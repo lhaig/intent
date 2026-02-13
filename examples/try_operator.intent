@@ -1,0 +1,51 @@
+module try_operator version "0.1.0";
+
+function parse_number(s: String) returns Result<Int, String>
+    requires true
+    ensures true
+{
+    if s == "42" {
+        return Ok(42);
+    }
+    if s == "0" {
+        return Ok(0);
+    }
+    return Err("Not a recognized number");
+}
+
+function add_parsed(a: String, b: String) returns Result<Int, String>
+    requires true
+    ensures true
+{
+    let x: Int = parse_number(a)?;
+    let y: Int = parse_number(b)?;
+    return Ok(x + y);
+}
+
+function safe_divide(a: Int, b: Int) returns Result<Int, String>
+    ensures result.is_ok() implies b != 0
+    ensures result.is_err() implies b == 0
+{
+    if b == 0 {
+        return Err("Division by zero");
+    }
+    return Ok(a / b);
+}
+
+entry function main() returns Int {
+    let sum: Result<Int, String> = add_parsed("42", "0");
+    let sum_val: Int = match sum {
+        Ok(v) => v,
+        Err(e) => -1
+    };
+    print(sum_val);
+
+    let div: Result<Int, String> = safe_divide(10, 2);
+    let div_val: Int = match div {
+        Ok(v) => v,
+        Err(e) => 0
+    };
+    print(div_val);
+
+    return 0;
+}

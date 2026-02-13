@@ -1,0 +1,19 @@
+module math version "0.1.0";
+
+public function add(a: Int, b: Int) returns Int
+    requires true
+    ensures result == a + b
+{
+    return a + b;
+}
+
+public function multiply(a: Int, b: Int) returns Int
+    requires true
+    ensures result == a * b
+{
+    return a * b;
+}
+
+function internal_helper(x: Int) returns Int {
+    return x + 1;
+}

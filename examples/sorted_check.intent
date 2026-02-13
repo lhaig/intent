@@ -1,0 +1,46 @@
+module sorted_check version "1.0";
+
+function is_all_positive(arr: Array<Int>) returns Bool
+    requires len(arr) > 0
+    requires forall i in 0..len(arr): arr[i] > 0
+{
+    let mutable i: Int = 0;
+    while i < len(arr) {
+        if arr[i] <= 0 {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+function check_sorted(arr: Array<Int>) returns Bool
+    requires len(arr) > 0
+{
+    if len(arr) == 1 {
+        return true;
+    }
+    let mutable i: Int = 0;
+    while i < len(arr) - 1 {
+        if arr[i] > arr[i + 1] {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+entry function main() returns Int {
+    let arr: Array<Int> = [1, 2, 3, 4, 5];
+    let sorted: Bool = check_sorted(arr);
+    print(sorted);
+
+    let positive: Bool = is_all_positive(arr);
+    print(positive);
+
+    let arr2: Array<Int> = [5, 3, 1, 4, 2];
+    let sorted2: Bool = check_sorted(arr2);
+    print(sorted2);
+
+    return 0;
+}

@@ -1,0 +1,50 @@
+module banking version "0.1.0";
+
+entity BankAccount {
+    field owner: String;
+    field balance: Int;
+
+    invariant self.balance >= 0;
+
+    constructor(owner: String, initial_balance: Int)
+        requires initial_balance >= 0
+        ensures self.balance == initial_balance
+    {
+        self.owner = owner;
+        self.balance = initial_balance;
+    }
+
+    method deposit(amount: Int) returns Void
+        requires amount > 0
+        ensures self.balance == old(self.balance) + amount
+    {
+        self.balance = self.balance + amount;
+    }
+
+    method withdraw(amount: Int) returns Bool
+        requires amount > 0
+    {
+        if self.balance >= amount {
+            self.balance = self.balance - amount;
+            return true;
+        }
+        return false;
+    }
+
+    method get_balance() returns Int {
+        return self.balance;
+    }
+}
+
+intent "Safe withdrawal preserves non-negative balance" {
+    goal: "BankAccount.withdraw never results in balance < 0";
+    guarantee: "if withdraw returns false then balance is unchanged";
+    verified_by: [BankAccount.invariant, BankAccount.withdraw.requires, BankAccount.deposit.requires, BankAccount.deposit.ensures];
+}
+
+entry function main() returns Int {
+    let account: BankAccount = BankAccount("Alice", 100);
+    account.deposit(50);
+    let success: Bool = account.withdraw(30);
+    return 0;
+}

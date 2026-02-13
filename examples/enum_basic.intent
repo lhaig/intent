@@ -1,0 +1,40 @@
+module enum_example version "1.0.0";
+
+enum Status {
+    Pending,
+    Running,
+    Complete,
+}
+
+enum Shape {
+    Circle(radius: Float),
+    Rectangle(width: Float, height: Float),
+    Point,
+}
+
+function getStatus() returns Status {
+    return Running;
+}
+
+function makeCircle(r: Float) returns Shape {
+    return Circle(r);
+}
+
+function makeRectangle(w: Float, h: Float) returns Shape {
+    return Rectangle(w, h);
+}
+
+function makePoint() returns Shape {
+    return Point;
+}
+
+entry function main() returns Int {
+    let s: Status = getStatus();
+    let c: Shape = makeCircle(5.0);
+    let r: Shape = makeRectangle(10.0, 20.0);
+    let p: Shape = makePoint();
+
+    print(42);
+
+    return 0;
+}
