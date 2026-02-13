@@ -1,0 +1,40 @@
+module result_option version "0.1.0";
+
+function safe_divide(a: Int, b: Int) returns Result<Int, String>
+    requires true
+    ensures true
+{
+    if b == 0 {
+        return Err("Division by zero");
+    }
+    return Ok(a / b);
+}
+
+function get_element(arr: Array<Int>, index: Int) returns Option<Int>
+    requires index >= 0
+    ensures true
+{
+    if index < len(arr) {
+        return Some(arr[index]);
+    }
+    return None;
+}
+
+entry function main() returns Int {
+    let res: Result<Int, String> = safe_divide(10, 2);
+    let value: Int = match res {
+        Ok(v) => v,
+        Err(e) => 0
+    };
+    print(value);
+
+    let nums: Array<Int> = [3, 4, 5];
+    let found: Option<Int> = get_element(nums, 1);
+    let found_val: Int = match found {
+        Some(v) => v,
+        None => -1
+    };
+    print(found_val);
+
+    return 0;
+}

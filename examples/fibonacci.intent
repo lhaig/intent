@@ -1,0 +1,29 @@
+module fibonacci version "1.0.0";
+
+function fib(n: Int) returns Int
+    requires n >= 0
+    ensures result >= 0
+{
+    if n <= 0 {
+        return 0;
+    }
+    if n == 1 {
+        return 1;
+    }
+    let mutable a: Int = 0;
+    let mutable b: Int = 1;
+    let mutable i: Int = 2;
+    while i <= n {
+        let temp: Int = a + b;
+        a = b;
+        b = temp;
+        i = i + 1;
+    }
+    return b;
+}
+
+entry function main() returns Int {
+    let res: Int = fib(10);
+    print(res);
+    return 0;
+}

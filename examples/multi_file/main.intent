@@ -1,0 +1,10 @@
+module main version "0.1.0";
+
+import "math.intent";
+
+entry function main() returns Int {
+    let sum: Int = math.add(3, 4);
+    let product: Int = math.multiply(sum, 2);
+    print(product);
+    return 0;
+}

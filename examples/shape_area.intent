@@ -1,0 +1,44 @@
+module shape_area version "1.0";
+
+enum Shape {
+    Circle(radius: Float),
+    Rectangle(width: Float, height: Float),
+    Point
+}
+
+function area(s: Shape) returns Float {
+    return match s {
+        Circle(r) => 3.14159 * r * r,
+        Rectangle(w, h) => w * h,
+        Point => 0.0
+    };
+}
+
+function describe(s: Shape) returns Int {
+    let code: Int = match s {
+        Circle(r) => 1,
+        Rectangle(w, h) => 2,
+        _ => 0
+    };
+    return code;
+}
+
+entry function main() returns Int {
+    let c: Shape = Circle(5.0);
+    let r: Shape = Rectangle(3.0, 4.0);
+    let p1: Shape = Point;
+    let p2: Shape = Point;
+
+    let a1: Float = area(c);
+    let a2: Float = area(r);
+    let a3: Float = area(p1);
+
+    print(a1);
+    print(a2);
+    print(a3);
+
+    let d: Int = describe(p2);
+    print(d);
+
+    return 0;
+}
