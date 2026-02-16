@@ -39,3 +39,5 @@ What follows from this decision? Trade-offs accepted.
 | 0005 | [While loops before for loops](0005-while-before-for.md) | 2025-02-12 | accepted |
 | 0006 | [Print as built-in function](0006-print-builtin.md) | 2025-02-12 | accepted |
 | 0007 | [Arrays before enums](0007-arrays-before-enums.md) | 2025-02-12 | accepted |
+| 0008 | [Intermediate representation](0008-intermediate-representation.md) | 2026-02-16 | accepted |
+| 0009 | [Multi-target code generation](0009-multi-target-codegen.md) | 2026-02-16 | accepted |
