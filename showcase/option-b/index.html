@@ -126,17 +126,47 @@
             margin-right: 4px;
         }
         .full-width { grid-column: 1 / -1; }
+        a { text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        code { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; }
+        .log-contract { color: #f97316; }
     </style>
 </head>
 <body>
     <h1>Intent Task Queue</h1>
-    <p class="subtitle">Same .intent source compiled to both Rust (native binary) and JavaScript (this page).
-        Contracts enforce: priority 1-10, exclusive worker assignment, monotonic completion count.</p>
+    <p class="subtitle">A contract-verified priority task queue written in
+        <a href="https://github.com/lhaig/intent" style="color:#38bdf8">Intent</a>,
+        a programming language where correctness rules are part of the code, not just comments.</p>
+
+    <div class="card full-width" style="margin-bottom:1.5rem; background:#1a2332; border-color:#1e3a5f">
+        <h2 style="color:#94a3b8; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.05em">What you're seeing</h2>
+        <div style="font-size:0.9rem; line-height:1.7; color:#cbd5e1; margin-top:0.5rem">
+            <p>This page runs <strong>the same source code</strong> that also compiles to a native Rust binary.
+            One <code style="background:#0f172a; padding:2px 6px; border-radius:3px; font-size:0.8rem">task_queue.intent</code>
+            file produces both a fast native executable and this browser application.</p>
+
+            <p style="margin-top:0.75rem"><strong>Contracts</strong> are the key idea. In Intent, you declare rules about your code
+            -- "priority must be between 1 and 10", "a worker can only hold one job at a time" -- and the compiler
+            enforces them automatically. Every method call checks its contracts at runtime. If a contract is violated,
+            execution stops with a clear error instead of silently corrupting state.</p>
+
+            <p style="margin-top:0.75rem">The demo below creates 5 jobs with different priorities and 2 workers.
+            Watch as workers pick up the highest-priority pending job, process it, and move to the next.
+            One job intentionally fails to show how the system handles errors while maintaining all contracts.</p>
+
+            <p style="margin-top:0.75rem; color:#94a3b8; font-size:0.85rem">
+                <strong>Try it:</strong> Click <em>Run</em> to auto-play, or <em>Step</em> to advance one action at a time.
+                Open the browser console to see contract checks happening on every method call.
+                Try <em>Break a Contract</em> to see what happens when a rule is violated.
+            </p>
+        </div>
+    </div>
 
     <div class="controls">
         <button id="runBtn" onclick="runDemo()">Run Demo</button>
         <button id="stepBtn" onclick="stepDemo()" disabled>Step</button>
         <button id="resetBtn" onclick="resetDemo()" disabled>Reset</button>
+        <button id="breakBtn" onclick="breakContract()" style="background:#7c2d12; margin-left:1rem">Break a Contract</button>
     </div>
 
     <div class="grid">
@@ -158,19 +188,44 @@
             </div>
         </div>
         <div class="card">
-            <h2>Contracts</h2>
+            <h2>Active Contracts</h2>
+            <p style="font-size:0.8rem; color:#94a3b8; margin-bottom:0.75rem">
+                These rules are declared in the Intent source and enforced automatically on every method call.
+                The same checks run in both the Rust binary and this JavaScript page.
+            </p>
             <div style="font-size:0.85rem; line-height:1.8">
-                <div><span class="contract-badge">invariant</span> Job.priority in [1, 10]</div>
-                <div><span class="contract-badge">invariant</span> Worker.jobs_completed >= 0</div>
-                <div><span class="contract-badge">requires</span> Worker.start_job: worker must be idle</div>
-                <div><span class="contract-badge">requires</span> Worker.finish_job: worker must be busy</div>
-                <div><span class="contract-badge">ensures</span> Worker.finish_job: jobs_completed increments by 1</div>
-                <div><span class="contract-badge">requires</span> Job.constructor: priority in [1, 10]</div>
+                <div><span class="contract-badge">invariant</span> Job.priority always between 1 and 10</div>
+                <div><span class="contract-badge">invariant</span> Worker.jobs_completed never goes negative</div>
+                <div><span class="contract-badge">requires</span> start_job: worker must be idle (no double-assignment)</div>
+                <div><span class="contract-badge">requires</span> finish_job: worker must be busy (no phantom completions)</div>
+                <div><span class="contract-badge">ensures</span> finish_job: completed count increments by exactly 1</div>
+                <div><span class="contract-badge">requires</span> Job constructor: priority must be in valid range</div>
             </div>
         </div>
         <div class="card full-width">
             <h2>Event Log</h2>
             <div class="log" id="log"></div>
+        </div>
+        <div class="card full-width" style="background:#1a2332; border-color:#1e3a5f">
+            <h2 style="color:#94a3b8; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.05em">How it works</h2>
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1.5rem; margin-top:0.75rem; font-size:0.85rem; line-height:1.6">
+                <div>
+                    <div style="color:#38bdf8; font-weight:600; margin-bottom:0.25rem">1. Write once</div>
+                    <div style="color:#94a3b8">The task queue is written in a single <code style="background:#0f172a;padding:1px 4px;border-radius:2px;font-size:0.8rem">.intent</code>
+                    file with entities (Job, Worker), enums (JobStatus), functions, and contracts.</div>
+                </div>
+                <div>
+                    <div style="color:#38bdf8; font-weight:600; margin-bottom:0.25rem">2. Compile to any target</div>
+                    <div style="color:#94a3b8"><code style="background:#0f172a;padding:1px 4px;border-radius:2px;font-size:0.8rem">intentc build task_queue.intent</code>
+                    produces a native binary. <code style="background:#0f172a;padding:1px 4px;border-radius:2px;font-size:0.8rem">--target js</code>
+                    produces JavaScript. Same logic, different runtimes.</div>
+                </div>
+                <div>
+                    <div style="color:#38bdf8; font-weight:600; margin-bottom:0.25rem">3. Contracts enforce correctness</div>
+                    <div style="color:#94a3b8">Every method call validates its preconditions, postconditions, and invariants.
+                    Bugs are caught at the boundary, not deep in corrupted state.</div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -454,6 +509,46 @@
         document.getElementById('stepBtn').disabled = false;
         document.getElementById('runBtn').disabled = false;
         document.getElementById('resetBtn').disabled = true;
+    }
+
+    function breakContract() {
+        log('--- Attempting to violate contracts ---', 'error');
+
+        // Try creating a job with invalid priority
+        try {
+            log('Creating Job with priority 0 (below minimum of 1)...', 'error');
+            const badJob = new Job(99, 0);
+            log('ERROR: Contract was not enforced!', 'error');
+        } catch (e) {
+            log('CAUGHT: ' + e.message, 'error');
+            log('The constructor rejected priority=0 because the contract requires priority >= 1', '');
+        }
+
+        // Try assigning a job to a busy worker
+        try {
+            log('Creating a worker and assigning two jobs without finishing the first...', 'error');
+            const w = new Worker(99);
+            w.start_job(1);
+            log('Worker 99 started job 1 (now busy)', 'action');
+            w.start_job(2); // Should fail -- worker is busy
+            log('ERROR: Contract was not enforced!', 'error');
+        } catch (e) {
+            log('CAUGHT: ' + e.message, 'error');
+            log('The start_job method rejected because the contract requires the worker to be idle', '');
+        }
+
+        // Try finishing a job on an idle worker
+        try {
+            log('Trying to finish a job on a worker that is not busy...', 'error');
+            const w2 = new Worker(98);
+            w2.finish_job(); // Should fail -- worker is not busy
+            log('ERROR: Contract was not enforced!', 'error');
+        } catch (e) {
+            log('CAUGHT: ' + e.message, 'error');
+            log('The finish_job method rejected because the contract requires the worker to be busy', '');
+        }
+
+        log('--- All 3 contract violations were caught and prevented ---', 'success');
     }
 
     // Initialize
