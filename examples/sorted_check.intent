@@ -34,13 +34,11 @@ entry function main() returns Int {
     let arr: Array<Int> = [1, 2, 3, 4, 5];
     let sorted: Bool = check_sorted(arr);
     print(sorted);
-
     let positive: Bool = is_all_positive(arr);
     print(positive);
-
     let arr2: Array<Int> = [5, 3, 1, 4, 2];
     let sorted2: Bool = check_sorted(arr2);
     print(sorted2);
-
     return 0;
 }
+

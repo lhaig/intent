@@ -1,8 +1,8 @@
 module array_sum version "1.0";
 
 function sum_array(numbers: Array<Int>) returns Int
-requires len(numbers) > 0
-ensures result >= 0
+    requires len(numbers) > 0
+    ensures result >= 0
 {
     let mutable total: Int = 0;
     for x in numbers {
@@ -15,21 +15,17 @@ entry function main() returns Int {
     let arr: Array<Int> = [10, 20, 30, 40];
     let total: Int = sum_array(arr);
     print(total);
-
     let n: Int = len(arr);
     print(n);
-
     let first: Int = arr[0];
     print(first);
-
     let mutable dynamic: Array<Int> = [1, 2, 3];
     dynamic.push(4);
     let dyn_len: Int = len(dynamic);
     print(dyn_len);
-
     for i in 0..n {
         print(arr[i]);
     }
-
     return 0;
 }
+

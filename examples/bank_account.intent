@@ -36,15 +36,16 @@ entity BankAccount {
     }
 }
 
-intent "Safe withdrawal preserves non-negative balance" {
-    goal: "BankAccount.withdraw never results in balance < 0";
-    guarantee: "if withdraw returns false then balance is unchanged";
-    verified_by: [BankAccount.invariant, BankAccount.withdraw.requires, BankAccount.deposit.requires, BankAccount.deposit.ensures];
-}
-
 entry function main() returns Int {
     let account: BankAccount = BankAccount("Alice", 100);
     account.deposit(50);
     let success: Bool = account.withdraw(30);
     return 0;
 }
+
+intent "Safe withdrawal preserves non-negative balance" {
+    goal: "BankAccount.withdraw never results in balance < 0";
+    guarantee: "if withdraw returns false then balance is unchanged";
+    verified_by: [BankAccount.invariant, BankAccount.withdraw.requires, BankAccount.deposit.requires, BankAccount.deposit.ensures];
+}
+
