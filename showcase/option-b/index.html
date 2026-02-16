@@ -141,9 +141,10 @@
     <div class="card full-width" style="margin-bottom:1.5rem; background:#1a2332; border-color:#1e3a5f">
         <h2 style="color:#94a3b8; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.05em">What you're seeing</h2>
         <div style="font-size:0.9rem; line-height:1.7; color:#cbd5e1; margin-top:0.5rem">
-            <p>This page runs <strong>the same source code</strong> that also compiles to a native Rust binary.
-            One <code style="background:#0f172a; padding:2px 6px; border-radius:3px; font-size:0.8rem">task_queue.intent</code>
-            file produces both a fast native executable and this browser application.</p>
+            <p>This page loads <code style="background:#0f172a; padding:2px 6px; border-radius:3px; font-size:0.8rem">task_queue.generated.js</code>,
+            which is the <strong>unmodified output</strong> of the Intent compiler (<code style="background:#0f172a; padding:2px 6px; border-radius:3px; font-size:0.8rem">intentc build --target js</code>).
+            The same <code style="background:#0f172a; padding:2px 6px; border-radius:3px; font-size:0.8rem">task_queue.intent</code>
+            source also compiles to a native Rust binary. One file, multiple targets, identical logic.</p>
 
             <p style="margin-top:0.75rem"><strong>Contracts</strong> are the key idea. In Intent, you declare rules about your code
             -- "priority must be between 1 and 10", "a worker can only hold one job at a time" -- and the compiler
@@ -229,96 +230,19 @@
         </div>
     </div>
 
+    <!-- Load the UNMODIFIED compiler-generated JS from task_queue.intent -->
+    <!-- Generated with: intentc build --target js examples/task_queue.intent -->
+    <!-- This file is compiler output - do not hand-edit -->
     <script>
-    // === Generated from task_queue.intent (same source as Rust binary) ===
-    const JobStatus = {
-        Pending: () => ({ _tag: "Pending" }),
-        Running: (worker_id) => ({ _tag: "Running", worker_id }),
-        Complete: () => ({ _tag: "Complete" }),
-        Failed: (error_code) => ({ _tag: "Failed", error_code }),
-    };
+    // Provide a browser-compatible 'process' so the generated entry point doesn't crash
+    var process = { exit: function() {} };
+    </script>
+    <script src="task_queue.generated.js"></script>
+    <script>
+    // === UI code (hand-written wrapper around compiler-generated classes) ===
 
-    class Job {
-        constructor(id, priority) {
-            if (!((priority >= 1))) throw new Error("Precondition failed: priority >= 1");
-            if (!((priority <= 10))) throw new Error("Precondition failed: priority <= 10");
-            this.id = 0; this.priority = 0; this.status = null;
-            this.id = id; this.priority = priority;
-            this.status = JobStatus.Pending();
-            if (!((this.id === id))) throw new Error("Postcondition failed: self.id == id");
-            if (!((this.priority === priority))) throw new Error("Postcondition failed: self.priority == priority");
-            this.__checkInvariants();
-        }
-        __checkInvariants() {
-            if (!((this.priority >= 1))) throw new Error("Invariant failed: self.priority >= 1");
-            if (!((this.priority <= 10))) throw new Error("Invariant failed: self.priority <= 10");
-        }
-        get_id() { return this.id; }
-        get_priority() { return this.priority; }
-        is_pending() {
-            const s = this.status;
-            return s._tag === "Pending";
-        }
-        assign(worker_id) {
-            if (!((worker_id >= 0))) throw new Error("Precondition failed: worker_id >= 0");
-            this.status = JobStatus.Running(worker_id);
-            this.__checkInvariants();
-        }
-        complete() { this.status = JobStatus.Complete(); this.__checkInvariants(); }
-        fail(error_code) { this.status = JobStatus.Failed(error_code); this.__checkInvariants(); }
-        status_code() {
-            const s = this.status;
-            if (s._tag === "Pending") return 0;
-            if (s._tag === "Running") return 1;
-            if (s._tag === "Complete") return 2;
-            if (s._tag === "Failed") return 3;
-            return -1;
-        }
-        status_name() {
-            return this.status._tag;
-        }
-    }
-
-    class Worker {
-        constructor(id) {
-            this.id = id; this.active_job_id = -1;
-            this.jobs_completed = 0; this.is_busy = false;
-            if (!((this.id === id))) throw new Error("Postcondition failed: self.id == id");
-            if (!((this.jobs_completed === 0))) throw new Error("Postcondition failed: self.jobs_completed == 0");
-            this.__checkInvariants();
-        }
-        __checkInvariants() {
-            if (!((this.jobs_completed >= 0))) throw new Error("Invariant failed: self.jobs_completed >= 0");
-        }
-        get_id() { return this.id; }
-        is_idle() { return this.is_busy === false; }
-        start_job(job_id) {
-            if (!((this.is_busy === false))) throw new Error("Precondition failed: self.is_busy == false");
-            this.active_job_id = job_id; this.is_busy = true;
-            this.__checkInvariants();
-        }
-        finish_job() {
-            const __old = this.jobs_completed;
-            if (!((this.is_busy === true))) throw new Error("Precondition failed: self.is_busy == true");
-            this.active_job_id = -1; this.is_busy = false;
-            this.jobs_completed = this.jobs_completed + 1;
-            if (!((this.jobs_completed === (__old + 1)))) throw new Error("Postcondition failed: jobs_completed == old + 1");
-            this.__checkInvariants();
-        }
-        get_completed_count() { return this.jobs_completed; }
-    }
-
-    function find_highest_priority(priorities, statuses, count) {
-        if (!((count >= 0))) throw new Error("Precondition failed: count >= 0");
-        let best_idx = -1, best_pri = 0;
-        for (let i = 0; i < count; i++) {
-            if (statuses[i] === 0 && priorities[i] > best_pri) {
-                best_pri = priorities[i]; best_idx = i;
-            }
-        }
-        return best_idx;
-    }
-    // === End of generated Intent code ===
+    // Helper: the generated code uses status._tag internally but doesn't expose status_name()
+    function statusName(job) { return job.status._tag; }
 
     // UI state
     let jobs = [], workers = [], logEntries = [];
@@ -337,7 +261,7 @@
                 <span class="job-id">Job ${j.get_id()}</span>
                 <div class="priority-bar" style="background:${priorityColor(j.get_priority())}; width:${j.get_priority()*10}%"></div>
                 <span class="priority-label">P${j.get_priority()}</span>
-                <span class="status-badge status-${j.status_name().toLowerCase()}">${j.status_name()}</span>
+                <span class="status-badge status-${statusName(j).toLowerCase()}">${statusName(j)}</span>
             </div>
         `).join('');
     }
@@ -360,7 +284,7 @@
 
     function renderStats() {
         const counts = { Pending: 0, Running: 0, Complete: 0, Failed: 0 };
-        jobs.forEach(j => counts[j.status_name()]++);
+        jobs.forEach(j => counts[statusName(j)]++);
         document.getElementById('stat-pending').textContent = counts.Pending;
         document.getElementById('stat-running').textContent = counts.Running;
         document.getElementById('stat-complete').textContent = counts.Complete;
@@ -399,7 +323,7 @@
                 render();
             },
             () => {
-                const j = jobs.find(j => j.status_name() === 'Running' && j.get_id() === 2);
+                const j = jobs.find(j => statusName(j) === 'Running' && j.get_id() === 2);
                 j.complete();
                 workers[0].finish_job();
                 log('Worker 0 completed Job 2', 'success');
@@ -436,7 +360,7 @@
                 render();
             },
             () => {
-                const j = jobs.find(j => j.status_name() === 'Running' && j.get_id() === 1);
+                const j = jobs.find(j => statusName(j) === 'Running' && j.get_id() === 1);
                 if (j) { j.complete(); workers[0].finish_job(); log('Worker 0 completed Job 1', 'success'); }
                 render();
             },

@@ -1,0 +1,23 @@
+{
+  "name": "intent-task-queue-server",
+  "version": "1.0.0",
+  "description": "Node.js server demo for Intent compiler-generated task queue",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "intent",
+    "contracts",
+    "task-queue",
+    "demo",
+    "server"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

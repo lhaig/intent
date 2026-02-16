@@ -542,17 +542,48 @@ The module name is derived from the filename (e.g., `math.intent` -> `math`).
 ## Compilation
 
 ```bash
-intentc build <file.intent>              # compile to native binary
-intentc build --emit-rust <file.intent>  # emit generated Rust only
-intentc check <file.intent>              # type-check without compiling
-intentc lint <file.intent>               # lint for style issues
+# Native binary (default target: Rust)
+intentc build <file.intent>                         # compile to native binary
+intentc build --emit <file.intent>                  # emit generated Rust source
+
+# JavaScript target
+intentc build --target js <file.intent>             # generate JavaScript file
+intentc build --target js --emit <file.intent>      # emit JS to stdout
+
+# WebAssembly target
+intentc build --target wasm <file.intent>           # compile to .wasm via Rust
+
+# Other commands
+intentc check <file.intent>                         # type-check without compiling
+intentc verify <file.intent>                        # verify contracts with Z3 SMT solver
+intentc fmt <file.intent>                           # format source to canonical style
+intentc fmt --check <file.intent>                   # check formatting (exit 1 if not formatted)
+intentc lint <file.intent>                          # lint for style issues
+intentc test-gen <file.intent>                      # generate property-based tests
+intentc test-gen --emit <file.intent>               # write tests to _test.rs file
 ```
 
-Requires Go (to build the compiler) and Rust/Cargo (to compile generated code).
+Requires Go (to build the compiler) and Rust/Cargo (to compile generated code). Z3 is optional (for `verify` command).
 
 Multi-file projects are detected automatically when the entry file contains `import` declarations.
 
+### Multi-Target Output
+
+All targets enforce the same contracts at runtime. A precondition failure throws an `Error` in JavaScript, panics in Rust, and traps in WebAssembly.
+
+| Intent Contract | Rust Output | JavaScript Output |
+|----------------|-------------|-------------------|
+| `requires expr` | `assert!(expr, "Precondition failed: ...")` | `if (!(expr)) throw new Error("Precondition failed: ...")` |
+| `ensures expr` | `assert!(expr, "Postcondition failed: ...")` | `if (!(expr)) throw new Error("Postcondition failed: ...")` |
+| `invariant expr` | `assert!(expr, "Invariant failed: ...")` | `if (!(expr)) throw new Error("Invariant failed: ...")` |
+| `old(expr)` | `let __old_N = expr;` before body | `const __old_N = expr;` before body |
+| `match` | Rust `match` with patterns | Chain of `if (__scrutinee._tag === "...")` |
+| `entity` | `struct` + `impl` | `class` with `__checkInvariants()` |
+| `enum` | Rust `enum` | Object with factory functions + `_tag` field |
+
 ## Code Generation Summary
+
+### Rust Target
 
 | Intent                  | Rust                                    |
 |-------------------------|-----------------------------------------|
@@ -574,6 +605,24 @@ Multi-file projects are detected automatically when the entry file contains `imp
 | `entity`                | `struct` + `impl`                       |
 | `enum`                  | Rust `enum`                             |
 | `print(x)`             | `println!("{}", x)`                     |
+
+### JavaScript Target
+
+| Intent                  | JavaScript                              |
+|-------------------------|-----------------------------------------|
+| `Int`                   | `number`                                |
+| `Float`                 | `number`                                |
+| `String`                | `string`                                |
+| `Bool`                  | `boolean`                               |
+| `Array<T>`              | `Array`                                 |
+| `requires expr`         | `if (!(expr)) throw new Error(...)`     |
+| `ensures expr`          | `if (!(expr)) throw new Error(...)`     |
+| `invariant expr`        | `if (!(expr)) throw new Error(...)`     |
+| `forall i in a..b: p`   | runtime loop checking p for each i     |
+| `match`                 | `if/else if` chain on `_tag`            |
+| `entity`                | `class` with `__checkInvariants()`      |
+| `enum`                  | Object with factory functions            |
+| `print(x)`             | `console.log(x)`                        |
 
 ## Guidelines for AI Code Generation
 
