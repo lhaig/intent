@@ -96,8 +96,8 @@ func CheckWithResult(prog *ast.Program) *CheckResult {
 		exprTypes:    make(map[ast.Expression]*Type),
 	}
 
-	c.registerEntities()
 	c.registerEnums()
+	c.registerEntities()
 	c.registerFunctions()
 	c.checkFunctions()
 	c.checkEntities()
@@ -171,8 +171,8 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 			contractCtx:  CtxNormal,
 			exprTypes:    make(map[ast.Expression]*Type),
 		}
-		tmpChecker.registerEntities()
 		tmpChecker.registerEnums()
+		tmpChecker.registerEntities()
 		tmpChecker.registerFunctions()
 
 		// Collect public functions
@@ -239,8 +239,8 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 			moduleFile:    filePath,
 		}
 
-		c.registerEntities()
 		c.registerEnums()
+		c.registerEntities()
 		c.registerFunctions()
 
 		// Inject imported public entities and enums into this checker's type maps

@@ -1,0 +1,272 @@
+// Option A: Contract-verified priority task queue
+// Stress test of the Intent compiler
+
+module task_queue version "1.0";
+
+// Job status tracks lifecycle
+enum JobStatus {
+    Pending,
+    Running(worker_id: Int),
+    Complete,
+    Failed(error_code: Int),
+}
+
+// A job with priority and status
+entity Job {
+    field id: Int;
+    field priority: Int;
+    field status: JobStatus;
+
+    invariant self.priority >= 1;
+    invariant self.priority <= 10;
+
+    constructor(id: Int, priority: Int)
+        requires priority >= 1
+        requires priority <= 10
+        ensures self.id == id
+        ensures self.priority == priority
+    {
+        self.id = id;
+        self.priority = priority;
+        self.status = Pending;
+    }
+
+    method get_id() returns Int {
+        return self.id;
+    }
+
+    method get_priority() returns Int {
+        return self.priority;
+    }
+
+    method is_pending() returns Bool {
+        let code: Int = match self.status {
+            Pending => 1,
+            Running(w) => 0,
+            Complete => 0,
+            Failed(r) => 0,
+        };
+        return code == 1;
+    }
+
+    method assign(worker_id: Int) returns Void
+        requires worker_id >= 0
+    {
+        self.status = Running(worker_id);
+    }
+
+    method complete() returns Void {
+        self.status = Complete;
+    }
+
+    method fail(error_code: Int) returns Void {
+        self.status = Failed(error_code);
+    }
+
+    method status_code() returns Int {
+        return match self.status {
+            Pending => 0,
+            Running(w) => 1,
+            Complete => 2,
+            Failed(r) => 3,
+        };
+    }
+}
+
+// A worker that processes jobs
+entity Worker {
+    field id: Int;
+    field active_job_id: Int;
+    field jobs_completed: Int;
+    field is_busy: Bool;
+
+    invariant self.jobs_completed >= 0;
+
+    constructor(id: Int)
+        ensures self.id == id
+        ensures self.jobs_completed == 0
+    {
+        self.id = id;
+        self.active_job_id = -1;
+        self.jobs_completed = 0;
+        self.is_busy = false;
+    }
+
+    method get_id() returns Int {
+        return self.id;
+    }
+
+    method is_idle() returns Bool {
+        return self.is_busy == false;
+    }
+
+    method start_job(job_id: Int) returns Void
+        requires self.is_busy == false
+    {
+        self.active_job_id = job_id;
+        self.is_busy = true;
+    }
+
+    method finish_job() returns Void
+        requires self.is_busy == true
+        ensures self.jobs_completed == old(self.jobs_completed) + 1
+    {
+        self.active_job_id = -1;
+        self.is_busy = false;
+        self.jobs_completed = self.jobs_completed + 1;
+    }
+
+    method get_completed_count() returns Int {
+        return self.jobs_completed;
+    }
+}
+
+// Find highest priority pending job from an array of priorities and statuses
+// Returns index of best job, or -1 if none pending
+// Uses parallel arrays: priorities[i] and statuses[i] for job i
+function find_highest_priority(priorities: Array<Int>, statuses: Array<Int>, count: Int) returns Int
+    requires count >= 0
+    requires len(priorities) >= count
+    requires len(statuses) >= count
+{
+    let mutable best_idx: Int = -1;
+    let mutable best_pri: Int = 0;
+    let mutable i: Int = 0;
+    while i < count {
+        if statuses[i] == 0 {
+            if priorities[i] > best_pri {
+                best_pri = priorities[i];
+                best_idx = i;
+            }
+        }
+        i = i + 1;
+    }
+    return best_idx;
+}
+
+// Count jobs in a given status
+function count_by_status(statuses: Array<Int>, target_status: Int, count: Int) returns Int
+    requires count >= 0
+    requires len(statuses) >= count
+    ensures result >= 0
+{
+    let mutable total: Int = 0;
+    let mutable i: Int = 0;
+    while i < count {
+        if statuses[i] == target_status {
+            total = total + 1;
+        }
+        i = i + 1;
+    }
+    return total;
+}
+
+entry function main() returns Int {
+    print("=== Intent Task Queue Demo ===");
+
+    // Create jobs with different priorities
+    let mutable job1: Job = Job(1, 5);
+    let mutable job2: Job = Job(2, 9);
+    let mutable job3: Job = Job(3, 3);
+    let mutable job4: Job = Job(4, 7);
+    let mutable job5: Job = Job(5, 1);
+
+    // Track priorities and statuses in parallel arrays for queue operations
+    let priorities: Array<Int> = [5, 9, 3, 7, 1];
+    let mutable statuses: Array<Int> = [0, 0, 0, 0, 0];
+
+    print("Jobs created: 5");
+    print("Queue capacity: 10");
+
+    // Create two workers
+    let mutable worker1: Worker = Worker(0);
+    let mutable worker2: Worker = Worker(1);
+
+    // Find highest priority pending job (should be index 1, priority 9)
+    let best: Int = find_highest_priority(priorities, statuses, 5);
+    print("Highest priority job index:");
+    print(best);
+
+    // Assign job2 (priority 9) to worker1
+    job2.assign(worker1.get_id());
+    worker1.start_job(job2.get_id());
+    statuses[1] = 1;
+    print("Worker 0 assigned job 2 (priority 9)");
+
+    // Worker1 completes the job
+    job2.complete();
+    worker1.finish_job();
+    statuses[1] = 2;
+    print("Worker 0 completed job 2");
+    print("Worker 0 total completed:");
+    print(worker1.get_completed_count());
+
+    // Find next highest priority (should be index 3, priority 7)
+    let next: Int = find_highest_priority(priorities, statuses, 5);
+    print("Next highest priority job index:");
+    print(next);
+
+    // Assign job4 (priority 7) to worker2
+    job4.assign(worker2.get_id());
+    worker2.start_job(job4.get_id());
+    statuses[3] = 1;
+    print("Worker 1 assigned job 4 (priority 7)");
+
+    // Job4 fails
+    job4.fail(42);
+    worker2.finish_job();
+    statuses[3] = 3;
+    print("Worker 1: job 4 failed (error 42)");
+    print("Worker 1 total completed:");
+    print(worker2.get_completed_count());
+
+    // Status summary
+    let pending: Int = count_by_status(statuses, 0, 5);
+    let running: Int = count_by_status(statuses, 1, 5);
+    let completed: Int = count_by_status(statuses, 2, 5);
+    let failed: Int = count_by_status(statuses, 3, 5);
+
+    print("--- Status Summary ---");
+    print("Pending:");
+    print(pending);
+    print("Running:");
+    print(running);
+    print("Completed:");
+    print(completed);
+    print("Failed:");
+    print(failed);
+
+    // Print individual job statuses
+    print("--- Job Details ---");
+    print("Job 1 status:");
+    print(job1.status_code());
+    print("Job 2 status:");
+    print(job2.status_code());
+    print("Job 3 status:");
+    print(job3.status_code());
+    print("Job 4 status:");
+    print(job4.status_code());
+    print("Job 5 status:");
+    print(job5.status_code());
+
+    print("=== Demo Complete ===");
+    return 0;
+}
+
+intent "Job priority is always valid" {
+    goal: "Priority stays within 1-10 range";
+    guarantee: "Constructor enforces bounds, invariant checked on every method";
+    verified_by: [Job.invariant, Job.constructor.requires];
+}
+
+intent "Workers have exclusive job assignment" {
+    goal: "A worker can only hold one job at a time";
+    guarantee: "start_job requires worker is idle, finish_job requires busy";
+    verified_by: [Worker.start_job.requires, Worker.finish_job.requires];
+}
+
+intent "Worker completion count is monotonic" {
+    goal: "jobs_completed never decreases";
+    guarantee: "finish_job always increments by exactly 1";
+    verified_by: [Worker.invariant, Worker.finish_job.ensures];
+}
