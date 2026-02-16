@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/lhaig/intent/internal/compiler"
+	"github.com/lhaig/intent/internal/formatter"
 	"github.com/lhaig/intent/internal/linter"
 	"github.com/lhaig/intent/internal/parser"
 )
@@ -16,10 +17,13 @@ const usage = `intentc - The Intent language compiler
 Usage:
   intentc build [--emit-rust] <file.intent>    Compile to native binary (or Rust source)
   intentc check <file.intent>                  Parse and type-check only
+  intentc test-gen [--emit] <file.intent>      Generate Rust with property-based contract tests
+  intentc fmt [--check] <file.intent>          Format source to canonical style
   intentc lint <file.intent>                   Run lint checks for style/best practices
 
 Options:
   --emit-rust    Output generated Rust source instead of building a binary
+  --emit         Write test-gen output to <basename>_test.rs instead of stdout
 
 Multi-file support:
   When the entry file contains import declarations, intentc automatically
@@ -31,6 +35,10 @@ Examples:
   intentc build --emit-rust hello.intent  Emit hello.rs (Rust source)
   intentc build main.intent               Build multi-file project (auto-detects imports)
   intentc check hello.intent              Check for errors without building
+  intentc test-gen fibonacci.intent       Generate Rust with contract tests to stdout
+  intentc test-gen --emit fibonacci.intent  Write to fibonacci_test.rs
+  intentc fmt hello.intent                Format hello.intent in-place
+  intentc fmt --check hello.intent        Check if already formatted (exit 1 if not)
   intentc lint hello.intent               Lint for style/best practice issues
 `
 
@@ -47,6 +55,10 @@ func main() {
 		handleBuild(os.Args[2:])
 	case "check":
 		handleCheck(os.Args[2:])
+	case "test-gen":
+		handleTestGen(os.Args[2:])
+	case "fmt":
+		handleFmt(os.Args[2:])
 	case "lint":
 		handleLint(os.Args[2:])
 	case "help", "--help", "-h":
@@ -186,6 +198,118 @@ func handleCheck(args []string) {
 	}
 
 	fmt.Println("No errors found.")
+}
+
+func handleTestGen(args []string) {
+	emitFile := false
+	var filePath string
+
+	for _, arg := range args {
+		switch arg {
+		case "--emit":
+			emitFile = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", arg)
+				os.Exit(1)
+			}
+			filePath = arg
+		}
+	}
+
+	if filePath == "" {
+		fmt.Fprintln(os.Stderr, "Error: no input file specified")
+		os.Exit(1)
+	}
+
+	// Check if this is a multi-file project
+	isMulti, err := compiler.IsMultiFile(filePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
+		os.Exit(1)
+	}
+
+	baseName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+
+	var res *compiler.Result
+	if isMulti {
+		res = compiler.GenerateTestsProject(filePath)
+	} else {
+		source, err := os.ReadFile(filePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
+			os.Exit(1)
+		}
+		res = compiler.GenerateTests(string(source))
+	}
+
+	if res.Diagnostics != nil && res.Diagnostics.HasErrors() {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", res.Diagnostics.Format(filePath))
+		os.Exit(1)
+	}
+
+	if emitFile {
+		outPath := baseName + "_test.rs"
+		if err := os.WriteFile(outPath, []byte(res.RustSource), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing file: %s\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Wrote %s\n", outPath)
+	} else {
+		fmt.Print(res.RustSource)
+	}
+}
+
+func handleFmt(args []string) {
+	checkOnly := false
+	var filePath string
+
+	for _, arg := range args {
+		switch arg {
+		case "--check":
+			checkOnly = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", arg)
+				os.Exit(1)
+			}
+			filePath = arg
+		}
+	}
+
+	if filePath == "" {
+		fmt.Fprintln(os.Stderr, "Error: no input file specified")
+		os.Exit(1)
+	}
+
+	source, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
+		os.Exit(1)
+	}
+
+	p := parser.New(string(source))
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		fmt.Fprintf(os.Stderr, "%s", p.Diagnostics().Format(filePath))
+		os.Exit(1)
+	}
+
+	formatted := formatter.Format(prog)
+
+	if checkOnly {
+		if formatted != string(source) {
+			fmt.Fprintf(os.Stderr, "%s is not formatted\n", filePath)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if err := os.WriteFile(filePath, []byte(formatted), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing file: %s\n", err)
+		os.Exit(1)
+	}
 }
 
 func handleLint(args []string) {

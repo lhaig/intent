@@ -10,6 +10,7 @@ import (
 	"github.com/lhaig/intent/internal/codegen"
 	"github.com/lhaig/intent/internal/diagnostic"
 	"github.com/lhaig/intent/internal/parser"
+	"github.com/lhaig/intent/internal/testgen"
 )
 
 // Result holds the output of a compilation
@@ -291,6 +292,96 @@ edition = "2021"
 	}
 
 	return nil
+}
+
+// GenerateTests runs parse -> check -> codegen -> testgen for a single file.
+// Returns Rust source with appended contract test module.
+func GenerateTests(source string) *Result {
+	res := &Result{}
+
+	// Parse
+	p := parser.New(source)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		res.Diagnostics = p.Diagnostics()
+		return res
+	}
+
+	// Type check
+	diag := checker.Check(prog)
+	if diag.HasErrors() {
+		res.Diagnostics = diag
+		return res
+	}
+	res.Diagnostics = diag
+
+	// Generate Rust
+	rustSource := codegen.Generate(prog)
+
+	// Generate tests
+	testSource := testgen.Generate(prog)
+
+	res.RustSource = rustSource + testSource
+
+	return res
+}
+
+// GenerateTestsProject runs the multi-file pipeline with test generation.
+func GenerateTestsProject(entryPath string) *Result {
+	res := &Result{}
+
+	// Create module registry
+	registry, err := NewModuleRegistry(entryPath)
+	if err != nil {
+		res.Diagnostics = diagnostic.New()
+		res.Diagnostics.Errorf(0, 0, "failed to initialize module registry: %s", err)
+		return res
+	}
+
+	// Discover all dependencies
+	diag, err := registry.DiscoverDependencies()
+	if err != nil {
+		if diag == nil {
+			diag = diagnostic.New()
+		}
+		diag.Errorf(0, 0, "%s", err)
+		res.Diagnostics = diag
+		return res
+	}
+	if diag.HasErrors() {
+		res.Diagnostics = diag
+		return res
+	}
+
+	// Topological sort
+	sortedPaths, err := registry.TopologicalSort()
+	if err != nil {
+		res.Diagnostics = diagnostic.New()
+		res.Diagnostics.Errorf(0, 0, "%s", err)
+		return res
+	}
+
+	// Cross-file type checking
+	allModules := registry.AllModules()
+	checkResult := checker.CheckAll(allModules, sortedPaths)
+	if checkResult.Diagnostics.HasErrors() {
+		res.Diagnostics = checkResult.Diagnostics
+		return res
+	}
+	res.Diagnostics = checkResult.Diagnostics
+
+	// Multi-file code generation
+	rustSource := codegen.GenerateAll(allModules, sortedPaths)
+
+	// Generate tests from the entry file's AST
+	entryPath = sortedPaths[len(sortedPaths)-1]
+	entryProg := allModules[entryPath]
+	testSource := testgen.Generate(entryProg)
+
+	res.RustSource = rustSource + testSource
+
+	return res
 }
 
 // IsMultiFile checks if the given file path is a multi-file project

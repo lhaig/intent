@@ -1,4 +1,4 @@
-.PHONY: build test clean install check-examples lint-examples
+.PHONY: build test clean install check-examples lint-examples test-gen-examples
 
 # Build the intentc compiler
 build:
@@ -39,3 +39,10 @@ emit-examples: build
 	./intentc build --emit-rust examples/hello.intent
 	./intentc build --emit-rust examples/bank_account.intent
 	./intentc build --emit-rust examples/fibonacci.intent
+
+# Generate test-augmented Rust for examples
+test-gen-examples: build
+	./intentc test-gen --emit examples/fibonacci.intent
+	./intentc test-gen --emit examples/bank_account.intent
+	./intentc test-gen --emit examples/array_sum.intent
+	./intentc test-gen --emit examples/sorted_check.intent

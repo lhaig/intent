@@ -190,6 +190,10 @@ type generator struct {
 	ensuresContext bool
 	oldExprs       map[string]string // mangled name -> original expression text
 
+	// Override fields for ExprToRust helper
+	selfVarOverride   string // when set, SelfExpr emits this instead of "self"/"__self"
+	resultVarOverride string // when set, ResultExpr emits this instead of "__result"
+
 	// Multi-file codegen fields
 	namePrefix      string            // prefix for name mangling (e.g., "math_" for non-entry modules)
 	structPrefix    string            // PascalCase prefix for entity/enum mangling (e.g., "Math")
@@ -928,12 +932,18 @@ func (g *generator) generateExpr(e ast.Expression) string {
 		return expr.Name
 
 	case *ast.SelfExpr:
+		if g.selfVarOverride != "" {
+			return g.selfVarOverride
+		}
 		if g.inConstructor {
 			return "__self"
 		}
 		return "self"
 
 	case *ast.ResultExpr:
+		if g.resultVarOverride != "" {
+			return g.resultVarOverride
+		}
 		return "__result"
 
 	case *ast.IntLit:
@@ -1345,6 +1355,42 @@ func (g *generator) resolveEnumNameForVariant(variantName string) string {
 	}
 	// Fallback: shouldn't happen if checker passed
 	return "UnknownEnum"
+}
+
+// MapType converts an Intent TypeRef to its Rust type string.
+func MapType(t *ast.TypeRef) string {
+	g := &generator{}
+	return g.mapType(t)
+}
+
+// ExprToRust converts a contract expression to Rust source.
+// selfVar: what "self" maps to (e.g., "__entity"), resultVar: what "result" maps to.
+// ensuresCtx enables old() substitution.
+func ExprToRust(expr ast.Expression, selfVar, resultVar string, ensuresCtx bool, entities map[string]*ast.EntityDecl, enums map[string]*ast.EnumDecl, functions map[string]*ast.FunctionDecl) string {
+	if entities == nil {
+		entities = make(map[string]*ast.EntityDecl)
+	}
+	if enums == nil {
+		enums = make(map[string]*ast.EnumDecl)
+	}
+	if functions == nil {
+		functions = make(map[string]*ast.FunctionDecl)
+	}
+	g := &generator{
+		entities:          entities,
+		enums:             enums,
+		functions:         functions,
+		oldExprs:          make(map[string]string),
+		ensuresContext:    ensuresCtx,
+		selfVarOverride:   selfVar,
+		resultVarOverride: resultVar,
+	}
+	return g.generateExpr(expr)
+}
+
+// EscapeRustString escapes a string for use in Rust string literals.
+func EscapeRustString(s string) string {
+	return escapeRustString(s)
 }
 
 // escapeRustString escapes a string for use in Rust string literals
