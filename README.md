@@ -143,8 +143,9 @@ The `showcase/` directory demonstrates the same `task_queue.intent` source compi
 - **Option A** (`examples/task_queue.intent`): CLI application compiled to native Rust binary
 - **Option B** (`showcase/option-b/`): Browser dashboard using compiler-generated JavaScript
 - **Option C** (`showcase/option-c/`): Node.js server with REST API using compiler-generated JavaScript
+- **Option D** (`showcase/option-d/`): Browser WASM demo with direct binary emission (155 bytes)
 
-All three options use **unmodified compiler output** -- no hand-edited generated code.
+All four options use **unmodified compiler output** -- no hand-edited generated code.
 
 ## Project Structure
 
@@ -166,7 +167,8 @@ All three options use **unmodified compiler output** -- no hand-edited generated
 │   ├── parser/           Recursive-descent parser
 │   ├── rustbe/           Rust backend (IR-based)
 │   ├── testgen/          Property-based test generation
-│   └── verify/           Z3 SMT verification
+│   ├── verify/           Z3 SMT verification
+│   └── wasmbe/           WebAssembly backend (direct binary)
 ├── examples/             Example .intent programs
 ├── showcase/             Multi-target demos
 ├── testdata/             Test fixtures
@@ -198,4 +200,5 @@ make lint-examples
 - [Design Document](docs/DESIGN.md) -- full language specification
 - [Grammar](docs/grammar.ebnf) -- formal EBNF grammar
 - [Roadmap](docs/ROADMAP.md) -- feature overview and status tracking
+- [Reproduction Guide](docs/REPRODUCE.md) -- reproduce the compiler with your own AI assistant
 - [Agent Instructions](AGENT.md) -- guide for AI code assistants writing Intent
