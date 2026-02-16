@@ -118,7 +118,49 @@ cp task_queue.js showcase/option-b/task_queue.generated.js
 cp task_queue.js showcase/option-c/task_queue.generated.js
 ```
 
-### Step 4: Run Each Option
+### Step 4: Create Option A (no extra work needed)
+
+Option A is just the compiled binary. No wrapper code required.
+
+### Step 5: Create Option B (Browser Dashboard)
+
+The prompt given to the AI code assistant was:
+
+> Create a self-contained HTML page at `showcase/option-b/index.html` that:
+> - Loads the unmodified compiler-generated `task_queue.generated.js` via a `<script src>` tag
+> - Provides a `process = { exit: function() {} }` shim before the script loads (the generated code calls `process.exit()`)
+> - Wraps the compiler-generated classes (Job, Worker, JobStatus, find_highest_priority) with a visual dashboard
+> - Dark theme UI with cards for: job list (with priority bars and status badges), worker status, summary stats, active contracts, event log
+> - "Run" button that auto-advances through the demo steps with 800ms delays
+> - "Step" button for manual one-at-a-time advancement
+> - "Break a Contract" button that demonstrates 3 contract violations: invalid priority (priority=0), double worker assignment, and finishing a job on an idle worker
+> - An explanatory section at the top explaining what the page is, how contracts work, and that the same source compiles to a native binary
+> - The UI code is hand-written, but ALL business logic and contract enforcement must come from the generated classes -- do not rewrite the contract checks
+>
+> The generated JS defines: JobStatus (object with factory functions), Job (class), Worker (class), find_highest_priority (function), count_by_status (function). Access job status via `job.status._tag` since the generated code doesn't expose a status_name() method.
+
+### Step 6: Create Option C (Node.js Server)
+
+The prompt given to the AI code assistant was:
+
+> Create a Node.js HTTP server at `showcase/option-c/server.js` (pure Node, no dependencies) that:
+> - Loads the unmodified compiler-generated `task_queue.generated.js` using Node's `vm` module
+> - Uses `vm.createContext()` with `process: { exit: () => {} }` and `console: { log: () => {} }` to suppress the generated entry point
+> - Wraps the generated code in an IIFE that returns the classes: `(function() { <generated code> return { JobStatus, Job, Worker, find_highest_priority, count_by_status }; })()`
+> - Manages demo state server-side (array of Job instances, Worker instances, step counter, log entries)
+> - Exposes REST API endpoints:
+>   - GET /api/state -- returns JSON with jobs, workers, stats, logs, step number
+>   - POST /api/step -- advances demo one step (same sequence as option B: find highest priority, assign, complete, fail one, process remaining)
+>   - POST /api/reset -- reinitializes all state
+>   - POST /api/break -- attempts 3 contract violations and returns the caught error messages
+>   - GET / -- serves the dashboard HTML
+> - Port 3000 by default (configurable via PORT env var)
+>
+> Also create `showcase/option-c/index.html` -- a dashboard similar to Option B's dark theme but fetching state from the server API via fetch(). Include Run/Step/Reset/Break buttons that call the API endpoints.
+>
+> Copy `task_queue.generated.js` from option-b. The generated file must not be modified.
+
+### Step 7: Run Each Option
 
 ```bash
 # Option A
