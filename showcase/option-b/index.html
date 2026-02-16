@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intent Task Queue - Live Demo</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 2rem;
+        }
+        h1 { color: #38bdf8; margin-bottom: 0.5rem; }
+        .subtitle { color: #94a3b8; margin-bottom: 2rem; font-size: 0.9rem; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2rem; }
+        .card {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 1.25rem;
+            border: 1px solid #334155;
+        }
+        .card h2 { font-size: 1rem; color: #38bdf8; margin-bottom: 1rem; }
+        .job {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #334155;
+        }
+        .job:last-child { border-bottom: none; }
+        .job-id { font-weight: bold; color: #f1f5f9; min-width: 60px; }
+        .priority-bar {
+            height: 8px;
+            border-radius: 4px;
+            flex: 1;
+        }
+        .priority-label { font-size: 0.8rem; color: #94a3b8; min-width: 30px; text-align: right; }
+        .status-badge {
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            min-width: 80px;
+            text-align: center;
+        }
+        .status-pending { background: #fbbf24; color: #1e293b; }
+        .status-running { background: #3b82f6; color: #fff; }
+        .status-complete { background: #22c55e; color: #fff; }
+        .status-failed { background: #ef4444; color: #fff; }
+        .worker-card {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem;
+            background: #0f172a;
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+        }
+        .worker-icon {
+            width: 40px; height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+        .worker-idle { background: #334155; color: #94a3b8; }
+        .worker-busy { background: #3b82f6; color: #fff; }
+        .worker-info { flex: 1; }
+        .worker-name { font-weight: 600; }
+        .worker-detail { font-size: 0.8rem; color: #94a3b8; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+        }
+        .stat {
+            text-align: center;
+            padding: 1rem;
+            background: #0f172a;
+            border-radius: 6px;
+        }
+        .stat-value { font-size: 2rem; font-weight: bold; }
+        .stat-label { font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem; }
+        .log {
+            background: #0f172a;
+            border-radius: 6px;
+            padding: 1rem;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.8rem;
+            max-height: 300px;
+            overflow-y: auto;
+            line-height: 1.6;
+        }
+        .log-entry { padding: 2px 0; }
+        .log-time { color: #64748b; }
+        .log-msg { color: #cbd5e1; }
+        .log-action { color: #38bdf8; }
+        .log-success { color: #22c55e; }
+        .log-error { color: #ef4444; }
+        .controls {
+            margin-bottom: 1.5rem;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 0.5rem 1.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        button:hover { background: #2563eb; }
+        button:disabled { background: #475569; cursor: not-allowed; }
+        .contract-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            background: #164e63;
+            color: #22d3ee;
+            margin-right: 4px;
+        }
+        .full-width { grid-column: 1 / -1; }
+    </style>
+</head>
+<body>
+    <h1>Intent Task Queue</h1>
+    <p class="subtitle">Same .intent source compiled to both Rust (native binary) and JavaScript (this page).
+        Contracts enforce: priority 1-10, exclusive worker assignment, monotonic completion count.</p>
+
+    <div class="controls">
+        <button id="runBtn" onclick="runDemo()">Run Demo</button>
+        <button id="stepBtn" onclick="stepDemo()" disabled>Step</button>
+        <button id="resetBtn" onclick="resetDemo()" disabled>Reset</button>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h2>Jobs</h2>
+            <div id="jobs"></div>
+        </div>
+        <div class="card">
+            <h2>Workers</h2>
+            <div id="workers"></div>
+        </div>
+        <div class="card">
+            <h2>Summary</h2>
+            <div class="stats" id="stats">
+                <div class="stat"><div class="stat-value" style="color:#fbbf24" id="stat-pending">0</div><div class="stat-label">Pending</div></div>
+                <div class="stat"><div class="stat-value" style="color:#3b82f6" id="stat-running">0</div><div class="stat-label">Running</div></div>
+                <div class="stat"><div class="stat-value" style="color:#22c55e" id="stat-complete">0</div><div class="stat-label">Complete</div></div>
+                <div class="stat"><div class="stat-value" style="color:#ef4444" id="stat-failed">0</div><div class="stat-label">Failed</div></div>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Contracts</h2>
+            <div style="font-size:0.85rem; line-height:1.8">
+                <div><span class="contract-badge">invariant</span> Job.priority in [1, 10]</div>
+                <div><span class="contract-badge">invariant</span> Worker.jobs_completed >= 0</div>
+                <div><span class="contract-badge">requires</span> Worker.start_job: worker must be idle</div>
+                <div><span class="contract-badge">requires</span> Worker.finish_job: worker must be busy</div>
+                <div><span class="contract-badge">ensures</span> Worker.finish_job: jobs_completed increments by 1</div>
+                <div><span class="contract-badge">requires</span> Job.constructor: priority in [1, 10]</div>
+            </div>
+        </div>
+        <div class="card full-width">
+            <h2>Event Log</h2>
+            <div class="log" id="log"></div>
+        </div>
+    </div>
+
+    <script>
+    // === Generated from task_queue.intent (same source as Rust binary) ===
+    const JobStatus = {
+        Pending: () => ({ _tag: "Pending" }),
+        Running: (worker_id) => ({ _tag: "Running", worker_id }),
+        Complete: () => ({ _tag: "Complete" }),
+        Failed: (error_code) => ({ _tag: "Failed", error_code }),
+    };
+
+    class Job {
+        constructor(id, priority) {
+            if (!((priority >= 1))) throw new Error("Precondition failed: priority >= 1");
+            if (!((priority <= 10))) throw new Error("Precondition failed: priority <= 10");
+            this.id = 0; this.priority = 0; this.status = null;
+            this.id = id; this.priority = priority;
+            this.status = JobStatus.Pending();
+            if (!((this.id === id))) throw new Error("Postcondition failed: self.id == id");
+            if (!((this.priority === priority))) throw new Error("Postcondition failed: self.priority == priority");
+            this.__checkInvariants();
+        }
+        __checkInvariants() {
+            if (!((this.priority >= 1))) throw new Error("Invariant failed: self.priority >= 1");
+            if (!((this.priority <= 10))) throw new Error("Invariant failed: self.priority <= 10");
+        }
+        get_id() { return this.id; }
+        get_priority() { return this.priority; }
+        is_pending() {
+            const s = this.status;
+            return s._tag === "Pending";
+        }
+        assign(worker_id) {
+            if (!((worker_id >= 0))) throw new Error("Precondition failed: worker_id >= 0");
+            this.status = JobStatus.Running(worker_id);
+            this.__checkInvariants();
+        }
+        complete() { this.status = JobStatus.Complete(); this.__checkInvariants(); }
+        fail(error_code) { this.status = JobStatus.Failed(error_code); this.__checkInvariants(); }
+        status_code() {
+            const s = this.status;
+            if (s._tag === "Pending") return 0;
+            if (s._tag === "Running") return 1;
+            if (s._tag === "Complete") return 2;
+            if (s._tag === "Failed") return 3;
+            return -1;
+        }
+        status_name() {
+            return this.status._tag;
+        }
+    }
+
+    class Worker {
+        constructor(id) {
+            this.id = id; this.active_job_id = -1;
+            this.jobs_completed = 0; this.is_busy = false;
+            if (!((this.id === id))) throw new Error("Postcondition failed: self.id == id");
+            if (!((this.jobs_completed === 0))) throw new Error("Postcondition failed: self.jobs_completed == 0");
+            this.__checkInvariants();
+        }
+        __checkInvariants() {
+            if (!((this.jobs_completed >= 0))) throw new Error("Invariant failed: self.jobs_completed >= 0");
+        }
+        get_id() { return this.id; }
+        is_idle() { return this.is_busy === false; }
+        start_job(job_id) {
+            if (!((this.is_busy === false))) throw new Error("Precondition failed: self.is_busy == false");
+            this.active_job_id = job_id; this.is_busy = true;
+            this.__checkInvariants();
+        }
+        finish_job() {
+            const __old = this.jobs_completed;
+            if (!((this.is_busy === true))) throw new Error("Precondition failed: self.is_busy == true");
+            this.active_job_id = -1; this.is_busy = false;
+            this.jobs_completed = this.jobs_completed + 1;
+            if (!((this.jobs_completed === (__old + 1)))) throw new Error("Postcondition failed: jobs_completed == old + 1");
+            this.__checkInvariants();
+        }
+        get_completed_count() { return this.jobs_completed; }
+    }
+
+    function find_highest_priority(priorities, statuses, count) {
+        if (!((count >= 0))) throw new Error("Precondition failed: count >= 0");
+        let best_idx = -1, best_pri = 0;
+        for (let i = 0; i < count; i++) {
+            if (statuses[i] === 0 && priorities[i] > best_pri) {
+                best_pri = priorities[i]; best_idx = i;
+            }
+        }
+        return best_idx;
+    }
+    // === End of generated Intent code ===
+
+    // UI state
+    let jobs = [], workers = [], logEntries = [];
+    let steps = [], stepIndex = 0;
+
+    function priorityColor(p) {
+        const colors = ['', '#334155', '#475569', '#f97316', '#f97316', '#eab308',
+                        '#eab308', '#22c55e', '#22c55e', '#3b82f6', '#ef4444'];
+        return colors[p] || '#64748b';
+    }
+
+    function renderJobs() {
+        const el = document.getElementById('jobs');
+        el.innerHTML = jobs.map(j => `
+            <div class="job">
+                <span class="job-id">Job ${j.get_id()}</span>
+                <div class="priority-bar" style="background:${priorityColor(j.get_priority())}; width:${j.get_priority()*10}%"></div>
+                <span class="priority-label">P${j.get_priority()}</span>
+                <span class="status-badge status-${j.status_name().toLowerCase()}">${j.status_name()}</span>
+            </div>
+        `).join('');
+    }
+
+    function renderWorkers() {
+        const el = document.getElementById('workers');
+        el.innerHTML = workers.map(w => {
+            const busy = !w.is_idle();
+            const assignedJob = busy ? jobs.find(j => j.get_id() === w.active_job_id) : null;
+            return `
+            <div class="worker-card">
+                <div class="worker-icon ${busy ? 'worker-busy' : 'worker-idle'}">W${w.get_id()}</div>
+                <div class="worker-info">
+                    <div class="worker-name">Worker ${w.get_id()}</div>
+                    <div class="worker-detail">${busy ? `Processing Job ${w.active_job_id}` : 'Idle'} | Completed: ${w.get_completed_count()}</div>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    function renderStats() {
+        const counts = { Pending: 0, Running: 0, Complete: 0, Failed: 0 };
+        jobs.forEach(j => counts[j.status_name()]++);
+        document.getElementById('stat-pending').textContent = counts.Pending;
+        document.getElementById('stat-running').textContent = counts.Running;
+        document.getElementById('stat-complete').textContent = counts.Complete;
+        document.getElementById('stat-failed').textContent = counts.Failed;
+    }
+
+    function log(msg, type = '') {
+        const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        logEntries.push({ time, msg, type });
+        const el = document.getElementById('log');
+        el.innerHTML = logEntries.map(e =>
+            `<div class="log-entry"><span class="log-time">${e.time}</span> <span class="log-msg ${e.type ? 'log-' + e.type : ''}">${e.msg}</span></div>`
+        ).join('');
+        el.scrollTop = el.scrollHeight;
+    }
+
+    function render() { renderJobs(); renderWorkers(); renderStats(); }
+
+    function defineSteps() {
+        return [
+            () => {
+                jobs = [new Job(1,5), new Job(2,9), new Job(3,3), new Job(4,7), new Job(5,1)];
+                workers = [new Worker(0), new Worker(1)];
+                log('Created 5 jobs with priorities [5, 9, 3, 7, 1]', 'action');
+                log('Created 2 workers', 'action');
+                render();
+            },
+            () => {
+                const priorities = jobs.map(j => j.get_priority());
+                const statuses = jobs.map(j => j.status_code());
+                const best = find_highest_priority(priorities, statuses, 5);
+                log(`Highest priority pending: Job ${jobs[best].get_id()} (priority ${jobs[best].get_priority()})`, 'action');
+                jobs[best].assign(workers[0].get_id());
+                workers[0].start_job(jobs[best].get_id());
+                log(`Worker 0 assigned Job ${jobs[best].get_id()}`, 'action');
+                render();
+            },
+            () => {
+                const j = jobs.find(j => j.status_name() === 'Running' && j.get_id() === 2);
+                j.complete();
+                workers[0].finish_job();
+                log('Worker 0 completed Job 2', 'success');
+                render();
+            },
+            () => {
+                const priorities = jobs.map(j => j.get_priority());
+                const statuses = jobs.map(j => j.status_code());
+                const best = find_highest_priority(priorities, statuses, 5);
+                log(`Next highest priority: Job ${jobs[best].get_id()} (priority ${jobs[best].get_priority()})`, 'action');
+                jobs[best].assign(workers[1].get_id());
+                workers[1].start_job(jobs[best].get_id());
+                log(`Worker 1 assigned Job ${jobs[best].get_id()}`, 'action');
+                render();
+            },
+            () => {
+                const j = jobs.find(j => j.get_id() === 4);
+                j.fail(42);
+                workers[1].finish_job();
+                log('Job 4 failed with error code 42', 'error');
+                log('Worker 1 finished (job failed)', 'error');
+                render();
+            },
+            () => {
+                const priorities = jobs.map(j => j.get_priority());
+                const statuses = jobs.map(j => j.status_code());
+                const best = find_highest_priority(priorities, statuses, 5);
+                if (best >= 0) {
+                    log(`Next highest priority: Job ${jobs[best].get_id()} (priority ${jobs[best].get_priority()})`, 'action');
+                    jobs[best].assign(workers[0].get_id());
+                    workers[0].start_job(jobs[best].get_id());
+                    log(`Worker 0 assigned Job ${jobs[best].get_id()}`, 'action');
+                }
+                render();
+            },
+            () => {
+                const j = jobs.find(j => j.status_name() === 'Running' && j.get_id() === 1);
+                if (j) { j.complete(); workers[0].finish_job(); log('Worker 0 completed Job 1', 'success'); }
+                render();
+            },
+            () => {
+                // Process remaining jobs
+                for (const j of jobs) {
+                    if (j.is_pending()) {
+                        const w = workers.find(w => w.is_idle());
+                        if (w) {
+                            j.assign(w.get_id());
+                            w.start_job(j.get_id());
+                            log(`Worker ${w.get_id()} assigned Job ${j.get_id()}`, 'action');
+                            j.complete();
+                            w.finish_job();
+                            log(`Worker ${w.get_id()} completed Job ${j.get_id()}`, 'success');
+                        }
+                    }
+                }
+                log('All jobs processed!', 'success');
+                render();
+            },
+        ];
+    }
+
+    function runDemo() {
+        resetDemo();
+        steps = defineSteps();
+        stepIndex = 0;
+        document.getElementById('stepBtn').disabled = false;
+        document.getElementById('resetBtn').disabled = false;
+        document.getElementById('runBtn').disabled = true;
+        // Auto-run with delays
+        function runNext() {
+            if (stepIndex < steps.length) {
+                steps[stepIndex]();
+                stepIndex++;
+                setTimeout(runNext, 800);
+            } else {
+                document.getElementById('stepBtn').disabled = true;
+            }
+        }
+        runNext();
+    }
+
+    function stepDemo() {
+        if (!steps.length) {
+            steps = defineSteps();
+            stepIndex = 0;
+            document.getElementById('resetBtn').disabled = false;
+            document.getElementById('runBtn').disabled = true;
+        }
+        if (stepIndex < steps.length) {
+            steps[stepIndex]();
+            stepIndex++;
+            if (stepIndex >= steps.length) {
+                document.getElementById('stepBtn').disabled = true;
+            }
+        }
+    }
+
+    function resetDemo() {
+        jobs = []; workers = []; logEntries = []; steps = []; stepIndex = 0;
+        document.getElementById('jobs').innerHTML = '<div style="color:#64748b;padding:1rem">Click Run or Step to start</div>';
+        document.getElementById('workers').innerHTML = '<div style="color:#64748b;padding:1rem">Click Run or Step to start</div>';
+        document.getElementById('stat-pending').textContent = '0';
+        document.getElementById('stat-running').textContent = '0';
+        document.getElementById('stat-complete').textContent = '0';
+        document.getElementById('stat-failed').textContent = '0';
+        document.getElementById('log').innerHTML = '';
+        document.getElementById('stepBtn').disabled = false;
+        document.getElementById('runBtn').disabled = false;
+        document.getElementById('resetBtn').disabled = true;
+    }
+
+    // Initialize
+    resetDemo();
+    </script>
+</body>
+</html>

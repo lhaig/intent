@@ -213,6 +213,17 @@ func (g *generator) defaultValue(t *checker.Type) string {
 	case "Array":
 		return "Vec::new()"
 	default:
+		if t.IsEnum && t.EnumInfo != nil {
+			// Use the first unit variant as default
+			for _, v := range t.EnumInfo.Variants {
+				if len(v.Fields) == 0 {
+					return fmt.Sprintf("%s::%s", g.mangledEnumName(t.Name), v.Name)
+				}
+			}
+		}
+		if t.IsEntity {
+			return fmt.Sprintf("%s { /* default fields */ }", g.mangledEntityName(t.Name))
+		}
 		return fmt.Sprintf("%s { /* default fields */ }", t.Name)
 	}
 }

@@ -412,7 +412,7 @@ func (p *Parser) parseVerifiedByRef() *ast.VerifiedByRef {
 		next := p.current()
 		// Allow keywords as parts (e.g., "requires", "ensures", "invariant")
 		switch next.Type {
-		case lexer.IDENT, lexer.REQUIRES, lexer.ENSURES, lexer.INVARIANT:
+		case lexer.IDENT, lexer.REQUIRES, lexer.ENSURES, lexer.INVARIANT, lexer.CONSTRUCTOR:
 			parts = append(parts, next.Literal)
 			p.advance()
 		default:

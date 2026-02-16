@@ -54,8 +54,9 @@ func (c *Checker) verifyContractReference(ref *ast.VerifiedByRef) {
 
 	if len(ref.Parts) == 3 {
 		// EntityName.MethodName.{requires|ensures}
+		// or EntityName.constructor.{requires|ensures}
 		entityName := ref.Parts[0]
-		methodName := ref.Parts[1]
+		memberName := ref.Parts[1]
 		contractType := ref.Parts[2]
 
 		entity, exists := c.entities[entityName]
@@ -65,10 +66,39 @@ func (c *Checker) verifyContractReference(ref *ast.VerifiedByRef) {
 			return
 		}
 
-		method, exists := entity.Methods[methodName]
+		if memberName == "constructor" {
+			// Look up constructor contracts from the AST
+			hasRequires := false
+			hasEnsures := false
+			for _, e := range c.prog.Entities {
+				if e.Name == entityName && e.Constructor != nil {
+					hasRequires = len(e.Constructor.Requires) > 0
+					hasEnsures = len(e.Constructor.Ensures) > 0
+					break
+				}
+			}
+			switch contractType {
+			case "requires":
+				if !hasRequires {
+					line, col := ref.Pos()
+					c.diag.Errorf(line, col, "constructor '%s' has no requires clause", entityName)
+				}
+			case "ensures":
+				if !hasEnsures {
+					line, col := ref.Pos()
+					c.diag.Errorf(line, col, "constructor '%s' has no ensures clause", entityName)
+				}
+			default:
+				line, col := ref.Pos()
+				c.diag.Errorf(line, col, "invalid contract type '%s'; expected 'requires' or 'ensures'", contractType)
+			}
+			return
+		}
+
+		method, exists := entity.Methods[memberName]
 		if !exists {
 			line, col := ref.Pos()
-			c.diag.Errorf(line, col, "entity '%s' has no method '%s'", entityName, methodName)
+			c.diag.Errorf(line, col, "entity '%s' has no method '%s'", entityName, memberName)
 			return
 		}
 
@@ -76,12 +106,12 @@ func (c *Checker) verifyContractReference(ref *ast.VerifiedByRef) {
 		case "requires":
 			if !method.HasRequires {
 				line, col := ref.Pos()
-				c.diag.Errorf(line, col, "method '%s.%s' has no requires clause", entityName, methodName)
+				c.diag.Errorf(line, col, "method '%s.%s' has no requires clause", entityName, memberName)
 			}
 		case "ensures":
 			if !method.HasEnsures {
 				line, col := ref.Pos()
-				c.diag.Errorf(line, col, "method '%s.%s' has no ensures clause", entityName, methodName)
+				c.diag.Errorf(line, col, "method '%s.%s' has no ensures clause", entityName, memberName)
 			}
 		default:
 			line, col := ref.Pos()
