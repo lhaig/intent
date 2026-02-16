@@ -201,8 +201,8 @@ type Block struct {
 	Column     int
 }
 
-func (b *Block) Pos() (int, int)  { return b.Line, b.Column }
-func (b *Block) stmtNode()        {}
+func (b *Block) Pos() (int, int) { return b.Line, b.Column }
+func (b *Block) stmtNode()       {}
 
 // LetStmt represents a let statement
 type LetStmt struct {
@@ -449,8 +449,8 @@ func (i *IndexExpr) exprNode()       {}
 
 // ForInStmt represents a for-in loop: for <variable> in <iterable> { ... }
 type ForInStmt struct {
-	Variable string      // loop variable name
-	Iterable Expression  // array expression or RangeExpr
+	Variable string     // loop variable name
+	Iterable Expression // array expression or RangeExpr
 	Body     *Block
 	Line     int
 	Column   int
@@ -472,9 +472,9 @@ func (r *RangeExpr) exprNode()       {}
 
 // ForallExpr represents: forall <variable> in <range>: <body>
 type ForallExpr struct {
-	Variable string       // bound variable name (e.g., "i")
-	Domain   *RangeExpr   // bounded range (e.g., 0..n)
-	Body     Expression   // predicate (must be Bool)
+	Variable string     // bound variable name (e.g., "i")
+	Domain   *RangeExpr // bounded range (e.g., 0..n)
+	Body     Expression // predicate (must be Bool)
 	Line     int
 	Column   int
 }
@@ -484,9 +484,9 @@ func (f *ForallExpr) exprNode()       {}
 
 // ExistsExpr represents: exists <variable> in <range>: <body>
 type ExistsExpr struct {
-	Variable string       // bound variable name (e.g., "i")
-	Domain   *RangeExpr   // bounded range (e.g., 0..n)
-	Body     Expression   // predicate (must be Bool)
+	Variable string     // bound variable name (e.g., "i")
+	Domain   *RangeExpr // bounded range (e.g., 0..n)
+	Body     Expression // predicate (must be Bool)
 	Line     int
 	Column   int
 }

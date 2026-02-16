@@ -12,13 +12,13 @@ type Program struct {
 
 // Module represents a single Intent source file after lowering.
 type Module struct {
-	Name       string
-	IsEntry    bool
-	Path       string // original file path
-	Functions  []*Function
-	Entities   []*Entity
-	Enums      []*Enum
-	Intents    []*Intent
+	Name      string
+	IsEntry   bool
+	Path      string // original file path
+	Functions []*Function
+	Entities  []*Entity
+	Enums     []*Enum
+	Intents   []*Intent
 }
 
 // Function represents a function declaration in the IR.
@@ -248,11 +248,11 @@ func (*CallExpr) exprNode()                 {}
 
 // MethodCallExpr represents a method call on an object.
 type MethodCallExpr struct {
-	Object     Expr
-	Method     string
-	Args       []Expr
-	IsModuleCall bool   // true if Object is a module name
-	ModuleName   string // set when IsModuleCall is true
+	Object       Expr
+	Method       string
+	Args         []Expr
+	IsModuleCall bool     // true if Object is a module name
+	ModuleName   string   // set when IsModuleCall is true
 	CallKind     CallKind // for module calls: function vs constructor
 	EnumName     string   // for module entity constructor, the mangled name
 	Type         *checker.Type
@@ -283,7 +283,7 @@ func (*IndexExpr) exprNode()                 {}
 
 // OldRef references a previously captured old() value.
 type OldRef struct {
-	Name string        // matches OldCapture.Name
+	Name string // matches OldCapture.Name
 	Type *checker.Type
 }
 
@@ -410,7 +410,7 @@ type MatchArm struct {
 
 // MatchPattern represents a pattern in a match arm.
 type MatchPattern struct {
-	EnumName    string   // resolved enum name (e.g., "Color", "Result")
+	EnumName    string // resolved enum name (e.g., "Color", "Result")
 	VariantName string
 	Bindings    []string
 	FieldNames  []string // resolved field names from the enum variant

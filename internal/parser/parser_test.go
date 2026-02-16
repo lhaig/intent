@@ -577,10 +577,10 @@ entry function main() returns Int {
 
 func TestParseParameterizedType(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
-		wantErr     bool
-		checkType   func(t *testing.T, typeRef *ast.TypeRef)
+		name      string
+		input     string
+		wantErr   bool
+		checkType func(t *testing.T, typeRef *ast.TypeRef)
 	}{
 		{
 			name: "Array<Int> type",
@@ -1874,7 +1874,7 @@ function f() returns Result<Int, String> {
 	}
 
 	fn := prog.Functions[0]
-	
+
 	// Check first let statement
 	letStmt1, ok := fn.Body.Statements[0].(*ast.LetStmt)
 	if !ok {

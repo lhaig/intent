@@ -22,7 +22,6 @@ type Result struct {
 	BinaryPath  string
 }
 
-
 // Compile runs the full pipeline: parse -> check -> lower -> rustbe
 // Returns the result without writing files or invoking cargo.
 func Compile(source string) *Result {

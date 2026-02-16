@@ -25,10 +25,10 @@ var syncTokens = map[lexer.TokenType]bool{
 
 // Parser holds the parser state
 type Parser struct {
-	tokens      []lexer.Token
-	pos         int
-	diags       *diagnostic.Diagnostics
-	source      string // raw source for extracting contract text
+	tokens []lexer.Token
+	pos    int
+	diags  *diagnostic.Diagnostics
+	source string // raw source for extracting contract text
 }
 
 // current returns the current token

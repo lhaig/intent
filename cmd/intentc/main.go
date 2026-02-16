@@ -13,6 +13,9 @@ import (
 	"github.com/lhaig/intent/internal/verify"
 )
 
+// version is set at build time via -ldflags "-X main.version=..."
+var version = "dev"
+
 const usage = `intentc - The Intent language compiler
 
 Usage:
@@ -61,6 +64,11 @@ func main() {
 	}
 
 	command := os.Args[1]
+
+	if command == "--version" || command == "version" {
+		fmt.Printf("intentc %s\n", version)
+		os.Exit(0)
+	}
 
 	switch command {
 	case "build":

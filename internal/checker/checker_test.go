@@ -2639,7 +2639,7 @@ entry function main() returns Int {
 `
 	registry := map[string]*ast.Program{
 		"/project/geometry.intent": makeProgram(t, geomSrc),
-		"/project/main.intent":    makeProgram(t, mainSrc),
+		"/project/main.intent":     makeProgram(t, mainSrc),
 	}
 	sortedPaths := []string{"/project/geometry.intent", "/project/main.intent"}
 

@@ -13,15 +13,15 @@ import (
 type ContractContext int
 
 const (
-	CtxNormal ContractContext = iota // Normal code
-	CtxRequires                       // Inside requires clause
-	CtxEnsures                        // Inside ensures clause
-	CtxInvariant                      // Inside invariant
+	CtxNormal    ContractContext = iota // Normal code
+	CtxRequires                         // Inside requires clause
+	CtxEnsures                          // Inside ensures clause
+	CtxInvariant                        // Inside invariant
 )
 
 // EntityContext tracks the current entity being checked
 type EntityContext struct {
-	Entity *EntityInfo
+	Entity        *EntityInfo
 	InConstructor bool
 	InMethod      bool
 }
@@ -52,12 +52,12 @@ type Checker struct {
 	contractCtx     ContractContext
 	entityCtx       *EntityContext
 	loopDepth       int
-	currentFunc     *FuncInfo        // Track current function for Result/Option variant inference
-	letDeclaredType *Type            // Track type annotation from let statement for variant inference
+	currentFunc     *FuncInfo // Track current function for Result/Option variant inference
+	letDeclaredType *Type     // Track type annotation from let statement for variant inference
 
 	// Cross-file (multi-module) context
 	moduleImports map[string]*ModuleSymbols // module alias -> public symbols
-	moduleFile    string                     // file path for error reporting
+	moduleFile    string                    // file path for error reporting
 }
 
 // EnumVariantLookup maps a variant name to its parent enum and variant info

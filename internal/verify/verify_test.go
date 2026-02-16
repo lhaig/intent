@@ -302,7 +302,7 @@ func TestVerifyWithRequires(t *testing.T) {
 		ReturnType: checker.TypeInt,
 		Requires: []*ir.Contract{
 			{
-				Expr: &ir.BoolLit{Value: true, Type: checker.TypeBool},
+				Expr:    &ir.BoolLit{Value: true, Type: checker.TypeBool},
 				RawText: "true",
 			},
 		},

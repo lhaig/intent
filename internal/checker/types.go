@@ -8,13 +8,13 @@ import (
 
 // Type represents a type in the Intent type system
 type Type struct {
-	Name       string      // "Int", "Float", "String", "Bool", "Void", entity name, or enum name
+	Name       string // "Int", "Float", "String", "Bool", "Void", entity name, or enum name
 	IsEntity   bool
 	Entity     *EntityInfo // non-nil if IsEntity
 	IsEnum     bool
-	EnumInfo   *EnumInfo   // non-nil if IsEnum
-	IsGeneric  bool        // true if TypeParams is non-empty
-	TypeParams []*Type     // e.g., [TypeInt] for Array<Int>
+	EnumInfo   *EnumInfo // non-nil if IsEnum
+	IsGeneric  bool      // true if TypeParams is non-empty
+	TypeParams []*Type   // e.g., [TypeInt] for Array<Int>
 }
 
 // EntityInfo holds information about an entity type
