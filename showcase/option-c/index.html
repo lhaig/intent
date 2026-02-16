@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intent Task Queue - Server Demo</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 2rem;
+        }
+        h1 { color: #38bdf8; margin-bottom: 0.5rem; }
+        .subtitle { color: #94a3b8; margin-bottom: 2rem; font-size: 0.9rem; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2rem; }
+        .card {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 1.25rem;
+            border: 1px solid #334155;
+        }
+        .card h2 { font-size: 1rem; color: #38bdf8; margin-bottom: 1rem; }
+        .job {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #334155;
+        }
+        .job:last-child { border-bottom: none; }
+        .job-id { font-weight: bold; color: #f1f5f9; min-width: 60px; }
+        .priority-bar {
+            height: 8px;
+            border-radius: 4px;
+            flex: 1;
+        }
+        .priority-label { font-size: 0.8rem; color: #94a3b8; min-width: 30px; text-align: right; }
+        .status-badge {
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            min-width: 80px;
+            text-align: center;
+        }
+        .status-pending { background: #fbbf24; color: #1e293b; }
+        .status-running { background: #3b82f6; color: #fff; }
+        .status-complete { background: #22c55e; color: #fff; }
+        .status-failed { background: #ef4444; color: #fff; }
+        .worker-card {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem;
+            background: #0f172a;
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+        }
+        .worker-icon {
+            width: 40px; height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+        .worker-idle { background: #334155; color: #94a3b8; }
+        .worker-busy { background: #3b82f6; color: #fff; }
+        .worker-info { flex: 1; }
+        .worker-name { font-weight: 600; }
+        .worker-detail { font-size: 0.8rem; color: #94a3b8; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+        }
+        .stat {
+            text-align: center;
+            padding: 1rem;
+            background: #0f172a;
+            border-radius: 6px;
+        }
+        .stat-value { font-size: 2rem; font-weight: bold; }
+        .stat-label { font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem; }
+        .log {
+            background: #0f172a;
+            border-radius: 6px;
+            padding: 1rem;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.8rem;
+            max-height: 300px;
+            overflow-y: auto;
+            line-height: 1.6;
+        }
+        .log-entry { padding: 2px 0; color: #cbd5e1; }
+        .controls {
+            margin-bottom: 1.5rem;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 0.5rem 1.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        button:hover { background: #2563eb; }
+        button:disabled { background: #475569; cursor: not-allowed; }
+        .contract-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            background: #164e63;
+            color: #22d3ee;
+            margin-right: 4px;
+        }
+        .full-width { grid-column: 1 / -1; }
+        a { text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        code { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; }
+        .server-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            background: #065f46;
+            color: #6ee7b7;
+            margin-left: 10px;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <h1>Intent Task Queue <span class="server-badge">Server-Side Demo</span></h1>
+    <p class="subtitle">A contract-verified priority task queue running on a Node.js server, powered by
+        <a href="https://github.com/lhaig/intent" style="color:#38bdf8">Intent</a> compiler-generated code.</p>
+
+    <div class="card full-width" style="margin-bottom:1.5rem; background:#1a2332; border-color:#1e3a5f">
+        <h2 style="color:#94a3b8; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.05em">What you're seeing</h2>
+        <div style="font-size:0.9rem; line-height:1.7; color:#cbd5e1; margin-top:0.5rem">
+            <p>This dashboard connects to a Node.js HTTP server that uses <strong>unmodified compiler-generated JavaScript</strong>
+            from the Intent compiler (<code style="background:#0f172a; padding:2px 6px; border-radius:3px; font-size:0.8rem">task_queue.generated.js</code>).
+            The server manages the task queue state and exposes it via a REST API.</p>
+
+            <p style="margin-top:0.75rem"><strong>Server-Side Benefits:</strong> Running Intent-generated code on a server demonstrates
+            how the same contract-verified logic can power backend APIs. The contracts are enforced in the server process, ensuring
+            that even API-driven state changes maintain all safety guarantees. No hand-written validation code needed - the Intent
+            compiler generates all contract checks automatically.</p>
+
+            <p style="margin-top:0.75rem">The demo creates 5 jobs with different priorities and 2 workers. The server processes
+            each step of the workflow while maintaining all contracts. One job intentionally fails to show error handling.</p>
+
+            <p style="margin-top:0.75rem; color:#94a3b8; font-size:0.85rem">
+                <strong>Try it:</strong> Click <em>Step</em> to advance one action at a time via the server API.
+                Click <em>Reset</em> to start over. Try <em>Break a Contract</em> to see server-side validation in action.
+            </p>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="stepBtn" onclick="stepDemo()">Step</button>
+        <button id="resetBtn" onclick="resetDemo()">Reset</button>
+        <button id="breakBtn" onclick="breakContract()" style="background:#7c2d12; margin-left:1rem">Break a Contract</button>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h2>Jobs</h2>
+            <div id="jobs"><div style="color:#64748b;padding:1rem">Loading...</div></div>
+        </div>
+        <div class="card">
+            <h2>Workers</h2>
+            <div id="workers"><div style="color:#64748b;padding:1rem">Loading...</div></div>
+        </div>
+        <div class="card">
+            <h2>Summary</h2>
+            <div class="stats" id="stats">
+                <div class="stat"><div class="stat-value" style="color:#fbbf24" id="stat-pending">0</div><div class="stat-label">Pending</div></div>
+                <div class="stat"><div class="stat-value" style="color:#3b82f6" id="stat-running">0</div><div class="stat-label">Running</div></div>
+                <div class="stat"><div class="stat-value" style="color:#22c55e" id="stat-complete">0</div><div class="stat-label">Complete</div></div>
+                <div class="stat"><div class="stat-value" style="color:#ef4444" id="stat-failed">0</div><div class="stat-label">Failed</div></div>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Active Contracts</h2>
+            <p style="font-size:0.8rem; color:#94a3b8; margin-bottom:0.75rem">
+                These rules are enforced on the Node.js server. Every API call triggers contract checks.
+            </p>
+            <div style="font-size:0.85rem; line-height:1.8">
+                <div><span class="contract-badge">invariant</span> Job.priority always between 1 and 10</div>
+                <div><span class="contract-badge">invariant</span> Worker.jobs_completed never goes negative</div>
+                <div><span class="contract-badge">requires</span> start_job: worker must be idle (no double-assignment)</div>
+                <div><span class="contract-badge">requires</span> finish_job: worker must be busy (no phantom completions)</div>
+                <div><span class="contract-badge">ensures</span> finish_job: completed count increments by exactly 1</div>
+                <div><span class="contract-badge">requires</span> Job constructor: priority must be in valid range</div>
+            </div>
+        </div>
+        <div class="card full-width">
+            <h2>Event Log</h2>
+            <div class="log" id="log"></div>
+        </div>
+        <div class="card full-width" style="background:#1a2332; border-color:#1e3a5f">
+            <h2 style="color:#94a3b8; font-size:0.85rem; text-transform:uppercase; letter-spacing:0.05em">Architecture</h2>
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1.5rem; margin-top:0.75rem; font-size:0.85rem; line-height:1.6">
+                <div>
+                    <div style="color:#38bdf8; font-weight:600; margin-bottom:0.25rem">1. Intent Source</div>
+                    <div style="color:#94a3b8">Written once in <code style="background:#0f172a;padding:1px 4px;border-radius:2px;font-size:0.8rem">task_queue.intent</code>
+                    with entities, enums, functions, and contracts.</div>
+                </div>
+                <div>
+                    <div style="color:#38bdf8; font-weight:600; margin-bottom:0.25rem">2. Server Integration</div>
+                    <div style="color:#94a3b8">Node.js HTTP server loads the generated code using the VM module,
+                    exposes state via REST API, and enforces contracts server-side.</div>
+                </div>
+                <div>
+                    <div style="color:#38bdf8; font-weight:600; margin-bottom:0.25rem">3. Client Dashboard</div>
+                    <div style="color:#94a3b8">This HTML page fetches state from the API and renders it in real-time.
+                    All business logic and contracts run on the server.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // === Client-side code that communicates with the server API ===
+
+    const API_BASE = '';  // Same origin
+
+    function priorityColor(p) {
+        const colors = ['', '#334155', '#475569', '#f97316', '#f97316', '#eab308',
+                        '#eab308', '#22c55e', '#22c55e', '#3b82f6', '#ef4444'];
+        return colors[p] || '#64748b';
+    }
+
+    function renderJobs(jobs) {
+        const el = document.getElementById('jobs');
+        if (!jobs || jobs.length === 0) {
+            el.innerHTML = '<div style="color:#64748b;padding:1rem">No jobs yet</div>';
+            return;
+        }
+        el.innerHTML = jobs.map(j => `
+            <div class="job">
+                <span class="job-id">Job ${j.id}</span>
+                <div class="priority-bar" style="background:${priorityColor(j.priority)}; width:${j.priority*10}%"></div>
+                <span class="priority-label">P${j.priority}</span>
+                <span class="status-badge status-${j.status.toLowerCase()}">${j.status}</span>
+            </div>
+        `).join('');
+    }
+
+    function renderWorkers(workers) {
+        const el = document.getElementById('workers');
+        if (!workers || workers.length === 0) {
+            el.innerHTML = '<div style="color:#64748b;padding:1rem">No workers yet</div>';
+            return;
+        }
+        el.innerHTML = workers.map(w => {
+            const busy = !w.isIdle;
+            return `
+            <div class="worker-card">
+                <div class="worker-icon ${busy ? 'worker-busy' : 'worker-idle'}">W${w.id}</div>
+                <div class="worker-info">
+                    <div class="worker-name">Worker ${w.id}</div>
+                    <div class="worker-detail">${busy ? `Processing Job ${w.activeJobId}` : 'Idle'} | Completed: ${w.completedCount}</div>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    function renderStats(stats) {
+        if (!stats) return;
+        document.getElementById('stat-pending').textContent = stats.pending || 0;
+        document.getElementById('stat-running').textContent = stats.running || 0;
+        document.getElementById('stat-complete').textContent = stats.completed || 0;
+        document.getElementById('stat-failed').textContent = stats.failed || 0;
+    }
+
+    function renderLogs(logs) {
+        const el = document.getElementById('log');
+        if (!logs || logs.length === 0) {
+            el.innerHTML = '<div style="color:#64748b">No events yet</div>';
+            return;
+        }
+        el.innerHTML = logs.map(log => `<div class="log-entry">${log}</div>`).join('');
+        el.scrollTop = el.scrollHeight;
+    }
+
+    function render(state) {
+        renderJobs(state.jobs);
+        renderWorkers(state.workers);
+        renderStats(state.stats);
+        renderLogs(state.logs);
+
+        // Disable step button if demo is done
+        document.getElementById('stepBtn').disabled = state.isDone;
+    }
+
+    async function fetchState() {
+        try {
+            const response = await fetch(`${API_BASE}/api/state`);
+            const state = await response.json();
+            render(state);
+        } catch (error) {
+            console.error('Failed to fetch state:', error);
+            document.getElementById('log').innerHTML = `<div class="log-entry" style="color:#ef4444">Error: Could not connect to server. Is it running on port 3000?</div>`;
+        }
+    }
+
+    async function stepDemo() {
+        try {
+            const response = await fetch(`${API_BASE}/api/step`, { method: 'POST' });
+            const state = await response.json();
+            render(state);
+        } catch (error) {
+            console.error('Failed to step:', error);
+        }
+    }
+
+    async function resetDemo() {
+        try {
+            const response = await fetch(`${API_BASE}/api/reset`, { method: 'POST' });
+            const state = await response.json();
+            render(state);
+            document.getElementById('stepBtn').disabled = false;
+        } catch (error) {
+            console.error('Failed to reset:', error);
+        }
+    }
+
+    async function breakContract() {
+        try {
+            const response = await fetch(`${API_BASE}/api/break`, { method: 'POST' });
+            const result = await response.json();
+
+            const el = document.getElementById('log');
+            const existingLogs = el.innerHTML;
+            const newLogs = result.logs.map(log => `<div class="log-entry">${log}</div>`).join('');
+            el.innerHTML = existingLogs + '<div class="log-entry" style="color:#f97316; margin-top:0.5rem">--- Testing Contract Enforcement ---</div>' + newLogs;
+            el.scrollTop = el.scrollHeight;
+        } catch (error) {
+            console.error('Failed to break contract:', error);
+        }
+    }
+
+    // Initialize: fetch state immediately
+    fetchState();
+
+    // Auto-refresh state every 2 seconds to show any server-side changes
+    setInterval(fetchState, 2000);
+    </script>
+</body>
+</html>
