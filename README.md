@@ -6,7 +6,7 @@ The language prioritizes **explicit contracts**, **declared intent**, and **veri
 
 ## Prerequisites
 
-- **Go** 1.21+
+- **Go** 1.25+
 - **Rust** (with `cargo`) for native binary compilation
 - **Z3** (optional) for SMT-based contract verification
 
