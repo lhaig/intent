@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 
 	"github.com/lhaig/intent/internal/checker"
-	"github.com/lhaig/intent/internal/codegen"
 	"github.com/lhaig/intent/internal/diagnostic"
+	"github.com/lhaig/intent/internal/ir"
 	"github.com/lhaig/intent/internal/parser"
+	"github.com/lhaig/intent/internal/rustbe"
 	"github.com/lhaig/intent/internal/testgen"
 )
 
@@ -20,7 +21,8 @@ type Result struct {
 	BinaryPath  string
 }
 
-// Compile runs the full pipeline: parse -> check -> codegen
+
+// Compile runs the full pipeline: parse -> check -> lower -> rustbe
 // Returns the result without writing files or invoking cargo.
 func Compile(source string) *Result {
 	res := &Result{}
@@ -34,16 +36,17 @@ func Compile(source string) *Result {
 		return res
 	}
 
-	// Type check
-	diag := checker.Check(prog)
-	if diag.HasErrors() {
-		res.Diagnostics = diag
+	// Type check with result (needed for IR lowering)
+	checkResult := checker.CheckWithResult(prog)
+	if checkResult.Diagnostics.HasErrors() {
+		res.Diagnostics = checkResult.Diagnostics
 		return res
 	}
-	res.Diagnostics = diag
+	res.Diagnostics = checkResult.Diagnostics
 
-	// Generate Rust
-	res.RustSource = codegen.Generate(prog)
+	// Lower to IR, then generate Rust
+	mod := ir.Lower(prog, checkResult)
+	res.RustSource = rustbe.Generate(mod)
 
 	return res
 }
@@ -145,7 +148,7 @@ func HasImports(source string) bool {
 	return len(prog.Imports) > 0
 }
 
-// CompileProject runs the multi-file pipeline: discover -> sort -> check -> codegen.
+// CompileProject runs the multi-file pipeline: discover -> sort -> check -> lower -> rustbe.
 // entryPath is the path to the entry file (e.g., "examples/multi_file/main.intent").
 func CompileProject(entryPath string) *Result {
 	res := &Result{}
@@ -190,8 +193,9 @@ func CompileProject(entryPath string) *Result {
 	}
 	res.Diagnostics = checkResult.Diagnostics
 
-	// Multi-file code generation
-	res.RustSource = codegen.GenerateAll(allModules, sortedPaths)
+	// Lower to IR, then generate Rust
+	prog := ir.LowerAll(allModules, sortedPaths, checkResult)
+	res.RustSource = rustbe.GenerateAll(prog)
 
 	return res
 }
@@ -296,6 +300,7 @@ edition = "2021"
 
 // GenerateTests runs parse -> check -> codegen -> testgen for a single file.
 // Returns Rust source with appended contract test module.
+// Note: testgen still uses codegen.ExprToRust() directly -- see Phase 5 plan.
 func GenerateTests(source string) *Result {
 	res := &Result{}
 
@@ -309,17 +314,18 @@ func GenerateTests(source string) *Result {
 	}
 
 	// Type check
-	diag := checker.Check(prog)
-	if diag.HasErrors() {
-		res.Diagnostics = diag
+	checkResult := checker.CheckWithResult(prog)
+	if checkResult.Diagnostics.HasErrors() {
+		res.Diagnostics = checkResult.Diagnostics
 		return res
 	}
-	res.Diagnostics = diag
+	res.Diagnostics = checkResult.Diagnostics
 
-	// Generate Rust
-	rustSource := codegen.Generate(prog)
+	// Generate Rust via IR pipeline
+	mod := ir.Lower(prog, checkResult)
+	rustSource := rustbe.Generate(mod)
 
-	// Generate tests
+	// Generate tests (still uses codegen.ExprToRust internally)
 	testSource := testgen.Generate(prog)
 
 	res.RustSource = rustSource + testSource
@@ -371,10 +377,11 @@ func GenerateTestsProject(entryPath string) *Result {
 	}
 	res.Diagnostics = checkResult.Diagnostics
 
-	// Multi-file code generation
-	rustSource := codegen.GenerateAll(allModules, sortedPaths)
+	// Multi-file code generation via IR pipeline
+	prog := ir.LowerAll(allModules, sortedPaths, checkResult)
+	rustSource := rustbe.GenerateAll(prog)
 
-	// Generate tests from the entry file's AST
+	// Generate tests from the entry file's AST (still uses codegen internally)
 	entryPath = sortedPaths[len(sortedPaths)-1]
 	entryProg := allModules[entryPath]
 	testSource := testgen.Generate(entryProg)
@@ -395,4 +402,3 @@ func IsMultiFile(filePath string) (bool, error) {
 	prog := p.Parse()
 	return len(prog.Imports) > 0, nil
 }
-
