@@ -27,3 +27,4 @@ entry function main() returns Int {
     print(res);
     return 0;
 }
+

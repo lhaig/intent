@@ -36,16 +36,15 @@ entry function main() returns Int {
     let sum: Result<Int, String> = add_parsed("42", "0");
     let sum_val: Int = match sum {
         Ok(v) => v,
-        Err(e) => -1
+        Err(e) => -1,
     };
     print(sum_val);
-
     let div: Result<Int, String> = safe_divide(10, 2);
     let div_val: Int = match div {
         Ok(v) => v,
-        Err(e) => 0
+        Err(e) => 0,
     };
     print(div_val);
-
     return 0;
 }
+

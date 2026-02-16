@@ -17,3 +17,4 @@ public function multiply(a: Int, b: Int) returns Int
 function internal_helper(x: Int) returns Int {
     return x + 1;
 }
+

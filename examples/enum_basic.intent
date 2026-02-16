@@ -33,8 +33,7 @@ entry function main() returns Int {
     let c: Shape = makeCircle(5.0);
     let r: Shape = makeRectangle(10.0, 20.0);
     let p: Shape = makePoint();
-
     print(42);
-
     return 0;
 }
+

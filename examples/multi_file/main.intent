@@ -8,3 +8,4 @@ entry function main() returns Int {
     print(product);
     return 0;
 }
+

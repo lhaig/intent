@@ -3,3 +3,4 @@ module hello version "1.0.0";
 entry function main() returns Int {
     return 0;
 }
+
