@@ -68,27 +68,29 @@ See [ADR 0008](decisions/0008-intermediate-representation.md) for full rationale
 - Fix known checker bugs (missing return type checking, enum variant collisions)
 - Fix codegen issues (fragile string concat detection)
 
-### Phase 4.2: Design the Intent IR
-- Define IR node types that preserve contracts as first-class elements
-- `Requires`, `Ensures`, `Invariant` as IR nodes (not assertion strings)
-- `OldCapture` as explicit pre-state node
-- `IntentLink` connecting goals to contract nodes by reference
-- Type information attached to every expression node
-- Structured control flow (no labeled block workarounds)
+### Phase 4.2: Design the Intent IR -- DONE
+- [x] IR node types in `internal/ir/nodes.go` (~30 node types)
+- [x] Contracts as first-class IR nodes (`Contract` with `Expr` + `RawText`)
+- [x] `OldCapture` + `OldRef` as explicit pre-state nodes
+- [x] Type information attached to every expression via `ExprType()`
+- [x] `CallExpr` with resolved `CallKind` (function/constructor/variant/builtin/method)
+- [x] `StringConcat` as dedicated node (replaces fragile AST detection)
+- [x] `MatchPattern` with resolved enum name and field bindings
 
-### Phase 4.3: Implement IR Lowering
-- Build `internal/ir/` package
-- Implement lowering pass: annotated AST -> IR
-- Contract expressions preserved as expression trees, not text
-- `old()` expressions lowered to explicit capture-before-execute nodes
-- Quantifiers lowered to structured iteration nodes
+### Phase 4.3: Implement IR Lowering -- DONE
+- [x] `internal/ir/lower.go` with `Lower()` and `LowerAll()` entry points
+- [x] `old()` expressions lowered to `OldCapture` + `OldRef` nodes
+- [x] String concat detected via checker type info
+- [x] Call resolution using checker's entity/enum/function maps
+- [x] Literal parsing (string to typed values)
+- [x] 7 IR-level unit tests in `internal/ir/lower_test.go`
 
-### Phase 4.4: Refactor Rust Codegen to Consume IR
-- Rewrite `internal/codegen/` to read IR instead of AST
-- Maintain identical Rust output (regression tests must pass)
-- The labeled block pattern and `__result` generation move into codegen
-  as an implementation detail, not an IR concern
-- Remove AST-walking from codegen entirely
+### Phase 4.4: Refactor Rust Codegen to Consume IR -- DONE
+- [x] New `internal/rustbe/` package consumes IR instead of AST
+- [x] Byte-identical Rust output verified against legacy codegen for all 9 examples
+- [x] Compiler pipeline switched: `checker.CheckWithResult()` -> `ir.Lower()` -> `rustbe.Generate()`
+- [x] Legacy `codegen.Generate()` / `codegen.GenerateAll()` marked deprecated
+- [x] `testgen` still uses `codegen.ExprToRust()` internally (to be migrated later)
 
 ### Phase 4.5: IR Validation and Testing
 - IR-level tests independent of any backend

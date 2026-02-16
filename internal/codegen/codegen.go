@@ -10,7 +10,8 @@ import (
 	"github.com/lhaig/intent/internal/lexer"
 )
 
-// Generate takes an AST Program and generates Rust source code
+// Deprecated: Generate uses the legacy AST-to-Rust pipeline.
+// Use ir.Lower + rustbe.Generate instead. Kept for testgen compatibility.
 func Generate(prog *ast.Program) string {
 	g := &generator{
 		entities:  make(map[string]*ast.EntityDecl),
@@ -66,9 +67,8 @@ func Generate(prog *ast.Program) string {
 	return g.sb.String()
 }
 
-// GenerateAll generates a single unified Rust source file from multiple Intent modules.
-// sortedPaths is in dependency order (leaf modules first, entry module last).
-// The last path in sortedPaths is the entry file.
+// Deprecated: GenerateAll uses the legacy AST-to-Rust pipeline.
+// Use ir.LowerAll + rustbe.GenerateAll instead. Kept for testgen compatibility.
 func GenerateAll(registry map[string]*ast.Program, sortedPaths []string) string {
 	if len(sortedPaths) == 0 {
 		return ""
