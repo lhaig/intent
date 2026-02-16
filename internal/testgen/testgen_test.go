@@ -705,4 +705,3 @@ entry function main() returns Int {
 		t.Error("Expected .clone() for string parameter passing")
 	}
 }
-

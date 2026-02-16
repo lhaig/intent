@@ -168,9 +168,10 @@ func (d *Diagnostics) ErrorfInFile(file string, line, col int, format string, ar
 
 // Format returns human-readable error messages
 // Output format:
-//   error[filename:3:10]: undeclared variable 'x'
-//     hint: did you mean 'y'?
-//   warning[filename:5:1]: unused variable 'z'
+//
+//	error[filename:3:10]: undeclared variable 'x'
+//	  hint: did you mean 'y'?
+//	warning[filename:5:1]: unused variable 'z'
 func (d *Diagnostics) Format(filename string) string {
 	if len(d.items) == 0 {
 		return ""

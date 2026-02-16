@@ -1540,7 +1540,7 @@ entry function main() returns Int {
 
 	registry := map[string]*ast.Program{
 		"/project/geometry.intent": geomProg,
-		"/project/main.intent":    mainProg,
+		"/project/main.intent":     mainProg,
 	}
 	sortedPaths := []string{"/project/geometry.intent", "/project/main.intent"}
 
