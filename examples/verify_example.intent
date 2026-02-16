@@ -1,0 +1,46 @@
+// Example demonstrating static verification with Z3
+
+module verify_example version "1.0.0";
+
+function abs(x: Int) returns Int
+  ensures result >= 0
+{
+  if x < 0 {
+    return -x;
+  } else {
+    return x;
+  }
+}
+
+function max(a: Int, b: Int) returns Int
+  ensures result >= a
+  ensures result >= b
+{
+  if a > b {
+    return a;
+  } else {
+    return b;
+  }
+}
+
+function safe_divide(a: Int, b: Int) returns Int
+  requires b != 0
+  ensures result * b <= a
+{
+  return a / b;
+}
+
+function increment(x: Int) returns Int
+  requires x < 2147483647
+  ensures result == x + 1
+  ensures result > x
+{
+  return x + 1;
+}
+
+entry function main() returns Int {
+  let x: Int = abs(-5);
+  let y: Int = max(10, 20);
+  let z: Int = increment(x);
+  return z;
+}

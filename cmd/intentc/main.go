@@ -10,36 +10,48 @@ import (
 	"github.com/lhaig/intent/internal/formatter"
 	"github.com/lhaig/intent/internal/linter"
 	"github.com/lhaig/intent/internal/parser"
+	"github.com/lhaig/intent/internal/verify"
 )
 
 const usage = `intentc - The Intent language compiler
 
 Usage:
-  intentc build [--emit-rust] <file.intent>    Compile to native binary (or Rust source)
-  intentc check <file.intent>                  Parse and type-check only
-  intentc test-gen [--emit] <file.intent>      Generate Rust with property-based contract tests
-  intentc fmt [--check] <file.intent>          Format source to canonical style
-  intentc lint <file.intent>                   Run lint checks for style/best practices
+  intentc build [--target <target>] [--emit] <file.intent>    Compile to binary or source
+  intentc check <file.intent>                                  Parse and type-check only
+  intentc verify <file.intent>                                 Verify contracts using Z3 SMT solver
+  intentc test-gen [--emit] <file.intent>                      Generate Rust with property-based contract tests
+  intentc fmt [--check] <file.intent>                          Format source to canonical style
+  intentc lint <file.intent>                                   Run lint checks for style/best practices
 
 Options:
-  --emit-rust    Output generated Rust source instead of building a binary
-  --emit         Write test-gen output to <basename>_test.rs instead of stdout
+  --target <target>   Target platform: rust (default), js, wasm
+  --emit              Output generated source instead of building a binary
+  --emit-rust         (deprecated) Same as --emit with --target rust
+
+Targets:
+  rust    Compile to native binary via Rust (default)
+  js      Generate JavaScript source
+  wasm    Compile to WebAssembly via Rust
 
 Multi-file support:
   When the entry file contains import declarations, intentc automatically
   discovers all imported files, performs cross-file type checking, and
-  produces a single binary from all modules.
+  produces a single output from all modules.
 
 Examples:
-  intentc build hello.intent              Build hello.intent -> hello (native binary)
-  intentc build --emit-rust hello.intent  Emit hello.rs (Rust source)
-  intentc build main.intent               Build multi-file project (auto-detects imports)
-  intentc check hello.intent              Check for errors without building
-  intentc test-gen fibonacci.intent       Generate Rust with contract tests to stdout
-  intentc test-gen --emit fibonacci.intent  Write to fibonacci_test.rs
-  intentc fmt hello.intent                Format hello.intent in-place
-  intentc fmt --check hello.intent        Check if already formatted (exit 1 if not)
-  intentc lint hello.intent               Lint for style/best practice issues
+  intentc build hello.intent                    Build hello.intent -> hello (native binary)
+  intentc build --emit hello.intent             Emit hello.rs (Rust source)
+  intentc build --target js hello.intent        Build hello.intent -> hello.js
+  intentc build --target js --emit hello.intent Emit hello.js (JS source)
+  intentc build --target wasm hello.intent      Build hello.intent -> hello.wasm
+  intentc build main.intent                     Build multi-file project (auto-detects imports)
+  intentc check hello.intent                    Check for errors without building
+  intentc verify hello.intent                   Verify contracts with Z3 (requires z3 on PATH)
+  intentc test-gen fibonacci.intent             Generate Rust with contract tests to stdout
+  intentc test-gen --emit fibonacci.intent      Write to fibonacci_test.rs
+  intentc fmt hello.intent                      Format hello.intent in-place
+  intentc fmt --check hello.intent              Check if already formatted (exit 1 if not)
+  intentc lint hello.intent                     Lint for style/best practice issues
 `
 
 func main() {
@@ -55,6 +67,8 @@ func main() {
 		handleBuild(os.Args[2:])
 	case "check":
 		handleCheck(os.Args[2:])
+	case "verify":
+		handleVerify(os.Args[2:])
 	case "test-gen":
 		handleTestGen(os.Args[2:])
 	case "fmt":
@@ -71,13 +85,30 @@ func main() {
 }
 
 func handleBuild(args []string) {
-	emitRust := false
+	emit := false
+	target := "rust"
 	var filePath string
 
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		switch arg {
 		case "--emit-rust":
-			emitRust = true
+			// deprecated but still supported
+			emit = true
+			target = "rust"
+		case "--emit":
+			emit = true
+		case "--target":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "Error: --target requires an argument")
+				os.Exit(1)
+			}
+			i++
+			target = args[i]
+			if target != "rust" && target != "js" && target != "wasm" {
+				fmt.Fprintf(os.Stderr, "Error: unknown target: %s\n", target)
+				os.Exit(1)
+			}
 		default:
 			if strings.HasPrefix(arg, "-") {
 				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", arg)
@@ -103,50 +134,35 @@ func handleBuild(args []string) {
 
 	if isMulti {
 		// Multi-file compilation path
-		if emitRust {
-			res := compiler.CompileProject(filePath)
-			if res.Diagnostics != nil && res.Diagnostics.HasErrors() {
-				fmt.Fprintf(os.Stderr, "Error: %s\n", res.Diagnostics.Format(filePath))
-				os.Exit(1)
-			}
-			outPath := baseName + ".rs"
-			if err := os.WriteFile(outPath, []byte(res.RustSource), 0644); err != nil {
-				fmt.Fprintf(os.Stderr, "Error writing file: %s\n", err)
-				os.Exit(1)
-			}
-			fmt.Printf("Wrote %s (multi-file)\n", outPath)
-		} else {
-			outPath := baseName
-			fmt.Printf("Compiling %s (multi-file project)...\n", filePath)
-			if err := compiler.BuildProject(filePath, outPath); err != nil {
+		if emit {
+			if err := compiler.EmitProjectToTarget(filePath, target, baseName); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 				os.Exit(1)
 			}
-			fmt.Printf("Built %s\n", outPath)
+		} else {
+			if err := compiler.BuildProjectToTarget(filePath, target, baseName); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+				os.Exit(1)
+			}
 		}
 	} else {
-		// Single-file compilation path (backward compatible)
+		// Single-file compilation path
 		source, err := os.ReadFile(filePath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
 			os.Exit(1)
 		}
 
-		if emitRust {
-			outPath := baseName + ".rs"
-			if err := compiler.EmitRust(string(source), outPath); err != nil {
+		if emit {
+			if err := compiler.EmitToTarget(string(source), target, baseName); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 				os.Exit(1)
 			}
-			fmt.Printf("Wrote %s\n", outPath)
 		} else {
-			outPath := baseName
-			fmt.Printf("Compiling %s...\n", filePath)
-			if err := compiler.Build(string(source), outPath); err != nil {
+			if err := compiler.BuildToTarget(string(source), target, baseName); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 				os.Exit(1)
 			}
-			fmt.Printf("Built %s\n", outPath)
 		}
 	}
 }
@@ -308,6 +324,85 @@ func handleFmt(args []string) {
 
 	if err := os.WriteFile(filePath, []byte(formatted), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing file: %s\n", err)
+		os.Exit(1)
+	}
+}
+
+func handleVerify(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "Error: no input file specified")
+		os.Exit(1)
+	}
+
+	filePath := args[0]
+
+	// Check if this is a multi-file project
+	isMulti, err := compiler.IsMultiFile(filePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
+		os.Exit(1)
+	}
+
+	var results []*verify.VerifyResult
+	if isMulti {
+		results, err = compiler.VerifyProject(filePath)
+	} else {
+		source, err := os.ReadFile(filePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
+			os.Exit(1)
+		}
+		results, err = compiler.Verify(string(source))
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
+	}
+
+	// Track verification status
+	hasError := false
+	hasUnverified := false
+	verified := 0
+	unverified := 0
+	errors := 0
+	timeouts := 0
+
+	// Print results
+	for _, result := range results {
+		contractType := "requires"
+		if result.IsEnsures {
+			contractType = "ensures"
+		}
+
+		switch result.Status {
+		case "verified":
+			fmt.Printf("VERIFIED: %s %s: %s\n", result.FunctionName, contractType, result.ContractText)
+			verified++
+		case "unverified":
+			fmt.Printf("UNVERIFIED: %s %s: %s\n", result.FunctionName, contractType, result.ContractText)
+			fmt.Printf("  %s\n", result.Message)
+			unverified++
+			hasUnverified = true
+		case "error":
+			fmt.Printf("ERROR: %s\n", result.Message)
+			errors++
+			hasError = true
+		case "timeout":
+			fmt.Printf("TIMEOUT: %s %s: %s\n", result.FunctionName, contractType, result.ContractText)
+			fmt.Printf("  %s\n", result.Message)
+			timeouts++
+			hasUnverified = true
+		}
+	}
+
+	// Print summary
+	fmt.Println()
+	fmt.Printf("Verification summary: %d verified, %d unverified, %d timeouts, %d errors\n",
+		verified, unverified, timeouts, errors)
+
+	// Exit with appropriate code
+	if hasError || hasUnverified {
 		os.Exit(1)
 	}
 }

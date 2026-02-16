@@ -12,6 +12,7 @@ import (
 	"github.com/lhaig/intent/internal/parser"
 	"github.com/lhaig/intent/internal/rustbe"
 	"github.com/lhaig/intent/internal/testgen"
+	"github.com/lhaig/intent/internal/verify"
 )
 
 // Result holds the output of a compilation
@@ -401,4 +402,73 @@ func IsMultiFile(filePath string) (bool, error) {
 	p := parser.New(string(source))
 	prog := p.Parse()
 	return len(prog.Imports) > 0, nil
+}
+
+// Verify runs the full pipeline (parse -> check -> lower -> verify) for a single file
+// and returns the verification results.
+func Verify(source string) ([]*verify.VerifyResult, error) {
+	// Parse
+	p := parser.New(source)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		return nil, fmt.Errorf("parse errors:\n%s", p.Diagnostics().Format("input"))
+	}
+
+	// Type check
+	checkResult := checker.CheckWithResult(prog)
+	if checkResult.Diagnostics.HasErrors() {
+		return nil, fmt.Errorf("type check errors:\n%s", checkResult.Diagnostics.Format("input"))
+	}
+
+	// Lower to IR
+	mod := ir.Lower(prog, checkResult)
+
+	// Verify
+	results := verify.Verify(mod)
+	return results, nil
+}
+
+// VerifyProject runs the full pipeline (discover -> check -> lower -> verify)
+// for a multi-file project and returns the verification results.
+func VerifyProject(entryPath string) ([]*verify.VerifyResult, error) {
+	// Create module registry
+	registry, err := NewModuleRegistry(entryPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize module registry: %w", err)
+	}
+
+	// Discover all dependencies
+	diag, err := registry.DiscoverDependencies()
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover dependencies: %w", err)
+	}
+	if diag.HasErrors() {
+		return nil, fmt.Errorf("discovery errors:\n%s", diag.Format(entryPath))
+	}
+
+	// Topological sort
+	sortedPaths, err := registry.TopologicalSort()
+	if err != nil {
+		return nil, fmt.Errorf("failed to sort dependencies: %w", err)
+	}
+
+	// Cross-file type checking
+	allModules := registry.AllModules()
+	checkResult := checker.CheckAll(allModules, sortedPaths)
+	if checkResult.Diagnostics.HasErrors() {
+		return nil, fmt.Errorf("type check errors:\n%s", checkResult.Diagnostics.Format(entryPath))
+	}
+
+	// Lower to IR
+	prog := ir.LowerAll(allModules, sortedPaths, checkResult)
+
+	// Verify all modules
+	var results []*verify.VerifyResult
+	for _, mod := range prog.Modules {
+		modResults := verify.Verify(mod)
+		results = append(results, modResults...)
+	}
+
+	return results, nil
 }

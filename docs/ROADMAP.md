@@ -49,9 +49,10 @@ documented in [ADR 0008](decisions/0008-intermediate-representation.md)
 - [x] Design document and grammar specification
 - [x] Architecture decision records (ADRs 0000-0009)
 - [x] Apache 2.0 license
+- [x] GitHub Actions CI (test, build, vet, fmt-check)
 
-### In Progress
-- [ ] Formatter (`intentc fmt`) -- CLI wired up, formatter package not yet implemented
+### Formatter
+- [x] Formatter (`intentc fmt`) -- fully implemented in `internal/formatter`
 
 ---
 
@@ -92,30 +93,28 @@ See [ADR 0008](decisions/0008-intermediate-representation.md) for full rationale
 - [x] Legacy `codegen.Generate()` / `codegen.GenerateAll()` marked deprecated
 - [x] `testgen` still uses `codegen.ExprToRust()` internally (to be migrated later)
 
-### Phase 4.5: IR Validation and Testing
-- IR-level tests independent of any backend
-- Contract consistency checks at the IR level
-- Round-trip testing: source -> IR -> Rust -> compile -> run
+### Phase 4.5: IR Validation and Testing -- DONE
+- [x] `internal/ir/validate.go` with structural validation (nil types, duplicate captures, etc.)
+- [x] 11 IR-level unit tests in `internal/ir/validate_test.go`
+- [x] Round-trip integration tests for all example files in `internal/ir/integration_test.go`
 
 ---
 
-## Milestone 5: Static Verification (Z3)
+## Milestone 5: Static Verification (Z3) -- DONE
 
 **Goal:** Prove contracts at compile time. Move from "runtime assertions" to
 "verified correctness."
 
 This is the milestone that differentiates Intent from "Rust + contract macros."
 
-### Phase 5.1: SMT Translation
-- Translate IR contract nodes to SMT-LIB formulae
-- Start with arithmetic contracts: `requires x > 0`, `ensures result >= 0`
-- Map Intent types to SMT sorts (Int -> Int, Bool -> Bool)
-
-### Phase 5.2: Z3 Integration
-- Invoke Z3 solver on generated SMT formulae
-- Report per-contract status: "verified" / "unverified" / "timeout"
-- New CLI command: `intentc verify <file.intent>`
-- Contracts that Z3 proves can optionally skip runtime assertion generation
+### Phase 5.1-5.2: SMT Translation and Z3 Integration -- DONE
+- [x] `internal/verify/smt.go` translates IR contracts to SMT-LIB formulae
+- [x] Intent types mapped to SMT sorts (Int -> Int, Bool -> Bool, Float -> Real)
+- [x] `internal/verify/verifier.go` invokes Z3 solver via `exec.Command`
+- [x] Per-contract status: "verified" / "unverified" / "error" / "timeout"
+- [x] CLI command: `intentc verify <file.intent>`
+- [x] Graceful degradation when Z3 is not installed
+- [x] 7 tests in `internal/verify/verify_test.go`
 
 ### Phase 5.3: Verification Reporting
 - `verified_by` references checked semantically, not just syntactically
@@ -130,29 +129,28 @@ This is the milestone that differentiates Intent from "Rust + contract macros."
 
 ---
 
-## Milestone 6: Multi-Target Code Generation
+## Milestone 6: Multi-Target Code Generation -- DONE (Phase 6.1-6.3)
 
 **Goal:** Intent programs run on more than just native binaries.
 
 See [ADR 0009](decisions/0009-multi-target-codegen.md) for full rationale.
 
-### Phase 6.1: Codegen Backend Interface
-- Define common interface that all backends implement
-- Factor out contract enforcement strategy per target
-- Rust backend implements the interface (refactor from Phase 4.4)
+### Phase 6.1: Codegen Backend Interface -- DONE
+- [x] `internal/backend/backend.go` defines `Backend` interface (`Name()`, `Generate()`, `GenerateAll()`)
+- [x] `internal/backend/rust.go` wraps `rustbe` package
+- [x] `internal/backend/js.go` wraps `jsbe` package
 
-### Phase 6.2: WASM Target (via Rust)
-- `intentc build --target wasm <file.intent>`
-- Leverage Rust's `wasm32-unknown-unknown` target
-- Contracts compile to WASM traps or imported assertion functions
-- Produces `.wasm` binary usable in browsers and edge runtimes
+### Phase 6.2: WASM Target (via Rust) -- DONE
+- [x] `intentc build --target wasm <file.intent>`
+- [x] Leverages Rust's `wasm32-unknown-unknown` target via cargo
+- [x] `internal/compiler/target.go` with `EmitToTarget()` / `BuildToTarget()`
 
-### Phase 6.3: JavaScript/TypeScript Target
-- `intentc build --target js <file.intent>`
-- Direct JS/TS emission from IR (no Rust intermediary)
-- Contracts compile to `throw` statements with contract metadata
-- TypeScript output preserves type annotations
-- Enables frontend development with Intent contracts
+### Phase 6.3: JavaScript Target -- DONE
+- [x] `intentc build --target js <file.intent>`
+- [x] `internal/jsbe/jsbe.go` direct JS emission from IR (~1000 lines)
+- [x] ES6 classes for entities, object-based enums, contract checks via throw
+- [x] Type mapping: Int->number, Float->number, Bool->boolean, String->string
+- [x] 6 tests in `internal/jsbe/jsbe_test.go`
 
 ### Phase 6.4: Direct WASM Emission
 - Remove Rust intermediary for WASM target
