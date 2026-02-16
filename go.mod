@@ -1,3 +1,3 @@
 module github.com/lhaig/intent
 
-go 1.21
+go 1.25
