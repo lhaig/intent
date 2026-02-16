@@ -11,10 +11,11 @@ const (
 	EOF
 
 	// Literals
-	IDENT      // x, y, myVariable
-	INT_LIT    // 123
-	FLOAT_LIT  // 123.45
-	STRING_LIT // "hello"
+	IDENT         // x, y, myVariable
+	INT_LIT       // 123
+	FLOAT_LIT     // 123.45
+	STRING_LIT    // "hello"
+	STRING_INTERP // "hello {expr} world" - contains {expr} interpolation markers
 
 	// Keywords
 	MODULE
@@ -121,6 +122,8 @@ func (t TokenType) String() string {
 		return "FLOAT_LIT"
 	case STRING_LIT:
 		return "STRING_LIT"
+	case STRING_INTERP:
+		return "STRING_INTERP"
 	case MODULE:
 		return "MODULE"
 	case VERSION:

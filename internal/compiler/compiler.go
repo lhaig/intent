@@ -403,9 +403,24 @@ func IsMultiFile(filePath string) (bool, error) {
 	return len(prog.Imports) > 0, nil
 }
 
+// VerifyOutput holds verification results and intent reports.
+type VerifyOutput struct {
+	Results       []*verify.VerifyResult
+	IntentReports []*verify.IntentReport
+}
+
 // Verify runs the full pipeline (parse -> check -> lower -> verify) for a single file
 // and returns the verification results.
 func Verify(source string) ([]*verify.VerifyResult, error) {
+	out, err := VerifyWithReport(source)
+	if err != nil {
+		return nil, err
+	}
+	return out.Results, nil
+}
+
+// VerifyWithReport runs the full pipeline and returns results with intent reports.
+func VerifyWithReport(source string) (*VerifyOutput, error) {
 	// Parse
 	p := parser.New(source)
 	prog := p.Parse()
@@ -425,12 +440,23 @@ func Verify(source string) ([]*verify.VerifyResult, error) {
 
 	// Verify
 	results := verify.Verify(mod)
-	return results, nil
+	reports := verify.BuildIntentReports(mod, results)
+
+	return &VerifyOutput{Results: results, IntentReports: reports}, nil
 }
 
 // VerifyProject runs the full pipeline (discover -> check -> lower -> verify)
 // for a multi-file project and returns the verification results.
 func VerifyProject(entryPath string) ([]*verify.VerifyResult, error) {
+	out, err := VerifyProjectWithReport(entryPath)
+	if err != nil {
+		return nil, err
+	}
+	return out.Results, nil
+}
+
+// VerifyProjectWithReport runs the multi-file pipeline and returns results with intent reports.
+func VerifyProjectWithReport(entryPath string) (*VerifyOutput, error) {
 	// Create module registry
 	registry, err := NewModuleRegistry(entryPath)
 	if err != nil {
@@ -462,12 +488,15 @@ func VerifyProject(entryPath string) ([]*verify.VerifyResult, error) {
 	// Lower to IR
 	prog := ir.LowerAll(allModules, sortedPaths, checkResult)
 
-	// Verify all modules
+	// Verify all modules and collect intent reports
 	var results []*verify.VerifyResult
+	var reports []*verify.IntentReport
 	for _, mod := range prog.Modules {
 		modResults := verify.Verify(mod)
 		results = append(results, modResults...)
+		modReports := verify.BuildIntentReports(mod, modResults)
+		reports = append(reports, modReports...)
 	}
 
-	return results, nil
+	return &VerifyOutput{Results: results, IntentReports: reports}, nil
 }

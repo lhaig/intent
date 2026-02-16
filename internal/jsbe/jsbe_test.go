@@ -335,3 +335,44 @@ func TestGenerateAll(t *testing.T) {
 		t.Errorf("Expected entry point invocation, got:\n%s", result)
 	}
 }
+
+func TestGenerateStringInterp(t *testing.T) {
+	mod := &ir.Module{
+		Name:    "test",
+		IsEntry: true,
+		Functions: []*ir.Function{
+			{
+				Name:    "__intent_main",
+				IsEntry: true,
+				Body: []ir.Stmt{
+					&ir.LetStmt{
+						Name: "msg",
+						Type: checker.TypeString,
+						Value: &ir.StringInterp{
+							Parts: []ir.StringInterpPart{
+								{IsExpr: false, Static: "Hello "},
+								{IsExpr: true, Expr: &ir.VarRef{Name: "name", Type: checker.TypeString}},
+								{IsExpr: false, Static: ", age "},
+								{IsExpr: true, Expr: &ir.VarRef{Name: "age", Type: checker.TypeInt}},
+							},
+							Type: checker.TypeString,
+						},
+					},
+				},
+				ReturnType: checker.TypeInt,
+			},
+		},
+	}
+
+	result := Generate(mod)
+
+	if !strings.Contains(result, "${name}") {
+		t.Errorf("Expected ${name} in template literal, got:\n%s", result)
+	}
+	if !strings.Contains(result, "${age}") {
+		t.Errorf("Expected ${age} in template literal, got:\n%s", result)
+	}
+	if !strings.Contains(result, "`Hello ") {
+		t.Errorf("Expected backtick template literal, got:\n%s", result)
+	}
+}

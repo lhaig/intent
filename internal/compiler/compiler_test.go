@@ -359,3 +359,25 @@ entry function main() returns Int { return 0; }`
 		t.Error("Expected HasImports to return false for source without import")
 	}
 }
+
+func TestCompileStringInterpolation(t *testing.T) {
+	source := `module test version "1.0.0";
+
+entry function main() returns Int {
+    let name: String = "Alice";
+    let age: Int = 30;
+    let msg: String = "Hello {name}, you are {age} years old";
+    return 0;
+}
+`
+	res := Compile(source)
+	if res.Diagnostics != nil && res.Diagnostics.HasErrors() {
+		t.Fatalf("Compile failed: %s", res.Diagnostics.Format("test"))
+	}
+	if !strings.Contains(res.RustSource, "format!") {
+		t.Errorf("Expected format!() in Rust output, got: %s", res.RustSource)
+	}
+	if !strings.Contains(res.RustSource, "name") {
+		t.Errorf("Expected 'name' variable in format args, got: %s", res.RustSource)
+	}
+}

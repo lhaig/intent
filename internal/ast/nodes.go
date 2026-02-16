@@ -416,6 +416,23 @@ type StringLit struct {
 func (s *StringLit) Pos() (int, int) { return s.Line, s.Column }
 func (s *StringLit) exprNode()       {}
 
+// StringInterp represents a string with embedded expressions: "hello {expr} world"
+type StringInterp struct {
+	Parts  []StringInterpPart // alternating static/expression parts
+	Line   int
+	Column int
+}
+
+// StringInterpPart is a part of an interpolated string.
+type StringInterpPart struct {
+	IsExpr bool       // true if this is an expression part
+	Static string     // static text (when IsExpr is false)
+	Expr   Expression // parsed expression (when IsExpr is true)
+}
+
+func (s *StringInterp) Pos() (int, int) { return s.Line, s.Column }
+func (s *StringInterp) exprNode()       {}
+
 // BoolLit represents a boolean literal
 type BoolLit struct {
 	Value  bool

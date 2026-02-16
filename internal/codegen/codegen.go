@@ -956,6 +956,27 @@ func (g *generator) generateExpr(e ast.Expression) string {
 		// String literals become owned Strings in Rust
 		return expr.Value + ".to_string()"
 
+	case *ast.StringInterp:
+		// Generate format!() for interpolated strings
+		var fmtStr string
+		var args []string
+		for _, part := range expr.Parts {
+			if part.IsExpr {
+				fmtStr += "{}"
+				args = append(args, g.generateExpr(part.Expr))
+			} else {
+				escaped := strings.ReplaceAll(part.Static, "{", "{{")
+				escaped = strings.ReplaceAll(escaped, "}", "}}")
+				escaped = strings.ReplaceAll(escaped, "\\", "\\\\")
+				escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
+				fmtStr += escaped
+			}
+		}
+		if len(args) == 0 {
+			return fmt.Sprintf("\"%s\".to_string()", fmtStr)
+		}
+		return fmt.Sprintf("format!(\"%s\", %s)", fmtStr, strings.Join(args, ", "))
+
 	case *ast.BoolLit:
 		if expr.Value {
 			return "true"

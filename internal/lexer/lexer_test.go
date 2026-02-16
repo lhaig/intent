@@ -236,6 +236,53 @@ func TestNextToken_StringLiterals(t *testing.T) {
 	}
 }
 
+func TestNextToken_StringInterp(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected TokenType
+		literal  string
+	}{
+		{
+			name:     "simple interpolation",
+			input:    `"hello {name}"`,
+			expected: STRING_INTERP,
+			literal:  `"hello {name}"`,
+		},
+		{
+			name:     "multiple interpolations",
+			input:    `"x={x}, y={y}"`,
+			expected: STRING_INTERP,
+			literal:  `"x={x}, y={y}"`,
+		},
+		{
+			name:     "no interpolation",
+			input:    `"hello world"`,
+			expected: STRING_LIT,
+			literal:  `"hello world"`,
+		},
+		{
+			name:     "field access in interpolation",
+			input:    `"Balance: {self.balance}"`,
+			expected: STRING_INTERP,
+			literal:  `"Balance: {self.balance}"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := New(tt.input)
+			tok := l.NextToken()
+			if tok.Type != tt.expected {
+				t.Errorf("expected %s, got %s", tt.expected, tok.Type)
+			}
+			if tok.Literal != tt.literal {
+				t.Errorf("expected literal %q, got %q", tt.literal, tok.Literal)
+			}
+		})
+	}
+}
+
 func TestNextToken_Identifiers(t *testing.T) {
 	tests := []struct {
 		input    string

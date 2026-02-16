@@ -769,6 +769,9 @@ func (g *generator) generateExpr(e ir.Expr) string {
 	case *ir.StringLit:
 		return expr.Value
 
+	case *ir.StringInterp:
+		return g.generateStringInterp(expr)
+
 	case *ir.BoolLit:
 		if expr.Value {
 			return "true"
@@ -1075,4 +1078,28 @@ func escapeJSString(s string) string {
 	s = strings.ReplaceAll(s, "\n", "\\n")
 	s = strings.ReplaceAll(s, "\t", "\\t")
 	return s
+}
+
+// generateStringInterp generates JS template literal for string interpolation.
+// "hello {expr} world" -> `hello ${expr} world`
+func (g *generator) generateStringInterp(interp *ir.StringInterp) string {
+	var sb strings.Builder
+	sb.WriteByte('`')
+
+	for _, part := range interp.Parts {
+		if part.IsExpr {
+			sb.WriteString("${")
+			sb.WriteString(g.generateExpr(part.Expr))
+			sb.WriteByte('}')
+		} else {
+			// Escape backticks and ${} in static parts for JS template literal
+			escaped := strings.ReplaceAll(part.Static, "\\", "\\\\")
+			escaped = strings.ReplaceAll(escaped, "`", "\\`")
+			escaped = strings.ReplaceAll(escaped, "${", "\\${")
+			sb.WriteString(escaped)
+		}
+	}
+
+	sb.WriteByte('`')
+	return sb.String()
 }

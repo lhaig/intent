@@ -653,6 +653,23 @@ func (l *lowerer) lowerExpr(e ast.Expression) Expr {
 	case *ast.StringLit:
 		return &StringLit{Value: expr.Value, Type: l.typeOf(e)}
 
+	case *ast.StringInterp:
+		interp := &StringInterp{Type: l.typeOf(e)}
+		for _, part := range expr.Parts {
+			if part.IsExpr {
+				interp.Parts = append(interp.Parts, StringInterpPart{
+					IsExpr: true,
+					Expr:   l.lowerExpr(part.Expr),
+				})
+			} else {
+				interp.Parts = append(interp.Parts, StringInterpPart{
+					IsExpr: false,
+					Static: part.Static,
+				})
+			}
+		}
+		return interp
+
 	case *ast.BoolLit:
 		return &BoolLit{Value: expr.Value, Type: l.typeOf(e)}
 

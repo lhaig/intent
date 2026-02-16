@@ -19,11 +19,18 @@ func getBackend(target string) (backend.Backend, error) {
 		return &backend.RustBackend{}, nil
 	case "js":
 		return &backend.JSBackend{}, nil
-	case "wasm":
-		// WASM uses Rust backend but with different cargo target
-		return &backend.RustBackend{}, nil
 	default:
 		return nil, fmt.Errorf("unknown target: %s", target)
+	}
+}
+
+// getBinaryBackend returns a binary backend for targets that produce binary output
+func getBinaryBackend(target string) (backend.BinaryBackend, error) {
+	switch target {
+	case "wasm":
+		return &backend.WasmBackend{}, nil
+	default:
+		return nil, fmt.Errorf("unknown binary target: %s", target)
 	}
 }
 
@@ -41,13 +48,8 @@ func getFileExtension(target string) string {
 	}
 }
 
-// EmitToTarget compiles source to the given target and writes source file
+// EmitToTarget compiles source to the given target and writes output file
 func EmitToTarget(source, target, baseName string) error {
-	be, err := getBackend(target)
-	if err != nil {
-		return err
-	}
-
 	// Parse
 	p := parser.New(source)
 	prog := p.Parse()
@@ -64,10 +66,28 @@ func EmitToTarget(source, target, baseName string) error {
 	// Lower to IR
 	mod := ir.Lower(prog, checkResult)
 
-	// Generate code
+	// Handle binary targets (WASM)
+	if target == "wasm" {
+		bbe, err := getBinaryBackend(target)
+		if err != nil {
+			return err
+		}
+		wasmBytes := bbe.GenerateBytes(mod)
+		outPath := baseName + ".wasm"
+		if err := os.WriteFile(outPath, wasmBytes, 0644); err != nil {
+			return fmt.Errorf("failed to write output file: %w", err)
+		}
+		fmt.Printf("Wrote %s\n", outPath)
+		return nil
+	}
+
+	// Handle text targets (Rust, JS)
+	be, err := getBackend(target)
+	if err != nil {
+		return err
+	}
 	code := be.Generate(mod)
 
-	// Write file
 	ext := getFileExtension(target)
 	outPath := baseName + ext
 	if err := os.WriteFile(outPath, []byte(code), 0644); err != nil {
@@ -78,13 +98,8 @@ func EmitToTarget(source, target, baseName string) error {
 	return nil
 }
 
-// EmitProjectToTarget compiles a multi-file project to the given target and writes source file
+// EmitProjectToTarget compiles a multi-file project to the given target and writes output file
 func EmitProjectToTarget(entryPath, target, baseName string) error {
-	be, err := getBackend(target)
-	if err != nil {
-		return err
-	}
-
 	// Create module registry
 	registry, err := NewModuleRegistry(entryPath)
 	if err != nil {
@@ -116,10 +131,28 @@ func EmitProjectToTarget(entryPath, target, baseName string) error {
 	// Lower to IR
 	prog := ir.LowerAll(allModules, sortedPaths, checkResult)
 
-	// Generate code
+	// Handle binary targets (WASM)
+	if target == "wasm" {
+		bbe, err := getBinaryBackend(target)
+		if err != nil {
+			return err
+		}
+		wasmBytes := bbe.GenerateAllBytes(prog)
+		outPath := baseName + ".wasm"
+		if err := os.WriteFile(outPath, wasmBytes, 0644); err != nil {
+			return fmt.Errorf("failed to write output file: %w", err)
+		}
+		fmt.Printf("Wrote %s (multi-file)\n", outPath)
+		return nil
+	}
+
+	// Handle text targets (Rust, JS)
+	be, err := getBackend(target)
+	if err != nil {
+		return err
+	}
 	code := be.GenerateAll(prog)
 
-	// Write file
 	ext := getFileExtension(target)
 	outPath := baseName + ext
 	if err := os.WriteFile(outPath, []byte(code), 0644); err != nil {
@@ -139,7 +172,8 @@ func BuildToTarget(source, target, baseName string) error {
 		// For JS, just emit the source (no binary build step)
 		return EmitToTarget(source, target, baseName)
 	case "wasm":
-		return buildWasm(source, baseName)
+		// Direct WASM emission - no Rust toolchain required
+		return EmitToTarget(source, target, baseName)
 	default:
 		return fmt.Errorf("unknown target: %s", target)
 	}
@@ -151,30 +185,21 @@ func BuildProjectToTarget(entryPath, target, baseName string) error {
 	case "rust":
 		return BuildProject(entryPath, baseName)
 	case "js":
-		// For JS, just emit the source (no binary build step)
 		return EmitProjectToTarget(entryPath, target, baseName)
 	case "wasm":
-		return buildProjectWasm(entryPath, baseName)
+		// Direct WASM emission - no Rust toolchain required
+		return EmitProjectToTarget(entryPath, target, baseName)
 	default:
 		return fmt.Errorf("unknown target: %s", target)
 	}
 }
 
-// buildWasm compiles single-file source to WASM via Rust
-func buildWasm(source, baseName string) error {
+// buildWasmViaRust compiles single-file source to WASM via Rust (legacy path).
+// This is retained for cases where the full Rust toolchain produces more optimized output.
+func buildWasmViaRust(source, baseName string) error {
 	res := Compile(source)
 	if res.Diagnostics != nil && res.Diagnostics.HasErrors() {
 		return fmt.Errorf("compilation errors:\n%s", res.Diagnostics.Format("input"))
-	}
-
-	return buildWasmFromRust(res.RustSource, baseName)
-}
-
-// buildProjectWasm compiles multi-file project to WASM via Rust
-func buildProjectWasm(entryPath, baseName string) error {
-	res := CompileProject(entryPath)
-	if res.Diagnostics != nil && res.Diagnostics.HasErrors() {
-		return fmt.Errorf("compilation errors:\n%s", res.Diagnostics.Format(entryPath))
 	}
 
 	return buildWasmFromRust(res.RustSource, baseName)
@@ -214,7 +239,7 @@ path = "src/lib.rs"
 	}
 
 	// Run cargo build --release --target wasm32-unknown-unknown
-	fmt.Printf("Compiling to WASM (this may take a moment)...\n")
+	fmt.Printf("Compiling to WASM via Rust (this may take a moment)...\n")
 	cmd := exec.Command("cargo", "build", "--release", "--target", "wasm32-unknown-unknown")
 	cmd.Dir = tmpDir
 	cmd.Stderr = os.Stderr

@@ -993,6 +993,14 @@ func (c *Checker) checkExpression(expr ast.Expression, scope *Scope) *Type {
 		return c.storeExprType(expr, TypeFloat)
 	case *ast.StringLit:
 		return c.storeExprType(expr, TypeString)
+	case *ast.StringInterp:
+		// Type-check each expression part
+		for _, part := range e.Parts {
+			if part.IsExpr && part.Expr != nil {
+				c.checkExpression(part.Expr, scope)
+			}
+		}
+		return c.storeExprType(expr, TypeString)
 	case *ast.BoolLit:
 		return c.storeExprType(expr, TypeBool)
 	case *ast.ArrayLit:
