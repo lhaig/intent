@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intent WASM - Fibonacci</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+        }
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            color: #fff;
+        }
+        .subtitle {
+            color: #888;
+            margin-bottom: 2rem;
+            font-size: 0.95rem;
+        }
+        .subtitle code {
+            background: #1a1a2e;
+            padding: 0.15rem 0.4rem;
+            border-radius: 3px;
+            color: #7ecfff;
+            font-size: 0.85rem;
+        }
+        .card {
+            background: #141422;
+            border: 1px solid #2a2a3a;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            width: 100%;
+            max-width: 640px;
+        }
+        .card h2 {
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+            color: #aaa;
+            font-weight: 500;
+        }
+        .input-row {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        label {
+            font-size: 0.9rem;
+            color: #999;
+            min-width: 80px;
+        }
+        input[type="number"] {
+            background: #0d0d1a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #fff;
+            padding: 0.5rem 0.75rem;
+            font-size: 1rem;
+            width: 100px;
+            outline: none;
+        }
+        input[type="number"]:focus { border-color: #5588ff; }
+        button {
+            background: #2244aa;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 0.5rem 1.25rem;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background: #3355cc; }
+        .result-box {
+            background: #0d0d1a;
+            border: 1px solid #2a2a3a;
+            border-radius: 8px;
+            padding: 1rem;
+            font-family: 'SF Mono', Menlo, monospace;
+            font-size: 1.5rem;
+            text-align: center;
+            color: #44ddaa;
+            min-height: 3rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .sequence {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+        .seq-item {
+            background: #1a1a2e;
+            border: 1px solid #2a2a3a;
+            border-radius: 6px;
+            padding: 0.35rem 0.6rem;
+            font-family: 'SF Mono', Menlo, monospace;
+            font-size: 0.85rem;
+            color: #ccc;
+        }
+        .seq-item .idx {
+            color: #666;
+            font-size: 0.75rem;
+        }
+        .seq-item .val {
+            color: #7ecfff;
+            margin-left: 0.25rem;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+        .stat {
+            background: #0d0d1a;
+            border-radius: 8px;
+            padding: 0.75rem;
+            text-align: center;
+        }
+        .stat .num {
+            font-size: 1.3rem;
+            font-family: 'SF Mono', Menlo, monospace;
+            color: #44ddaa;
+        }
+        .stat .lbl {
+            font-size: 0.75rem;
+            color: #666;
+            margin-top: 0.25rem;
+        }
+        .source-info {
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 0.5rem;
+        }
+        .source-info pre {
+            font-family: 'SF Mono', Menlo, monospace;
+            font-size: 0.8rem;
+            color: #999;
+            line-height: 1.5;
+            overflow-x: auto;
+        }
+        .source-info pre .kw { color: #c792ea; }
+        .source-info pre .fn { color: #82aaff; }
+        .source-info pre .ct { color: #ffcb6b; }
+        .source-info pre .cm { color: #546e7a; }
+        .tag {
+            display: inline-block;
+            background: #1a3a1a;
+            color: #44dd88;
+            font-size: 0.7rem;
+            padding: 0.15rem 0.5rem;
+            border-radius: 4px;
+            margin-left: 0.5rem;
+            vertical-align: middle;
+        }
+        #status {
+            font-size: 0.85rem;
+            color: #666;
+            margin-bottom: 1rem;
+        }
+        #status.loaded { color: #44dd88; }
+        #status.error { color: #ff6666; }
+        .wasm-size {
+            color: #888;
+            font-size: 0.8rem;
+            text-align: center;
+            margin-top: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>Intent WASM Demo <span class="tag">WebAssembly</span></h1>
+    <p class="subtitle">
+        Compiled from <code>fibonacci.intent</code> directly to WASM binary &mdash; no Rust intermediary
+    </p>
+    <div id="status">Loading WASM module...</div>
+
+    <div class="card">
+        <h2>Compute Fibonacci</h2>
+        <div class="input-row">
+            <label for="n">fib(n):</label>
+            <input type="number" id="n" value="10" min="0" max="90">
+            <button onclick="compute()">Run WASM</button>
+        </div>
+        <div class="result-box" id="result">-</div>
+        <div id="timing" class="wasm-size"></div>
+    </div>
+
+    <div class="card">
+        <h2>Fibonacci Sequence</h2>
+        <div class="input-row">
+            <label for="seqN">First N:</label>
+            <input type="number" id="seqN" value="20" min="1" max="50">
+            <button onclick="showSequence()">Generate</button>
+        </div>
+        <div class="sequence" id="sequence"></div>
+        <div class="stats" id="stats" style="display:none">
+            <div class="stat">
+                <div class="num" id="statCalls">-</div>
+                <div class="lbl">WASM calls</div>
+            </div>
+            <div class="stat">
+                <div class="num" id="statTime">-</div>
+                <div class="lbl">total time</div>
+            </div>
+            <div class="stat">
+                <div class="num" id="statSize">-</div>
+                <div class="lbl">module size</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Intent Source</h2>
+        <div class="source-info">
+            <pre><span class="kw">module</span> fibonacci <span class="kw">version</span> <span class="ct">"1.0.0"</span>;
+
+<span class="kw">function</span> <span class="fn">fib</span>(n: Int) <span class="kw">returns</span> Int
+    <span class="kw">requires</span> n >= 0
+    <span class="kw">ensures</span> result >= 0
+{
+    <span class="kw">if</span> n <= 0 { <span class="kw">return</span> 0; }
+    <span class="kw">if</span> n == 1 { <span class="kw">return</span> 1; }
+    <span class="kw">let mutable</span> a: Int = 0;
+    <span class="kw">let mutable</span> b: Int = 1;
+    <span class="kw">let mutable</span> i: Int = 2;
+    <span class="kw">while</span> i <= n {
+        <span class="kw">let</span> temp: Int = a + b;
+        a = b;
+        b = temp;
+        i = i + 1;
+    }
+    <span class="kw">return</span> b;
+}
+
+<span class="kw">entry function</span> <span class="fn">main</span>() <span class="kw">returns</span> Int {
+    <span class="kw">let</span> res: Int = <span class="fn">fib</span>(10);
+    <span class="kw">return</span> 0;
+}</pre>
+        </div>
+    </div>
+
+    <script>
+    // WASM binary embedded as base64 (155 bytes) -- compiled from fibonacci.intent
+    const WASM_BASE64 = 'AGFzbQEAAAABCgJgAX4BfmAAAX4DAwIAAQUDAQABBxcDA2ZpYgAABG1haW4AAQZtZW1vcnkCAApiAk8BBH4gAEIAVwRAQgAPCyAAQgFRBEBCAQ8LQgAhAUIBIQJCAiEDAkADQCADIABXRQ0BIAEgAnwhBCACIQEgBCECIANCAXwhAwwACwsgAg8LEAEBfkIKEAAhACAAGkIADws=';
+
+    let wasmFib = null;
+    let wasmSize = 0;
+
+    async function loadWasm() {
+        const statusEl = document.getElementById('status');
+        try {
+            const binaryStr = atob(WASM_BASE64);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) {
+                bytes[i] = binaryStr.charCodeAt(i);
+            }
+            wasmSize = bytes.byteLength;
+
+            const { instance } = await WebAssembly.instantiate(bytes.buffer);
+            wasmFib = instance.exports.fib;
+
+            statusEl.textContent = `WASM module loaded (${wasmSize} bytes, ${Object.keys(instance.exports).filter(k => k !== 'memory').length} exports)`;
+            statusEl.className = 'loaded';
+
+            // Auto-run
+            compute();
+            showSequence();
+        } catch (err) {
+            statusEl.textContent = `Failed to load WASM: ${err.message}`;
+            statusEl.className = 'error';
+        }
+    }
+
+    function compute() {
+        if (!wasmFib) return;
+        const n = parseInt(document.getElementById('n').value) || 0;
+        const start = performance.now();
+        const result = wasmFib(BigInt(n));
+        const elapsed = performance.now() - start;
+        document.getElementById('result').textContent = result.toString();
+        document.getElementById('timing').textContent =
+            `Computed in ${elapsed < 0.01 ? '<0.01' : elapsed.toFixed(2)}ms`;
+    }
+
+    function showSequence() {
+        if (!wasmFib) return;
+        const count = parseInt(document.getElementById('seqN').value) || 10;
+        const seqEl = document.getElementById('sequence');
+        seqEl.innerHTML = '';
+
+        const start = performance.now();
+        for (let i = 0; i < count; i++) {
+            const val = wasmFib(BigInt(i));
+            const item = document.createElement('div');
+            item.className = 'seq-item';
+            item.innerHTML = `<span class="idx">${i}:</span><span class="val">${val.toString()}</span>`;
+            seqEl.appendChild(item);
+        }
+        const elapsed = performance.now() - start;
+
+        document.getElementById('stats').style.display = 'grid';
+        document.getElementById('statCalls').textContent = count;
+        document.getElementById('statTime').textContent =
+            elapsed < 0.1 ? '<0.1ms' : elapsed.toFixed(1) + 'ms';
+        document.getElementById('statSize').textContent = wasmSize + 'B';
+    }
+
+    // Enter key triggers compute
+    document.getElementById('n').addEventListener('keydown', e => {
+        if (e.key === 'Enter') compute();
+    });
+    document.getElementById('seqN').addEventListener('keydown', e => {
+        if (e.key === 'Enter') showSequence();
+    });
+
+    loadWasm();
+    </script>
+</body>
+</html>

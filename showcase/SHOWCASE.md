@@ -1,6 +1,6 @@
-# Intent Task Queue Showcase
+# Intent Showcase
 
-This showcase demonstrates one Intent source file (`examples/task_queue.intent`) compiled to three different targets. All three options use **unmodified compiler output** -- the generated code is never hand-edited.
+This showcase demonstrates Intent source files compiled to multiple targets. All options use **unmodified compiler output** -- the generated code is never hand-edited.
 
 ## The Application
 
@@ -73,6 +73,33 @@ A Node.js HTTP server that loads the compiler-generated code using `vm.runInCont
 - `server.js` -- Node.js server (hand-written, loads generated code)
 - `index.html` -- Dashboard UI (fetches state from API)
 
+### Option D: WASM in Browser
+
+**Directory:** `showcase/option-d/`
+
+```bash
+# Generate the WASM binary (no Rust toolchain needed)
+intentc build --target wasm examples/fibonacci.intent
+cp fibonacci.wasm showcase/option-d/fibonacci.wasm
+
+# Open in browser
+open showcase/option-d/index.html
+```
+
+The HTML page loads `fibonacci.wasm` (unmodified compiler output) via `WebAssembly.instantiate()` and calls the exported `fib()` function directly. The WASM binary is emitted directly from the IR -- no Rust intermediary, no cargo, no wasm32-unknown-unknown target. Compilation is instant.
+
+**Key files:**
+- `fibonacci.wasm` -- Compiler output (do not edit)
+- `index.html` -- Interactive demo UI (hand-written wrapper)
+
+**What it demonstrates:**
+- Direct WASM binary emission from Intent IR (Phase 6.4)
+- Exported functions callable from JavaScript via `WebAssembly.instantiate()`
+- Pure computation (recursive fibonacci with contracts) running as native WASM
+- Module size: 155 bytes (compared to ~30KB+ via the Rust intermediary path)
+
+---
+
 ## Reproducing This Showcase
 
 ### Prerequisites
@@ -80,7 +107,7 @@ A Node.js HTTP server that loads the compiler-generated code using `vm.runInCont
 - Go 1.21+ (to build the Intent compiler)
 - Rust with cargo (for Option A native binary)
 - Node.js 14+ (for Option C server)
-- A modern browser (for Options B and C)
+- A modern browser (for Options B, C, and D)
 
 ### Step 1: Build the Compiler
 
@@ -116,6 +143,10 @@ intentc build examples/task_queue.intent
 intentc build --target js examples/task_queue.intent
 cp task_queue.js showcase/option-b/task_queue.generated.js
 cp task_queue.js showcase/option-c/task_queue.generated.js
+
+# Option D: WebAssembly
+intentc build --target wasm examples/fibonacci.intent
+cp fibonacci.wasm showcase/option-d/fibonacci.wasm
 ```
 
 ### Step 4: Create Option A (no extra work needed)
@@ -172,6 +203,9 @@ open showcase/option-b/index.html
 # Option C
 node showcase/option-c/server.js
 # then open http://localhost:3000
+
+# Option D
+open showcase/option-d/index.html
 ```
 
 ## Compiler Bugs Found During Development

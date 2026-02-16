@@ -113,45 +113,42 @@ func (l *Lexer) readNumber() (string, TokenType) {
 	return l.input[position:l.position], tokenType
 }
 
-// readString reads a string literal
-func (l *Lexer) readString() (string, bool) {
+// readString reads a string literal.
+// Returns the raw literal (including quotes), whether it contains interpolation, and success.
+func (l *Lexer) readString() (string, bool, bool) {
 	// Already consumed opening quote
 	position := l.position
-	result := ""
+	hasInterp := false
+	braceDepth := 0
 
 	for {
 		l.readChar()
 		if l.ch == 0 || l.ch == '\n' {
 			// Unterminated string
-			return "", false
+			return "", false, false
 		}
-		if l.ch == '"' {
+		if l.ch == '"' && braceDepth == 0 {
 			break
 		}
 		if l.ch == '\\' {
-			// Handle escape sequences
+			// Skip escape sequences
 			l.readChar()
-			switch l.ch {
-			case 'n':
-				result += "\n"
-			case 't':
-				result += "\t"
-			case '\\':
-				result += "\\"
-			case '"':
-				result += "\""
-			default:
-				// Invalid escape sequence, just include the backslash
-				result += "\\" + string(l.ch)
+			continue
+		}
+		if l.ch == '{' {
+			if braceDepth == 0 {
+				hasInterp = true
 			}
-		} else {
-			result += string(l.ch)
+			braceDepth++
+		}
+		if l.ch == '}' && braceDepth > 0 {
+			braceDepth--
 		}
 	}
 
 	// Store the raw literal including quotes for reference
 	literal := l.input[position : l.position+1]
-	return literal, true
+	return literal, hasInterp, true
 }
 
 // NextToken returns the next token from the input
@@ -250,9 +247,11 @@ func (l *Lexer) NextToken() Token {
 	case '?':
 		tok = Token{Type: QUESTION, Literal: string(l.ch), Line: tok.Line, Column: tok.Column}
 	case '"':
-		str, ok := l.readString()
+		str, hasInterp, ok := l.readString()
 		if !ok {
 			tok = Token{Type: ILLEGAL, Literal: "unterminated string", Line: tok.Line, Column: tok.Column}
+		} else if hasInterp {
+			tok = Token{Type: STRING_INTERP, Literal: str, Line: tok.Line, Column: tok.Column}
 		} else {
 			tok = Token{Type: STRING_LIT, Literal: str, Line: tok.Line, Column: tok.Column}
 		}

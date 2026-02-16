@@ -473,6 +473,27 @@ func (f *formatter) formatExprPrec(e ast.Expression, parentPrec int) string {
 	case *ast.StringLit:
 		return expr.Value
 
+	case *ast.StringInterp:
+		// Reconstruct the interpolated string from parts
+		var result strings.Builder
+		result.WriteByte('"')
+		for _, part := range expr.Parts {
+			if part.IsExpr {
+				result.WriteByte('{')
+				result.WriteString(f.formatExpr(part.Expr))
+				result.WriteByte('}')
+			} else {
+				// Re-escape the static text
+				escaped := strings.ReplaceAll(part.Static, "\\", "\\\\")
+				escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
+				escaped = strings.ReplaceAll(escaped, "\n", "\\n")
+				escaped = strings.ReplaceAll(escaped, "\t", "\\t")
+				result.WriteString(escaped)
+			}
+		}
+		result.WriteByte('"')
+		return result.String()
+
 	case *ast.BoolLit:
 		if expr.Value {
 			return "true"

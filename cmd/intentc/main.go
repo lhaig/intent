@@ -34,7 +34,7 @@ Options:
 Targets:
   rust    Compile to native binary via Rust (default)
   js      Generate JavaScript source
-  wasm    Compile to WebAssembly via Rust
+  wasm    Compile to WebAssembly (direct binary emission)
 
 Multi-file support:
   When the entry file contains import declarations, intentc automatically
@@ -351,16 +351,16 @@ func handleVerify(args []string) {
 		os.Exit(1)
 	}
 
-	var results []*verify.VerifyResult
+	var output *compiler.VerifyOutput
 	if isMulti {
-		results, err = compiler.VerifyProject(filePath)
+		output, err = compiler.VerifyProjectWithReport(filePath)
 	} else {
-		source, err := os.ReadFile(filePath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
+		source, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			fmt.Fprintf(os.Stderr, "Error reading file: %s\n", readErr)
 			os.Exit(1)
 		}
-		results, err = compiler.Verify(string(source))
+		output, err = compiler.VerifyWithReport(string(source))
 	}
 
 	if err != nil {
@@ -377,18 +377,15 @@ func handleVerify(args []string) {
 	timeouts := 0
 
 	// Print results
-	for _, result := range results {
-		contractType := "requires"
-		if result.IsEnsures {
-			contractType = "ensures"
-		}
+	for _, result := range output.Results {
+		name := result.QualifiedName()
 
 		switch result.Status {
 		case "verified":
-			fmt.Printf("VERIFIED: %s %s: %s\n", result.FunctionName, contractType, result.ContractText)
+			fmt.Printf("VERIFIED: %s: %s\n", name, result.ContractText)
 			verified++
 		case "unverified":
-			fmt.Printf("UNVERIFIED: %s %s: %s\n", result.FunctionName, contractType, result.ContractText)
+			fmt.Printf("UNVERIFIED: %s: %s\n", name, result.ContractText)
 			fmt.Printf("  %s\n", result.Message)
 			unverified++
 			hasUnverified = true
@@ -397,7 +394,7 @@ func handleVerify(args []string) {
 			errors++
 			hasError = true
 		case "timeout":
-			fmt.Printf("TIMEOUT: %s %s: %s\n", result.FunctionName, contractType, result.ContractText)
+			fmt.Printf("TIMEOUT: %s: %s\n", name, result.ContractText)
 			fmt.Printf("  %s\n", result.Message)
 			timeouts++
 			hasUnverified = true
@@ -408,6 +405,12 @@ func handleVerify(args []string) {
 	fmt.Println()
 	fmt.Printf("Verification summary: %d verified, %d unverified, %d timeouts, %d errors\n",
 		verified, unverified, timeouts, errors)
+
+	// Print intent verification report
+	if len(output.IntentReports) > 0 {
+		fmt.Println()
+		fmt.Print(verify.FormatReport(output.IntentReports))
+	}
 
 	// Exit with appropriate code
 	if hasError || hasUnverified {

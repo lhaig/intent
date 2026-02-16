@@ -820,6 +820,9 @@ func (g *generator) generateExpr(e ir.Expr, arrayRefParams map[string]bool) stri
 	case *ir.StringLit:
 		return expr.Value + ".to_string()"
 
+	case *ir.StringInterp:
+		return g.generateStringInterp(expr)
+
 	case *ir.BoolLit:
 		if expr.Value {
 			return "true"
@@ -1155,4 +1158,32 @@ func escapeRustString(s string) string {
 	s = strings.ReplaceAll(s, "\n", "\\n")
 	s = strings.ReplaceAll(s, "\t", "\\t")
 	return s
+}
+
+// generateStringInterp generates Rust format!() for string interpolation.
+// "hello {expr} world" -> format!("hello {} world", expr)
+func (g *generator) generateStringInterp(interp *ir.StringInterp) string {
+	var fmtStr strings.Builder
+	var args []string
+
+	for _, part := range interp.Parts {
+		if part.IsExpr {
+			fmtStr.WriteString("{}")
+			args = append(args, g.generateExpr(part.Expr, nil))
+		} else {
+			// Escape braces in static parts for Rust format!()
+			escaped := strings.ReplaceAll(part.Static, "{", "{{")
+			escaped = strings.ReplaceAll(escaped, "}", "}}")
+			// Escape quotes and backslashes for Rust string literal
+			escaped = strings.ReplaceAll(escaped, "\\", "\\\\")
+			escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
+			fmtStr.WriteString(escaped)
+		}
+	}
+
+	if len(args) == 0 {
+		return fmt.Sprintf("\"%s\".to_string()", fmtStr.String())
+	}
+
+	return fmt.Sprintf("format!(\"%s\", %s)", fmtStr.String(), strings.Join(args, ", "))
 }

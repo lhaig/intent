@@ -329,6 +329,13 @@ func validateExpr(expr Expr, context string) []string {
 			errors = append(errors, validateExpr(e.Right, context)...)
 		}
 
+	case *StringInterp:
+		for _, part := range e.Parts {
+			if part.IsExpr && part.Expr != nil {
+				errors = append(errors, validateExpr(part.Expr, context)...)
+			}
+		}
+
 	case *OldRef, *VarRef, *SelfRef, *ResultRef, *IntLit, *FloatLit, *StringLit, *BoolLit:
 		// No validation needed for leaf nodes
 

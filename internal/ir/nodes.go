@@ -427,6 +427,22 @@ type TryExpr struct {
 func (e *TryExpr) ExprType() *checker.Type { return e.Type }
 func (*TryExpr) exprNode()                 {}
 
+// StringInterp represents a string with embedded expressions.
+type StringInterp struct {
+	Parts []StringInterpPart
+	Type  *checker.Type
+}
+
+// StringInterpPart is a part of an interpolated string (static text or expression).
+type StringInterpPart struct {
+	IsExpr bool
+	Static string // when IsExpr is false
+	Expr   Expr   // when IsExpr is true
+}
+
+func (e *StringInterp) ExprType() *checker.Type { return e.Type }
+func (*StringInterp) exprNode()                 {}
+
 // StringConcat represents string concatenation (replaces BinaryExpr with + on strings).
 type StringConcat struct {
 	Left  Expr

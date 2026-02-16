@@ -927,6 +927,9 @@ func (p *Parser) parsePrimary() ast.Expression {
 	case lexer.STRING_LIT:
 		p.advance()
 		return &ast.StringLit{Value: tok.Literal, Line: tok.Line, Column: tok.Column}
+	case lexer.STRING_INTERP:
+		p.advance()
+		return p.parseStringInterp(tok)
 	case lexer.TRUE:
 		p.advance()
 		return &ast.BoolLit{Value: true, Line: tok.Line, Column: tok.Column}
@@ -1171,4 +1174,124 @@ func (p *Parser) parseMatchPattern() *ast.MatchPattern {
 		Line:        tok.Line,
 		Column:      tok.Column,
 	}
+}
+
+// parseStringInterp parses an interpolated string token into a StringInterp AST node.
+// The token literal is like: "hello {expr} world {expr2}"
+// We split on { and } boundaries and sub-parse each expression.
+func (p *Parser) parseStringInterp(tok lexer.Token) ast.Expression {
+	// Strip surrounding quotes
+	raw := tok.Literal
+	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+		raw = raw[1 : len(raw)-1]
+	}
+
+	var parts []ast.StringInterpPart
+	i := 0
+	for i < len(raw) {
+		// Find next unescaped {
+		start := i
+		for i < len(raw) && raw[i] != '{' {
+			if raw[i] == '\\' {
+				i++ // skip escaped char
+			}
+			i++
+		}
+
+		// Add static part if non-empty
+		if i > start {
+			parts = append(parts, ast.StringInterpPart{
+				IsExpr: false,
+				Static: unescapeString(raw[start:i]),
+			})
+		}
+
+		if i >= len(raw) {
+			break
+		}
+
+		// Skip the {
+		i++
+
+		// Find matching } (handle nested braces)
+		braceDepth := 1
+		exprStart := i
+		for i < len(raw) && braceDepth > 0 {
+			if raw[i] == '{' {
+				braceDepth++
+			} else if raw[i] == '}' {
+				braceDepth--
+			}
+			if braceDepth > 0 {
+				i++
+			}
+		}
+
+		if braceDepth != 0 {
+			p.diags.Errorf(tok.Line, tok.Column, "unterminated interpolation in string")
+			return &ast.StringLit{Value: tok.Literal, Line: tok.Line, Column: tok.Column}
+		}
+
+		// Parse the expression between { and }
+		exprSource := raw[exprStart:i]
+		expr := p.parseSubExpression(exprSource, tok.Line, tok.Column)
+		if expr != nil {
+			parts = append(parts, ast.StringInterpPart{
+				IsExpr: true,
+				Expr:   expr,
+			})
+		}
+
+		// Skip the }
+		i++
+	}
+
+	return &ast.StringInterp{
+		Parts:  parts,
+		Line:   tok.Line,
+		Column: tok.Column,
+	}
+}
+
+// parseSubExpression creates a sub-parser to parse an expression string.
+func (p *Parser) parseSubExpression(source string, line, col int) ast.Expression {
+	subLex := lexer.New(source)
+	tokens := subLex.Tokenize()
+	subParser := &Parser{
+		tokens: tokens,
+		pos:    0,
+		diags:  p.diags,
+	}
+	if len(tokens) == 0 || (len(tokens) == 1 && tokens[0].Type == lexer.EOF) {
+		p.diags.Errorf(line, col, "empty interpolation expression")
+		return nil
+	}
+	expr := subParser.parseExpression()
+	return expr
+}
+
+// unescapeString processes escape sequences in a string.
+func unescapeString(s string) string {
+	var result strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			i++
+			switch s[i] {
+			case 'n':
+				result.WriteByte('\n')
+			case 't':
+				result.WriteByte('\t')
+			case '\\':
+				result.WriteByte('\\')
+			case '"':
+				result.WriteByte('"')
+			default:
+				result.WriteByte('\\')
+				result.WriteByte(s[i])
+			}
+		} else {
+			result.WriteByte(s[i])
+		}
+	}
+	return result.String()
 }
