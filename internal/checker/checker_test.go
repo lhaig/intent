@@ -1097,24 +1097,28 @@ entry function main() returns Int {
 }
 
 func TestCheckEmptyArrayLiteral(t *testing.T) {
+	// Empty array with type annotation should be accepted
 	source := `module test version "1.0.0";
 entry function main() returns Int {
     let x: Array<Int> = [];
     return 0;
 }`
 	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Empty array with Array<Int> annotation should be accepted, got: %s", diag.Format("test"))
+	}
+}
+
+func TestCheckEmptyArrayLiteralNoArrayAnnotation(t *testing.T) {
+	// Empty array assigned to non-Array type should still error
+	source := `module test version "1.0.0";
+entry function main() returns Int {
+    let x: Int = [];
+    return 0;
+}`
+	diag := parseAndCheck(t, source)
 	if !diag.HasErrors() {
-		t.Error("Expected error for empty array literal")
-	}
-	found := false
-	for _, d := range diag.All() {
-		if strings.Contains(d.Message, "empty array literal requires type annotation") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("Expected 'empty array literal requires type annotation' error, got: %s", diag.Format("test"))
+		t.Error("Expected error for empty array literal with non-Array type annotation")
 	}
 }
 

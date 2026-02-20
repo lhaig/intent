@@ -188,6 +188,16 @@ because each feature needs to work across all backends and with the verifier.
 - [x] JS backend: template literal with `${}` interpolation
 - [x] End-to-end compiler test in `compiler_test.go`
 
+### String Standard Library
+- Methods on String: `split(delim)`, `to_lowercase()`, `trim()`, `starts_with(prefix)`, `contains(substr)`, `len()`
+- Maps to Rust String/str methods
+- Driven by Attractor: condition expression parsing, label normalization
+
+### Map Type
+- `Map<K, V>` with `get(key)`, `set(key, value)`, `contains(key)`, `keys()`, `remove(key)`
+- Maps to Rust `HashMap<K, V>`
+- Driven by Attractor: Context (state passing between pipeline stages), HandlerRegistry
+
 ### Rust FFI / Crate Imports
 - Call Rust crate functions from Intent (Rust backend only)
 - Type-safe bridge declarations with contracts on the boundary
@@ -216,6 +226,21 @@ because each feature needs to work across all backends and with the verifier.
 - `--release` flag to strip unverified contract assertions
 - Keep verified contracts as documentation, remove runtime checks
 - Configurable per-contract: critical invariants always checked
+
+---
+
+## Driving Example: Attractor
+
+The Attractor pipeline orchestration spec (`examples/attractor/`) serves as the primary driver for language development. By implementing the spec in Intent, we discover which features matter most in practice.
+
+**Current state:** Phase 1 complete — type model, edge selection, retry policy, graph validation all compile and run. See `examples/attractor/STRATEGY.md` for the full gap analysis and phased plan.
+
+**Next features driven by Attractor (in priority order):**
+1. String standard library (split, lowercase, trim, starts_with) — unlocks condition parsing
+2. Array\<String\> on entity fields — unlocks suggested_next_ids, reachability
+3. Map\<K,V\> type — unlocks Context (the central state-passing mechanism)
+4. Result\<T,E\> and error handling — unlocks retry loop exception handling
+5. Traits/Interfaces — unlocks Handler dispatch
 
 ---
 

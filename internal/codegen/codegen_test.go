@@ -519,8 +519,8 @@ entity Calculator {
 	if !strings.Contains(result, "fn add(&mut self, n: i64)") {
 		t.Error("Expected method with mutable self parameter")
 	}
-	if !strings.Contains(result, "fn getValue(&mut self) -> i64") {
-		t.Error("Expected method with return type")
+	if !strings.Contains(result, "fn getValue(&self) -> i64") {
+		t.Error("Expected read-only method with &self receiver")
 	}
 	if !strings.Contains(result, "self.value =") {
 		t.Error("Expected self field access")
@@ -1309,8 +1309,8 @@ function use_parse(s: String) returns Result<Int, String>
 	prog := parser.New(source).Parse()
 	result := Generate(prog)
 
-	if !strings.Contains(result, "parse(s)?") {
-		t.Errorf("Expected 'parse(s)?', got:\n%s", result)
+	if !strings.Contains(result, "parse(s.clone())?") {
+		t.Errorf("Expected 'parse(s.clone())?', got:\n%s", result)
 	}
 }
 
