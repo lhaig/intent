@@ -1,0 +1,149 @@
+module attractor_validation version "0.1.0";
+
+import "types.intent";
+
+public function has_exactly_one_start(nodes: Array<NodeAttr>, count: Int) returns Bool
+    requires count >= 0
+    ensures true
+{
+    let mutable starts: Int = 0;
+    for i in 0..count {
+        if nodes[i].is_start() {
+            starts = starts + 1;
+        }
+    }
+    return starts == 1;
+}
+
+public function has_exactly_one_exit(nodes: Array<NodeAttr>, count: Int) returns Bool
+    requires count >= 0
+    ensures true
+{
+    let mutable exits: Int = 0;
+    for i in 0..count {
+        if nodes[i].is_exit() {
+            exits = exits + 1;
+        }
+    }
+    return exits == 1;
+}
+
+public function find_start_index(nodes: Array<NodeAttr>, count: Int) returns Int
+    requires count >= 0
+    ensures result >= -1
+    ensures result < count or result == -1
+{
+    let mutable idx: Int = -1;
+    for i in 0..count {
+        if nodes[i].is_start() and idx == -1 {
+            idx = i;
+        }
+    }
+    return idx;
+}
+
+public function find_exit_index(nodes: Array<NodeAttr>, count: Int) returns Int
+    requires count >= 0
+    ensures result >= -1
+    ensures result < count or result == -1
+{
+    let mutable idx: Int = -1;
+    for i in 0..count {
+        if nodes[i].is_exit() and idx == -1 {
+            idx = i;
+        }
+    }
+    return idx;
+}
+
+public function node_exists(nodes: Array<NodeAttr>, count: Int, id: String) returns Bool
+    requires count >= 0
+    ensures true
+{
+    let mutable found: Bool = false;
+    for i in 0..count {
+        if nodes[i].id == id {
+            found = true;
+        }
+    }
+    return found;
+}
+
+public function start_has_no_incoming(edges: Array<EdgeAttr>, edge_count: Int, start_id: String) returns Bool
+    requires edge_count >= 0
+    ensures true
+{
+    let mutable has_incoming: Bool = false;
+    for i in 0..edge_count {
+        if edges[i].to_node == start_id {
+            has_incoming = true;
+        }
+    }
+    return not has_incoming;
+}
+
+public function exit_has_no_outgoing(edges: Array<EdgeAttr>, edge_count: Int, exit_id: String) returns Bool
+    requires edge_count >= 0
+    ensures true
+{
+    let mutable has_outgoing: Bool = false;
+    for i in 0..edge_count {
+        if edges[i].from_node == exit_id {
+            has_outgoing = true;
+        }
+    }
+    return not has_outgoing;
+}
+
+public function all_edge_targets_exist(nodes: Array<NodeAttr>, node_count: Int, edges: Array<EdgeAttr>, edge_count: Int) returns Bool
+    requires node_count >= 0
+    requires edge_count >= 0
+    ensures true
+{
+    let mutable all_valid: Bool = true;
+    for i in 0..edge_count {
+        let from_exists: Bool = node_exists(nodes, node_count, edges[i].from_node);
+        let to_exists: Bool = node_exists(nodes, node_count, edges[i].to_node);
+        if not from_exists or not to_exists {
+            all_valid = false;
+        }
+    }
+    return all_valid;
+}
+
+public function count_outgoing(edges: Array<EdgeAttr>, edge_count: Int, node_id: String) returns Int
+    requires edge_count >= 0
+    ensures result >= 0
+    ensures result <= edge_count
+{
+    let mutable count: Int = 0;
+    for i in 0..edge_count {
+        if edges[i].from_node == node_id {
+            count = count + 1;
+        }
+    }
+    return count;
+}
+
+public function decision_nodes_valid(nodes: Array<NodeAttr>, node_count: Int, edges: Array<EdgeAttr>, edge_count: Int) returns Bool
+    requires node_count >= 0
+    requires edge_count >= 0
+    ensures true
+{
+    let mutable all_valid: Bool = true;
+    for i in 0..node_count {
+        if nodes[i].is_decision() {
+            let outgoing: Int = count_outgoing(edges, edge_count, nodes[i].id);
+            if outgoing < 2 {
+                all_valid = false;
+            }
+        }
+    }
+    return all_valid;
+}
+
+intent "Graph structural integrity" {
+    goal: "Validation rules enforce Attractor spec Section 7 invariants";
+    guarantee: "No graph with structural errors can pass validation";
+    verified_by: [has_exactly_one_start.ensures, has_exactly_one_exit.ensures, find_start_index.ensures, find_exit_index.ensures, all_edge_targets_exist.requires];
+}

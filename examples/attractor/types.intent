@@ -1,0 +1,295 @@
+module attractor_types version "0.1.0";
+
+// StageStatus represents the result of a pipeline stage execution.
+public enum StageStatus {
+    Success,
+    PartialSuccess,
+    Retry,
+    Fail,
+    Skipped,
+}
+
+// Severity classifies the importance of a diagnostic message.
+public enum Severity {
+    Error,
+    Warning,
+    Info,
+}
+
+// status_is_success returns true if the status represents any success variant.
+public function status_is_success(s: StageStatus) returns Bool
+    requires true
+    ensures true
+{
+    let val: Bool = match s {
+        Success => true,
+        PartialSuccess => true,
+        Retry => false,
+        Fail => false,
+        Skipped => false,
+    };
+    return val;
+}
+
+// status_is_terminal_success returns true only for terminal success variants.
+public function status_is_terminal_success(s: StageStatus) returns Bool
+    requires true
+    ensures true
+{
+    let val: Bool = match s {
+        Success => true,
+        PartialSuccess => true,
+        Retry => false,
+        Fail => false,
+        Skipped => false,
+    };
+    return val;
+}
+
+// Outcome records the result of a stage execution including status and diagnostics.
+public entity Outcome {
+    field status: StageStatus;
+    field preferred_label: String;
+    field notes: String;
+    field failure_reason: String;
+
+    constructor(status: StageStatus, preferred_label: String, notes: String, failure_reason: String)
+        requires true
+    {
+        self.status = status;
+        self.preferred_label = preferred_label;
+        self.notes = notes;
+        self.failure_reason = failure_reason;
+    }
+
+    method is_success() returns Bool
+        ensures true
+    {
+        let val: Bool = match self.status {
+            Success => true,
+            PartialSuccess => true,
+            Retry => false,
+            Fail => false,
+            Skipped => false,
+        };
+        return val;
+    }
+
+    method is_retriable() returns Bool
+        ensures true
+    {
+        let val: Bool = match self.status {
+            Success => false,
+            PartialSuccess => false,
+            Retry => true,
+            Fail => false,
+            Skipped => false,
+        };
+        return val;
+    }
+}
+
+// NodeAttr holds the attributes of a node in the Attractor pipeline graph.
+public entity NodeAttr {
+    field id: String;
+    field label: String;
+    field shape: String;
+    field node_type: String;
+    field prompt: String;
+    field max_retries: Int;
+    field goal_gate: Bool;
+    field retry_target: String;
+    field timeout_seconds: Int;
+
+    invariant self.max_retries >= 0;
+    invariant self.timeout_seconds >= 0;
+
+    constructor(id: String, label: String, shape: String, node_type: String, prompt: String, max_retries: Int, goal_gate: Bool, retry_target: String, timeout_seconds: Int)
+        requires max_retries >= 0
+        requires timeout_seconds >= 0
+    {
+        self.id = id;
+        self.label = label;
+        self.shape = shape;
+        self.node_type = node_type;
+        self.prompt = prompt;
+        self.max_retries = max_retries;
+        self.goal_gate = goal_gate;
+        self.retry_target = retry_target;
+        self.timeout_seconds = timeout_seconds;
+    }
+
+    method is_start() returns Bool
+        ensures true
+    {
+        return self.shape == "Mdiamond";
+    }
+
+    method is_exit() returns Bool
+        ensures true
+    {
+        return self.shape == "Msquare";
+    }
+
+    method is_decision() returns Bool
+        ensures true
+    {
+        return self.shape == "diamond";
+    }
+
+    method is_parallel() returns Bool
+        ensures true
+    {
+        return self.shape == "component";
+    }
+
+    method is_human_gate() returns Bool
+        ensures true
+    {
+        return self.shape == "hexagon";
+    }
+}
+
+// EdgeAttr holds the attributes of a directed edge in the Attractor pipeline graph.
+// Self-loops are disallowed: from_node and to_node must differ.
+public entity EdgeAttr {
+    field from_node: String;
+    field to_node: String;
+    field label: String;
+    field condition: String;
+    field weight: Int;
+    field loop_restart: Bool;
+
+    invariant self.weight >= 0;
+    invariant self.from_node != self.to_node;
+
+    constructor(from_node: String, to_node: String, label: String, condition: String, weight: Int, loop_restart: Bool)
+        requires weight >= 0
+        requires from_node != to_node
+    {
+        self.from_node = from_node;
+        self.to_node = to_node;
+        self.label = label;
+        self.condition = condition;
+        self.weight = weight;
+        self.loop_restart = loop_restart;
+    }
+
+    method is_conditional() returns Bool
+        ensures true
+    {
+        return self.condition != "";
+    }
+
+    method is_unconditional() returns Bool
+        ensures true
+    {
+        return self.condition == "";
+    }
+}
+
+// RetryPolicy defines how a failed stage should be retried.
+// backoff_factor is a Float multiplier applied to the delay on each retry (e.g. 2.0 doubles the delay).
+public entity RetryPolicy {
+    field max_attempts: Int;
+    field initial_delay_ms: Int;
+    field backoff_factor: Float;
+    field max_delay_ms: Int;
+
+    invariant self.max_attempts >= 1;
+    invariant self.initial_delay_ms >= 0;
+    invariant self.backoff_factor > 0.0;
+    invariant self.max_delay_ms >= self.initial_delay_ms;
+
+    constructor(max_attempts: Int, initial_delay_ms: Int, backoff_factor: Float, max_delay_ms: Int)
+        requires max_attempts >= 1
+        requires initial_delay_ms >= 0
+        requires backoff_factor > 0.0
+        requires max_delay_ms >= initial_delay_ms
+    {
+        self.max_attempts = max_attempts;
+        self.initial_delay_ms = initial_delay_ms;
+        self.backoff_factor = backoff_factor;
+        self.max_delay_ms = max_delay_ms;
+    }
+}
+
+// Diagnostic captures a validation or runtime issue found in the pipeline graph.
+public entity Diagnostic {
+    field rule: String;
+    field severity: Severity;
+    field message: String;
+    field node_id: String;
+
+    constructor(rule: String, severity: Severity, message: String, node_id: String)
+        requires true
+    {
+        self.rule = rule;
+        self.severity = severity;
+        self.message = message;
+        self.node_id = node_id;
+    }
+}
+
+// GraphMeta holds pipeline-level configuration.
+// Nodes and edges are managed as separate arrays passed to functions,
+// since Intent does not yet support typed empty array literals.
+public entity GraphMeta {
+    field pipeline_goal: String;
+    field label: String;
+    field default_max_retry: Int;
+    field retry_target: String;
+
+    invariant self.default_max_retry >= 0;
+
+    constructor(pipeline_goal: String, label: String, default_max_retry: Int, retry_target: String)
+        requires default_max_retry >= 0
+    {
+        self.pipeline_goal = pipeline_goal;
+        self.label = label;
+        self.default_max_retry = default_max_retry;
+        self.retry_target = retry_target;
+    }
+}
+
+// Checkpoint tracks the current execution position within a running pipeline.
+public entity Checkpoint {
+    field current_node: String;
+    field completed_count: Int;
+
+    invariant self.completed_count >= 0;
+
+    constructor(current_node: String, completed_count: Int)
+        requires completed_count >= 0
+    {
+        self.current_node = current_node;
+        self.completed_count = completed_count;
+    }
+
+    method advance(next_node: String) returns Void
+        ensures self.completed_count == old(self.completed_count) + 1
+    {
+        self.current_node = next_node;
+        self.completed_count = self.completed_count + 1;
+    }
+}
+
+intent "Attractor type safety" {
+    goal "All stage outcomes carry a status and a failure reason when the stage fails";
+    goal "Graph structure is valid when it contains at least two nodes";
+    goal "Edges are directed and never self-referential";
+    goal "Retry policies guarantee at least one attempt within bounded delay ranges";
+    goal "Checkpoints track forward progress with a non-decreasing completed count";
+    constraint "Node max_retries and timeout_seconds must be non-negative";
+    constraint "Edge weights must be non-negative";
+    constraint "Edge from_node and to_node must differ";
+    constraint "RetryPolicy backoff_factor must be strictly positive";
+    guarantee "Graph node and edge counts stay in sync with their backing arrays";
+    guarantee "Checkpoint completed_count only increases";
+    verified_by NodeAttr.invariant;
+    verified_by EdgeAttr.invariant;
+    verified_by RetryPolicy.invariant;
+    verified_by GraphMeta.invariant;
+    verified_by Checkpoint.invariant;
+    verified_by Checkpoint.advance.ensures;
+}

@@ -1,0 +1,70 @@
+module attractor_main version "0.1.0";
+
+import "types.intent";
+import "validation.intent";
+import "edge_selection.intent";
+import "retry.intent";
+
+// Build a minimal Attractor pipeline graph: start -> task -> exit
+// Then validate it and run edge selection to prove all modules work.
+entry function main() returns Int {
+    // Create graph metadata
+    let meta: GraphMeta = GraphMeta("Run tests and report", "Simple Pipeline", 50, "");
+
+    // Create nodes
+    let mutable nodes: Array<NodeAttr> = [
+        NodeAttr("start", "Start", "Mdiamond", "", "", 0, false, "", 0),
+        NodeAttr("run_tests", "Run Tests", "box", "", "Run the test suite", 3, true, "start", 900),
+        NodeAttr("exit", "Exit", "Msquare", "", "", 0, false, "", 0)
+    ];
+    let node_count: Int = 3;
+
+    // Create edges
+    let mutable edges: Array<EdgeAttr> = [
+        EdgeAttr("start", "run_tests", "next", "", 0, false),
+        EdgeAttr("run_tests", "exit", "done", "outcome=success", 1, false)
+    ];
+    let edge_count: Int = 2;
+
+    // Validate graph structure
+    let has_start: Bool = attractor_validation.has_exactly_one_start(nodes, node_count);
+    let has_exit: Bool = attractor_validation.has_exactly_one_exit(nodes, node_count);
+    let start_idx: Int = attractor_validation.find_start_index(nodes, node_count);
+    let exit_idx: Int = attractor_validation.find_exit_index(nodes, node_count);
+
+    print(has_start);
+    print(has_exit);
+    print(start_idx);
+    print(exit_idx);
+
+    // Validate edges
+    let no_incoming: Bool = attractor_validation.start_has_no_incoming(edges, edge_count, "start");
+    let no_outgoing: Bool = attractor_validation.exit_has_no_outgoing(edges, edge_count, "exit");
+    let targets_ok: Bool = attractor_validation.all_edge_targets_exist(nodes, node_count, edges, edge_count);
+
+    print(no_incoming);
+    print(no_outgoing);
+    print(targets_ok);
+
+    // Test edge selection with a success outcome
+    let outcome_str: String = attractor_edge_selection.status_to_string(Success);
+    let selected: Int = attractor_edge_selection.select_edge(edges, edge_count, outcome_str, "");
+
+    print(selected);
+
+    // Test retry policy
+    let policy: RetryPolicy = attractor_retry.build_retry_policy(3, 50);
+    let delay: Int = attractor_retry.delay_for_attempt(2, policy);
+
+    print(policy.max_attempts);
+    print(delay);
+
+    // Test goal gate
+    let gate_ok: Bool = attractor_retry.goal_gate_satisfied(Success);
+    let gate_fail: Bool = attractor_retry.goal_gate_satisfied(Fail);
+
+    print(gate_ok);
+    print(gate_fail);
+
+    return 0;
+}

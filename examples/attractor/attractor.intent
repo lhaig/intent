@@ -1,0 +1,782 @@
+module attractor version "0.1.0";
+
+// --- Enums ---
+
+// StageStatus represents the result of a pipeline stage execution.
+enum StageStatus {
+    Success,
+    PartialSuccess,
+    Retry,
+    Fail,
+    Skipped,
+}
+
+// Severity classifies the importance of a diagnostic message.
+enum Severity {
+    Error,
+    Warning,
+    Info,
+}
+
+// --- Entities ---
+
+// Outcome records the result of a stage execution including status and diagnostics.
+entity Outcome {
+    field status: StageStatus;
+    field preferred_label: String;
+    field notes: String;
+    field failure_reason: String;
+
+    constructor(status: StageStatus, preferred_label: String, notes: String, failure_reason: String)
+        requires true
+    {
+        self.status = status;
+        self.preferred_label = preferred_label;
+        self.notes = notes;
+        self.failure_reason = failure_reason;
+    }
+
+    method is_success() returns Bool
+        ensures true
+    {
+        let val: Bool = match self.status {
+            Success => true,
+            PartialSuccess => true,
+            Retry => false,
+            Fail => false,
+            Skipped => false,
+        };
+        return val;
+    }
+
+    method is_retriable() returns Bool
+        ensures true
+    {
+        let val: Bool = match self.status {
+            Success => false,
+            PartialSuccess => false,
+            Retry => true,
+            Fail => false,
+            Skipped => false,
+        };
+        return val;
+    }
+}
+
+// NodeAttr holds the attributes of a node in the Attractor pipeline graph.
+entity NodeAttr {
+    field id: String;
+    field label: String;
+    field shape: String;
+    field node_type: String;
+    field prompt: String;
+    field max_retries: Int;
+    field goal_gate: Bool;
+    field retry_target: String;
+    field timeout_seconds: Int;
+
+    invariant self.max_retries >= 0;
+    invariant self.timeout_seconds >= 0;
+
+    constructor(id: String, label: String, shape: String, node_type: String, prompt: String, max_retries: Int, goal_gate: Bool, retry_target: String, timeout_seconds: Int)
+        requires max_retries >= 0
+        requires timeout_seconds >= 0
+    {
+        self.id = id;
+        self.label = label;
+        self.shape = shape;
+        self.node_type = node_type;
+        self.prompt = prompt;
+        self.max_retries = max_retries;
+        self.goal_gate = goal_gate;
+        self.retry_target = retry_target;
+        self.timeout_seconds = timeout_seconds;
+    }
+
+    method is_start() returns Bool
+        ensures true
+    {
+        return self.shape == "Mdiamond";
+    }
+
+    method is_exit() returns Bool
+        ensures true
+    {
+        return self.shape == "Msquare";
+    }
+
+    method is_decision() returns Bool
+        ensures true
+    {
+        return self.shape == "diamond";
+    }
+
+    method is_parallel() returns Bool
+        ensures true
+    {
+        return self.shape == "component";
+    }
+
+    method is_human_gate() returns Bool
+        ensures true
+    {
+        return self.shape == "hexagon";
+    }
+}
+
+// EdgeAttr holds the attributes of a directed edge in the Attractor pipeline graph.
+// Self-loops are disallowed: from_node and to_node must differ.
+entity EdgeAttr {
+    field from_node: String;
+    field to_node: String;
+    field label: String;
+    field condition: String;
+    field weight: Int;
+    field loop_restart: Bool;
+
+    invariant self.weight >= 0;
+    invariant self.from_node != self.to_node;
+
+    constructor(from_node: String, to_node: String, label: String, condition: String, weight: Int, loop_restart: Bool)
+        requires weight >= 0
+        requires from_node != to_node
+    {
+        self.from_node = from_node;
+        self.to_node = to_node;
+        self.label = label;
+        self.condition = condition;
+        self.weight = weight;
+        self.loop_restart = loop_restart;
+    }
+
+    method is_conditional() returns Bool
+        ensures true
+    {
+        return self.condition != "";
+    }
+
+    method is_unconditional() returns Bool
+        ensures true
+    {
+        return self.condition == "";
+    }
+}
+
+// RetryPolicy defines how a failed stage should be retried.
+// backoff_factor is a Float multiplier applied to the delay on each retry (e.g. 2.0 doubles the delay).
+entity RetryPolicy {
+    field max_attempts: Int;
+    field initial_delay_ms: Int;
+    field backoff_factor: Float;
+    field max_delay_ms: Int;
+
+    invariant self.max_attempts >= 1;
+    invariant self.initial_delay_ms >= 0;
+    invariant self.backoff_factor > 0.0;
+    invariant self.max_delay_ms >= self.initial_delay_ms;
+
+    constructor(max_attempts: Int, initial_delay_ms: Int, backoff_factor: Float, max_delay_ms: Int)
+        requires max_attempts >= 1
+        requires initial_delay_ms >= 0
+        requires backoff_factor > 0.0
+        requires max_delay_ms >= initial_delay_ms
+    {
+        self.max_attempts = max_attempts;
+        self.initial_delay_ms = initial_delay_ms;
+        self.backoff_factor = backoff_factor;
+        self.max_delay_ms = max_delay_ms;
+    }
+}
+
+// Diagnostic captures a validation or runtime issue found in the pipeline graph.
+entity Diagnostic {
+    field rule: String;
+    field severity: Severity;
+    field message: String;
+    field node_id: String;
+
+    constructor(rule: String, severity: Severity, message: String, node_id: String)
+        requires true
+    {
+        self.rule = rule;
+        self.severity = severity;
+        self.message = message;
+        self.node_id = node_id;
+    }
+}
+
+// GraphMeta holds pipeline-level configuration.
+// Nodes and edges are managed as separate arrays passed to functions,
+// since Intent does not yet support typed empty array literals.
+entity GraphMeta {
+    field pipeline_goal: String;
+    field label: String;
+    field default_max_retry: Int;
+    field retry_target: String;
+
+    invariant self.default_max_retry >= 0;
+
+    constructor(pipeline_goal: String, label: String, default_max_retry: Int, retry_target: String)
+        requires default_max_retry >= 0
+    {
+        self.pipeline_goal = pipeline_goal;
+        self.label = label;
+        self.default_max_retry = default_max_retry;
+        self.retry_target = retry_target;
+    }
+}
+
+// Checkpoint tracks the current execution position within a running pipeline.
+entity Checkpoint {
+    field current_node: String;
+    field completed_count: Int;
+
+    invariant self.completed_count >= 0;
+
+    constructor(current_node: String, completed_count: Int)
+        requires completed_count >= 0
+    {
+        self.current_node = current_node;
+        self.completed_count = completed_count;
+    }
+
+    method advance(next_node: String) returns Void
+        ensures self.completed_count == old(self.completed_count) + 1
+    {
+        self.current_node = next_node;
+        self.completed_count = self.completed_count + 1;
+    }
+}
+
+// --- Helper functions ---
+
+// status_is_success returns true if the status represents any success variant.
+function status_is_success(s: StageStatus) returns Bool
+    requires true
+    ensures true
+{
+    let val: Bool = match s {
+        Success => true,
+        PartialSuccess => true,
+        Retry => false,
+        Fail => false,
+        Skipped => false,
+    };
+    return val;
+}
+
+// status_is_terminal_success returns true only for terminal success variants.
+function status_is_terminal_success(s: StageStatus) returns Bool
+    requires true
+    ensures true
+{
+    let val: Bool = match s {
+        Success => true,
+        PartialSuccess => true,
+        Retry => false,
+        Fail => false,
+        Skipped => false,
+    };
+    return val;
+}
+
+// --- Validation functions ---
+
+function has_exactly_one_start(nodes: Array<NodeAttr>, count: Int) returns Bool
+    requires count >= 0
+    ensures true
+{
+    let mutable starts: Int = 0;
+    for i in 0..count {
+        if nodes[i].is_start() {
+            starts = starts + 1;
+        }
+    }
+    return starts == 1;
+}
+
+function has_exactly_one_exit(nodes: Array<NodeAttr>, count: Int) returns Bool
+    requires count >= 0
+    ensures true
+{
+    let mutable exits: Int = 0;
+    for i in 0..count {
+        if nodes[i].is_exit() {
+            exits = exits + 1;
+        }
+    }
+    return exits == 1;
+}
+
+function find_start_index(nodes: Array<NodeAttr>, count: Int) returns Int
+    requires count >= 0
+    ensures result >= -1
+    ensures result < count or result == -1
+{
+    let mutable idx: Int = -1;
+    for i in 0..count {
+        if nodes[i].is_start() and idx == -1 {
+            idx = i;
+        }
+    }
+    return idx;
+}
+
+function find_exit_index(nodes: Array<NodeAttr>, count: Int) returns Int
+    requires count >= 0
+    ensures result >= -1
+    ensures result < count or result == -1
+{
+    let mutable idx: Int = -1;
+    for i in 0..count {
+        if nodes[i].is_exit() and idx == -1 {
+            idx = i;
+        }
+    }
+    return idx;
+}
+
+function node_exists(nodes: Array<NodeAttr>, count: Int, id: String) returns Bool
+    requires count >= 0
+    ensures true
+{
+    let mutable found: Bool = false;
+    for i in 0..count {
+        if nodes[i].id == id {
+            found = true;
+        }
+    }
+    return found;
+}
+
+function start_has_no_incoming(edges: Array<EdgeAttr>, edge_count: Int, start_id: String) returns Bool
+    requires edge_count >= 0
+    ensures true
+{
+    let mutable has_incoming: Bool = false;
+    for i in 0..edge_count {
+        if edges[i].to_node == start_id {
+            has_incoming = true;
+        }
+    }
+    return not has_incoming;
+}
+
+function exit_has_no_outgoing(edges: Array<EdgeAttr>, edge_count: Int, exit_id: String) returns Bool
+    requires edge_count >= 0
+    ensures true
+{
+    let mutable has_outgoing: Bool = false;
+    for i in 0..edge_count {
+        if edges[i].from_node == exit_id {
+            has_outgoing = true;
+        }
+    }
+    return not has_outgoing;
+}
+
+function all_edge_targets_exist(nodes: Array<NodeAttr>, node_count: Int, edges: Array<EdgeAttr>, edge_count: Int) returns Bool
+    requires node_count >= 0
+    requires edge_count >= 0
+    ensures true
+{
+    let mutable all_valid: Bool = true;
+    for i in 0..edge_count {
+        let from_exists: Bool = node_exists(nodes, node_count, edges[i].from_node);
+        let to_exists: Bool = node_exists(nodes, node_count, edges[i].to_node);
+        if not from_exists or not to_exists {
+            all_valid = false;
+        }
+    }
+    return all_valid;
+}
+
+function count_outgoing(edges: Array<EdgeAttr>, edge_count: Int, node_id: String) returns Int
+    requires edge_count >= 0
+    ensures result >= 0
+    ensures result <= edge_count
+{
+    let mutable count: Int = 0;
+    for i in 0..edge_count {
+        if edges[i].from_node == node_id {
+            count = count + 1;
+        }
+    }
+    return count;
+}
+
+function decision_nodes_valid(nodes: Array<NodeAttr>, node_count: Int, edges: Array<EdgeAttr>, edge_count: Int) returns Bool
+    requires node_count >= 0
+    requires edge_count >= 0
+    ensures true
+{
+    let mutable all_valid: Bool = true;
+    for i in 0..node_count {
+        if nodes[i].is_decision() {
+            let outgoing: Int = count_outgoing(edges, edge_count, nodes[i].id);
+            if outgoing < 2 {
+                all_valid = false;
+            }
+        }
+    }
+    return all_valid;
+}
+
+// --- Edge selection functions ---
+
+// NOTE: Intent does not yet expose string lowercase or trim methods.
+// This function documents the gap and returns the label unchanged.
+// When string methods are available, implement: label.trim().lowercase()
+function normalize_label(label: String) returns String {
+    return label;
+}
+
+// Collect all edges originating from node_id.
+// NOTE: Pushing entity values into arrays may not be supported in all Intent
+// runtimes. If this causes issues, switch to an index-based approach using
+// count_edges_from and iterating the original array.
+// NOTE: edges_from_node removed -- requires empty array literal support (future Intent feature).
+// Use index-based functions (count_edges_from, find_condition_match, etc.) instead.
+
+// Evaluate a single condition clause of the form: clause_key clause_op clause_value
+// Supported clause_key values: "outcome", "preferred_label"
+// Supported clause_op values: "=", "!="
+// NOTE: context.* keys require map support not yet available in Intent.
+function evaluate_clause(clause_key: String, clause_op: String, clause_value: String, outcome_status: String, preferred_label: String) returns Bool {
+    if clause_key == "outcome" {
+        if clause_op == "=" {
+            return outcome_status == clause_value;
+        }
+        if clause_op == "!=" {
+            return outcome_status != clause_value;
+        }
+        return false;
+    }
+    if clause_key == "preferred_label" {
+        if clause_op == "=" {
+            return preferred_label == clause_value;
+        }
+        if clause_op == "!=" {
+            return preferred_label != clause_value;
+        }
+        return false;
+    }
+    // Unknown key (e.g. context.*): return false until map support is available.
+    return false;
+}
+
+// Evaluate whether an edge's condition matches the current outcome and preferred label.
+// Unconditional edges (empty condition string) always return false here; they are
+// handled separately in the highest-weight step.
+// NOTE: Full && / || parsing requires string split methods not yet in Intent.
+// Only single-clause conditions are supported. The condition string must be one of:
+//   "outcome=<value>", "outcome!=<value>",
+//   "preferred_label=<value>", "preferred_label!=<value>"
+function edge_matches_condition(edge: EdgeAttr, outcome_status: String, preferred_label: String) returns Bool {
+    if edge.condition == "" {
+        return false;
+    }
+
+    // Simplified single-clause parsing via known patterns.
+    // "outcome=<value>"
+    if edge.condition == "outcome=success" {
+        return evaluate_clause("outcome", "=", "success", outcome_status, preferred_label);
+    }
+    if edge.condition == "outcome=fail" {
+        return evaluate_clause("outcome", "=", "fail", outcome_status, preferred_label);
+    }
+    if edge.condition == "outcome=retry" {
+        return evaluate_clause("outcome", "=", "retry", outcome_status, preferred_label);
+    }
+    if edge.condition == "outcome=partial_success" {
+        return evaluate_clause("outcome", "=", "partial_success", outcome_status, preferred_label);
+    }
+    if edge.condition == "outcome=skipped" {
+        return evaluate_clause("outcome", "=", "skipped", outcome_status, preferred_label);
+    }
+    // "outcome!=<value>"
+    if edge.condition == "outcome!=success" {
+        return evaluate_clause("outcome", "!=", "success", outcome_status, preferred_label);
+    }
+    if edge.condition == "outcome!=fail" {
+        return evaluate_clause("outcome", "!=", "fail", outcome_status, preferred_label);
+    }
+    if edge.condition == "outcome!=retry" {
+        return evaluate_clause("outcome", "!=", "retry", outcome_status, preferred_label);
+    }
+    if edge.condition == "outcome!=partial_success" {
+        return evaluate_clause("outcome", "!=", "partial_success", outcome_status, preferred_label);
+    }
+
+    // Unknown / compound condition: conservatively return false.
+    // Full parsing requires string split — document gap and revisit.
+    return false;
+}
+
+// Step 1: Find the index of the first edge whose condition matches.
+// Returns the index into `edges`, or -1 if no edge matches.
+function find_condition_matched_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: String, preferred_label: String) returns Int
+    requires edge_count >= 0
+    ensures result >= -1
+    ensures result < edge_count
+{
+    let mutable found_idx: Int = -1;
+    let mutable done: Bool = false;
+    for i in 0..edge_count {
+        if not done {
+            if edge_matches_condition(edges[i], outcome_status, preferred_label) {
+                found_idx = i;
+                done = true;
+            }
+        }
+    }
+    return found_idx;
+}
+
+// Step 2: Find the index of the first edge whose label matches preferred_label.
+// Returns -1 if preferred_label is empty or no edge matches.
+function find_preferred_label_edge(edges: Array<EdgeAttr>, edge_count: Int, preferred_label: String) returns Int
+    requires edge_count >= 0
+    ensures result >= -1
+{
+    if preferred_label == "" {
+        return -1;
+    }
+    let mutable found_idx: Int = -1;
+    let mutable done: Bool = false;
+    for i in 0..edge_count {
+        if not done {
+            if edges[i].label == preferred_label {
+                found_idx = i;
+                done = true;
+            }
+        }
+    }
+    return found_idx;
+}
+
+// Steps 4 & 5: Among unconditional edges, find the one with the highest weight.
+// First-encountered highest-weight edge wins (lexical tiebreak requires string
+// lt/gt comparison not yet available in Intent).
+// Returns -1 if no unconditional edges exist.
+function find_highest_weight_edge(edges: Array<EdgeAttr>, edge_count: Int) returns Int
+    requires edge_count >= 0
+    ensures result >= -1
+{
+    let mutable best_idx: Int = -1;
+    let mutable best_weight: Int = -1;
+    for i in 0..edge_count {
+        if edges[i].is_unconditional() {
+            if edges[i].weight > best_weight {
+                best_weight = edges[i].weight;
+                best_idx = i;
+            }
+        }
+    }
+    return best_idx;
+}
+
+// Convert a StageStatus enum value to the string used in condition expressions.
+function status_to_string(status: StageStatus) returns String {
+    return match status {
+        Success => "success",
+        PartialSuccess => "partial_success",
+        Retry => "retry",
+        Fail => "fail",
+        Skipped => "skipped"
+    };
+}
+
+// Main entry point: select the next edge using the Attractor spec Section 3.3
+// five-step priority algorithm.
+//
+// Priority order:
+//   1. Condition-matching edges
+//   2. Preferred label match
+//   3. Suggested next IDs (skipped - requires Array<String> field in Outcome)
+//   4. Highest weight among unconditional edges
+//   5. Lexical tiebreak (simplified: first-wins for equal weights)
+//
+// Returns the index into `edges` of the selected edge, or -1 if edge_count == 0.
+function select_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: String, preferred_label: String) returns Int
+    requires edge_count >= 0
+    ensures result >= -1
+    ensures result < edge_count
+{
+    if edge_count == 0 {
+        return -1;
+    }
+
+    // Step 1: condition match.
+    let step1: Int = find_condition_matched_edge(edges, edge_count, outcome_status, preferred_label);
+    if step1 >= 0 {
+        return step1;
+    }
+
+    // Step 2: preferred label match.
+    let step2: Int = find_preferred_label_edge(edges, edge_count, preferred_label);
+    if step2 >= 0 {
+        return step2;
+    }
+
+    // Step 3: suggested next IDs - skipped (needs Array<String> field in Outcome).
+
+    // Steps 4+5: highest weight unconditional edge.
+    let step4: Int = find_highest_weight_edge(edges, edge_count);
+    if step4 >= 0 {
+        return step4;
+    }
+
+    // Fallback: first edge.
+    return 0;
+}
+
+// --- Retry functions ---
+
+function build_retry_policy(node_max_retries: Int, graph_default_max_retry: Int) returns RetryPolicy
+    requires graph_default_max_retry >= 0
+    ensures result.max_attempts >= 1
+{
+    let mutable chosen: Int = graph_default_max_retry;
+    if node_max_retries > 0 { chosen = node_max_retries; }
+    return RetryPolicy(chosen + 1, 200, 2.0, 60000);
+}
+
+function standard_policy() returns RetryPolicy
+    ensures result.max_attempts == 5
+{
+    return RetryPolicy(5, 200, 2.0, 60000);
+}
+
+function aggressive_policy() returns RetryPolicy
+{
+    return RetryPolicy(5, 500, 2.0, 60000);
+}
+
+function linear_policy() returns RetryPolicy
+    ensures result.backoff_factor == 1.0
+{
+    return RetryPolicy(3, 500, 1.0, 60000);
+}
+
+function patient_policy() returns RetryPolicy
+{
+    return RetryPolicy(3, 2000, 3.0, 60000);
+}
+
+function no_retry_policy() returns RetryPolicy
+    ensures result.max_attempts == 1
+{
+    return RetryPolicy(1, 0, 1.0, 0);
+}
+
+// Calculate delay in ms for a given retry attempt (1-indexed).
+// Uses integer doubling since Intent does not support Int*Float mixed arithmetic.
+// Exact for standard/aggressive policies (factor=2.0).
+function delay_for_attempt(attempt: Int, policy: RetryPolicy) returns Int
+    requires attempt >= 1
+    requires policy.max_attempts >= 1
+    ensures result >= 0
+    ensures result <= policy.max_delay_ms
+{
+    let mutable delay: Int = policy.initial_delay_ms;
+    let mutable i: Int = 1;
+    while i < attempt {
+        delay = delay * 2;
+        i = i + 1;
+    }
+    if delay > policy.max_delay_ms { delay = policy.max_delay_ms; }
+    return delay;
+}
+
+function should_retry(status: StageStatus) returns Bool
+{
+    let val: Bool = match status { Retry => true, _ => false, };
+    return val;
+}
+
+function is_retriable(status: StageStatus, attempt: Int, max_attempts: Int) returns Bool
+    requires attempt >= 1
+    requires max_attempts >= 1
+{
+    let retryable: Bool = match status { Retry => true, _ => false, };
+    return retryable and attempt < max_attempts;
+}
+
+function goal_gate_satisfied(status: StageStatus) returns Bool
+{
+    let val: Bool = match status { Success => true, PartialSuccess => true, _ => false, };
+    return val;
+}
+
+function max_with_partial(allow_partial: Bool) returns StageStatus
+{
+    if allow_partial { return PartialSuccess; }
+    return Fail;
+}
+
+// --- Entry function ---
+
+// Build a minimal Attractor pipeline graph: start -> task -> exit
+// Then validate it and run edge selection to prove all functions work.
+entry function main() returns Int {
+    // Create graph metadata
+    let meta: GraphMeta = GraphMeta("Run tests and report", "Simple Pipeline", 50, "");
+
+    // Create nodes
+    let mutable nodes: Array<NodeAttr> = [
+        NodeAttr("start", "Start", "Mdiamond", "", "", 0, false, "", 0),
+        NodeAttr("run_tests", "Run Tests", "box", "", "Run the test suite", 3, true, "start", 900),
+        NodeAttr("exit", "Exit", "Msquare", "", "", 0, false, "", 0)
+    ];
+    let node_count: Int = 3;
+
+    // Create edges
+    let mutable edges: Array<EdgeAttr> = [
+        EdgeAttr("start", "run_tests", "next", "", 0, false),
+        EdgeAttr("run_tests", "exit", "done", "outcome=success", 1, false)
+    ];
+    let edge_count: Int = 2;
+
+    // Validate graph structure
+    let has_start: Bool = has_exactly_one_start(nodes, node_count);
+    let has_exit: Bool = has_exactly_one_exit(nodes, node_count);
+    let start_idx: Int = find_start_index(nodes, node_count);
+    let exit_idx: Int = find_exit_index(nodes, node_count);
+
+    print(has_start);
+    print(has_exit);
+    print(start_idx);
+    print(exit_idx);
+
+    // Validate edges
+    let no_incoming: Bool = start_has_no_incoming(edges, edge_count, "start");
+    let no_outgoing: Bool = exit_has_no_outgoing(edges, edge_count, "exit");
+    let targets_ok: Bool = all_edge_targets_exist(nodes, node_count, edges, edge_count);
+
+    print(no_incoming);
+    print(no_outgoing);
+    print(targets_ok);
+
+    // Test edge selection with a success outcome
+    let outcome_str: String = status_to_string(Success);
+    let selected: Int = select_edge(edges, edge_count, outcome_str, "");
+
+    print(selected);
+
+    // Test retry policy
+    let policy: RetryPolicy = build_retry_policy(3, 50);
+    let delay: Int = delay_for_attempt(2, policy);
+
+    print(policy.max_attempts);
+    print(delay);
+
+    // Test goal gate
+    let gate_ok: Bool = goal_gate_satisfied(Success);
+    let gate_fail: Bool = goal_gate_satisfied(Fail);
+
+    print(gate_ok);
+    print(gate_fail);
+
+    return 0;
+}
