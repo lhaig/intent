@@ -41,3 +41,6 @@ What follows from this decision? Trade-offs accepted.
 | 0007 | [Arrays before enums](0007-arrays-before-enums.md) | 2025-02-12 | accepted |
 | 0008 | [Intermediate representation](0008-intermediate-representation.md) | 2026-02-16 | accepted |
 | 0009 | [Multi-target code generation](0009-multi-target-codegen.md) | 2026-02-16 | accepted |
+| 0010 | [Attractor as driving example](0010-attractor-as-driving-example.md) | 2026-02-20 | accepted |
+| 0011 | [Conservative String cloning for Rust ownership](0011-string-clone-strategy.md) | 2026-02-20 | accepted |
+| 0012 | [Method self-mutability analysis](0012-self-mutability-analysis.md) | 2026-02-20 | accepted |
