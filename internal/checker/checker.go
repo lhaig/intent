@@ -171,6 +171,35 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 			contractCtx:  CtxNormal,
 			exprTypes:    make(map[ast.Expression]*Type),
 		}
+
+		// Inject already-collected symbols from this module's imports so that
+		// type resolution works for things like Array<NodeAttr> where NodeAttr
+		// comes from an imported module. sortedPaths is in dependency order,
+		// so imported modules have already been processed.
+		for _, imp := range prog.Imports {
+			importedModName := strings.TrimSuffix(filepath.Base(imp.Path), ".intent")
+			if syms, ok := publicSymbols[importedModName]; ok {
+				for name, entityInfo := range syms.Entities {
+					if _, exists := tmpChecker.entities[name]; !exists {
+						tmpChecker.entities[name] = entityInfo
+					}
+				}
+				for name, enumInfo := range syms.Enums {
+					if _, exists := tmpChecker.enums[name]; !exists {
+						tmpChecker.enums[name] = enumInfo
+						for _, variant := range enumInfo.Variants {
+							if _, exists := tmpChecker.enumVariants[variant.Name]; !exists {
+								tmpChecker.enumVariants[variant.Name] = &EnumVariantLookup{
+									EnumInfo:    enumInfo,
+									VariantInfo: variant,
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
 		tmpChecker.registerEnums()
 		tmpChecker.registerEntities()
 		tmpChecker.registerFunctions()
@@ -206,6 +235,10 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 		}
 
 		publicSymbols[modName] = modSyms
+		// Also register by declared module name (e.g., "attractor_validation" vs file "validation")
+		if prog.Module != nil && prog.Module.Name != "" && prog.Module.Name != modName {
+			publicSymbols[prog.Module.Name] = modSyms
+		}
 	}
 
 	// Pass 2: Type-check each file with cross-file context
@@ -216,11 +249,26 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 		}
 
 		// Build moduleImports for this file: for each import, look up the module's public symbols
+		// Register by both file-derived name and declared module name
 		moduleImports := make(map[string]*ModuleSymbols)
 		for _, imp := range prog.Imports {
 			importedModName := strings.TrimSuffix(filepath.Base(imp.Path), ".intent")
 			if syms, ok := publicSymbols[importedModName]; ok {
 				moduleImports[importedModName] = syms
+				// Also look up the declared module name from the imported program
+				importedProg := registry[imp.Path]
+				if importedProg == nil {
+					// Try resolving relative to current file directory
+					for regPath, regProg := range registry {
+						if strings.TrimSuffix(filepath.Base(regPath), ".intent") == importedModName {
+							importedProg = regProg
+							break
+						}
+					}
+				}
+				if importedProg != nil && importedProg.Module != nil && importedProg.Module.Name != importedModName {
+					moduleImports[importedProg.Module.Name] = syms
+				}
 			}
 		}
 
@@ -239,13 +287,10 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 			moduleFile:    filePath,
 		}
 
-		c.registerEnums()
-		c.registerEntities()
-		c.registerFunctions()
-
-		// Inject imported public entities and enums into this checker's type maps
-		// so that type annotations like `let c: Circle` resolve correctly when
-		// Circle is a public entity from an imported module
+		// Inject imported public symbols BEFORE registration so that
+		// type resolution in registerEntities/registerFunctions can find
+		// imported types (e.g., Array<NodeAttr> where NodeAttr is imported,
+		// or type annotations like `let c: Circle` where Circle is from another module)
 		for _, modSyms := range moduleImports {
 			for name, entityInfo := range modSyms.Entities {
 				if _, exists := c.entities[name]; !exists {
@@ -265,9 +310,28 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 						Type: &Type{Name: name, IsEnum: true, EnumInfo: enumInfo},
 						Kind: SymEnum,
 					})
+					// Also register enum variants so bare variant names resolve
+					for _, variant := range enumInfo.Variants {
+						if _, exists := c.enumVariants[variant.Name]; !exists {
+							c.enumVariants[variant.Name] = &EnumVariantLookup{
+								EnumInfo:    enumInfo,
+								VariantInfo: variant,
+							}
+						}
+					}
+				}
+			}
+			// Also inject imported functions so cross-module function calls resolve
+			for name, funcInfo := range modSyms.Functions {
+				if _, exists := c.functions[name]; !exists {
+					c.functions[name] = funcInfo
 				}
 			}
 		}
+
+		c.registerEnums()
+		c.registerEntities()
+		c.registerFunctions()
 
 		c.checkFunctions()
 		c.checkEntities()
@@ -813,8 +877,14 @@ func (c *Checker) checkAssignStmt(stmt *ast.AssignStmt, scope *Scope) {
 		}
 	}
 
+	// Set target type context for empty array literal inference
+	c.letDeclaredType = targetType
+
 	// Check value
 	valueType := c.checkExpression(stmt.Value, scope)
+
+	// Clear target type context
+	c.letDeclaredType = nil
 
 	// Check type compatibility
 	if targetType != nil && valueType != nil {
@@ -1578,6 +1648,10 @@ func (c *Checker) checkArrayLit(lit *ast.ArrayLit, scope *Scope) *Type {
 	line, col := lit.Pos()
 
 	if len(lit.Elements) == 0 {
+		// Try to infer element type from let declaration type annotation
+		if c.letDeclaredType != nil && c.letDeclaredType.Name == "Array" && c.letDeclaredType.IsGeneric && len(c.letDeclaredType.TypeParams) == 1 {
+			return c.letDeclaredType
+		}
 		c.diag.Errorf(line, col, "empty array literal requires type annotation (element type cannot be inferred)")
 		return nil
 	}

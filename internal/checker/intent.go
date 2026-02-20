@@ -28,27 +28,56 @@ func (c *Checker) verifyContractReference(ref *ast.VerifiedByRef) {
 	// - EntityName.MethodName.ensures (check method has ensures)
 
 	if len(ref.Parts) == 2 {
-		// EntityName.invariant
-		entityName := ref.Parts[0]
+		firstName := ref.Parts[0]
 		contractType := ref.Parts[1]
 
-		entity, exists := c.entities[entityName]
-		if !exists {
-			line, col := ref.Pos()
-			c.diag.Errorf(line, col, "unknown entity '%s' in verified_by reference", entityName)
+		// Check if it's an entity reference (EntityName.invariant)
+		if entity, exists := c.entities[firstName]; exists {
+			if contractType == "invariant" {
+				if !entity.HasInvariant {
+					line, col := ref.Pos()
+					c.diag.Errorf(line, col, "entity '%s' has no invariant", firstName)
+				}
+			} else {
+				line, col := ref.Pos()
+				c.diag.Errorf(line, col, "invalid contract reference '%s.%s'; expected 'invariant' or EntityName.MethodName.{requires|ensures}",
+					firstName, contractType)
+			}
 			return
 		}
 
-		if contractType == "invariant" {
-			if !entity.HasInvariant {
-				line, col := ref.Pos()
-				c.diag.Errorf(line, col, "entity '%s' has no invariant", entityName)
+		// Check if it's a standalone function reference (function_name.requires/ensures)
+		if fn, exists := c.functions[firstName]; exists {
+			_ = fn // function exists, check contract type
+			// Look up the AST function to check for requires/ensures
+			var hasRequires, hasEnsures bool
+			for _, fnDecl := range c.prog.Functions {
+				if fnDecl.Name == firstName {
+					hasRequires = len(fnDecl.Requires) > 0
+					hasEnsures = len(fnDecl.Ensures) > 0
+					break
+				}
 			}
-		} else {
-			line, col := ref.Pos()
-			c.diag.Errorf(line, col, "invalid contract reference '%s.%s'; expected 'invariant' or EntityName.MethodName.{requires|ensures}",
-				entityName, contractType)
+			switch contractType {
+			case "requires":
+				if !hasRequires {
+					line, col := ref.Pos()
+					c.diag.Errorf(line, col, "function '%s' has no requires clause", firstName)
+				}
+			case "ensures":
+				if !hasEnsures {
+					line, col := ref.Pos()
+					c.diag.Errorf(line, col, "function '%s' has no ensures clause", firstName)
+				}
+			default:
+				line, col := ref.Pos()
+				c.diag.Errorf(line, col, "invalid contract type '%s'; expected 'requires' or 'ensures'", contractType)
+			}
+			return
 		}
+
+		line, col := ref.Pos()
+		c.diag.Errorf(line, col, "unknown entity or function '%s' in verified_by reference", firstName)
 		return
 	}
 
@@ -66,14 +95,19 @@ func (c *Checker) verifyContractReference(ref *ast.VerifiedByRef) {
 			return
 		}
 
+		// Handle constructor as a special case
 		if memberName == "constructor" {
-			// Look up constructor contracts from the AST
-			hasRequires := false
-			hasEnsures := false
-			for _, e := range c.prog.Entities {
-				if e.Name == entityName && e.Constructor != nil {
-					hasRequires = len(e.Constructor.Requires) > 0
-					hasEnsures = len(e.Constructor.Ensures) > 0
+			if !entity.HasConstructor {
+				line, col := ref.Pos()
+				c.diag.Errorf(line, col, "entity '%s' has no constructor", entityName)
+				return
+			}
+			// Check constructor contracts from AST
+			var hasRequires, hasEnsures bool
+			for _, entityDecl := range c.prog.Entities {
+				if entityDecl.Name == entityName && entityDecl.Constructor != nil {
+					hasRequires = len(entityDecl.Constructor.Requires) > 0
+					hasEnsures = len(entityDecl.Constructor.Ensures) > 0
 					break
 				}
 			}
@@ -81,12 +115,12 @@ func (c *Checker) verifyContractReference(ref *ast.VerifiedByRef) {
 			case "requires":
 				if !hasRequires {
 					line, col := ref.Pos()
-					c.diag.Errorf(line, col, "constructor '%s' has no requires clause", entityName)
+					c.diag.Errorf(line, col, "constructor '%s.constructor' has no requires clause", entityName)
 				}
 			case "ensures":
 				if !hasEnsures {
 					line, col := ref.Pos()
-					c.diag.Errorf(line, col, "constructor '%s' has no ensures clause", entityName)
+					c.diag.Errorf(line, col, "constructor '%s.constructor' has no ensures clause", entityName)
 				}
 			default:
 				line, col := ref.Pos()

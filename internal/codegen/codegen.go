@@ -77,11 +77,17 @@ func GenerateAll(registry map[string]*ast.Program, sortedPaths []string) string 
 	entryPath := sortedPaths[len(sortedPaths)-1]
 
 	// Build module manglings map: module name -> function prefix
+	// Register by both file-derived name and declared module name
 	moduleManglings := make(map[string]string)
 	for _, filePath := range sortedPaths {
 		modName := strings.TrimSuffix(filepath.Base(filePath), ".intent")
 		if filePath != entryPath {
 			moduleManglings[modName] = modName + "_"
+			// Also register by declared module name
+			prog := registry[filePath]
+			if prog != nil && prog.Module != nil && prog.Module.Name != "" && prog.Module.Name != modName {
+				moduleManglings[prog.Module.Name] = modName + "_"
+			}
 		}
 	}
 
@@ -126,6 +132,8 @@ func GenerateAll(registry map[string]*ast.Program, sortedPaths []string) string 
 		}
 
 		// Also register entities/enums from imported modules for type resolution
+		// and build the imported type name -> mangled name mapping
+		g.importedTypeMangle = make(map[string]string)
 		for _, imp := range prog.Imports {
 			importedModName := strings.TrimSuffix(filepath.Base(imp.Path), ".intent")
 			for _, otherPath := range sortedPaths {
@@ -133,14 +141,25 @@ func GenerateAll(registry map[string]*ast.Program, sortedPaths []string) string 
 				if otherModName == importedModName {
 					otherProg := registry[otherPath]
 					if otherProg != nil {
+						// Compute the struct prefix for the imported module
+						var importedStructPrefix string
+						if otherPath != entryPath {
+							importedStructPrefix = strings.ToUpper(otherModName[:1]) + otherModName[1:]
+						}
 						for _, e := range otherProg.Entities {
 							if e.IsPublic {
 								g.entities[e.Name] = e
+								if importedStructPrefix != "" {
+									g.importedTypeMangle[e.Name] = importedStructPrefix + e.Name
+								}
 							}
 						}
 						for _, e := range otherProg.Enums {
 							if e.IsPublic {
 								g.enums[e.Name] = e
+								if importedStructPrefix != "" {
+									g.importedTypeMangle[e.Name] = importedStructPrefix + e.Name
+								}
 							}
 						}
 						for _, f := range otherProg.Functions {
@@ -195,10 +214,11 @@ type generator struct {
 	resultVarOverride string // when set, ResultExpr emits this instead of "__result"
 
 	// Multi-file codegen fields
-	namePrefix      string            // prefix for name mangling (e.g., "math_" for non-entry modules)
-	structPrefix    string            // PascalCase prefix for entity/enum mangling (e.g., "Math")
-	isEntryFile     bool              // true if this is the entry file (no mangling)
-	moduleManglings map[string]string // module name -> function prefix (e.g., "math" -> "math_")
+	namePrefix        string            // prefix for name mangling (e.g., "math_" for non-entry modules)
+	structPrefix      string            // PascalCase prefix for entity/enum mangling (e.g., "Math")
+	isEntryFile       bool              // true if this is the entry file (no mangling)
+	moduleManglings   map[string]string // module name -> function prefix (e.g., "math" -> "math_")
+	importedTypeMangle map[string]string // original type name -> mangled name for imported types
 }
 
 func (g *generator) emit(s string) {
@@ -256,10 +276,10 @@ func (g *generator) generateFunction(f *ast.FunctionDecl) {
 		g.emitLine("}")
 	} else {
 		// Regular function
-		// Track array parameters passed by reference
+		// Track array and entity parameters passed by reference
 		g.arrayRefParams = make(map[string]bool)
 		for _, p := range f.Params {
-			if p.Type.Name == "Array" {
+			if p.Type.Name == "Array" || g.isEntityType(p.Type) {
 				g.arrayRefParams[p.Name] = true
 			}
 		}
@@ -275,9 +295,9 @@ func (g *generator) generateFunction(f *ast.FunctionDecl) {
 			if i > 0 {
 				g.emit(", ")
 			}
-			// Array parameters should be passed by reference to avoid ownership issues
+			// Array and entity parameters should be passed by reference to avoid ownership issues
 			paramType := g.mapType(p.Type)
-			if p.Type.Name == "Array" {
+			if p.Type.Name == "Array" || g.isEntityType(p.Type) {
 				paramType = "&" + paramType
 			}
 			g.emitf("%s: %s", p.Name, paramType)
@@ -336,6 +356,12 @@ func (g *generator) generateFunction(f *ast.FunctionDecl) {
 
 // mangledEntityName returns the mangled entity name for Rust codegen
 func (g *generator) mangledEntityName(name string) string {
+	// Check imported type mangling first
+	if g.importedTypeMangle != nil {
+		if mangled, ok := g.importedTypeMangle[name]; ok {
+			return mangled
+		}
+	}
 	if g.structPrefix != "" {
 		return g.structPrefix + name
 	}
@@ -392,6 +418,12 @@ func (g *generator) generateEntity(e *ast.EntityDecl) {
 
 // mangledEnumName returns the mangled enum name for Rust codegen
 func (g *generator) mangledEnumName(name string) string {
+	// Check imported type mangling first
+	if g.importedTypeMangle != nil {
+		if mangled, ok := g.importedTypeMangle[name]; ok {
+			return mangled
+		}
+	}
 	if g.structPrefix != "" {
 		return g.structPrefix + name
 	}
@@ -489,7 +521,12 @@ func (g *generator) generateMethod(e *ast.EntityDecl, m *ast.MethodDecl) {
 		g.collectOldExprs(ens.Expr)
 	}
 
-	g.emitLinef("fn %s(&mut self", m.Name)
+	// Determine if method needs &mut self (writes to self.field) or &self (read-only)
+	receiver := "&self"
+	if methodMutatesSelf(m) {
+		receiver = "&mut self"
+	}
+	g.emitLinef("fn %s(%s", m.Name, receiver)
 	for _, p := range m.Params {
 		g.emitf(", %s: %s", p.Name, g.mapType(p.Type))
 	}
@@ -561,6 +598,63 @@ func (g *generator) generateMethod(e *ast.EntityDecl, m *ast.MethodDecl) {
 
 	g.decIndent()
 	g.emitLine("}")
+}
+
+// methodMutatesSelf checks if a method body contains any assignment to self.field
+func methodMutatesSelf(m *ast.MethodDecl) bool {
+	if m.Body == nil {
+		return false
+	}
+	return blockMutatesSelf(m.Body)
+}
+
+func blockMutatesSelf(b *ast.Block) bool {
+	for _, stmt := range b.Statements {
+		if stmtMutatesSelf(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtMutatesSelf(s ast.Statement) bool {
+	switch stmt := s.(type) {
+	case *ast.AssignStmt:
+		// Check if target is self.field
+		if fa, ok := stmt.Target.(*ast.FieldAccessExpr); ok {
+			if _, ok := fa.Object.(*ast.SelfExpr); ok {
+				return true
+			}
+		}
+	case *ast.IfStmt:
+		if stmt.Then != nil && blockMutatesSelf(stmt.Then) {
+			return true
+		}
+		if stmt.Else != nil {
+			if elseIf, ok := stmt.Else.(*ast.IfStmt); ok {
+				if stmtMutatesSelf(elseIf) {
+					return true
+				}
+			} else if elseBlock, ok := stmt.Else.(*ast.Block); ok {
+				if blockMutatesSelf(elseBlock) {
+					return true
+				}
+			}
+		}
+	case *ast.WhileStmt:
+		if stmt.Body != nil && blockMutatesSelf(stmt.Body) {
+			return true
+		}
+	case *ast.ForInStmt:
+		if stmt.Body != nil && blockMutatesSelf(stmt.Body) {
+			return true
+		}
+	case *ast.Block:
+		if blockMutatesSelf(stmt) {
+			return true
+		}
+	}
+	return false
 }
 
 // generateIntent generates structured comments for an intent block
@@ -846,18 +940,29 @@ func (g *generator) generateExpr(e ast.Expression) string {
 		funcDecl := g.functions[expr.Function]
 		for i, arg := range expr.Args {
 			argStr := g.generateExpr(arg)
-			// If the corresponding parameter is an Array type, pass by reference
 			if funcDecl != nil && i < len(funcDecl.Params) {
-				if funcDecl.Params[i].Type.Name == "Array" {
-					// Only add & for simple identifiers (variables), not for complex expressions
+				paramType := funcDecl.Params[i].Type
+				if paramType.Name == "Array" || g.isEntityType(paramType) {
+					// Array/entity parameters: pass by reference
 					if _, ok := arg.(*ast.Identifier); ok {
 						argStr = "&" + argStr
+					} else if _, ok := arg.(*ast.IndexExpr); ok {
+						argStr = "&" + argStr
+					}
+				} else if paramType.Name == "String" {
+					// String parameters: clone non-literal arguments to avoid moves
+					if _, isLit := arg.(*ast.StringLit); !isLit {
+						argStr += ".clone()"
 					}
 				}
 			}
 			args[i] = argStr
 		}
-		return fmt.Sprintf("%s(%s)", expr.Function, strings.Join(args, ", "))
+		fnName := expr.Function
+		if g.namePrefix != "" {
+			fnName = g.namePrefix + expr.Function
+		}
+		return fmt.Sprintf("%s(%s)", fnName, strings.Join(args, ", "))
 
 	case *ast.MethodCallExpr:
 		// Check if this is a module-qualified call (e.g., math.add(1, 2) or geometry.Circle(5.0))
@@ -867,12 +972,17 @@ func (g *generator) generateExpr(e ast.Expression) string {
 				funcDecl := g.functions[expr.Method]
 				for i, arg := range expr.Args {
 					argStr := g.generateExpr(arg)
-					// If the corresponding parameter is an Array type, pass by reference
 					if funcDecl != nil && i < len(funcDecl.Params) {
-						if funcDecl.Params[i].Type.Name == "Array" {
-							// Only add & for simple identifiers (variables), not for complex expressions
+						paramType := funcDecl.Params[i].Type
+						if paramType.Name == "Array" || g.isEntityType(paramType) {
 							if _, ok := arg.(*ast.Identifier); ok {
 								argStr = "&" + argStr
+							} else if _, ok := arg.(*ast.IndexExpr); ok {
+								argStr = "&" + argStr
+							}
+						} else if paramType.Name == "String" {
+							if _, isLit := arg.(*ast.StringLit); !isLit {
+								argStr += ".clone()"
 							}
 						}
 					}
@@ -882,13 +992,12 @@ func (g *generator) generateExpr(e ast.Expression) string {
 				// Check if this is an entity constructor from the other module
 				if _, isEntity := g.entities[expr.Method]; isEntity {
 					// Entity constructor: emit MangledName::new(args)
-					modPrefix := strings.ToUpper(ident.Name[:1]) + ident.Name[1:]
-					mangledStructName := modPrefix + expr.Method
+					mangledStructName := g.mangledEntityName(expr.Method)
 					return fmt.Sprintf("%s::new(%s)", mangledStructName, strings.Join(args, ", "))
 				}
 
 				// Regular function call: emit mangled function name
-				mangledFnName := ident.Name + "_" + expr.Method
+				mangledFnName := g.moduleManglings[ident.Name] + expr.Method
 				return fmt.Sprintf("%s(%s)", mangledFnName, strings.Join(args, ", "))
 			}
 		}
@@ -909,7 +1018,12 @@ func (g *generator) generateExpr(e ast.Expression) string {
 
 	case *ast.FieldAccessExpr:
 		obj := g.generateExpr(expr.Object)
-		return fmt.Sprintf("%s.%s", obj, expr.Field)
+		fieldExpr := fmt.Sprintf("%s.%s", obj, expr.Field)
+		// Clone String-typed fields to avoid ownership moves
+		if g.fieldIsString(expr) {
+			fieldExpr += ".clone()"
+		}
+		return fieldExpr
 
 	case *ast.OldExpr:
 		// In ensures context, replace with captured old value
@@ -927,7 +1041,7 @@ func (g *generator) generateExpr(e ast.Expression) string {
 		}
 		// Check if it's a unit variant
 		if enumDecl, variantDecl := g.lookupVariant(expr.Name); enumDecl != nil && len(variantDecl.Fields) == 0 {
-			return fmt.Sprintf("%s::%s", enumDecl.Name, expr.Name)
+			return fmt.Sprintf("%s::%s", g.mangledEnumName(enumDecl.Name), expr.Name)
 		}
 		return expr.Name
 
@@ -994,7 +1108,15 @@ func (g *generator) generateExpr(e ast.Expression) string {
 		return fmt.Sprintf("vec![%s]", strings.Join(elems, ", "))
 
 	case *ast.IndexExpr:
-		return fmt.Sprintf("%s[%s as usize]", g.generateExpr(expr.Object), g.generateExpr(expr.Index))
+		result := fmt.Sprintf("%s[%s as usize]", g.generateExpr(expr.Object), g.generateExpr(expr.Index))
+		// Clone entity-typed elements accessed from arrays to avoid moves
+		if ident, ok := expr.Object.(*ast.Identifier); ok {
+			entityName := g.resolveArrayElementEntity(ident.Name)
+			if entityName != "" {
+				result += ".clone()"
+			}
+		}
+		return result
 
 	case *ast.RangeExpr:
 		return fmt.Sprintf("(%s..%s)", g.generateExpr(expr.Start), g.generateExpr(expr.End))
@@ -1022,7 +1144,7 @@ func (g *generator) generateEntityConstructorCall(c *ast.CallExpr) string {
 	for i, arg := range c.Args {
 		args[i] = g.generateExpr(arg)
 	}
-	return fmt.Sprintf("%s::new(%s)", c.Function, strings.Join(args, ", "))
+	return fmt.Sprintf("%s::new(%s)", g.mangledEntityName(c.Function), strings.Join(args, ", "))
 }
 
 // lookupVariant searches for a variant by name across all enums
@@ -1039,13 +1161,14 @@ func (g *generator) lookupVariant(name string) (*ast.EnumDecl, *ast.EnumVariant)
 
 // generateVariantConstructor generates variant constructor: EnumName::VariantName or EnumName::VariantName { field: value }
 func (g *generator) generateVariantConstructor(expr *ast.CallExpr, enumDecl *ast.EnumDecl, variantDecl *ast.EnumVariant) string {
+	mangledName := g.mangledEnumName(enumDecl.Name)
 	// Unit variant: EnumName::VariantName (should not happen in CallExpr, but handle it)
 	if len(variantDecl.Fields) == 0 {
-		return fmt.Sprintf("%s::%s", enumDecl.Name, expr.Function)
+		return fmt.Sprintf("%s::%s", mangledName, expr.Function)
 	}
 	// Data variant: EnumName::VariantName { field1: arg1, field2: arg2 }
 	var sb strings.Builder
-	sb.WriteString(enumDecl.Name)
+	sb.WriteString(mangledName)
 	sb.WriteString("::")
 	sb.WriteString(expr.Function)
 	sb.WriteString(" { ")
@@ -1183,9 +1306,72 @@ func (g *generator) mapType(t *ast.TypeRef) string {
 		}
 		return "Option<_>" // fallback, should not happen after checker
 	default:
-		// Entity or enum type
+		// Entity or enum type — resolve mangled name
+		if _, ok := g.entities[t.Name]; ok {
+			return g.mangledEntityName(t.Name)
+		}
+		if _, ok := g.enums[t.Name]; ok {
+			return g.mangledEnumName(t.Name)
+		}
 		return t.Name
 	}
+}
+
+// fieldIsString checks if a field access expression refers to a String-typed field on an entity
+func (g *generator) fieldIsString(expr *ast.FieldAccessExpr) bool {
+	// Resolve the object's entity type
+	entityName := g.resolveEntityName(expr.Object)
+	if entityName == "" {
+		return false
+	}
+	entity, ok := g.entities[entityName]
+	if !ok {
+		return false
+	}
+	// Check if the field exists and is String
+	for _, f := range entity.Fields {
+		if f.Name == expr.Field {
+			return f.Type.Name == "String"
+		}
+	}
+	return false
+}
+
+// resolveEntityName tries to determine the entity type name from an expression
+func (g *generator) resolveEntityName(expr ast.Expression) string {
+	switch e := expr.(type) {
+	case *ast.Identifier:
+		// Check if variable is an entity type (can't know from codegen alone without type info)
+		// But we can check entities for indexed access patterns
+		return ""
+	case *ast.IndexExpr:
+		// arr[i] — the element type might be an entity. Check if the array variable
+		// matches a function parameter of type Array<EntityType>
+		if ident, ok := e.Object.(*ast.Identifier); ok {
+			return g.resolveArrayElementEntity(ident.Name)
+		}
+	case *ast.SelfExpr:
+		// self in a method context — would need current entity context
+		return ""
+	}
+	return ""
+}
+
+// resolveArrayElementEntity checks if a variable name corresponds to an Array<Entity> parameter
+// and returns the entity name if so
+func (g *generator) resolveArrayElementEntity(varName string) string {
+	// Check current function parameters for Array<EntityType>
+	for _, fn := range g.functions {
+		for _, p := range fn.Params {
+			if p.Name == varName && p.Type.Name == "Array" && len(p.Type.TypeArgs) == 1 {
+				elemTypeName := p.Type.TypeArgs[0].Name
+				if _, ok := g.entities[elemTypeName]; ok {
+					return elemTypeName
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // isEntityType checks if a type refers to a known entity
@@ -1242,6 +1428,10 @@ func (g *generator) defaultValue(t *ast.TypeRef) string {
 	case "Array":
 		return "Vec::new()"
 	default:
+		// Check if it's an enum type - use first variant as default
+		if enumDecl, ok := g.enums[t.Name]; ok && len(enumDecl.Variants) > 0 {
+			return fmt.Sprintf("%s::%s", g.mangledEnumName(t.Name), enumDecl.Variants[0].Name)
+		}
 		// Entity type - would need constructor call, but for now use default
 		return fmt.Sprintf("%s { /* default fields */ }", t.Name)
 	}
@@ -1365,12 +1555,12 @@ func (g *generator) generateMatchPattern(pattern *ast.MatchPattern) string {
 	return fmt.Sprintf("%s::%s { %s }", enumName, pattern.VariantName, strings.Join(fields, ", "))
 }
 
-// resolveEnumNameForVariant finds the enum name that contains the given variant
+// resolveEnumNameForVariant finds the mangled enum name that contains the given variant
 func (g *generator) resolveEnumNameForVariant(variantName string) string {
 	for enumName, enumDecl := range g.enums {
 		for _, v := range enumDecl.Variants {
 			if v.Name == variantName {
-				return enumName
+				return g.mangledEnumName(enumName)
 			}
 		}
 	}

@@ -395,7 +395,11 @@ func (p *Parser) parseIntentDecl() *ast.IntentDecl {
 		default:
 			p.diags.Errorf(p.current().Line, p.current().Column,
 				"unexpected token %s in intent block", p.current().Type)
+			startPos := p.pos
 			p.synchronize()
+			if p.pos == startPos {
+				p.advance() // ensure forward progress to avoid infinite loop
+			}
 		}
 	}
 	p.expect(lexer.RBRACE)
@@ -417,7 +421,11 @@ func (p *Parser) parseVerifiedByRef() *ast.VerifiedByRef {
 			p.advance()
 		default:
 			p.diags.Errorf(next.Line, next.Column, "expected identifier in verified_by path")
-			break
+			return &ast.VerifiedByRef{
+				Parts:  parts,
+				Line:   tok.Line,
+				Column: tok.Column,
+			}
 		}
 	}
 	return &ast.VerifiedByRef{
