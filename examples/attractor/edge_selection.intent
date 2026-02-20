@@ -1,0 +1,226 @@
+module attractor_edge_selection version "0.1.0";
+
+import "types.intent";
+
+// NOTE: Intent does not yet expose string lowercase or trim methods.
+// This function documents the gap and returns the label unchanged.
+// When string methods are available, implement: label.trim().lowercase()
+public function normalize_label(label: String) returns String {
+    return label;
+}
+
+// Collect all edges originating from node_id.
+// NOTE: Pushing entity values into arrays may not be supported in all Intent
+// runtimes. If this causes issues, switch to an index-based approach using
+// count_edges_from and iterating the original array.
+public function edges_from_node(edges: Array<EdgeAttr>, edge_count: Int, node_id: String) returns Array<EdgeAttr>
+    requires edge_count >= 0
+    ensures len(result) <= edge_count
+{
+    let mutable collected: Array<EdgeAttr> = [];
+    for i in 0..edge_count {
+        if edges[i].from_node == node_id {
+            collected.push(edges[i]);
+        }
+    }
+    return collected;
+}
+
+// Evaluate a single condition clause of the form: clause_key clause_op clause_value
+// Supported clause_key values: "outcome", "preferred_label"
+// Supported clause_op values: "=", "!="
+// NOTE: context.* keys require map support not yet available in Intent.
+public function evaluate_clause(clause_key: String, clause_op: String, clause_value: String, outcome_status: String, preferred_label: String) returns Bool {
+    if clause_key == "outcome" {
+        if clause_op == "=" {
+            return outcome_status == clause_value;
+        }
+        if clause_op == "!=" {
+            return outcome_status != clause_value;
+        }
+        return false;
+    }
+    if clause_key == "preferred_label" {
+        if clause_op == "=" {
+            return preferred_label == clause_value;
+        }
+        if clause_op == "!=" {
+            return preferred_label != clause_value;
+        }
+        return false;
+    }
+    // Unknown key (e.g. context.*): return false until map support is available.
+    return false;
+}
+
+// Evaluate whether an edge's condition matches the current outcome and preferred label.
+// Unconditional edges (empty condition string) always return false here; they are
+// handled separately in the highest-weight step.
+// NOTE: Full && / || parsing requires string split methods not yet in Intent.
+// Only single-clause conditions are supported. The condition string must be one of:
+//   "outcome=<value>", "outcome!=<value>",
+//   "preferred_label=<value>", "preferred_label!=<value>"
+public function edge_matches_condition(edge: EdgeAttr, outcome_status: String, preferred_label: String) returns Bool {
+    if edge.condition == "" {
+        return false;
+    }
+
+    // Simplified single-clause parsing via known patterns.
+    // "outcome=<value>"
+    if edge.condition == "outcome=success" {
+        return evaluate_clause("outcome", "=", "success", outcome_status, preferred_label);
+    }
+    if edge.condition == "outcome=fail" {
+        return evaluate_clause("outcome", "=", "fail", outcome_status, preferred_label);
+    }
+    if edge.condition == "outcome=retry" {
+        return evaluate_clause("outcome", "=", "retry", outcome_status, preferred_label);
+    }
+    if edge.condition == "outcome=partial_success" {
+        return evaluate_clause("outcome", "=", "partial_success", outcome_status, preferred_label);
+    }
+    if edge.condition == "outcome=skipped" {
+        return evaluate_clause("outcome", "=", "skipped", outcome_status, preferred_label);
+    }
+    // "outcome!=<value>"
+    if edge.condition == "outcome!=success" {
+        return evaluate_clause("outcome", "!=", "success", outcome_status, preferred_label);
+    }
+    if edge.condition == "outcome!=fail" {
+        return evaluate_clause("outcome", "!=", "fail", outcome_status, preferred_label);
+    }
+    if edge.condition == "outcome!=retry" {
+        return evaluate_clause("outcome", "!=", "retry", outcome_status, preferred_label);
+    }
+    if edge.condition == "outcome!=partial_success" {
+        return evaluate_clause("outcome", "!=", "partial_success", outcome_status, preferred_label);
+    }
+
+    // Unknown / compound condition: conservatively return false.
+    // Full parsing requires string split — document gap and revisit.
+    return false;
+}
+
+// Step 1: Find the index of the first edge whose condition matches.
+// Returns the index into `edges`, or -1 if no edge matches.
+public function find_condition_matched_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: String, preferred_label: String) returns Int
+    requires edge_count >= 0
+    ensures result >= -1
+    ensures result < edge_count
+{
+    let mutable found_idx: Int = -1;
+    let mutable done: Bool = false;
+    for i in 0..edge_count {
+        if not done {
+            if edge_matches_condition(edges[i], outcome_status, preferred_label) {
+                found_idx = i;
+                done = true;
+            }
+        }
+    }
+    return found_idx;
+}
+
+// Step 2: Find the index of the first edge whose label matches preferred_label.
+// Returns -1 if preferred_label is empty or no edge matches.
+public function find_preferred_label_edge(edges: Array<EdgeAttr>, edge_count: Int, preferred_label: String) returns Int
+    requires edge_count >= 0
+    ensures result >= -1
+{
+    if preferred_label == "" {
+        return -1;
+    }
+    let mutable found_idx: Int = -1;
+    let mutable done: Bool = false;
+    for i in 0..edge_count {
+        if not done {
+            if edges[i].label == preferred_label {
+                found_idx = i;
+                done = true;
+            }
+        }
+    }
+    return found_idx;
+}
+
+// Steps 4 & 5: Among unconditional edges, find the one with the highest weight.
+// First-encountered highest-weight edge wins (lexical tiebreak requires string
+// lt/gt comparison not yet available in Intent).
+// Returns -1 if no unconditional edges exist.
+public function find_highest_weight_edge(edges: Array<EdgeAttr>, edge_count: Int) returns Int
+    requires edge_count >= 0
+    ensures result >= -1
+{
+    let mutable best_idx: Int = -1;
+    let mutable best_weight: Int = -1;
+    for i in 0..edge_count {
+        if edges[i].is_unconditional() {
+            if edges[i].weight > best_weight {
+                best_weight = edges[i].weight;
+                best_idx = i;
+            }
+        }
+    }
+    return best_idx;
+}
+
+// Convert a StageStatus enum value to the string used in condition expressions.
+public function status_to_string(status: StageStatus) returns String {
+    return match status {
+        Success => "success",
+        PartialSuccess => "partial_success",
+        Retry => "retry",
+        Fail => "fail",
+        Skipped => "skipped"
+    };
+}
+
+// Main entry point: select the next edge using the Attractor spec Section 3.3
+// five-step priority algorithm.
+//
+// Priority order:
+//   1. Condition-matching edges
+//   2. Preferred label match
+//   3. Suggested next IDs (skipped - requires Array<String> field in Outcome)
+//   4. Highest weight among unconditional edges
+//   5. Lexical tiebreak (simplified: first-wins for equal weights)
+//
+// Returns the index into `edges` of the selected edge, or -1 if edge_count == 0.
+public function select_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: String, preferred_label: String) returns Int
+    requires edge_count >= 0
+    ensures result >= -1
+    ensures result < edge_count
+{
+    if edge_count == 0 {
+        return -1;
+    }
+
+    // Step 1: condition match.
+    let step1: Int = find_condition_matched_edge(edges, edge_count, outcome_status, preferred_label);
+    if step1 >= 0 {
+        return step1;
+    }
+
+    // Step 2: preferred label match.
+    let step2: Int = find_preferred_label_edge(edges, edge_count, preferred_label);
+    if step2 >= 0 {
+        return step2;
+    }
+
+    // Step 3: suggested next IDs - skipped (needs Array<String> field in Outcome).
+
+    // Steps 4+5: highest weight unconditional edge.
+    let step4: Int = find_highest_weight_edge(edges, edge_count);
+    if step4 >= 0 {
+        return step4;
+    }
+
+    // Fallback: first edge.
+    return 0;
+}
+
+intent "Deterministic edge selection" {
+    goal: "Edge selection follows Attractor spec Section 3.3 priority order";
+    guarantee: "Given the same inputs, edge selection always produces the same result";
+    verified_by: [select_edge.ensures, find_condition_matched_edge.ensures, find_preferred_label_edge.ensures, find_highest_weight_edge.ensures];
+}
