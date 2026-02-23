@@ -1206,13 +1206,13 @@ entry function main() returns Int {
 	}
 	found := false
 	for _, d := range diag.All() {
-		if strings.Contains(d.Message, "len() requires Array argument") {
+		if strings.Contains(d.Message, "len() requires Array or Map argument") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("Expected 'len() requires Array argument' error, got: %s", diag.Format("test"))
+		t.Errorf("Expected 'len() requires Array or Map argument' error, got: %s", diag.Format("test"))
 	}
 }
 
@@ -2872,5 +2872,205 @@ function test(s: String) returns Int {
 	diag := parseAndCheck(t, source)
 	if !diag.HasErrors() {
 		t.Error("Expected error for len() with arguments")
+	}
+}
+
+// ===== Map Type Tests =====
+
+func TestResolveMapType(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test(m: Map<String, Int>) returns Int {
+    let x: Map<String, Int> = m;
+    return 0;
+}`
+
+	p := parser.New(source)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("Parser errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	result := CheckWithResult(prog)
+
+	if result.Diagnostics.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", result.Diagnostics.Format("test"))
+	}
+
+	// Find the let statement and check its resolved type
+	fn := prog.Functions[0]
+	letStmt := fn.Body.Statements[0].(*ast.LetStmt)
+
+	// Get the identifier type from exprTypes
+	identExpr := letStmt.Value.(*ast.Identifier)
+	exprType := result.ExprTypes[identExpr]
+	if exprType == nil {
+		t.Error("Expected identifier expression to have type in exprTypes map")
+	} else if !exprType.IsGeneric || exprType.Name != "Map" {
+		t.Errorf("Expected Map<String, Int> type, got: %s", exprType.String())
+	} else if len(exprType.TypeParams) != 2 || !exprType.TypeParams[0].Equal(TypeString) || !exprType.TypeParams[1].Equal(TypeInt) {
+		t.Errorf("Expected Map<String, Int> with correct type parameters, got: %s", exprType.String())
+	}
+}
+
+func TestMapTypeEquality(t *testing.T) {
+	mapStringInt1 := &Type{
+		Name:       "Map",
+		IsGeneric:  true,
+		TypeParams: []*Type{TypeString, TypeInt},
+	}
+
+	mapStringInt2 := &Type{
+		Name:       "Map",
+		IsGeneric:  true,
+		TypeParams: []*Type{TypeString, TypeInt},
+	}
+
+	mapIntString := &Type{
+		Name:       "Map",
+		IsGeneric:  true,
+		TypeParams: []*Type{TypeInt, TypeString},
+	}
+
+	mapStringBool := &Type{
+		Name:       "Map",
+		IsGeneric:  true,
+		TypeParams: []*Type{TypeString, TypeBool},
+	}
+
+	if !mapStringInt1.Equal(mapStringInt2) {
+		t.Error("Map<String, Int> should equal Map<String, Int>")
+	}
+
+	if mapStringInt1.Equal(mapIntString) {
+		t.Error("Map<String, Int> should not equal Map<Int, String>")
+	}
+
+	if mapStringInt1.Equal(mapStringBool) {
+		t.Error("Map<String, Int> should not equal Map<String, Bool>")
+	}
+}
+
+func TestCheckMapMethods(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test() returns Int {
+    let mutable m: Map<String, Int> = [];
+    m.set("key", 42);
+    let v: Int = m.get("key", 0);
+    let has: Bool = m.contains("key");
+    let k: Array<String> = m.keys();
+    m.remove("key");
+    return len(m);
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", diag.Format("test"))
+	}
+}
+
+func TestCheckMapMethodTypeMismatch(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test() returns Int {
+    let mutable m: Map<String, Int> = [];
+    m.set(42, "wrong");
+    return 0;
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for Map method type mismatch")
+	}
+	foundKey := false
+	foundVal := false
+	for _, d := range diag.All() {
+		if strings.Contains(d.Message, "set() key type mismatch") {
+			foundKey = true
+		}
+		if strings.Contains(d.Message, "set() value type mismatch") {
+			foundVal = true
+		}
+	}
+	if !foundKey {
+		t.Errorf("Expected 'set() key type mismatch' error, got: %s", diag.Format("test"))
+	}
+	if !foundVal {
+		t.Errorf("Expected 'set() value type mismatch' error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestCheckMapSetMutability(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test() returns Int {
+    let m: Map<String, Int> = [];
+    m.set("key", 42);
+    return 0;
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for set() on immutable map")
+	}
+	found := false
+	for _, d := range diag.All() {
+		if strings.Contains(d.Message, "cannot call set() on immutable map") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected 'cannot call set() on immutable map' error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestCheckMapRemoveMutability(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test() returns Int {
+    let m: Map<String, Int> = [];
+    m.remove("key");
+    return 0;
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for remove() on immutable map")
+	}
+	found := false
+	for _, d := range diag.All() {
+		if strings.Contains(d.Message, "cannot call remove() on immutable map") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected 'cannot call remove() on immutable map' error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestCheckEmptyMapLiteral(t *testing.T) {
+	source := `module test version "1.0.0";
+
+entry function main() returns Int {
+    let m: Map<String, Int> = [];
+    return 0;
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Empty map literal with Map<String, Int> annotation should be accepted, got: %s", diag.Format("test"))
+	}
+}
+
+func TestCheckLenMap(t *testing.T) {
+	source := `module test version "1.0.0";
+
+entry function main() returns Int {
+    let m: Map<String, Int> = [];
+    let n: Int = len(m);
+    return n;
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for len() on Map, got: %s", diag.Format("test"))
 	}
 }

@@ -8,7 +8,7 @@ This is preferable to designing language features in the abstract: every additio
 
 ## Current Coverage
 
-**Phase 1-3 (complete):** Structural and logical skeleton, string stdlib, Array\<String\> entity fields — ~55% of the spec by section count.
+**Phase 1-4 (complete):** Structural and logical skeleton, string stdlib, Array\<String\> entity fields, Map\<K,V\> type — ~65% of the spec by section count.
 
 | Spec Area | Status | Files |
 |-----------|--------|-------|
@@ -31,10 +31,15 @@ Both single-file (`attractor.intent`) and multi-file (`main.intent`) versions co
 - Intent blocks link natural-language goals to formal contracts
 - The 5-step edge selection algorithm is faithfully modeled with bounds postconditions
 
+| Context propagation (PipelineContext entity) | Done | types.intent |
+| Condition evaluation with context variables | Done | edge_selection.intent |
+| Checkpoint node_retries tracking | Done | types.intent |
+| Outcome context_updates | Done | types.intent |
+
 ### Known limitations in current implementation
 
-- Context type entirely absent (needs Map\<K,V\>)
-- Checkpoint `node_retries` map not yet implemented (needs Map\<K,V\>)
+- No error handling (Result\<T,E\> matching) -- needs Phase 5
+- No trait-based handler dispatch -- needs Phase 6
 
 ## Gap-to-Feature Mapping
 
@@ -159,3 +164,4 @@ Each phase should produce both a language improvement and a visible expansion of
 | 2026-02-20 | Phase 1 complete: 8 codegen/checker bugs fixed, single-file and multi-file compile and run | enum defaults, &self/&mut self, String cloning, cross-module resolution, empty arrays, verified_by for constructors and functions |
 | 2026-02-20 | Phase 2 complete: String stdlib (6 methods), legacy codegen removed, dynamic condition parsing | Array.len() method not available (use len() builtin), Rust borrow checker issues with entity methods on borrowed refs |
 | 2026-02-23 | Phase 3 complete: Array\<String\> entity fields, full 5-step edge selection, BFS reachability, Checkpoint.completed_nodes | No compiler changes needed — Array\<String\> on entity fields already worked |
+| 2026-02-23 | Phase 4 complete: Map\<K,V\> type across checker + Rust/JS/WASM backends. PipelineContext, node_retries, context_updates, context-aware condition evaluation | Map\<Float,V\> not rejected at compile time (Rust HashMap requires Eq+Hash) |

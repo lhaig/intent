@@ -1,6 +1,8 @@
 package jsbe
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -437,5 +439,89 @@ function test_split(s: String) returns Array<String> {
 		if !strings.Contains(output, tt.expected) {
 			t.Errorf("[%s] expected output to contain %q, got:\n%s", tt.name, tt.expected, output)
 		}
+	}
+}
+
+func TestGenerateMapDemoJS(t *testing.T) {
+	src, err := os.ReadFile(findExample(t, "map_demo.intent"))
+	if err != nil {
+		t.Fatalf("failed to read map_demo.intent: %v", err)
+	}
+	output := generateJSFromSource(t, "map_demo", string(src))
+
+	expects := []string{
+		"class Config",
+		"new Map()",
+		".set(",
+		".has(",
+		".get(",
+		".delete(",
+		"Array.from(",
+		".keys())",
+		".size)",
+		"get_setting(",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}
+
+func TestGenerateMapTypeJS(t *testing.T) {
+	src := `module test version "1.0";
+function test_map() returns Int {
+    let mutable m: Map<String, Int> = [];
+    m.set("alice", 100);
+    let v: Int = m.get("alice", 0);
+    let has: Bool = m.contains("alice");
+    let k: Array<String> = m.keys();
+    m.remove("alice");
+    return len(m);
+}
+`
+	p := parser.New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("parse errors: %s", p.Diagnostics().Format("test"))
+	}
+	result := checker.CheckWithResult(prog)
+	if result.Diagnostics.HasErrors() {
+		t.Fatalf("check errors: %s", result.Diagnostics.Format("test"))
+	}
+	mod := ir.Lower(prog, result)
+	output := Generate(mod)
+
+	expects := []string{
+		"new Map()",
+		".set(",
+		".has(",
+		".get(",
+		".delete(",
+		"Array.from(",
+		".keys())",
+		".size)",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}
+
+// findExample locates an example file relative to the project root.
+func findExample(t *testing.T, name string) string {
+	t.Helper()
+	dir, _ := os.Getwd()
+	for {
+		candidate := filepath.Join(dir, "examples", name)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("could not find examples/%s from %s", name, dir)
+		}
+		dir = parent
 	}
 }

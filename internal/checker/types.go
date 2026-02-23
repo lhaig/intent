@@ -126,6 +126,21 @@ func ResolveType(ref *ast.TypeRef, entities map[string]*EntityInfo, enums map[st
 			TypeParams: []*Type{someType},
 			EnumInfo:   instantiateOption(someType),
 		}
+	case "Map":
+		// Map requires exactly 2 type arguments (K, V)
+		if len(ref.TypeArgs) != 2 {
+			return nil // caller should emit error
+		}
+		keyType := ResolveType(ref.TypeArgs[0], entities, enums)
+		valType := ResolveType(ref.TypeArgs[1], entities, enums)
+		if keyType == nil || valType == nil {
+			return nil
+		}
+		return &Type{
+			Name:       "Map",
+			IsGeneric:  true,
+			TypeParams: []*Type{keyType, valType},
+		}
 	default:
 		// Check if it's an entity type
 		if entity, ok := entities[ref.Name]; ok {

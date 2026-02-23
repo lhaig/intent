@@ -27,8 +27,9 @@ entity Outcome {
     field notes: String;
     field failure_reason: String;
     field suggested_next_ids: Array<String>;
+    field context_updates: Map<String, String>;
 
-    constructor(status: StageStatus, preferred_label: String, notes: String, failure_reason: String, suggested_next_ids: Array<String>)
+    constructor(status: StageStatus, preferred_label: String, notes: String, failure_reason: String, suggested_next_ids: Array<String>, context_updates: Map<String, String>)
         requires true
     {
         self.status = status;
@@ -36,6 +37,7 @@ entity Outcome {
         self.notes = notes;
         self.failure_reason = failure_reason;
         self.suggested_next_ids = suggested_next_ids;
+        self.context_updates = context_updates;
     }
 
     method is_success() returns Bool
@@ -233,15 +235,17 @@ entity Checkpoint {
     field current_node: String;
     field completed_count: Int;
     field completed_nodes: Array<String>;
+    field node_retries: Map<String, Int>;
 
     invariant self.completed_count >= 0;
 
-    constructor(current_node: String, completed_count: Int, completed_nodes: Array<String>)
+    constructor(current_node: String, completed_count: Int, completed_nodes: Array<String>, node_retries: Map<String, Int>)
         requires completed_count >= 0
     {
         self.current_node = current_node;
         self.completed_count = completed_count;
         self.completed_nodes = completed_nodes;
+        self.node_retries = node_retries;
     }
 
     method advance(next_node: String) returns Void
@@ -442,10 +446,9 @@ function normalize_label(label: String) returns String {
 // Use index-based functions (count_edges_from, find_condition_match, etc.) instead.
 
 // Evaluate a single condition clause of the form: clause_key clause_op clause_value
-// Supported clause_key values: "outcome", "preferred_label"
+// Supported clause_key values: "outcome", "preferred_label", context map keys
 // Supported clause_op values: "=", "!="
-// NOTE: context.* keys require map support not yet available in Intent.
-function evaluate_clause(clause_key: String, clause_op: String, clause_value: String, outcome_status: String, preferred_label: String) returns Bool {
+function evaluate_clause(clause_key: String, clause_op: String, clause_value: String, outcome_status: String, preferred_label: String, context: Map<String, String>) returns Bool {
     if clause_key == "outcome" {
         if clause_op == "=" {
             return outcome_status == clause_value;
@@ -464,21 +467,29 @@ function evaluate_clause(clause_key: String, clause_op: String, clause_value: St
         }
         return false;
     }
-    // Unknown key (e.g. context.*): return false until map support is available.
+    // Look up key in context map
+    if context.contains(clause_key) {
+        let ctx_val: String = context.get(clause_key, "");
+        if clause_op == "=" {
+            return ctx_val == clause_value;
+        }
+        if clause_op == "!=" {
+            return ctx_val != clause_value;
+        }
+    }
     return false;
 }
 
 // Parse a single condition clause dynamically using string methods.
 // Supported forms: "key=value", "key!=value"
-// Returns (clause_key, clause_op, clause_value) by evaluating against outcome and label.
-function parse_and_evaluate_clause(clause: String, outcome_status: String, preferred_label: String) returns Bool {
+function parse_and_evaluate_clause(clause: String, outcome_status: String, preferred_label: String, context: Map<String, String>) returns Bool {
     let trimmed: String = clause.trim();
 
     // Check for "!=" operator first (before "=" to avoid partial match)
     if trimmed.contains("!=") {
         let parts: Array<String> = trimmed.split("!=");
         if len(parts) == 2 {
-            return evaluate_clause(parts[0].trim(), "!=", parts[1].trim(), outcome_status, preferred_label);
+            return evaluate_clause(parts[0].trim(), "!=", parts[1].trim(), outcome_status, preferred_label, context);
         }
         return false;
     }
@@ -487,7 +498,7 @@ function parse_and_evaluate_clause(clause: String, outcome_status: String, prefe
     if trimmed.contains("=") {
         let parts: Array<String> = trimmed.split("=");
         if len(parts) == 2 {
-            return evaluate_clause(parts[0].trim(), "=", parts[1].trim(), outcome_status, preferred_label);
+            return evaluate_clause(parts[0].trim(), "=", parts[1].trim(), outcome_status, preferred_label, context);
         }
         return false;
     }
@@ -500,18 +511,18 @@ function parse_and_evaluate_clause(clause: String, outcome_status: String, prefe
 // Unconditional edges (empty condition string) always return false here; they are
 // handled separately in the highest-weight step.
 // Supports single-clause conditions parsed dynamically using string split.
-function edge_matches_condition(edge: EdgeAttr, outcome_status: String, preferred_label: String) returns Bool {
+function edge_matches_condition(edge: EdgeAttr, outcome_status: String, preferred_label: String, context: Map<String, String>) returns Bool {
     if edge.condition == "" {
         return false;
     }
 
     // Dynamic single-clause parsing using string methods.
-    return parse_and_evaluate_clause(edge.condition, outcome_status, preferred_label);
+    return parse_and_evaluate_clause(edge.condition, outcome_status, preferred_label, context);
 }
 
 // Step 1: Find the index of the first edge whose condition matches.
 // Returns the index into `edges`, or -1 if no edge matches.
-function find_condition_matched_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: String, preferred_label: String) returns Int
+function find_condition_matched_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: String, preferred_label: String, context: Map<String, String>) returns Int
     requires edge_count >= 0
     ensures result >= -1
     ensures result < edge_count
@@ -520,7 +531,7 @@ function find_condition_matched_edge(edges: Array<EdgeAttr>, edge_count: Int, ou
     let mutable done: Bool = false;
     for i in 0..edge_count {
         if not done {
-            if edge_matches_condition(edges[i], outcome_status, preferred_label) {
+            if edge_matches_condition(edges[i], outcome_status, preferred_label, context) {
                 found_idx = i;
                 done = true;
             }
@@ -618,7 +629,7 @@ function status_to_string(status: StageStatus) returns String {
 //   5. Lexical tiebreak (simplified: first-wins for equal weights)
 //
 // Returns the index into `edges` of the selected edge, or -1 if edge_count == 0.
-function select_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: String, preferred_label: String, suggested_next_ids: Array<String>, suggested_count: Int) returns Int
+function select_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: String, preferred_label: String, suggested_next_ids: Array<String>, suggested_count: Int, context: Map<String, String>) returns Int
     requires edge_count >= 0
     requires suggested_count >= 0
     ensures result >= -1
@@ -629,7 +640,7 @@ function select_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: St
     }
 
     // Step 1: condition match.
-    let step1: Int = find_condition_matched_edge(edges, edge_count, outcome_status, preferred_label);
+    let step1: Int = find_condition_matched_edge(edges, edge_count, outcome_status, preferred_label, context);
     if step1 >= 0 {
         return step1;
     }
@@ -840,22 +851,24 @@ entry function main() returns Int {
     // Test edge selection with a success outcome (no suggested IDs)
     let outcome_str: String = status_to_string(Success);
     let mutable empty_suggestions: Array<String> = [];
-    let selected: Int = select_edge(edges, edge_count, outcome_str, "", empty_suggestions, 0);
+    let mutable empty_context: Map<String, String> = [];
+    let selected: Int = select_edge(edges, edge_count, outcome_str, "", empty_suggestions, 0, empty_context);
 
     print(selected);
 
     // Test edge selection Step 3: suggested next IDs
     let mutable suggestions: Array<String> = [];
     suggestions.push("exit");
-    let step3_selected: Int = select_edge(edges, edge_count, "unknown_status", "", suggestions, 1);
+    let step3_selected: Int = select_edge(edges, edge_count, "unknown_status", "", suggestions, 1, empty_context);
     print(step3_selected);
 
     // Test reachability
     let reachable: Bool = all_nodes_reachable(nodes, node_count, edges, edge_count, "start");
     print(reachable);
 
-    // Test checkpoint with completed_nodes tracking
-    let mutable cp: Checkpoint = Checkpoint("start", 0, []);
+    // Test checkpoint with completed_nodes tracking and node_retries map
+    let mutable retries: Map<String, Int> = [];
+    let mutable cp: Checkpoint = Checkpoint("start", 0, [], retries);
     cp.advance("run_tests");
     cp.advance("exit");
     print(cp.completed_count);

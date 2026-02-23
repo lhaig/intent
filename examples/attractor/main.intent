@@ -49,26 +49,35 @@ entry function main() returns Int {
     // Test edge selection with a success outcome (no suggested IDs)
     let outcome_str: String = attractor_edge_selection.status_to_string(Success);
     let mutable empty_suggestions: Array<String> = [];
-    let selected: Int = attractor_edge_selection.select_edge(edges, edge_count, outcome_str, "", empty_suggestions, 0);
+    let mutable empty_context: Map<String, String> = [];
+    let selected: Int = attractor_edge_selection.select_edge(edges, edge_count, outcome_str, "", empty_suggestions, 0, empty_context);
 
     print(selected);
 
     // Test edge selection Step 3: suggested next IDs
     let mutable suggestions: Array<String> = [];
     suggestions.push("exit");
-    let step3_selected: Int = attractor_edge_selection.select_edge(edges, edge_count, "unknown_status", "", suggestions, 1);
+    let step3_selected: Int = attractor_edge_selection.select_edge(edges, edge_count, "unknown_status", "", suggestions, 1, empty_context);
     print(step3_selected);
 
     // Test reachability
     let reachable: Bool = attractor_validation.all_nodes_reachable(nodes, node_count, edges, edge_count, "start");
     print(reachable);
 
-    // Test checkpoint with completed_nodes tracking
-    let mutable cp: Checkpoint = Checkpoint("start", 0, []);
+    // Test checkpoint with completed_nodes tracking and node_retries map
+    let mutable retries: Map<String, Int> = [];
+    let mutable cp: Checkpoint = Checkpoint("start", 0, [], retries);
     cp.advance("run_tests");
     cp.advance("exit");
     print(cp.completed_count);
     print(len(cp.completed_nodes));
+
+    // Test context map operations
+    let mutable ctx_values: Map<String, String> = [];
+    ctx_values.set("input_data", "test_payload");
+    let ctx: PipelineContext = PipelineContext(ctx_values);
+    let input: String = ctx.get_value("input_data", "none");
+    print(input);
 
     // Test retry policy
     let policy: RetryPolicy = attractor_retry.build_retry_policy(3, 50);

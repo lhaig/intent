@@ -25,10 +25,9 @@ public function edges_from_node(edges: Array<EdgeAttr>, edge_count: Int, node_id
 }
 
 // Evaluate a single condition clause of the form: clause_key clause_op clause_value
-// Supported clause_key values: "outcome", "preferred_label"
+// Supported clause_key values: "outcome", "preferred_label", context map keys
 // Supported clause_op values: "=", "!="
-// NOTE: context.* keys require map support not yet available in Intent.
-public function evaluate_clause(clause_key: String, clause_op: String, clause_value: String, outcome_status: String, preferred_label: String) returns Bool {
+public function evaluate_clause(clause_key: String, clause_op: String, clause_value: String, outcome_status: String, preferred_label: String, context: Map<String, String>) returns Bool {
     if clause_key == "outcome" {
         if clause_op == "=" {
             return outcome_status == clause_value;
@@ -47,20 +46,29 @@ public function evaluate_clause(clause_key: String, clause_op: String, clause_va
         }
         return false;
     }
-    // Unknown key (e.g. context.*): return false until map support is available.
+    // Look up key in context map
+    if context.contains(clause_key) {
+        let ctx_val: String = context.get(clause_key, "");
+        if clause_op == "=" {
+            return ctx_val == clause_value;
+        }
+        if clause_op == "!=" {
+            return ctx_val != clause_value;
+        }
+    }
     return false;
 }
 
 // Parse a single condition clause dynamically using string methods.
 // Supported forms: "key=value", "key!=value"
-public function parse_and_evaluate_clause(clause: String, outcome_status: String, preferred_label: String) returns Bool {
+public function parse_and_evaluate_clause(clause: String, outcome_status: String, preferred_label: String, context: Map<String, String>) returns Bool {
     let trimmed: String = clause.trim();
 
     // Check for "!=" operator first (before "=" to avoid partial match)
     if trimmed.contains("!=") {
         let parts: Array<String> = trimmed.split("!=");
         if len(parts) == 2 {
-            return evaluate_clause(parts[0].trim(), "!=", parts[1].trim(), outcome_status, preferred_label);
+            return evaluate_clause(parts[0].trim(), "!=", parts[1].trim(), outcome_status, preferred_label, context);
         }
         return false;
     }
@@ -69,7 +77,7 @@ public function parse_and_evaluate_clause(clause: String, outcome_status: String
     if trimmed.contains("=") {
         let parts: Array<String> = trimmed.split("=");
         if len(parts) == 2 {
-            return evaluate_clause(parts[0].trim(), "=", parts[1].trim(), outcome_status, preferred_label);
+            return evaluate_clause(parts[0].trim(), "=", parts[1].trim(), outcome_status, preferred_label, context);
         }
         return false;
     }
@@ -82,18 +90,18 @@ public function parse_and_evaluate_clause(clause: String, outcome_status: String
 // Unconditional edges (empty condition string) always return false here; they are
 // handled separately in the highest-weight step.
 // Supports single-clause conditions parsed dynamically using string split.
-public function edge_matches_condition(edge: EdgeAttr, outcome_status: String, preferred_label: String) returns Bool {
+public function edge_matches_condition(edge: EdgeAttr, outcome_status: String, preferred_label: String, context: Map<String, String>) returns Bool {
     if edge.condition == "" {
         return false;
     }
 
     // Dynamic single-clause parsing using string methods.
-    return parse_and_evaluate_clause(edge.condition, outcome_status, preferred_label);
+    return parse_and_evaluate_clause(edge.condition, outcome_status, preferred_label, context);
 }
 
 // Step 1: Find the index of the first edge whose condition matches.
 // Returns the index into `edges`, or -1 if no edge matches.
-public function find_condition_matched_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: String, preferred_label: String) returns Int
+public function find_condition_matched_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: String, preferred_label: String, context: Map<String, String>) returns Int
     requires edge_count >= 0
     ensures result >= -1
     ensures result < edge_count
@@ -102,7 +110,7 @@ public function find_condition_matched_edge(edges: Array<EdgeAttr>, edge_count: 
     let mutable done: Bool = false;
     for i in 0..edge_count {
         if not done {
-            if edge_matches_condition(edges[i], outcome_status, preferred_label) {
+            if edge_matches_condition(edges[i], outcome_status, preferred_label, context) {
                 found_idx = i;
                 done = true;
             }
@@ -200,7 +208,7 @@ public function status_to_string(status: StageStatus) returns String {
 //   5. Lexical tiebreak (simplified: first-wins for equal weights)
 //
 // Returns the index into `edges` of the selected edge, or -1 if edge_count == 0.
-public function select_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: String, preferred_label: String, suggested_next_ids: Array<String>, suggested_count: Int) returns Int
+public function select_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: String, preferred_label: String, suggested_next_ids: Array<String>, suggested_count: Int, context: Map<String, String>) returns Int
     requires edge_count >= 0
     requires suggested_count >= 0
     ensures result >= -1
@@ -211,7 +219,7 @@ public function select_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_sta
     }
 
     // Step 1: condition match.
-    let step1: Int = find_condition_matched_edge(edges, edge_count, outcome_status, preferred_label);
+    let step1: Int = find_condition_matched_edge(edges, edge_count, outcome_status, preferred_label, context);
     if step1 >= 0 {
         return step1;
     }

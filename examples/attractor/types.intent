@@ -53,8 +53,9 @@ public entity Outcome {
     field notes: String;
     field failure_reason: String;
     field suggested_next_ids: Array<String>;
+    field context_updates: Map<String, String>;
 
-    constructor(status: StageStatus, preferred_label: String, notes: String, failure_reason: String, suggested_next_ids: Array<String>)
+    constructor(status: StageStatus, preferred_label: String, notes: String, failure_reason: String, suggested_next_ids: Array<String>, context_updates: Map<String, String>)
         requires true
     {
         self.status = status;
@@ -62,6 +63,7 @@ public entity Outcome {
         self.notes = notes;
         self.failure_reason = failure_reason;
         self.suggested_next_ids = suggested_next_ids;
+        self.context_updates = context_updates;
     }
 
     method is_success() returns Bool
@@ -254,20 +256,43 @@ public entity GraphMeta {
     }
 }
 
+// PipelineContext holds the shared state passed between pipeline stages.
+public entity PipelineContext {
+    field values: Map<String, String>;
+
+    constructor(values: Map<String, String>) {
+        self.values = values;
+    }
+
+    method get_value(key: String, default_val: String) returns String {
+        return self.values.get(key, default_val);
+    }
+
+    method set_value(key: String, value: String) returns Void {
+        self.values.set(key, value);
+    }
+
+    method has_key(key: String) returns Bool {
+        return self.values.contains(key);
+    }
+}
+
 // Checkpoint tracks the current execution position within a running pipeline.
 public entity Checkpoint {
     field current_node: String;
     field completed_count: Int;
     field completed_nodes: Array<String>;
+    field node_retries: Map<String, Int>;
 
     invariant self.completed_count >= 0;
 
-    constructor(current_node: String, completed_count: Int, completed_nodes: Array<String>)
+    constructor(current_node: String, completed_count: Int, completed_nodes: Array<String>, node_retries: Map<String, Int>)
         requires completed_count >= 0
     {
         self.current_node = current_node;
         self.completed_count = completed_count;
         self.completed_nodes = completed_nodes;
+        self.node_retries = node_retries;
     }
 
     method advance(next_node: String) returns Void

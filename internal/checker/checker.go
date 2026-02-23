@@ -1221,8 +1221,8 @@ func (c *Checker) checkCallExpr(expr *ast.CallExpr, scope *Scope) *Type {
 		}
 		argType := c.checkExpression(expr.Args[0], scope)
 		if argType != nil {
-			if argType.Name != "Array" || !argType.IsGeneric {
-				c.diag.Errorf(line, col, "len() requires Array argument, got %s", argType.String())
+			if (argType.Name != "Array" && argType.Name != "Map") || !argType.IsGeneric {
+				c.diag.Errorf(line, col, "len() requires Array or Map argument, got %s", argType.String())
 			}
 		}
 		return TypeInt
@@ -1426,6 +1426,84 @@ func (c *Checker) checkMethodCallExpr(expr *ast.MethodCallExpr, scope *Scope) *T
 			return TypeVoid
 		default:
 			c.diag.Errorf(line, col, "Array has no method '%s'", expr.Method)
+			return nil
+		}
+	}
+
+	// Handle Map methods
+	if objType.Name == "Map" && objType.IsGeneric && len(objType.TypeParams) == 2 {
+		keyType := objType.TypeParams[0]
+		valType := objType.TypeParams[1]
+		switch expr.Method {
+		case "get":
+			if len(expr.Args) != 2 {
+				c.diag.Errorf(line, col, "get() requires exactly 2 arguments (key, default), got %d", len(expr.Args))
+				return valType
+			}
+			argKeyType := c.checkExpression(expr.Args[0], scope)
+			if argKeyType != nil && !argKeyType.Equal(keyType) {
+				c.diag.Errorf(line, col, "get() key type mismatch: expected %s, got %s", keyType.String(), argKeyType.String())
+			}
+			argDefType := c.checkExpression(expr.Args[1], scope)
+			if argDefType != nil && !argDefType.Equal(valType) {
+				c.diag.Errorf(line, col, "get() default type mismatch: expected %s, got %s", valType.String(), argDefType.String())
+			}
+			return valType
+		case "set":
+			if len(expr.Args) != 2 {
+				c.diag.Errorf(line, col, "set() requires exactly 2 arguments (key, value), got %d", len(expr.Args))
+				return TypeVoid
+			}
+			// Check mutability
+			if ident, ok := expr.Object.(*ast.Identifier); ok {
+				sym := scope.Resolve(ident.Name)
+				if sym != nil && !sym.Mutable {
+					c.diag.Errorf(line, col, "cannot call set() on immutable map '%s'", ident.Name)
+				}
+			}
+			argKeyType := c.checkExpression(expr.Args[0], scope)
+			if argKeyType != nil && !argKeyType.Equal(keyType) {
+				c.diag.Errorf(line, col, "set() key type mismatch: expected %s, got %s", keyType.String(), argKeyType.String())
+			}
+			argValType := c.checkExpression(expr.Args[1], scope)
+			if argValType != nil && !argValType.Equal(valType) {
+				c.diag.Errorf(line, col, "set() value type mismatch: expected %s, got %s", valType.String(), argValType.String())
+			}
+			return TypeVoid
+		case "contains":
+			if len(expr.Args) != 1 {
+				c.diag.Errorf(line, col, "contains() requires exactly 1 argument, got %d", len(expr.Args))
+				return TypeBool
+			}
+			argKeyType := c.checkExpression(expr.Args[0], scope)
+			if argKeyType != nil && !argKeyType.Equal(keyType) {
+				c.diag.Errorf(line, col, "contains() key type mismatch: expected %s, got %s", keyType.String(), argKeyType.String())
+			}
+			return TypeBool
+		case "keys":
+			if len(expr.Args) != 0 {
+				c.diag.Errorf(line, col, "keys() requires no arguments, got %d", len(expr.Args))
+			}
+			return &Type{Name: "Array", IsGeneric: true, TypeParams: []*Type{keyType}}
+		case "remove":
+			if len(expr.Args) != 1 {
+				c.diag.Errorf(line, col, "remove() requires exactly 1 argument, got %d", len(expr.Args))
+				return TypeVoid
+			}
+			// Check mutability
+			if ident, ok := expr.Object.(*ast.Identifier); ok {
+				sym := scope.Resolve(ident.Name)
+				if sym != nil && !sym.Mutable {
+					c.diag.Errorf(line, col, "cannot call remove() on immutable map '%s'", ident.Name)
+				}
+			}
+			argKeyType := c.checkExpression(expr.Args[0], scope)
+			if argKeyType != nil && !argKeyType.Equal(keyType) {
+				c.diag.Errorf(line, col, "remove() key type mismatch: expected %s, got %s", keyType.String(), argKeyType.String())
+			}
+			return TypeVoid
+		default:
+			c.diag.Errorf(line, col, "Map has no method '%s'", expr.Method)
 			return nil
 		}
 	}
@@ -1689,6 +1767,10 @@ func (c *Checker) checkArrayLit(lit *ast.ArrayLit, scope *Scope) *Type {
 	if len(lit.Elements) == 0 {
 		// Try to infer element type from let declaration type annotation
 		if c.letDeclaredType != nil && c.letDeclaredType.Name == "Array" && c.letDeclaredType.IsGeneric && len(c.letDeclaredType.TypeParams) == 1 {
+			return c.letDeclaredType
+		}
+		// Also support empty [] for Map types
+		if c.letDeclaredType != nil && c.letDeclaredType.Name == "Map" && c.letDeclaredType.IsGeneric && len(c.letDeclaredType.TypeParams) == 2 {
 			return c.letDeclaredType
 		}
 		c.diag.Errorf(line, col, "empty array literal requires type annotation (element type cannot be inferred)")

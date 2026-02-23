@@ -1,0 +1,73 @@
+module map_demo version "1.0.0";
+
+// Demonstrate Map<K,V> type with all operations.
+
+entity Config {
+    field settings: Map<String, String>;
+
+    constructor(settings: Map<String, String>) {
+        self.settings = settings;
+    }
+
+    method get_setting(key: String, default_val: String) returns String {
+        return self.settings.get(key, default_val);
+    }
+}
+
+function test_map_operations() returns Int {
+    // Create an empty Map<String, Int>
+    let mutable scores: Map<String, Int> = [];
+
+    // set() adds key-value pairs
+    scores.set("alice", 100);
+    scores.set("bob", 85);
+    scores.set("charlie", 92);
+
+    // get() retrieves a value with a default
+    let alice_score: Int = scores.get("alice", 0);
+    let unknown_score: Int = scores.get("dave", -1);
+
+    // contains() checks for key existence
+    let has_bob: Bool = scores.contains("bob");
+    let has_dave: Bool = scores.contains("dave");
+
+    // keys() returns Array<K>
+    let all_keys: Array<String> = scores.keys();
+
+    // len() works on maps
+    let count: Int = len(scores);
+
+    // remove() deletes a key
+    scores.remove("charlie");
+    let after_remove: Int = len(scores);
+
+    return 0;
+}
+
+function test_map_string_string() returns Int {
+    // Map<String, String> for context passing
+    let mutable context: Map<String, String> = [];
+    context.set("user", "admin");
+    context.set("action", "deploy");
+
+    let user: String = context.get("user", "unknown");
+    let missing: String = context.get("role", "guest");
+
+    return 0;
+}
+
+entry function main() returns Int {
+    let r1: Int = test_map_operations();
+    let r2: Int = test_map_string_string();
+
+    // Test Map on entity fields
+    let mutable cfg_map: Map<String, String> = [];
+    cfg_map.set("timeout", "30");
+    cfg_map.set("retries", "3");
+    let cfg: Config = Config(cfg_map);
+    let timeout: String = cfg.get_setting("timeout", "10");
+
+    print(timeout);
+
+    return 0;
+}

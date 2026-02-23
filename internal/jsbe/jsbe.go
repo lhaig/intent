@@ -209,6 +209,11 @@ func (g *generator) mapType(t *checker.Type) string {
 			return "Option<" + g.mapType(t.TypeParams[0]) + ">"
 		}
 		return "Option<any>"
+	case "Map":
+		if t.IsGeneric && len(t.TypeParams) == 2 {
+			return "Map<" + g.mapType(t.TypeParams[0]) + ", " + g.mapType(t.TypeParams[1]) + ">"
+		}
+		return "Map<any, any>"
 	default:
 		return t.Name
 	}
@@ -227,6 +232,8 @@ func (g *generator) defaultValue(t *checker.Type) string {
 		return "false"
 	case "Array":
 		return "[]"
+	case "Map":
+		return "new Map()"
 	default:
 		return "null"
 	}
@@ -780,6 +787,9 @@ func (g *generator) generateExpr(e ir.Expr) string {
 
 	case *ir.ArrayLit:
 		if len(expr.Elements) == 0 {
+			if expr.Type != nil && expr.Type.Name == "Map" {
+				return "new Map()"
+			}
 			return "[]"
 		}
 		elems := make([]string, len(expr.Elements))
@@ -851,6 +861,10 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr) string {
 	case "len":
 		if len(expr.Args) == 1 {
 			arg := g.generateExpr(expr.Args[0])
+			// Check if arg is a Map type
+			if expr.Args[0].ExprType() != nil && expr.Args[0].ExprType().Name == "Map" {
+				return fmt.Sprintf("(%s.size)", arg)
+			}
 			return fmt.Sprintf("(%s.length)", arg)
 		}
 	case "Ok", "Err", "Some":
@@ -948,6 +962,28 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr) string {
 		case "split":
 			arg := g.generateExpr(expr.Args[0])
 			return fmt.Sprintf("%s.split(%s)", obj, arg)
+		}
+	}
+
+	// Map methods
+	if objType := expr.Object.ExprType(); objType != nil && objType.Name == "Map" {
+		switch expr.Method {
+		case "get":
+			key := g.generateExpr(expr.Args[0])
+			def := g.generateExpr(expr.Args[1])
+			return fmt.Sprintf("(%s.has(%s) ? %s.get(%s) : %s)", obj, key, obj, key, def)
+		case "set":
+			key := g.generateExpr(expr.Args[0])
+			val := g.generateExpr(expr.Args[1])
+			return fmt.Sprintf("%s.set(%s, %s)", obj, key, val)
+		case "contains":
+			key := g.generateExpr(expr.Args[0])
+			return fmt.Sprintf("%s.has(%s)", obj, key)
+		case "keys":
+			return fmt.Sprintf("Array.from(%s.keys())", obj)
+		case "remove":
+			key := g.generateExpr(expr.Args[0])
+			return fmt.Sprintf("%s.delete(%s)", obj, key)
 		}
 	}
 

@@ -44,15 +44,14 @@ The Go toolchain handles lexing, parsing, semantic analysis, and Rust code gener
 - Compile to efficient native binaries through Rust as an intermediate representation.
 - Verify at compile time that all declared intents reference valid contracts.
 - Generate runtime assertions for all preconditions, postconditions, and invariants.
-- Keep the proof-of-concept scope minimal: no generics, no collections, no enums, no traits.
+- Keep the proof-of-concept scope minimal: built-in generic containers only, no user-defined generics, no traits.
 
 ### 1.2 Non-Goals (for POC)
 
 - Standard library.
 - Package management.
-- Generic types or type parameters.
-- Arrays, slices, maps, or other collection types.
-- Enum or union types.
+- User-defined generic types or type parameters.
+- Enum or union types beyond the built-in `Result<T,E>` and `Option<T>`.
 - Concurrency or async constructs.
 - Pattern matching.
 - Closures or first-class functions.
@@ -171,7 +170,7 @@ Spaces, tabs, carriage returns, and newlines are whitespace. Whitespace separate
 
 ## 4. Type System
 
-Intent uses a simple, nominal type system with no subtyping, no generics, and no type inference beyond literal types.
+Intent uses a nominal type system with no subtyping and no type inference beyond literal types. It supports a fixed set of generic container types (`Array<T>`, `Map<K,V>`, `Result<T,E>`, `Option<T>`) but not user-defined generics.
 
 ### 4.1 Primitive Types
 
@@ -183,11 +182,36 @@ Intent uses a simple, nominal type system with no subtyping, no generics, and no
 | `Bool`      | `bool`      | Boolean (`true` or `false`) |
 | `Void`      | `()`        | Unit type, no value |
 
-### 4.2 Entity Types
+### 4.2 Generic Container Types
+
+Intent provides four built-in generic types. User-defined generics are not supported.
+
+| Intent Type | Rust Mapping | JS Mapping | Description |
+|-------------|-------------|------------|-------------|
+| `Array<T>` | `Vec<T>` | `Array` | Ordered, growable sequence |
+| `Map<K,V>` | `HashMap<K,V>` | `Map` | Key-value associative container |
+| `Result<T,E>` | `Result<T,E>` | tagged object | Success-or-error wrapper |
+| `Option<T>` | `Option<T>` | tagged object | Present-or-absent wrapper |
+
+**Map methods:**
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `get(key, default)` | `(K, V) -> V` | Returns value for key, or default if absent |
+| `set(key, value)` | `(K, V) -> Void` | Inserts or updates key-value pair (requires `mutable`) |
+| `contains(key)` | `(K) -> Bool` | Returns true if key exists |
+| `keys()` | `() -> Array<K>` | Returns all keys as an array |
+| `remove(key)` | `(K) -> Void` | Removes key-value pair (requires `mutable`) |
+
+The `len()` builtin works on both `Array<T>` and `Map<K,V>`.
+
+Empty maps are initialized with `[]` and a type annotation: `let mutable m: Map<String, Int> = [];`
+
+### 4.3 Entity Types
 
 Entity types are user-defined nominal types, declared with the `entity` keyword (see Section 7). Each entity declaration introduces a new type whose name can be used as a type annotation. Entity types map to Rust structs.
 
-### 4.3 Type Rules
+### 4.4 Type Rules
 
 - Arithmetic operators (`+`, `-`, `*`, `/`, `%`) require both operands to have the same numeric type (`Int` or `Float`). The result has that same type. Mixed `Int`/`Float` arithmetic is a compile-time error.
 - The `+` operator is also defined for `String` operands (concatenation). The result is `String`.
@@ -198,7 +222,7 @@ Entity types are user-defined nominal types, declared with the `entity` keyword 
 - Method call arguments must match parameter types exactly. The call expression's type is the method's return type.
 - Field access on an entity-typed expression produces the field's declared type.
 
-### 4.4 No Implicit Conversions
+### 4.5 No Implicit Conversions
 
 There are no implicit type conversions. `Int` does not implicitly convert to `Float`, `Bool` does not implicitly convert to `Int`, and so on. All conversions, if needed, must be explicit (and in the POC, no conversion functions are provided -- this is a known limitation).
 
@@ -1436,9 +1460,9 @@ When compiled and run, the program exits with code 0. If any contract is violate
 
 The following features are explicitly deferred from the POC but are candidates for future versions:
 
-- **Arrays and collection types**: `Array<T>` with quantifier expressions in contracts (`forall`, `exists`).
-- **Enums and pattern matching**: Sum types with exhaustive match.
-- **Generics**: Parameterized types and functions.
+- **Quantifier expressions**: `forall` and `exists` over `Array<T>` and `Map<K,V>` in contracts.
+- **Pattern matching**: Exhaustive `match` on enums and `Result`/`Option`.
+- **User-defined generics**: Parameterized types and functions beyond built-in containers.
 - **Imports**: Cross-module references with dependency resolution.
 - **Standard library**: Basic I/O, math, string manipulation.
 - **Proof integration**: Connecting `verified_by` to formal proof tools.

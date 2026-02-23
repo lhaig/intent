@@ -249,6 +249,66 @@ function test_chain(s: String) returns String {
 	}
 }
 
+func TestGenerateMapType(t *testing.T) {
+	src := `module test version "1.0";
+function test_map() returns Int {
+    let mutable m: Map<String, Int> = [];
+    m.set("alice", 100);
+    let v: Int = m.get("alice", 0);
+    let has: Bool = m.contains("alice");
+    let k: Array<String> = m.keys();
+    m.remove("alice");
+    return len(m);
+}
+`
+	output := generateFromSource(t, "map", src)
+
+	expects := []string{
+		"use std::collections::HashMap;",
+		"HashMap::new()",
+		".insert(",
+		".get(&",
+		".cloned().unwrap_or(",
+		".contains_key(&",
+		".keys().cloned().collect::<Vec<_>>()",
+		".remove(&",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}
+
+func TestGenerateMapDemo(t *testing.T) {
+	src, err := os.ReadFile(findExample(t, "map_demo.intent"))
+	if err != nil {
+		t.Fatalf("failed to read map_demo.intent: %v", err)
+	}
+	output := generateFromSource(t, "map_demo", string(src))
+
+	expects := []string{
+		"use std::collections::HashMap;",
+		"struct Config",
+		"HashMap<String, String>",
+		"HashMap<String, i64>",
+		"HashMap::new()",
+		".insert(",
+		".get(&",
+		".cloned().unwrap_or(",
+		".contains_key(&",
+		".keys().cloned().collect::<Vec<_>>()",
+		".remove(&",
+		"(scores.len() as i64)",
+		"fn get_setting(",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}
+
 // findExample locates an example file relative to the project root.
 func findExample(t *testing.T, name string) string {
 	t.Helper()

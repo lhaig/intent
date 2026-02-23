@@ -49,7 +49,13 @@ func Generate(mod *ir.Module) string {
 		g.emitLine("")
 	}
 
-	return g.sb.String()
+	result := g.sb.String()
+	if g.needsHashMap {
+		// Insert use statement after #![allow(...)] line
+		marker := "#![allow(unused_parens, unused_variables, dead_code)]\n"
+		result = strings.Replace(result, marker, marker+"use std::collections::HashMap;\n", 1)
+	}
+	return result
 }
 
 // GenerateAll produces Rust source from a multi-file IR Program.
@@ -70,6 +76,7 @@ func GenerateAll(prog *ir.Program) string {
 	sb.WriteString("// Generated Rust code from Intent (multi-file)\n")
 	sb.WriteString("#![allow(unused_parens, unused_variables, dead_code)]\n\n")
 
+	needsHashMapGlobal := false
 	for _, mod := range prog.Modules {
 		g := &generator{
 			entities:        make(map[string]*ir.Entity),
@@ -108,9 +115,17 @@ func GenerateAll(prog *ir.Program) string {
 		}
 
 		sb.WriteString(g.sb.String())
+		if g.needsHashMap {
+			needsHashMapGlobal = true
+		}
 	}
 
-	return sb.String()
+	output := sb.String()
+	if needsHashMapGlobal {
+		marker := "#![allow(unused_parens, unused_variables, dead_code)]\n"
+		output = strings.Replace(output, marker, marker+"use std::collections::HashMap;\n", 1)
+	}
+	return output
 }
 
 type generator struct {
@@ -122,6 +137,7 @@ type generator struct {
 	inConstructor  bool
 	inLabeledBlock bool
 	ensuresContext bool
+	needsHashMap   bool
 
 	// Multi-file fields
 	namePrefix      string
@@ -192,6 +208,12 @@ func (g *generator) mapType(t *checker.Type) string {
 			return "Option<" + g.mapType(t.TypeParams[0]) + ">"
 		}
 		return "Option<_>"
+	case "Map":
+		if t.IsGeneric && len(t.TypeParams) == 2 {
+			g.needsHashMap = true
+			return "HashMap<" + g.mapType(t.TypeParams[0]) + ", " + g.mapType(t.TypeParams[1]) + ">"
+		}
+		return "HashMap<_, _>"
 	default:
 		return t.Name
 	}
@@ -212,6 +234,9 @@ func (g *generator) defaultValue(t *checker.Type) string {
 		return "false"
 	case "Array":
 		return "Vec::new()"
+	case "Map":
+		g.needsHashMap = true
+		return "HashMap::new()"
 	default:
 		if t.IsEnum && t.EnumInfo != nil {
 			// Use the first unit variant as default
@@ -259,10 +284,10 @@ func (g *generator) generateFunction(f *ir.Function) {
 		g.decIndent()
 		g.emitLine("}")
 	} else {
-		// Track array params for reference passing
+		// arrayRefParams tracks Array and Map params that should be passed by reference
 		arrayRefParams := make(map[string]bool)
 		for _, p := range f.Params {
-			if p.Type != nil && p.Type.Name == "Array" {
+			if p.Type != nil && (p.Type.Name == "Array" || p.Type.Name == "Map") {
 				arrayRefParams[p.Name] = true
 			}
 		}
@@ -278,7 +303,7 @@ func (g *generator) generateFunction(f *ir.Function) {
 				g.emit(", ")
 			}
 			paramType := g.mapType(p.Type)
-			if p.Type != nil && p.Type.Name == "Array" {
+			if p.Type != nil && (p.Type.Name == "Array" || p.Type.Name == "Map") {
 				paramType = "&" + paramType
 			}
 			g.emitf("%s: %s", p.Name, paramType)
@@ -565,8 +590,8 @@ func (g *generator) generateStmt(s ir.Stmt, arrayRefParams map[string]bool) {
 		isMut := stmt.Mutable || g.isEntityType(stmt.Type)
 		valueExpr := g.generateExpr(stmt.Value, arrayRefParams)
 
-		// Clone array ref params when binding
-		if stmt.Type != nil && stmt.Type.Name == "Array" {
+		// Clone array/map ref params when binding
+		if stmt.Type != nil && (stmt.Type.Name == "Array" || stmt.Type.Name == "Map") {
 			if vr, ok := stmt.Value.(*ir.VarRef); ok {
 				if arrayRefParams != nil && arrayRefParams[vr.Name] {
 					valueExpr = valueExpr + ".clone()"
@@ -831,6 +856,10 @@ func (g *generator) generateExpr(e ir.Expr, arrayRefParams map[string]bool) stri
 
 	case *ir.ArrayLit:
 		if len(expr.Elements) == 0 {
+			if expr.Type != nil && expr.Type.Name == "Map" {
+				g.needsHashMap = true
+				return "HashMap::new()"
+			}
 			return "Vec::new()"
 		}
 		elems := make([]string, len(expr.Elements))
@@ -888,7 +917,7 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[strin
 			argStr := g.generateExpr(arg, arrayRefParams)
 			// Pass arrays by reference
 			if funcDef != nil && i < len(funcDef.Params) {
-				if funcDef.Params[i].Type != nil && funcDef.Params[i].Type.Name == "Array" {
+				if funcDef.Params[i].Type != nil && (funcDef.Params[i].Type.Name == "Array" || funcDef.Params[i].Type.Name == "Map") {
 					if _, ok := arg.(*ir.VarRef); ok {
 						argStr = "&" + argStr
 					}
@@ -973,7 +1002,7 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr, arrayRefPara
 		for i, arg := range expr.Args {
 			argStr := g.generateExpr(arg, arrayRefParams)
 			if funcDecl != nil && i < len(funcDecl.Params) {
-				if funcDecl.Params[i].Type != nil && funcDecl.Params[i].Type.Name == "Array" {
+				if funcDecl.Params[i].Type != nil && (funcDecl.Params[i].Type.Name == "Array" || funcDecl.Params[i].Type.Name == "Map") {
 					if _, ok := arg.(*ir.VarRef); ok {
 						argStr = "&" + argStr
 					}
@@ -1017,6 +1046,28 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr, arrayRefPara
 		case "split":
 			arg := g.generateExpr(expr.Args[0], arrayRefParams)
 			return fmt.Sprintf("%s.split(%s.as_str()).map(|s| s.to_string()).collect::<Vec<String>>()", obj, arg)
+		}
+	}
+
+	// Map methods
+	if objType := expr.Object.ExprType(); objType != nil && objType.Name == "Map" {
+		switch expr.Method {
+		case "get":
+			key := g.generateExpr(expr.Args[0], arrayRefParams)
+			def := g.generateExpr(expr.Args[1], arrayRefParams)
+			return fmt.Sprintf("%s.get(&%s).cloned().unwrap_or(%s)", obj, key, def)
+		case "set":
+			key := g.generateExpr(expr.Args[0], arrayRefParams)
+			val := g.generateExpr(expr.Args[1], arrayRefParams)
+			return fmt.Sprintf("%s.insert(%s, %s)", obj, key, val)
+		case "contains":
+			key := g.generateExpr(expr.Args[0], arrayRefParams)
+			return fmt.Sprintf("%s.contains_key(&%s)", obj, key)
+		case "keys":
+			return fmt.Sprintf("%s.keys().cloned().collect::<Vec<_>>()", obj)
+		case "remove":
+			key := g.generateExpr(expr.Args[0], arrayRefParams)
+			return fmt.Sprintf("%s.remove(&%s)", obj, key)
 		}
 	}
 

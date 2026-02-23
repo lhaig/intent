@@ -198,9 +198,14 @@ type_ref = "Int"
          | "String"
          | "Bool"
          | "Void"
+         | "Array" , "<" , type_ref , ">"
+         | "Map" , "<" , type_ref , "," , type_ref , ">"
+         | "Result" , "<" , type_ref , "," , type_ref , ">"
+         | "Option" , "<" , type_ref , ">"
          | identifier ;
-(* The identifier alternative covers entity types. *)
-(* The semantic checker distinguishes built-in types from entity types. *)
+(* The identifier alternative covers entity and enum types. *)
+(* Generic types (Array, Map, Result, Option) are recursive. *)
+(* The semantic checker distinguishes built-in types from user types. *)
 
 
 (* -------------------------------------------------------------------------- *)
