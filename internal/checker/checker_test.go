@@ -2744,3 +2744,133 @@ entry function main() returns Int {
 		t.Errorf("Expected no errors for single-file program, got:\n%s", diag.Format("test"))
 	}
 }
+
+func TestStringMethodLen(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test(s: String) returns Int {
+    return s.len();
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for String.len(), got:\n%s", diag.Format("test"))
+	}
+}
+
+func TestStringMethodToLowercase(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test(s: String) returns String {
+    return s.to_lowercase();
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for String.to_lowercase(), got:\n%s", diag.Format("test"))
+	}
+}
+
+func TestStringMethodTrim(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test(s: String) returns String {
+    return s.trim();
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for String.trim(), got:\n%s", diag.Format("test"))
+	}
+}
+
+func TestStringMethodStartsWith(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test(s: String) returns Bool {
+    return s.starts_with("hello");
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for String.starts_with(), got:\n%s", diag.Format("test"))
+	}
+}
+
+func TestStringMethodContains(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test(s: String) returns Bool {
+    return s.contains("hello");
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for String.contains(), got:\n%s", diag.Format("test"))
+	}
+}
+
+func TestStringMethodSplit(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test(s: String) returns Array<String> {
+    return s.split(",");
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for String.split(), got:\n%s", diag.Format("test"))
+	}
+}
+
+func TestStringMethodChaining(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test(s: String) returns String {
+    return s.trim().to_lowercase();
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for chained String methods, got:\n%s", diag.Format("test"))
+	}
+}
+
+func TestStringMethodUnknown(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test(s: String) returns String {
+    return s.nonexistent();
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for unknown String method")
+	}
+	found := false
+	for _, d := range diag.All() {
+		if strings.Contains(d.Message, "no method") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected 'no method' error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestStringMethodStartsWithWrongArgType(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test(s: String) returns Bool {
+    return s.starts_with(42);
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for starts_with() with Int argument")
+	}
+}
+
+func TestStringMethodLenWithArgs(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test(s: String) returns Int {
+    return s.len("extra");
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for len() with arguments")
+	}
+}

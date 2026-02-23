@@ -930,6 +930,27 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr) string {
 		return fmt.Sprintf("(%s._tag === \"None\")", obj)
 	}
 
+	// String methods
+	if objType := expr.Object.ExprType(); objType != nil && objType.Name == "String" {
+		switch expr.Method {
+		case "len":
+			return fmt.Sprintf("BigInt(%s.length)", obj)
+		case "to_lowercase":
+			return fmt.Sprintf("%s.toLowerCase()", obj)
+		case "trim":
+			return fmt.Sprintf("%s.trim()", obj)
+		case "starts_with":
+			arg := g.generateExpr(expr.Args[0])
+			return fmt.Sprintf("%s.startsWith(%s)", obj, arg)
+		case "contains":
+			arg := g.generateExpr(expr.Args[0])
+			return fmt.Sprintf("%s.includes(%s)", obj, arg)
+		case "split":
+			arg := g.generateExpr(expr.Args[0])
+			return fmt.Sprintf("%s.split(%s)", obj, arg)
+		}
+	}
+
 	args := make([]string, len(expr.Args))
 	for i, arg := range expr.Args {
 		args[i] = g.generateExpr(arg)

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/lhaig/intent/internal/ast"
-	"github.com/lhaig/intent/internal/codegen"
 )
 
 // Generate produces a #[cfg(test)] module with property-based contract tests
@@ -109,9 +108,9 @@ func generateFunctionTest(f *ast.FunctionDecl, entities map[string]*ast.EntityDe
 		if len(f.Ensures) > 0 && f.ReturnType.Name != "Void" {
 			sb.WriteString(fmt.Sprintf("            let __result = %s();\n", f.Name))
 			for _, ens := range f.Ensures {
-				rustExpr := codegen.ExprToRust(ens.Expr, "", "__result", true, entities, enums, functions)
+				rustExpr := ExprToRust(ens.Expr, "", "__result", true, entities, enums, functions)
 				sb.WriteString(fmt.Sprintf("            assert!(%s, \"Postcondition '%s' failed\");\n",
-					rustExpr, codegen.EscapeRustString(ens.RawText)))
+					rustExpr, EscapeRustString(ens.RawText)))
 			}
 		} else {
 			sb.WriteString(fmt.Sprintf("            %s();\n", f.Name))
@@ -136,7 +135,7 @@ func generateFunctionTest(f *ast.FunctionDecl, entities map[string]*ast.EntityDe
 
 		// Filter by preconditions
 		for _, req := range f.Requires {
-			rustExpr := codegen.ExprToRust(req.Expr, "", "", false, entities, enums, functions)
+			rustExpr := ExprToRust(req.Expr, "", "", false, entities, enums, functions)
 			sb.WriteString(fmt.Sprintf("            if !(%s) { continue; }\n", rustExpr))
 		}
 
@@ -147,10 +146,10 @@ func generateFunctionTest(f *ast.FunctionDecl, entities map[string]*ast.EntityDe
 			sb.WriteString(fmt.Sprintf("            let __result = %s(%s);\n", f.Name, args))
 			// Check postconditions
 			for _, ens := range f.Ensures {
-				rustExpr := codegen.ExprToRust(ens.Expr, "", "__result", true, entities, enums, functions)
+				rustExpr := ExprToRust(ens.Expr, "", "__result", true, entities, enums, functions)
 				sb.WriteString(fmt.Sprintf("            assert!(%s,\n                \"Postcondition '%s' failed for %s\",\n                %s);\n",
 					rustExpr,
-					codegen.EscapeRustString(ens.RawText),
+					EscapeRustString(ens.RawText),
 					paramFormatStr(f.Params),
 					paramFormatArgs(f.Params)))
 			}
@@ -239,7 +238,7 @@ func generateConstructorTest(e *ast.EntityDecl, entities map[string]*ast.EntityD
 
 		// Filter by preconditions
 		for _, req := range ctor.Requires {
-			rustExpr := codegen.ExprToRust(req.Expr, "", "", false, entities, enums, functions)
+			rustExpr := ExprToRust(req.Expr, "", "", false, entities, enums, functions)
 			sb.WriteString(fmt.Sprintf("            if !(%s) { continue; }\n", rustExpr))
 		}
 
@@ -249,16 +248,16 @@ func generateConstructorTest(e *ast.EntityDecl, entities map[string]*ast.EntityD
 
 		// Check ensures (self -> __entity)
 		for _, ens := range ctor.Ensures {
-			rustExpr := codegen.ExprToRust(ens.Expr, "__entity", "", true, entities, enums, functions)
+			rustExpr := ExprToRust(ens.Expr, "__entity", "", true, entities, enums, functions)
 			sb.WriteString(fmt.Sprintf("            assert!(%s, \"Constructor postcondition '%s' failed\");\n",
-				rustExpr, codegen.EscapeRustString(ens.RawText)))
+				rustExpr, EscapeRustString(ens.RawText)))
 		}
 
 		// Check invariants
 		for _, inv := range e.Invariants {
-			rustExpr := codegen.ExprToRust(inv.Expr, "__entity", "", false, entities, enums, functions)
+			rustExpr := ExprToRust(inv.Expr, "__entity", "", false, entities, enums, functions)
 			sb.WriteString(fmt.Sprintf("            assert!(%s, \"Invariant '%s' failed after construction\");\n",
-				rustExpr, codegen.EscapeRustString(inv.RawText)))
+				rustExpr, EscapeRustString(inv.RawText)))
 		}
 
 		sb.WriteString("        }\n")
@@ -266,14 +265,14 @@ func generateConstructorTest(e *ast.EntityDecl, entities map[string]*ast.EntityD
 		// No params, just test once
 		sb.WriteString(fmt.Sprintf("        let __entity = %s::new();\n", e.Name))
 		for _, ens := range ctor.Ensures {
-			rustExpr := codegen.ExprToRust(ens.Expr, "__entity", "", true, entities, enums, functions)
+			rustExpr := ExprToRust(ens.Expr, "__entity", "", true, entities, enums, functions)
 			sb.WriteString(fmt.Sprintf("        assert!(%s, \"Constructor postcondition '%s' failed\");\n",
-				rustExpr, codegen.EscapeRustString(ens.RawText)))
+				rustExpr, EscapeRustString(ens.RawText)))
 		}
 		for _, inv := range e.Invariants {
-			rustExpr := codegen.ExprToRust(inv.Expr, "__entity", "", false, entities, enums, functions)
+			rustExpr := ExprToRust(inv.Expr, "__entity", "", false, entities, enums, functions)
 			sb.WriteString(fmt.Sprintf("        assert!(%s, \"Invariant '%s' failed after construction\");\n",
-				rustExpr, codegen.EscapeRustString(inv.RawText)))
+				rustExpr, EscapeRustString(inv.RawText)))
 		}
 	}
 
@@ -326,7 +325,7 @@ func generateMethodTest(e *ast.EntityDecl, m *ast.MethodDecl, entities map[strin
 
 		// Filter by preconditions
 		for _, req := range m.Requires {
-			rustExpr := codegen.ExprToRust(req.Expr, "__entity", "", false, entities, enums, functions)
+			rustExpr := ExprToRust(req.Expr, "__entity", "", false, entities, enums, functions)
 			sb.WriteString(fmt.Sprintf("            if !(%s) { continue; }\n", rustExpr))
 		}
 
@@ -347,21 +346,21 @@ func generateMethodTest(e *ast.EntityDecl, m *ast.MethodDecl, entities map[strin
 
 		// Check ensures
 		for _, ens := range m.Ensures {
-			rustExpr := codegen.ExprToRust(ens.Expr, "__entity", "__result", true, entities, enums, functions)
+			rustExpr := ExprToRust(ens.Expr, "__entity", "__result", true, entities, enums, functions)
 			// Replace old() captures with our pre-captured values
 			for mangledName := range oldCaptures {
 				// The ExprToRust function should handle old() expressions via ensuresCtx
 				_ = mangledName
 			}
 			sb.WriteString(fmt.Sprintf("            assert!(%s, \"Postcondition '%s' failed\");\n",
-				rustExpr, codegen.EscapeRustString(ens.RawText)))
+				rustExpr, EscapeRustString(ens.RawText)))
 		}
 
 		// Check invariants
 		for _, inv := range e.Invariants {
-			rustExpr := codegen.ExprToRust(inv.Expr, "__entity", "", false, entities, enums, functions)
+			rustExpr := ExprToRust(inv.Expr, "__entity", "", false, entities, enums, functions)
 			sb.WriteString(fmt.Sprintf("            assert!(%s, \"Invariant '%s' failed after %s\");\n",
-				rustExpr, codegen.EscapeRustString(inv.RawText), m.Name))
+				rustExpr, EscapeRustString(inv.RawText), m.Name))
 		}
 
 		// Reset entity for next iteration (re-construct)
@@ -382,14 +381,14 @@ func generateMethodTest(e *ast.EntityDecl, m *ast.MethodDecl, entities map[strin
 			sb.WriteString(fmt.Sprintf("        __entity.%s();\n", m.Name))
 		}
 		for _, ens := range m.Ensures {
-			rustExpr := codegen.ExprToRust(ens.Expr, "__entity", "__result", true, entities, enums, functions)
+			rustExpr := ExprToRust(ens.Expr, "__entity", "__result", true, entities, enums, functions)
 			sb.WriteString(fmt.Sprintf("        assert!(%s, \"Postcondition '%s' failed\");\n",
-				rustExpr, codegen.EscapeRustString(ens.RawText)))
+				rustExpr, EscapeRustString(ens.RawText)))
 		}
 		for _, inv := range e.Invariants {
-			rustExpr := codegen.ExprToRust(inv.Expr, "__entity", "", false, entities, enums, functions)
+			rustExpr := ExprToRust(inv.Expr, "__entity", "", false, entities, enums, functions)
 			sb.WriteString(fmt.Sprintf("        assert!(%s, \"Invariant '%s' failed after %s\");\n",
-				rustExpr, codegen.EscapeRustString(inv.RawText), m.Name))
+				rustExpr, EscapeRustString(inv.RawText), m.Name))
 		}
 	}
 
@@ -409,9 +408,9 @@ func generateWorkflowTest(e *ast.EntityDecl, entities map[string]*ast.EntityDecl
 
 	// Check invariants after construction
 	for _, inv := range e.Invariants {
-		rustExpr := codegen.ExprToRust(inv.Expr, "__entity", "", false, entities, enums, functions)
+		rustExpr := ExprToRust(inv.Expr, "__entity", "", false, entities, enums, functions)
 		sb.WriteString(fmt.Sprintf("        assert!(%s, \"Invariant '%s' failed after construction\");\n",
-			rustExpr, codegen.EscapeRustString(inv.RawText)))
+			rustExpr, EscapeRustString(inv.RawText)))
 	}
 
 	// Call each method once with default valid args
@@ -430,7 +429,7 @@ func generateWorkflowTest(e *ast.EntityDecl, entities map[string]*ast.EntityDecl
 		if len(m.Requires) > 0 {
 			var conditions []string
 			for _, req := range m.Requires {
-				rustExpr := codegen.ExprToRust(req.Expr, "__entity", "", false, entities, enums, functions)
+				rustExpr := ExprToRust(req.Expr, "__entity", "", false, entities, enums, functions)
 				conditions = append(conditions, rustExpr)
 			}
 			sb.WriteString(fmt.Sprintf("        if %s {\n", strings.Join(conditions, " && ")))
@@ -444,9 +443,9 @@ func generateWorkflowTest(e *ast.EntityDecl, entities map[string]*ast.EntityDecl
 
 			// Check invariants after each method call
 			for _, inv := range e.Invariants {
-				rustExpr := codegen.ExprToRust(inv.Expr, "__entity", "", false, entities, enums, functions)
+				rustExpr := ExprToRust(inv.Expr, "__entity", "", false, entities, enums, functions)
 				sb.WriteString(fmt.Sprintf("            assert!(%s, \"Invariant '%s' failed after %s in workflow\");\n",
-					rustExpr, codegen.EscapeRustString(inv.RawText), m.Name))
+					rustExpr, EscapeRustString(inv.RawText), m.Name))
 			}
 			sb.WriteString("        }\n")
 		} else {
@@ -457,9 +456,9 @@ func generateWorkflowTest(e *ast.EntityDecl, entities map[string]*ast.EntityDecl
 				sb.WriteString(fmt.Sprintf("        __entity.%s(%s);\n", m.Name, methodArgs))
 			}
 			for _, inv := range e.Invariants {
-				rustExpr := codegen.ExprToRust(inv.Expr, "__entity", "", false, entities, enums, functions)
+				rustExpr := ExprToRust(inv.Expr, "__entity", "", false, entities, enums, functions)
 				sb.WriteString(fmt.Sprintf("        assert!(%s, \"Invariant '%s' failed after %s in workflow\");\n",
-					rustExpr, codegen.EscapeRustString(inv.RawText), m.Name))
+					rustExpr, EscapeRustString(inv.RawText), m.Name))
 			}
 		}
 	}
@@ -502,11 +501,11 @@ func rustTypeForParam(p *ast.Param) string {
 		return "String"
 	case "Array":
 		if len(p.Type.TypeArgs) > 0 {
-			return "Vec<" + codegen.MapType(p.Type.TypeArgs[0]) + ">"
+			return "Vec<" + MapType(p.Type.TypeArgs[0]) + ">"
 		}
 		return "Vec<i64>"
 	default:
-		return codegen.MapType(p.Type)
+		return MapType(p.Type)
 	}
 }
 
@@ -676,7 +675,7 @@ func walkForOld(expr ast.Expression, captures map[string]string, entities map[st
 		walkForOld(e.Operand, captures, entities, enums, functions)
 	case *ast.OldExpr:
 		mangledName := mangleOldExpr(e.Expr)
-		rustExpr := codegen.ExprToRust(e.Expr, "__entity", "", false, entities, enums, functions)
+		rustExpr := ExprToRust(e.Expr, "__entity", "", false, entities, enums, functions)
 		captures[mangledName] = rustExpr
 		walkForOld(e.Expr, captures, entities, enums, functions)
 	case *ast.CallExpr:

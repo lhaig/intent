@@ -999,6 +999,27 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr, arrayRefPara
 		return fmt.Sprintf("%s.%s()", obj, expr.Method)
 	}
 
+	// String methods
+	if objType := expr.Object.ExprType(); objType != nil && objType.Name == "String" {
+		switch expr.Method {
+		case "len":
+			return fmt.Sprintf("(%s.len() as i64)", obj)
+		case "to_lowercase":
+			return fmt.Sprintf("%s.to_lowercase()", obj)
+		case "trim":
+			return fmt.Sprintf("%s.trim().to_string()", obj)
+		case "starts_with":
+			arg := g.generateExpr(expr.Args[0], arrayRefParams)
+			return fmt.Sprintf("%s.starts_with(%s.as_str())", obj, arg)
+		case "contains":
+			arg := g.generateExpr(expr.Args[0], arrayRefParams)
+			return fmt.Sprintf("%s.contains(%s.as_str())", obj, arg)
+		case "split":
+			arg := g.generateExpr(expr.Args[0], arrayRefParams)
+			return fmt.Sprintf("%s.split(%s.as_str()).map(|s| s.to_string()).collect::<Vec<String>>()", obj, arg)
+		}
+	}
+
 	args := make([]string, len(expr.Args))
 	for i, arg := range expr.Args {
 		args[i] = g.generateExpr(arg, arrayRefParams)

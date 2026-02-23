@@ -1452,6 +1452,45 @@ func (c *Checker) checkMethodCallExpr(expr *ast.MethodCallExpr, scope *Scope) *T
 		}
 	}
 
+	// Handle String methods
+	if objType.Name == "String" {
+		switch expr.Method {
+		case "len":
+			if len(expr.Args) != 0 {
+				c.diag.Errorf(line, col, "len() requires no arguments, got %d", len(expr.Args))
+			}
+			return TypeInt
+		case "to_lowercase", "trim":
+			if len(expr.Args) != 0 {
+				c.diag.Errorf(line, col, "%s() requires no arguments, got %d", expr.Method, len(expr.Args))
+			}
+			return TypeString
+		case "starts_with", "contains":
+			if len(expr.Args) != 1 {
+				c.diag.Errorf(line, col, "%s() requires exactly 1 argument, got %d", expr.Method, len(expr.Args))
+				return TypeBool
+			}
+			argType := c.checkExpression(expr.Args[0], scope)
+			if argType != nil && !argType.Equal(TypeString) {
+				c.diag.Errorf(line, col, "%s() argument must be String, got %s", expr.Method, argType.String())
+			}
+			return TypeBool
+		case "split":
+			if len(expr.Args) != 1 {
+				c.diag.Errorf(line, col, "split() requires exactly 1 argument, got %d", len(expr.Args))
+				return &Type{Name: "Array", IsGeneric: true, TypeParams: []*Type{TypeString}}
+			}
+			argType := c.checkExpression(expr.Args[0], scope)
+			if argType != nil && !argType.Equal(TypeString) {
+				c.diag.Errorf(line, col, "split() argument must be String, got %s", argType.String())
+			}
+			return &Type{Name: "Array", IsGeneric: true, TypeParams: []*Type{TypeString}}
+		default:
+			c.diag.Errorf(line, col, "String has no method '%s'", expr.Method)
+			return nil
+		}
+	}
+
 	if !objType.IsEntity {
 		c.diag.Errorf(line, col, "cannot call method on non-entity type %s", objType.Name)
 		return nil

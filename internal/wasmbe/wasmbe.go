@@ -909,6 +909,8 @@ func (fc *funcCompiler) compileMethodCallExpr(e *ir.MethodCallExpr) {
 		return
 	}
 
+	// String methods - stub (return zero/default)
+	// len -> 0, to_lowercase/trim -> stub, starts_with/contains -> false, split -> stub
 	// Regular method call - simplified
 	fc.body = append(fc.body, opI64Const)
 	fc.body = append(fc.body, encodeLEB128S(0)...)

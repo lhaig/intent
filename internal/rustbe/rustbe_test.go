@@ -7,132 +7,246 @@ import (
 	"testing"
 
 	"github.com/lhaig/intent/internal/checker"
-	"github.com/lhaig/intent/internal/codegen"
 	"github.com/lhaig/intent/internal/ir"
 	"github.com/lhaig/intent/internal/parser"
 )
 
-// compareOutput runs both pipelines (old: AST->codegen, new: AST->check->lower->rustbe)
-// on the given source and asserts identical output.
-func compareOutput(t *testing.T, name, src string) {
+// generateFromSource runs the new pipeline (parse -> check -> lower -> rustbe)
+// and returns the generated Rust source.
+func generateFromSource(t *testing.T, name, src string) string {
 	t.Helper()
 
-	// Old pipeline: AST -> codegen
 	p := parser.New(src)
 	prog := p.Parse()
 	if p.Diagnostics().HasErrors() {
 		t.Fatalf("[%s] parse errors: %s", name, p.Diagnostics().Format("test"))
 	}
-	diag := checker.Check(prog)
-	if diag.HasErrors() {
-		t.Fatalf("[%s] check errors: %s", name, diag.Format("test"))
-	}
-	oldOutput := codegen.Generate(prog)
-
-	// New pipeline: AST -> check with result -> lower -> rustbe
-	p2 := parser.New(src)
-	prog2 := p2.Parse()
-	result := checker.CheckWithResult(prog2)
+	result := checker.CheckWithResult(prog)
 	if result.Diagnostics.HasErrors() {
-		t.Fatalf("[%s] check errors (new): %s", name, result.Diagnostics.Format("test"))
+		t.Fatalf("[%s] check errors: %s", name, result.Diagnostics.Format("test"))
 	}
-	mod := ir.Lower(prog2, result)
-	newOutput := Generate(mod)
-
-	if oldOutput != newOutput {
-		// Find first difference for debugging
-		oldLines := strings.Split(oldOutput, "\n")
-		newLines := strings.Split(newOutput, "\n")
-		for i := 0; i < len(oldLines) || i < len(newLines); i++ {
-			var oldLine, newLine string
-			if i < len(oldLines) {
-				oldLine = oldLines[i]
-			}
-			if i < len(newLines) {
-				newLine = newLines[i]
-			}
-			if oldLine != newLine {
-				t.Errorf("[%s] output differs at line %d:\n  old: %q\n  new: %q", name, i+1, oldLine, newLine)
-				break
-			}
-		}
-		t.Logf("[%s] old output (%d bytes):\n%s", name, len(oldOutput), oldOutput)
-		t.Logf("[%s] new output (%d bytes):\n%s", name, len(newOutput), newOutput)
-	}
+	mod := ir.Lower(prog, result)
+	return Generate(mod)
 }
 
-func TestCompareHello(t *testing.T) {
+func TestGenerateHello(t *testing.T) {
 	src := `module hello version "1.0";
 entry function main() returns Int {
     print("Hello, Intent!");
     return 0;
 }
 `
-	compareOutput(t, "hello", src)
+	output := generateFromSource(t, "hello", src)
+
+	expects := []string{
+		"fn __intent_main() -> i64",
+		`println!("{}"`,
+		`"Hello, Intent!".to_string()`,
+		"fn main()",
+		"std::process::exit",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
 }
 
-func TestCompareBankAccount(t *testing.T) {
+func TestGenerateBankAccount(t *testing.T) {
 	src, err := os.ReadFile(findExample(t, "bank_account.intent"))
 	if err != nil {
 		t.Fatalf("failed to read bank_account.intent: %v", err)
 	}
-	compareOutput(t, "bank_account", string(src))
+	output := generateFromSource(t, "bank_account", string(src))
+
+	expects := []string{
+		"struct BankAccount",
+		"fn new(",
+		"fn deposit(",
+		"fn withdraw(",
+		"fn get_balance(",
+		"__check_invariants",
+		"assert!(",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
 }
 
-func TestCompareFibonacci(t *testing.T) {
+func TestGenerateFibonacci(t *testing.T) {
 	src, err := os.ReadFile(findExample(t, "fibonacci.intent"))
 	if err != nil {
 		t.Fatalf("failed to read fibonacci.intent: %v", err)
 	}
-	compareOutput(t, "fibonacci", string(src))
+	output := generateFromSource(t, "fibonacci", string(src))
+
+	expects := []string{
+		"fn fib(",
+		"i64",
+		"assert!(",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
 }
 
-func TestCompareArraySum(t *testing.T) {
+func TestGenerateArraySum(t *testing.T) {
 	src, err := os.ReadFile(findExample(t, "array_sum.intent"))
 	if err != nil {
 		t.Fatalf("failed to read array_sum.intent: %v", err)
 	}
-	compareOutput(t, "array_sum", string(src))
+	output := generateFromSource(t, "array_sum", string(src))
+
+	expects := []string{
+		"Vec<i64>",
+		"fn sum_array(",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
 }
 
-func TestCompareEnumBasic(t *testing.T) {
+func TestGenerateEnumBasic(t *testing.T) {
 	src, err := os.ReadFile(findExample(t, "enum_basic.intent"))
 	if err != nil {
 		t.Fatalf("failed to read enum_basic.intent: %v", err)
 	}
-	compareOutput(t, "enum_basic", string(src))
+	output := generateFromSource(t, "enum_basic", string(src))
+
+	expects := []string{
+		"enum ",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
 }
 
-func TestCompareSortedCheck(t *testing.T) {
+func TestGenerateSortedCheck(t *testing.T) {
 	src, err := os.ReadFile(findExample(t, "sorted_check.intent"))
 	if err != nil {
 		t.Fatalf("failed to read sorted_check.intent: %v", err)
 	}
-	compareOutput(t, "sorted_check", string(src))
+	output := generateFromSource(t, "sorted_check", string(src))
+
+	expects := []string{
+		"fn check_sorted(",
+		"Vec<i64>",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
 }
 
-func TestCompareShapeArea(t *testing.T) {
+func TestGenerateShapeArea(t *testing.T) {
 	src, err := os.ReadFile(findExample(t, "shape_area.intent"))
 	if err != nil {
 		t.Fatalf("failed to read shape_area.intent: %v", err)
 	}
-	compareOutput(t, "shape_area", string(src))
+	output := generateFromSource(t, "shape_area", string(src))
+
+	expects := []string{
+		"enum ",
+		"f64",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
 }
 
-func TestCompareResultOption(t *testing.T) {
+func TestGenerateResultOption(t *testing.T) {
 	src, err := os.ReadFile(findExample(t, "result_option.intent"))
 	if err != nil {
 		t.Fatalf("failed to read result_option.intent: %v", err)
 	}
-	compareOutput(t, "result_option", string(src))
+	output := generateFromSource(t, "result_option", string(src))
+
+	expects := []string{
+		"Result<",
+		"Option<",
+		"Ok(",
+		"Err(",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
 }
 
-func TestCompareTryOperator(t *testing.T) {
+func TestGenerateTryOperator(t *testing.T) {
 	src, err := os.ReadFile(findExample(t, "try_operator.intent"))
 	if err != nil {
 		t.Fatalf("failed to read try_operator.intent: %v", err)
 	}
-	compareOutput(t, "try_operator", string(src))
+	output := generateFromSource(t, "try_operator", string(src))
+
+	if !strings.Contains(output, "?") {
+		t.Errorf("expected output to contain try operator '?', got:\n%s", output)
+	}
+}
+
+func TestGenerateStringMethods(t *testing.T) {
+	src := `module test version "1.0";
+
+function test_len(s: String) returns Int {
+    return s.len();
+}
+
+function test_to_lowercase(s: String) returns String {
+    return s.to_lowercase();
+}
+
+function test_trim(s: String) returns String {
+    return s.trim();
+}
+
+function test_starts_with(s: String) returns Bool {
+    return s.starts_with("hello");
+}
+
+function test_contains(s: String) returns Bool {
+    return s.contains("world");
+}
+
+function test_split(s: String) returns Array<String> {
+    return s.split(",");
+}
+
+function test_chain(s: String) returns String {
+    return s.trim().to_lowercase();
+}
+`
+	output := generateFromSource(t, "string_methods", src)
+
+	tests := []struct {
+		name     string
+		expected string
+	}{
+		{"len", "(s.len() as i64)"},
+		{"to_lowercase", "s.to_lowercase()"},
+		{"trim", "s.trim().to_string()"},
+		{"starts_with", "s.starts_with("},
+		{"contains", "s.contains("},
+		{"split", "s.split("},
+		{"split_collect", "collect::<Vec<String>>()"},
+	}
+	for _, tt := range tests {
+		if !strings.Contains(output, tt.expected) {
+			t.Errorf("[%s] expected output to contain %q, got:\n%s", tt.name, tt.expected, output)
+		}
+	}
 }
 
 // findExample locates an example file relative to the project root.

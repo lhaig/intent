@@ -7,6 +7,7 @@ import (
 	"github.com/lhaig/intent/internal/checker"
 	"github.com/lhaig/intent/internal/ir"
 	"github.com/lhaig/intent/internal/lexer"
+	"github.com/lhaig/intent/internal/parser"
 )
 
 func TestGenerateHello(t *testing.T) {
@@ -374,5 +375,67 @@ func TestGenerateStringInterp(t *testing.T) {
 	}
 	if !strings.Contains(result, "`Hello ") {
 		t.Errorf("Expected backtick template literal, got:\n%s", result)
+	}
+}
+
+func generateJSFromSource(t *testing.T, name, src string) string {
+	t.Helper()
+	p := parser.New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("[%s] parse errors: %s", name, p.Diagnostics().Format("test"))
+	}
+	result := checker.CheckWithResult(prog)
+	if result.Diagnostics.HasErrors() {
+		t.Fatalf("[%s] check errors: %s", name, result.Diagnostics.Format("test"))
+	}
+	mod := ir.Lower(prog, result)
+	return Generate(mod)
+}
+
+func TestGenerateStringMethods(t *testing.T) {
+	src := `module test version "1.0";
+
+function test_len(s: String) returns Int {
+    return s.len();
+}
+
+function test_to_lowercase(s: String) returns String {
+    return s.to_lowercase();
+}
+
+function test_trim(s: String) returns String {
+    return s.trim();
+}
+
+function test_starts_with(s: String) returns Bool {
+    return s.starts_with("hello");
+}
+
+function test_contains(s: String) returns Bool {
+    return s.contains("world");
+}
+
+function test_split(s: String) returns Array<String> {
+    return s.split(",");
+}
+`
+	output := generateJSFromSource(t, "string_methods", src)
+
+	tests := []struct {
+		name     string
+		expected string
+	}{
+		{"len", "BigInt(s.length)"},
+		{"to_lowercase", "s.toLowerCase()"},
+		{"trim", "s.trim()"},
+		{"starts_with", "s.startsWith("},
+		{"contains", "s.includes("},
+		{"split", "s.split("},
+	}
+	for _, tt := range tests {
+		if !strings.Contains(output, tt.expected) {
+			t.Errorf("[%s] expected output to contain %q, got:\n%s", tt.name, tt.expected, output)
+		}
 	}
 }
