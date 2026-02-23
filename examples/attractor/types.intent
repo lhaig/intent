@@ -52,14 +52,16 @@ public entity Outcome {
     field preferred_label: String;
     field notes: String;
     field failure_reason: String;
+    field suggested_next_ids: Array<String>;
 
-    constructor(status: StageStatus, preferred_label: String, notes: String, failure_reason: String)
+    constructor(status: StageStatus, preferred_label: String, notes: String, failure_reason: String, suggested_next_ids: Array<String>)
         requires true
     {
         self.status = status;
         self.preferred_label = preferred_label;
         self.notes = notes;
         self.failure_reason = failure_reason;
+        self.suggested_next_ids = suggested_next_ids;
     }
 
     method is_success() returns Bool
@@ -256,19 +258,22 @@ public entity GraphMeta {
 public entity Checkpoint {
     field current_node: String;
     field completed_count: Int;
+    field completed_nodes: Array<String>;
 
     invariant self.completed_count >= 0;
 
-    constructor(current_node: String, completed_count: Int)
+    constructor(current_node: String, completed_count: Int, completed_nodes: Array<String>)
         requires completed_count >= 0
     {
         self.current_node = current_node;
         self.completed_count = completed_count;
+        self.completed_nodes = completed_nodes;
     }
 
     method advance(next_node: String) returns Void
         ensures self.completed_count == old(self.completed_count) + 1
     {
+        self.completed_nodes.push(self.current_node);
         self.current_node = next_node;
         self.completed_count = self.completed_count + 1;
     }

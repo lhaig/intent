@@ -8,7 +8,7 @@ This is preferable to designing language features in the abstract: every additio
 
 ## Current Coverage
 
-**Phase 1 (complete):** Structural and logical skeleton — ~40% of the spec by section count.
+**Phase 1-3 (complete):** Structural and logical skeleton, string stdlib, Array\<String\> entity fields — ~55% of the spec by section count.
 
 | Spec Area | Status | Files |
 |-----------|--------|-------|
@@ -33,11 +33,8 @@ Both single-file (`attractor.intent`) and multi-file (`main.intent`) versions co
 
 ### Known limitations in current implementation
 
-- `edge_matches_condition()` hard-codes ~15 string patterns instead of parsing conditions dynamically
-- `normalize_label()` is a stub (returns input unchanged)
-- `suggested_next_ids` field omitted from Outcome (needs Array\<String\>)
 - Context type entirely absent (needs Map\<K,V\>)
-- Checkpoint only tracks count, not completed_nodes list or node_retries map
+- Checkpoint `node_retries` map not yet implemented (needs Map\<K,V\>)
 
 ## Gap-to-Feature Mapping
 
@@ -160,3 +157,5 @@ Each phase should produce both a language improvement and a visible expansion of
 | Date | What | Bugs/Gaps Found |
 |------|------|-----------------|
 | 2026-02-20 | Phase 1 complete: 8 codegen/checker bugs fixed, single-file and multi-file compile and run | enum defaults, &self/&mut self, String cloning, cross-module resolution, empty arrays, verified_by for constructors and functions |
+| 2026-02-20 | Phase 2 complete: String stdlib (6 methods), legacy codegen removed, dynamic condition parsing | Array.len() method not available (use len() builtin), Rust borrow checker issues with entity methods on borrowed refs |
+| 2026-02-23 | Phase 3 complete: Array\<String\> entity fields, full 5-step edge selection, BFS reachability, Checkpoint.completed_nodes | No compiler changes needed — Array\<String\> on entity fields already worked |

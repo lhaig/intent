@@ -142,6 +142,63 @@ public function decision_nodes_valid(nodes: Array<NodeAttr>, node_count: Int, ed
     return all_valid;
 }
 
+// Check if a string array contains a target value.
+public function string_array_contains(arr: Array<String>, count: Int, target: String) returns Bool
+    requires count >= 0
+    ensures true
+{
+    let mutable found: Bool = false;
+    for i in 0..count {
+        if arr[i] == target {
+            found = true;
+        }
+    }
+    return found;
+}
+
+// BFS-based reachability check: returns true if all nodes are reachable from start_id.
+// Uses Array<String> as both a worklist (queue) and a visited set.
+public function all_nodes_reachable(nodes: Array<NodeAttr>, node_count: Int, edges: Array<EdgeAttr>, edge_count: Int, start_id: String) returns Bool
+    requires node_count >= 0
+    requires edge_count >= 0
+    ensures true
+{
+    // Build worklist starting with start_id.
+    let mutable visited: Array<String> = [];
+    visited.push(start_id);
+    let mutable visited_count: Int = 1;
+
+    // BFS: process each element in visited as a queue.
+    // We use a read index to walk through the queue.
+    let mutable read_idx: Int = 0;
+    while read_idx < visited_count {
+        let current: String = visited[read_idx];
+        read_idx = read_idx + 1;
+
+        // Find all edges from current node and add unvisited targets.
+        for i in 0..edge_count {
+            if edges[i].from_node == current {
+                let target: String = edges[i].to_node;
+                let already: Bool = string_array_contains(visited, visited_count, target);
+                if not already {
+                    visited.push(target);
+                    visited_count = visited_count + 1;
+                }
+            }
+        }
+    }
+
+    // Check that every node was visited.
+    let mutable all_reached: Bool = true;
+    for i in 0..node_count {
+        let reached: Bool = string_array_contains(visited, visited_count, nodes[i].id);
+        if not reached {
+            all_reached = false;
+        }
+    }
+    return all_reached;
+}
+
 intent "Graph structural integrity" {
     goal: "Validation rules enforce Attractor spec Section 7 invariants";
     guarantee: "No graph with structural errors can pass validation";

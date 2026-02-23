@@ -46,11 +46,29 @@ entry function main() returns Int {
     print(no_outgoing);
     print(targets_ok);
 
-    // Test edge selection with a success outcome
+    // Test edge selection with a success outcome (no suggested IDs)
     let outcome_str: String = attractor_edge_selection.status_to_string(Success);
-    let selected: Int = attractor_edge_selection.select_edge(edges, edge_count, outcome_str, "");
+    let mutable empty_suggestions: Array<String> = [];
+    let selected: Int = attractor_edge_selection.select_edge(edges, edge_count, outcome_str, "", empty_suggestions, 0);
 
     print(selected);
+
+    // Test edge selection Step 3: suggested next IDs
+    let mutable suggestions: Array<String> = [];
+    suggestions.push("exit");
+    let step3_selected: Int = attractor_edge_selection.select_edge(edges, edge_count, "unknown_status", "", suggestions, 1);
+    print(step3_selected);
+
+    // Test reachability
+    let reachable: Bool = attractor_validation.all_nodes_reachable(nodes, node_count, edges, edge_count, "start");
+    print(reachable);
+
+    // Test checkpoint with completed_nodes tracking
+    let mutable cp: Checkpoint = Checkpoint("start", 0, []);
+    cp.advance("run_tests");
+    cp.advance("exit");
+    print(cp.completed_count);
+    print(len(cp.completed_nodes));
 
     // Test retry policy
     let policy: RetryPolicy = attractor_retry.build_retry_policy(3, 50);

@@ -26,14 +26,16 @@ entity Outcome {
     field preferred_label: String;
     field notes: String;
     field failure_reason: String;
+    field suggested_next_ids: Array<String>;
 
-    constructor(status: StageStatus, preferred_label: String, notes: String, failure_reason: String)
+    constructor(status: StageStatus, preferred_label: String, notes: String, failure_reason: String, suggested_next_ids: Array<String>)
         requires true
     {
         self.status = status;
         self.preferred_label = preferred_label;
         self.notes = notes;
         self.failure_reason = failure_reason;
+        self.suggested_next_ids = suggested_next_ids;
     }
 
     method is_success() returns Bool
@@ -230,19 +232,22 @@ entity GraphMeta {
 entity Checkpoint {
     field current_node: String;
     field completed_count: Int;
+    field completed_nodes: Array<String>;
 
     invariant self.completed_count >= 0;
 
-    constructor(current_node: String, completed_count: Int)
+    constructor(current_node: String, completed_count: Int, completed_nodes: Array<String>)
         requires completed_count >= 0
     {
         self.current_node = current_node;
         self.completed_count = completed_count;
+        self.completed_nodes = completed_nodes;
     }
 
     method advance(next_node: String) returns Void
         ensures self.completed_count == old(self.completed_count) + 1
     {
+        self.completed_nodes.push(self.current_node);
         self.current_node = next_node;
         self.completed_count = self.completed_count + 1;
     }
@@ -424,11 +429,9 @@ function decision_nodes_valid(nodes: Array<NodeAttr>, node_count: Int, edges: Ar
 
 // --- Edge selection functions ---
 
-// NOTE: Intent does not yet expose string lowercase or trim methods.
-// This function documents the gap and returns the label unchanged.
-// When string methods are available, implement: label.trim().lowercase()
+// Normalize a label by trimming whitespace and converting to lowercase.
 function normalize_label(label: String) returns String {
-    return label;
+    return label.trim().to_lowercase();
 }
 
 // Collect all edges originating from node_id.
@@ -465,52 +468,45 @@ function evaluate_clause(clause_key: String, clause_op: String, clause_value: St
     return false;
 }
 
+// Parse a single condition clause dynamically using string methods.
+// Supported forms: "key=value", "key!=value"
+// Returns (clause_key, clause_op, clause_value) by evaluating against outcome and label.
+function parse_and_evaluate_clause(clause: String, outcome_status: String, preferred_label: String) returns Bool {
+    let trimmed: String = clause.trim();
+
+    // Check for "!=" operator first (before "=" to avoid partial match)
+    if trimmed.contains("!=") {
+        let parts: Array<String> = trimmed.split("!=");
+        if len(parts) == 2 {
+            return evaluate_clause(parts[0].trim(), "!=", parts[1].trim(), outcome_status, preferred_label);
+        }
+        return false;
+    }
+
+    // Check for "=" operator
+    if trimmed.contains("=") {
+        let parts: Array<String> = trimmed.split("=");
+        if len(parts) == 2 {
+            return evaluate_clause(parts[0].trim(), "=", parts[1].trim(), outcome_status, preferred_label);
+        }
+        return false;
+    }
+
+    // No recognized operator
+    return false;
+}
+
 // Evaluate whether an edge's condition matches the current outcome and preferred label.
 // Unconditional edges (empty condition string) always return false here; they are
 // handled separately in the highest-weight step.
-// NOTE: Full && / || parsing requires string split methods not yet in Intent.
-// Only single-clause conditions are supported. The condition string must be one of:
-//   "outcome=<value>", "outcome!=<value>",
-//   "preferred_label=<value>", "preferred_label!=<value>"
+// Supports single-clause conditions parsed dynamically using string split.
 function edge_matches_condition(edge: EdgeAttr, outcome_status: String, preferred_label: String) returns Bool {
     if edge.condition == "" {
         return false;
     }
 
-    // Simplified single-clause parsing via known patterns.
-    // "outcome=<value>"
-    if edge.condition == "outcome=success" {
-        return evaluate_clause("outcome", "=", "success", outcome_status, preferred_label);
-    }
-    if edge.condition == "outcome=fail" {
-        return evaluate_clause("outcome", "=", "fail", outcome_status, preferred_label);
-    }
-    if edge.condition == "outcome=retry" {
-        return evaluate_clause("outcome", "=", "retry", outcome_status, preferred_label);
-    }
-    if edge.condition == "outcome=partial_success" {
-        return evaluate_clause("outcome", "=", "partial_success", outcome_status, preferred_label);
-    }
-    if edge.condition == "outcome=skipped" {
-        return evaluate_clause("outcome", "=", "skipped", outcome_status, preferred_label);
-    }
-    // "outcome!=<value>"
-    if edge.condition == "outcome!=success" {
-        return evaluate_clause("outcome", "!=", "success", outcome_status, preferred_label);
-    }
-    if edge.condition == "outcome!=fail" {
-        return evaluate_clause("outcome", "!=", "fail", outcome_status, preferred_label);
-    }
-    if edge.condition == "outcome!=retry" {
-        return evaluate_clause("outcome", "!=", "retry", outcome_status, preferred_label);
-    }
-    if edge.condition == "outcome!=partial_success" {
-        return evaluate_clause("outcome", "!=", "partial_success", outcome_status, preferred_label);
-    }
-
-    // Unknown / compound condition: conservatively return false.
-    // Full parsing requires string split — document gap and revisit.
-    return false;
+    // Dynamic single-clause parsing using string methods.
+    return parse_and_evaluate_clause(edge.condition, outcome_status, preferred_label);
 }
 
 // Step 1: Find the index of the first edge whose condition matches.
@@ -555,6 +551,30 @@ function find_preferred_label_edge(edges: Array<EdgeAttr>, edge_count: Int, pref
     return found_idx;
 }
 
+// Step 3: Find the first edge whose to_node matches any of the suggested next IDs.
+// Returns the index into `edges`, or -1 if no match is found.
+function find_suggested_next_edge(edges: Array<EdgeAttr>, edge_count: Int, suggested_next_ids: Array<String>, suggested_count: Int) returns Int
+    requires edge_count >= 0
+    requires suggested_count >= 0
+    ensures result >= -1
+{
+    let mutable found_idx: Int = -1;
+    let mutable done: Bool = false;
+    for i in 0..edge_count {
+        if not done {
+            for j in 0..suggested_count {
+                if not done {
+                    if edges[i].to_node == suggested_next_ids[j] {
+                        found_idx = i;
+                        done = true;
+                    }
+                }
+            }
+        }
+    }
+    return found_idx;
+}
+
 // Steps 4 & 5: Among unconditional edges, find the one with the highest weight.
 // First-encountered highest-weight edge wins (lexical tiebreak requires string
 // lt/gt comparison not yet available in Intent).
@@ -593,13 +613,14 @@ function status_to_string(status: StageStatus) returns String {
 // Priority order:
 //   1. Condition-matching edges
 //   2. Preferred label match
-//   3. Suggested next IDs (skipped - requires Array<String> field in Outcome)
+//   3. Suggested next IDs
 //   4. Highest weight among unconditional edges
 //   5. Lexical tiebreak (simplified: first-wins for equal weights)
 //
 // Returns the index into `edges` of the selected edge, or -1 if edge_count == 0.
-function select_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: String, preferred_label: String) returns Int
+function select_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: String, preferred_label: String, suggested_next_ids: Array<String>, suggested_count: Int) returns Int
     requires edge_count >= 0
+    requires suggested_count >= 0
     ensures result >= -1
     ensures result < edge_count
 {
@@ -619,7 +640,11 @@ function select_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: St
         return step2;
     }
 
-    // Step 3: suggested next IDs - skipped (needs Array<String> field in Outcome).
+    // Step 3: suggested next IDs.
+    let step3: Int = find_suggested_next_edge(edges, edge_count, suggested_next_ids, suggested_count);
+    if step3 >= 0 {
+        return step3;
+    }
 
     // Steps 4+5: highest weight unconditional edge.
     let step4: Int = find_highest_weight_edge(edges, edge_count);
@@ -629,6 +654,60 @@ function select_edge(edges: Array<EdgeAttr>, edge_count: Int, outcome_status: St
 
     // Fallback: first edge.
     return 0;
+}
+
+// --- Reachability functions ---
+
+// Check if a string array contains a target value.
+function string_array_contains(arr: Array<String>, count: Int, target: String) returns Bool
+    requires count >= 0
+    ensures true
+{
+    let mutable found: Bool = false;
+    for i in 0..count {
+        if arr[i] == target {
+            found = true;
+        }
+    }
+    return found;
+}
+
+// BFS-based reachability check: returns true if all nodes are reachable from start_id.
+// Uses Array<String> as both a worklist (queue) and a visited set.
+function all_nodes_reachable(nodes: Array<NodeAttr>, node_count: Int, edges: Array<EdgeAttr>, edge_count: Int, start_id: String) returns Bool
+    requires node_count >= 0
+    requires edge_count >= 0
+    ensures true
+{
+    let mutable visited: Array<String> = [];
+    visited.push(start_id);
+    let mutable visited_count: Int = 1;
+
+    let mutable read_idx: Int = 0;
+    while read_idx < visited_count {
+        let current: String = visited[read_idx];
+        read_idx = read_idx + 1;
+
+        for i in 0..edge_count {
+            if edges[i].from_node == current {
+                let target: String = edges[i].to_node;
+                let already: Bool = string_array_contains(visited, visited_count, target);
+                if not already {
+                    visited.push(target);
+                    visited_count = visited_count + 1;
+                }
+            }
+        }
+    }
+
+    let mutable all_reached: Bool = true;
+    for i in 0..node_count {
+        let reached: Bool = string_array_contains(visited, visited_count, nodes[i].id);
+        if not reached {
+            all_reached = false;
+        }
+    }
+    return all_reached;
 }
 
 // --- Retry functions ---
@@ -758,11 +837,29 @@ entry function main() returns Int {
     print(no_outgoing);
     print(targets_ok);
 
-    // Test edge selection with a success outcome
+    // Test edge selection with a success outcome (no suggested IDs)
     let outcome_str: String = status_to_string(Success);
-    let selected: Int = select_edge(edges, edge_count, outcome_str, "");
+    let mutable empty_suggestions: Array<String> = [];
+    let selected: Int = select_edge(edges, edge_count, outcome_str, "", empty_suggestions, 0);
 
     print(selected);
+
+    // Test edge selection Step 3: suggested next IDs
+    let mutable suggestions: Array<String> = [];
+    suggestions.push("exit");
+    let step3_selected: Int = select_edge(edges, edge_count, "unknown_status", "", suggestions, 1);
+    print(step3_selected);
+
+    // Test reachability
+    let reachable: Bool = all_nodes_reachable(nodes, node_count, edges, edge_count, "start");
+    print(reachable);
+
+    // Test checkpoint with completed_nodes tracking
+    let mutable cp: Checkpoint = Checkpoint("start", 0, []);
+    cp.advance("run_tests");
+    cp.advance("exit");
+    print(cp.completed_count);
+    print(len(cp.completed_nodes));
 
     // Test retry policy
     let policy: RetryPolicy = build_retry_policy(3, 50);

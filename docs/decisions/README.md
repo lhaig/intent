@@ -44,3 +44,6 @@ What follows from this decision? Trade-offs accepted.
 | 0010 | [Attractor as driving example](0010-attractor-as-driving-example.md) | 2026-02-20 | accepted |
 | 0011 | [Conservative String cloning for Rust ownership](0011-string-clone-strategy.md) | 2026-02-20 | accepted |
 | 0012 | [Method self-mutability analysis](0012-self-mutability-analysis.md) | 2026-02-20 | accepted |
+| 0013 | [String standard library](0013-string-standard-library.md) | 2026-02-20 | accepted |
+| 0014 | [Remove legacy codegen package](0014-remove-legacy-codegen.md) | 2026-02-20 | accepted |
+| 0015 | [Array\<String\> on entity fields](0015-array-string-entity-fields.md) | 2026-02-23 | accepted |
