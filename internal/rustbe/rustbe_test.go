@@ -309,6 +309,34 @@ func TestGenerateMapDemo(t *testing.T) {
 	}
 }
 
+func TestGenerateErrorHandling(t *testing.T) {
+	src, err := os.ReadFile(findExample(t, "error_handling.intent"))
+	if err != nil {
+		t.Fatalf("failed to read error_handling.intent: %v", err)
+	}
+	output := generateFromSource(t, "error_handling", string(src))
+
+	expects := []string{
+		"Result<",
+		"Option<",
+		"Ok(",
+		"Err(",
+		"Some(",
+		"None",
+		"match ",
+		"?",
+		"break",
+		"continue",
+		"for ",
+		"while ",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}
+
 // findExample locates an example file relative to the project root.
 func findExample(t *testing.T, name string) string {
 	t.Helper()

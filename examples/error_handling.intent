@@ -1,0 +1,137 @@
+module error_handling version "0.1.0";
+
+// Demonstrates Result<T,E>, Option<T>, match expressions, try operator,
+// and loop control flow (for, while, break, continue).
+
+function parse_int(s: String) returns Result<Int, String>
+    requires true
+    ensures true
+{
+    if s == "0" { return Ok(0); }
+    if s == "1" { return Ok(1); }
+    if s == "42" { return Ok(42); }
+    if s == "100" { return Ok(100); }
+    return Err("Cannot parse: " + s);
+}
+
+// Uses the try operator (?) to propagate errors.
+function add_parsed(a: String, b: String) returns Result<Int, String>
+    requires true
+    ensures true
+{
+    let x: Int = parse_int(a)?;
+    let y: Int = parse_int(b)?;
+    return Ok(x + y);
+}
+
+// Demonstrates match on Result for error recovery.
+function safe_add(a: String, b: String) returns Int {
+    let res: Result<Int, String> = add_parsed(a, b);
+    let value: Int = match res {
+        Ok(v) => v,
+        Err(e) => -1,
+    };
+    return value;
+}
+
+// Option<T> for safe array access.
+function find_positive(arr: Array<Int>, count: Int) returns Option<Int>
+    requires count >= 0
+    ensures true
+{
+    for i in 0..count {
+        if arr[i] > 0 {
+            return Some(arr[i]);
+        }
+    }
+    return None;
+}
+
+// For loop with break: find first element greater than threshold.
+function find_greater_than(arr: Array<Int>, count: Int, threshold: Int) returns Int
+    requires count >= 0
+    ensures result >= -1
+{
+    let mutable found: Int = -1;
+    for i in 0..count {
+        if arr[i] > threshold {
+            found = arr[i];
+            break;
+        }
+    }
+    return found;
+}
+
+// While loop with continue: sum only positive values.
+function sum_positive(arr: Array<Int>, count: Int) returns Int
+    requires count >= 0
+    ensures result >= 0
+{
+    let mutable total: Int = 0;
+    let mutable i: Int = 0;
+    while i < count {
+        let val: Int = arr[i];
+        i = i + 1;
+        if val <= 0 {
+            continue;
+        }
+        total = total + val;
+    }
+    return total;
+}
+
+// Chained error propagation with multiple try operators.
+function compute(a: String, b: String, c: String) returns Result<Int, String>
+    requires true
+    ensures true
+{
+    let sum: Int = add_parsed(a, b)?;
+    let third: Int = parse_int(c)?;
+    return Ok(sum + third);
+}
+
+entry function main() returns Int {
+    // Test try operator
+    let sum: Result<Int, String> = add_parsed("42", "1");
+    let sum_val: Int = match sum {
+        Ok(v) => v,
+        Err(e) => -1,
+    };
+    print(sum_val);
+
+    // Test error recovery with match
+    let recovered: Int = safe_add("42", "bad");
+    print(recovered);
+
+    // Test Option<T>
+    let nums: Array<Int> = [-1, 0, 3, 5];
+    let first_pos: Option<Int> = find_positive(nums, 4);
+    let pos_val: Int = match first_pos {
+        Some(v) => v,
+        None => 0,
+    };
+    print(pos_val);
+
+    // Test for loop with break
+    let found: Int = find_greater_than(nums, 4, 2);
+    print(found);
+
+    // Test while loop with continue
+    let total: Int = sum_positive(nums, 4);
+    print(total);
+
+    // Test chained error propagation
+    let chained: Result<Int, String> = compute("1", "42", "100");
+    let chained_val: Int = match chained {
+        Ok(v) => v,
+        Err(e) => -1,
+    };
+    print(chained_val);
+
+    // Test error case
+    let bad: Result<Int, String> = compute("1", "bad", "100");
+    let bad_ok: Bool = bad.is_ok();
+    print(bad_ok);
+
+    return 0;
+}

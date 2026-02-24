@@ -84,8 +84,74 @@ public function max_with_partial(allow_partial: Bool) returns StageStatus
     return Fail;
 }
 
+// Simulate handler execution for a node.
+// Returns Ok(Outcome) on success, Err(error message) on failure.
+// In a real implementation this would dispatch to the appropriate handler type.
+public function execute_handler(node: NodeAttr, context: PipelineContext) returns Result<Outcome, String>
+    requires node.id != ""
+{
+    // Simulation: nodes with a prompt succeed, others fail.
+    if node.prompt != "" {
+        let mutable empty_ids: Array<String> = [];
+        let mutable empty_updates: Map<String, String> = [];
+        return Ok(Outcome(Success, "", "executed", "", empty_ids, empty_updates));
+    }
+    return Err("No handler available for node: " + node.id);
+}
+
+// Execute a node with retry logic per Attractor spec Section 3.5.
+// Retries on retriable failures up to policy.max_attempts times.
+// Returns Ok(Outcome) with the final outcome (success or fail).
+public function execute_with_retry(node: NodeAttr, context: PipelineContext, policy: RetryPolicy) returns Result<Outcome, String>
+    requires policy.max_attempts >= 1
+{
+    let mutable last_outcome_status: StageStatus = Fail;
+    for attempt in 1..policy.max_attempts + 1 {
+        let handler_result: Result<Outcome, String> = execute_handler(node, context);
+
+        // Check if handler itself errored (not a retriable failure, an actual error)
+        let is_error: Bool = handler_result.is_err();
+        if is_error {
+            // Handler crashed -- if attempts remain, retry; otherwise return fail
+            if attempt < policy.max_attempts {
+                continue;
+            }
+            let mutable fail_ids: Array<String> = [];
+            let mutable fail_updates: Map<String, String> = [];
+            return Ok(Outcome(Fail, "", "all attempts exhausted", "handler error", fail_ids, fail_updates));
+        }
+
+        // Extract the outcome from Ok result
+        let outcome: Outcome = match handler_result {
+            Ok(o) => o,
+            Err(e) => Outcome(Fail, "", "", e, [], []),
+        };
+
+        // If success, return immediately
+        if outcome.is_success() {
+            return Ok(outcome);
+        }
+
+        // If retriable and attempts remain, continue to next attempt
+        last_outcome_status = outcome.status;
+        let can_retry: Bool = is_retriable(last_outcome_status, attempt, policy.max_attempts);
+        if can_retry {
+            continue;
+        }
+
+        // Non-retriable failure or final attempt
+        return Ok(outcome);
+    }
+
+    // All attempts exhausted
+    let mutable final_ids: Array<String> = [];
+    let mutable final_updates: Map<String, String> = [];
+    return Ok(Outcome(Fail, "", "all retry attempts exhausted", "", final_ids, final_updates));
+}
+
 intent "Retry policy correctness" {
     goal: "Retry policies enforce Attractor spec Section 3.5-3.6 behavior";
+    goal: "Handler execution with retry exhausts attempts before returning failure";
     guarantee: "Backoff delays never exceed max_delay_ms and attempts never exceed max_attempts";
-    verified_by: [delay_for_attempt.ensures, build_retry_policy.ensures, is_retriable.requires];
+    verified_by: [delay_for_attempt.ensures, build_retry_policy.ensures, is_retriable.requires, execute_with_retry.requires, execute_handler.requires];
 }

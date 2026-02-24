@@ -60,13 +60,12 @@ public function node_exists(nodes: Array<NodeAttr>, count: Int, id: String) retu
     requires count >= 0
     ensures true
 {
-    let mutable found: Bool = false;
     for i in 0..count {
         if nodes[i].id == id {
-            found = true;
+            return true;
         }
     }
-    return found;
+    return false;
 }
 
 public function start_has_no_incoming(edges: Array<EdgeAttr>, edge_count: Int, start_id: String) returns Bool
@@ -147,13 +146,12 @@ public function string_array_contains(arr: Array<String>, count: Int, target: St
     requires count >= 0
     ensures true
 {
-    let mutable found: Bool = false;
     for i in 0..count {
         if arr[i] == target {
-            found = true;
+            return true;
         }
     }
-    return found;
+    return false;
 }
 
 // BFS-based reachability check: returns true if all nodes are reachable from start_id.
@@ -197,6 +195,53 @@ public function all_nodes_reachable(nodes: Array<NodeAttr>, node_count: Int, edg
         }
     }
     return all_reached;
+}
+
+// Validate the entire graph structure per Attractor spec Section 7.3.
+// Returns Ok(true) if all validations pass, or Err(message) on first failure.
+public function validate_graph(nodes: Array<NodeAttr>, node_count: Int, edges: Array<EdgeAttr>, edge_count: Int) returns Result<Bool, String>
+    requires node_count >= 0
+    requires edge_count >= 0
+{
+    if not has_exactly_one_start(nodes, node_count) {
+        return Err("Graph must have exactly one start node");
+    }
+    if not has_exactly_one_exit(nodes, node_count) {
+        return Err("Graph must have exactly one exit node");
+    }
+
+    let start_idx: Int = find_start_index(nodes, node_count);
+    if start_idx == -1 {
+        return Err("Start node not found");
+    }
+    let exit_idx: Int = find_exit_index(nodes, node_count);
+    if exit_idx == -1 {
+        return Err("Exit node not found");
+    }
+
+    if not start_has_no_incoming(edges, edge_count, nodes[start_idx].id) {
+        return Err("Start node must have no incoming edges");
+    }
+    if not exit_has_no_outgoing(edges, edge_count, nodes[exit_idx].id) {
+        return Err("Exit node must have no outgoing edges");
+    }
+    if not all_edge_targets_exist(nodes, node_count, edges, edge_count) {
+        return Err("All edge endpoints must reference existing nodes");
+    }
+    if not decision_nodes_valid(nodes, node_count, edges, edge_count) {
+        return Err("Decision nodes must have at least 2 outgoing edges");
+    }
+    if not all_nodes_reachable(nodes, node_count, edges, edge_count, nodes[start_idx].id) {
+        return Err("All nodes must be reachable from start");
+    }
+
+    return Ok(true);
+}
+
+intent "Graph validation completeness" {
+    goal: "validate_graph checks all structural invariants in a single call";
+    guarantee: "Returns Err with descriptive message on first validation failure";
+    verified_by: [validate_graph.requires, has_exactly_one_start.ensures, has_exactly_one_exit.ensures];
 }
 
 intent "Graph structural integrity" {

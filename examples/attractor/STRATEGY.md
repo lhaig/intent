@@ -8,7 +8,7 @@ This is preferable to designing language features in the abstract: every additio
 
 ## Current Coverage
 
-**Phase 1-4 (complete):** Structural and logical skeleton, string stdlib, Array\<String\> entity fields, Map\<K,V\> type — ~65% of the spec by section count.
+**Phase 1-5 (complete):** Structural and logical skeleton, string stdlib, Array\<String\> entity fields, Map\<K,V\> type, Result\<T,E\> error handling — ~70% of the spec by section count.
 
 | Spec Area | Status | Files |
 |-----------|--------|-------|
@@ -35,10 +35,13 @@ Both single-file (`attractor.intent`) and multi-file (`main.intent`) versions co
 | Condition evaluation with context variables | Done | edge_selection.intent |
 | Checkpoint node_retries tracking | Done | types.intent |
 | Outcome context_updates | Done | types.intent |
+| Error handling (Result\<T,E\> on retry/validation) | Done | retry.intent, validation.intent |
+| Handler execution with retry (execute_with_retry) | Done | retry.intent |
+| Graph validation aggregate (validate_graph) | Done | validation.intent |
+| Loop refactoring (break/continue replacing done flags) | Done | edge_selection.intent, validation.intent |
 
 ### Known limitations in current implementation
 
-- No error handling (Result\<T,E\> matching) -- needs Phase 5
 - No trait-based handler dispatch -- needs Phase 6
 
 ## Gap-to-Feature Mapping
@@ -165,3 +168,4 @@ Each phase should produce both a language improvement and a visible expansion of
 | 2026-02-20 | Phase 2 complete: String stdlib (6 methods), legacy codegen removed, dynamic condition parsing | Array.len() method not available (use len() builtin), Rust borrow checker issues with entity methods on borrowed refs |
 | 2026-02-23 | Phase 3 complete: Array\<String\> entity fields, full 5-step edge selection, BFS reachability, Checkpoint.completed_nodes | No compiler changes needed — Array\<String\> on entity fields already worked |
 | 2026-02-23 | Phase 4 complete: Map\<K,V\> type across checker + Rust/JS/WASM backends. PipelineContext, node_retries, context_updates, context-aware condition evaluation | Map\<Float,V\> not rejected at compile time (Rust HashMap requires Eq+Hash) |
+| 2026-02-24 | Phase 5 complete: Result\<T,E\> error handling in retry and validation, done-flag loop refactoring to break, grammar docs updated, error_handling.intent example | No compiler changes needed -- all features already implemented. Match arms are expression-only (can't contain continue/return). |

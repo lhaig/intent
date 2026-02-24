@@ -207,6 +207,43 @@ The `len()` builtin works on both `Array<T>` and `Map<K,V>`.
 
 Empty maps are initialized with `[]` and a type annotation: `let mutable m: Map<String, Int> = [];`
 
+**Result<T,E> constructors and methods:**
+
+| Constructor/Method | Signature | Description |
+|-------------------|-----------|-------------|
+| `Ok(value)` | `(T) -> Result<T,E>` | Wraps a success value |
+| `Err(error)` | `(E) -> Result<T,E>` | Wraps an error value |
+| `is_ok()` | `() -> Bool` | Returns true if Ok |
+| `is_err()` | `() -> Bool` | Returns true if Err |
+| `?` (try operator) | postfix | Unwraps Ok or propagates Err to enclosing function |
+
+Result values are destructured with `match`:
+
+```
+let val: Int = match result {
+    Ok(v) => v,
+    Err(e) => 0,
+};
+```
+
+**Option<T> constructors and methods:**
+
+| Constructor/Method | Signature | Description |
+|-------------------|-----------|-------------|
+| `Some(value)` | `(T) -> Option<T>` | Wraps a present value |
+| `None` | `Option<T>` | Represents absence |
+| `is_some()` | `() -> Bool` | Returns true if Some |
+| `is_none()` | `() -> Bool` | Returns true if None |
+
+Option values are destructured with `match`:
+
+```
+let val: Int = match opt {
+    Some(v) => v,
+    None => -1,
+};
+```
+
 ### 4.3 Entity Types
 
 Entity types are user-defined nominal types, declared with the `entity` keyword (see Section 7). Each entity declaration introduces a new type whose name can be used as a type annotation. Entity types map to Rust structs.
@@ -671,6 +708,35 @@ account.deposit(100);
 ```
 
 The result of the expression is discarded.
+
+### 9.6 While Loop
+
+```
+while <expression> {
+    <statements>
+}
+```
+
+The condition expression must have type `Bool`. The body executes repeatedly while the condition is true.
+
+### 9.7 For-In Loop (Range)
+
+```
+for <name> in <start>..<end> {
+    <statements>
+}
+```
+
+Iterates `<name>` from `<start>` (inclusive) to `<end>` (exclusive). Both bounds must be `Int` expressions. The loop variable is implicitly `Int` and immutable within the body.
+
+### 9.8 Break and Continue
+
+```
+break;
+continue;
+```
+
+`break` exits the innermost enclosing `while` or `for` loop. `continue` skips to the next iteration. Both are compile-time errors outside of loops.
 
 ---
 

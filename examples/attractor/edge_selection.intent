@@ -107,13 +107,10 @@ public function find_condition_matched_edge(edges: Array<EdgeAttr>, edge_count: 
     ensures result < edge_count
 {
     let mutable found_idx: Int = -1;
-    let mutable done: Bool = false;
     for i in 0..edge_count {
-        if not done {
-            if edge_matches_condition(edges[i], outcome_status, preferred_label, context) {
-                found_idx = i;
-                done = true;
-            }
+        if edge_matches_condition(edges[i], outcome_status, preferred_label, context) {
+            found_idx = i;
+            break;
         }
     }
     return found_idx;
@@ -129,13 +126,10 @@ public function find_preferred_label_edge(edges: Array<EdgeAttr>, edge_count: In
         return -1;
     }
     let mutable found_idx: Int = -1;
-    let mutable done: Bool = false;
     for i in 0..edge_count {
-        if not done {
-            if edges[i].label == preferred_label {
-                found_idx = i;
-                done = true;
-            }
+        if edges[i].label == preferred_label {
+            found_idx = i;
+            break;
         }
     }
     return found_idx;
@@ -149,17 +143,15 @@ public function find_suggested_next_edge(edges: Array<EdgeAttr>, edge_count: Int
     ensures result >= -1
 {
     let mutable found_idx: Int = -1;
-    let mutable done: Bool = false;
     for i in 0..edge_count {
-        if not done {
-            for j in 0..suggested_count {
-                if not done {
-                    if edges[i].to_node == suggested_next_ids[j] {
-                        found_idx = i;
-                        done = true;
-                    }
-                }
+        for j in 0..suggested_count {
+            if edges[i].to_node == suggested_next_ids[j] {
+                found_idx = i;
+                break;
             }
+        }
+        if found_idx >= 0 {
+            break;
         }
     }
     return found_idx;

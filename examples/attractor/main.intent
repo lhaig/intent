@@ -93,5 +93,39 @@ entry function main() returns Int {
     print(gate_ok);
     print(gate_fail);
 
+    // --- Phase 5: Error handling tests ---
+
+    // Test validate_graph with Result<Bool, String>
+    let validation_result: Result<Bool, String> = attractor_validation.validate_graph(nodes, node_count, edges, edge_count);
+    let validation_ok: Bool = validation_result.is_ok();
+    print(validation_ok);
+
+    let validation_msg: String = match validation_result {
+        Ok(v) => "graph valid",
+        Err(e) => e,
+    };
+    print(validation_msg);
+
+    // Test execute_with_retry with a node that has a prompt (should succeed)
+    let mutable retry_ctx_values: Map<String, String> = [];
+    let retry_ctx: PipelineContext = PipelineContext(retry_ctx_values);
+    let retry_policy: RetryPolicy = attractor_retry.standard_policy();
+    let retry_result: Result<Outcome, String> = attractor_retry.execute_with_retry(nodes[1], retry_ctx, retry_policy);
+    let retry_ok: Bool = retry_result.is_ok();
+    print(retry_ok);
+
+    // Test execute_with_retry with a node that has no prompt (should fail after retries)
+    let retry_result2: Result<Outcome, String> = attractor_retry.execute_with_retry(nodes[0], retry_ctx, retry_policy);
+    let retry_ok2: Bool = retry_result2.is_ok();
+    print(retry_ok2);
+
+    // Extract outcome from retry_result2 and check status
+    let outcome2: Outcome = match retry_result2 {
+        Ok(o) => o,
+        Err(e) => Outcome(Fail, "", "", e, [], []),
+    };
+    let outcome2_success: Bool = outcome2.is_success();
+    print(outcome2_success);
+
     return 0;
 }

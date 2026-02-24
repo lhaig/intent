@@ -257,6 +257,27 @@ entity Checkpoint {
     }
 }
 
+// PipelineContext holds the shared state passed between pipeline stages.
+entity PipelineContext {
+    field values: Map<String, String>;
+
+    constructor(values: Map<String, String>) {
+        self.values = values;
+    }
+
+    method get_value(key: String, default_val: String) returns String {
+        return self.values.get(key, default_val);
+    }
+
+    method set_value(key: String, value: String) returns Void {
+        self.values.set(key, value);
+    }
+
+    method has_key(key: String) returns Bool {
+        return self.values.contains(key);
+    }
+}
+
 // --- Helper functions ---
 
 // status_is_success returns true if the status represents any success variant.
@@ -349,13 +370,12 @@ function node_exists(nodes: Array<NodeAttr>, count: Int, id: String) returns Boo
     requires count >= 0
     ensures true
 {
-    let mutable found: Bool = false;
     for i in 0..count {
         if nodes[i].id == id {
-            found = true;
+            return true;
         }
     }
-    return found;
+    return false;
 }
 
 function start_has_no_incoming(edges: Array<EdgeAttr>, edge_count: Int, start_id: String) returns Bool
@@ -528,13 +548,10 @@ function find_condition_matched_edge(edges: Array<EdgeAttr>, edge_count: Int, ou
     ensures result < edge_count
 {
     let mutable found_idx: Int = -1;
-    let mutable done: Bool = false;
     for i in 0..edge_count {
-        if not done {
-            if edge_matches_condition(edges[i], outcome_status, preferred_label, context) {
-                found_idx = i;
-                done = true;
-            }
+        if edge_matches_condition(edges[i], outcome_status, preferred_label, context) {
+            found_idx = i;
+            break;
         }
     }
     return found_idx;
@@ -550,13 +567,10 @@ function find_preferred_label_edge(edges: Array<EdgeAttr>, edge_count: Int, pref
         return -1;
     }
     let mutable found_idx: Int = -1;
-    let mutable done: Bool = false;
     for i in 0..edge_count {
-        if not done {
-            if edges[i].label == preferred_label {
-                found_idx = i;
-                done = true;
-            }
+        if edges[i].label == preferred_label {
+            found_idx = i;
+            break;
         }
     }
     return found_idx;
@@ -570,17 +584,15 @@ function find_suggested_next_edge(edges: Array<EdgeAttr>, edge_count: Int, sugge
     ensures result >= -1
 {
     let mutable found_idx: Int = -1;
-    let mutable done: Bool = false;
     for i in 0..edge_count {
-        if not done {
-            for j in 0..suggested_count {
-                if not done {
-                    if edges[i].to_node == suggested_next_ids[j] {
-                        found_idx = i;
-                        done = true;
-                    }
-                }
+        for j in 0..suggested_count {
+            if edges[i].to_node == suggested_next_ids[j] {
+                found_idx = i;
+                break;
             }
+        }
+        if found_idx >= 0 {
+            break;
         }
     }
     return found_idx;
@@ -674,13 +686,12 @@ function string_array_contains(arr: Array<String>, count: Int, target: String) r
     requires count >= 0
     ensures true
 {
-    let mutable found: Bool = false;
     for i in 0..count {
         if arr[i] == target {
-            found = true;
+            return true;
         }
     }
-    return found;
+    return false;
 }
 
 // BFS-based reachability check: returns true if all nodes are reachable from start_id.
@@ -805,6 +816,104 @@ function max_with_partial(allow_partial: Bool) returns StageStatus
     return Fail;
 }
 
+// --- Validation aggregate function ---
+
+// Validate the entire graph structure per Attractor spec Section 7.3.
+// Returns Ok(true) if all validations pass, or Err(message) on first failure.
+function validate_graph(nodes: Array<NodeAttr>, node_count: Int, edges: Array<EdgeAttr>, edge_count: Int) returns Result<Bool, String>
+    requires node_count >= 0
+    requires edge_count >= 0
+{
+    if not has_exactly_one_start(nodes, node_count) {
+        return Err("Graph must have exactly one start node");
+    }
+    if not has_exactly_one_exit(nodes, node_count) {
+        return Err("Graph must have exactly one exit node");
+    }
+
+    let start_idx: Int = find_start_index(nodes, node_count);
+    if start_idx == -1 {
+        return Err("Start node not found");
+    }
+    let exit_idx: Int = find_exit_index(nodes, node_count);
+    if exit_idx == -1 {
+        return Err("Exit node not found");
+    }
+
+    if not start_has_no_incoming(edges, edge_count, nodes[start_idx].id) {
+        return Err("Start node must have no incoming edges");
+    }
+    if not exit_has_no_outgoing(edges, edge_count, nodes[exit_idx].id) {
+        return Err("Exit node must have no outgoing edges");
+    }
+    if not all_edge_targets_exist(nodes, node_count, edges, edge_count) {
+        return Err("All edge endpoints must reference existing nodes");
+    }
+    if not decision_nodes_valid(nodes, node_count, edges, edge_count) {
+        return Err("Decision nodes must have at least 2 outgoing edges");
+    }
+    if not all_nodes_reachable(nodes, node_count, edges, edge_count, nodes[start_idx].id) {
+        return Err("All nodes must be reachable from start");
+    }
+
+    return Ok(true);
+}
+
+// --- Handler execution with retry ---
+
+// Simulate handler execution for a node.
+function execute_handler(node: NodeAttr, context: PipelineContext) returns Result<Outcome, String>
+    requires node.id != ""
+{
+    if node.prompt != "" {
+        let mutable empty_ids: Array<String> = [];
+        let mutable empty_updates: Map<String, String> = [];
+        return Ok(Outcome(Success, "", "executed", "", empty_ids, empty_updates));
+    }
+    return Err("No handler available for node: " + node.id);
+}
+
+// Execute a node with retry logic per Attractor spec Section 3.5.
+function execute_with_retry(node: NodeAttr, context: PipelineContext, policy: RetryPolicy) returns Result<Outcome, String>
+    requires policy.max_attempts >= 1
+{
+    let mutable last_outcome_status: StageStatus = Fail;
+    for attempt in 1..policy.max_attempts + 1 {
+        let handler_result: Result<Outcome, String> = execute_handler(node, context);
+
+        let is_error: Bool = handler_result.is_err();
+        if is_error {
+            if attempt < policy.max_attempts {
+                continue;
+            }
+            let mutable fail_ids: Array<String> = [];
+            let mutable fail_updates: Map<String, String> = [];
+            return Ok(Outcome(Fail, "", "all attempts exhausted", "handler error", fail_ids, fail_updates));
+        }
+
+        let outcome: Outcome = match handler_result {
+            Ok(o) => o,
+            Err(e) => Outcome(Fail, "", "", e, [], []),
+        };
+
+        if outcome.is_success() {
+            return Ok(outcome);
+        }
+
+        last_outcome_status = outcome.status;
+        let can_retry: Bool = is_retriable(last_outcome_status, attempt, policy.max_attempts);
+        if can_retry {
+            continue;
+        }
+
+        return Ok(outcome);
+    }
+
+    let mutable final_ids: Array<String> = [];
+    let mutable final_updates: Map<String, String> = [];
+    return Ok(Outcome(Fail, "", "all retry attempts exhausted", "", final_ids, final_updates));
+}
+
 // --- Entry function ---
 
 // Build a minimal Attractor pipeline graph: start -> task -> exit
@@ -887,6 +996,40 @@ entry function main() returns Int {
 
     print(gate_ok);
     print(gate_fail);
+
+    // --- Phase 5: Error handling tests ---
+
+    // Test validate_graph with Result<Bool, String>
+    let validation_result: Result<Bool, String> = validate_graph(nodes, node_count, edges, edge_count);
+    let validation_ok: Bool = validation_result.is_ok();
+    print(validation_ok);
+
+    let validation_msg: String = match validation_result {
+        Ok(v) => "graph valid",
+        Err(e) => e,
+    };
+    print(validation_msg);
+
+    // Test execute_with_retry with a node that has a prompt (should succeed)
+    let mutable retry_ctx_values: Map<String, String> = [];
+    let retry_ctx: PipelineContext = PipelineContext(retry_ctx_values);
+    let retry_policy: RetryPolicy = standard_policy();
+    let retry_result: Result<Outcome, String> = execute_with_retry(nodes[1], retry_ctx, retry_policy);
+    let retry_ok: Bool = retry_result.is_ok();
+    print(retry_ok);
+
+    // Test execute_with_retry with a node that has no prompt (should fail after retries)
+    let retry_result2: Result<Outcome, String> = execute_with_retry(nodes[0], retry_ctx, retry_policy);
+    let retry_ok2: Bool = retry_result2.is_ok();
+    print(retry_ok2);
+
+    // Extract outcome from retry_result2 and check status
+    let outcome2: Outcome = match retry_result2 {
+        Ok(o) => o,
+        Err(e) => Outcome(Fail, "", "", e, [], []),
+    };
+    let outcome2_success: Bool = outcome2.is_success();
+    print(outcome2_success);
 
     return 0;
 }

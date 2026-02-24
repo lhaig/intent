@@ -26,14 +26,34 @@ module_decl = "module" , identifier , "version" , string_literal , ";" ;
 
 top_level_decl = function_decl
                | entity_decl
+               | enum_decl
+               | import_decl
                | intent_block ;
+
+
+(* -------------------------------------------------------------------------- *)
+(* Import Declarations                                                         *)
+(* -------------------------------------------------------------------------- *)
+
+import_decl = "import" , string_literal , ";" ;
+(* Imports another .intent module file. The string is a relative path. *)
+
+
+(* -------------------------------------------------------------------------- *)
+(* Enum Declarations                                                           *)
+(* -------------------------------------------------------------------------- *)
+
+enum_decl = [ "public" ] , "enum" , identifier , "{" , enum_variant , { "," , enum_variant } , [ "," ] , "}" ;
+
+enum_variant = identifier ;
+(* Unit variants only in the POC. No associated data on user-defined enums. *)
 
 
 (* -------------------------------------------------------------------------- *)
 (* Function Declarations                                                       *)
 (* -------------------------------------------------------------------------- *)
 
-function_decl = [ "entry" ] , "function" , identifier ,
+function_decl = [ "public" ] , [ "entry" ] , "function" , identifier ,
                 "(" , [ param_list ] , ")" ,
                 "returns" , type_ref ,
                 { requires_clause } ,
@@ -53,14 +73,14 @@ ensures_clause = "ensures" , expression ;
 (* Entity Declarations                                                         *)
 (* -------------------------------------------------------------------------- *)
 
-entity_decl = "entity" , identifier , "{" , { entity_member } , "}" ;
+entity_decl = [ "public" ] , "entity" , identifier , "{" , { entity_member } , "}" ;
 
 entity_member = field_decl
               | invariant_decl
               | constructor_decl
               | method_decl ;
 
-field_decl = identifier , ":" , type_ref , ";" ;
+field_decl = "field" , identifier , ":" , type_ref , ";" ;
 
 invariant_decl = "invariant" , expression , ";" ;
 
@@ -108,6 +128,10 @@ statement = let_statement
           | assign_statement
           | return_statement
           | if_statement
+          | while_statement
+          | for_in_statement
+          | break_statement
+          | continue_statement
           | expression_statement ;
 
 let_statement = "let" , [ "mutable" ] , identifier , ":" , type_ref ,
@@ -123,6 +147,19 @@ return_statement = "return" , [ expression ] , ";" ;
 if_statement = "if" , expression , block , [ else_clause ] ;
 
 else_clause = "else" , ( if_statement | block ) ;
+
+while_statement = "while" , expression , block ;
+(* The condition expression must have type Bool. *)
+
+for_in_statement = "for" , identifier , "in" , expression , ".." , expression , block ;
+(* Range-based for loop. The identifier is the loop variable (implicitly Int). *)
+(* Both range bounds must be Int expressions. The upper bound is exclusive. *)
+
+break_statement = "break" , ";" ;
+(* Valid only inside while or for loops. Exits the innermost enclosing loop. *)
+
+continue_statement = "continue" , ";" ;
+(* Valid only inside while or for loops. Skips to the next iteration. *)
 
 expression_statement = expression , ";" ;
 
@@ -169,24 +206,56 @@ unary_expr = "-" , unary_expr
 postfix_expr = primary_expr , { postfix_op } ;
 
 postfix_op = "." , identifier , [ "(" , [ arg_list ] , ")" ]
-           | "(" , [ arg_list ] , ")" ;
+           | "(" , [ arg_list ] , ")"
+           | "[" , expression , "]"
+           | "?" ;
 (* The first alternative handles both field access (no parens) and method calls (with parens). *)
 (* The second alternative handles bare function calls on an identifier primary. *)
+(* The third alternative handles array/map indexing. *)
+(* The fourth alternative is the try operator for Result<T,E> error propagation. *)
 (* Note: Function calls are: identifier followed by postfix_op "(" args ")".    *)
 (*       Method calls are: expr "." identifier "(" args ")".                     *)
 (*       Field access is: expr "." identifier (no parens).                       *)
+(*       Try: expr? -- unwraps Ok or propagates Err to the enclosing function.  *)
 
 arg_list = expression , { "," , expression } ;
 
 primary_expr = int_literal
              | float_literal
              | string_literal
+             | string_interp
              | bool_literal
              | "self"
              | "result"
              | "old" , "(" , expression , ")"
+             | "Ok" , "(" , expression , ")"
+             | "Err" , "(" , expression , ")"
+             | "Some" , "(" , expression , ")"
+             | "None"
+             | match_expr
+             | array_literal
+             | forall_expr
+             | exists_expr
              | identifier
              | "(" , expression , ")" ;
+
+match_expr = "match" , expression , "{" , match_arm , { "," , match_arm } , [ "," ] , "}" ;
+
+match_arm = match_pattern , "=>" , expression ;
+
+match_pattern = identifier , [ "(" , identifier , ")" ]
+              | "_" ;
+(* Patterns: variant name (unit), variant(binding) (data), or wildcard _. *)
+(* For Result: Ok(v), Err(e). For Option: Some(v), None. For enums: VariantName. *)
+
+array_literal = "[" , [ expression , { "," , expression } , [ "," ] ] , "]" ;
+(* Empty arrays [] require a type annotation on the enclosing let binding. *)
+
+forall_expr = "forall" , identifier , "in" , expression , ".." , expression , ":" , expression ;
+(* Universal quantifier over an integer range. The body expression must be Bool. *)
+
+exists_expr = "exists" , identifier , "in" , expression , ".." , expression , ":" , expression ;
+(* Existential quantifier over an integer range. The body expression must be Bool. *)
 
 
 (* -------------------------------------------------------------------------- *)
@@ -228,6 +297,10 @@ escape_sequence = '\"'
                | '\r' ;
 
 bool_literal = "true" | "false" ;
+
+string_interp = '"' , { string_char | "${" , expression , "}" } , '"' ;
+(* String interpolation: "Hello ${name}, you are ${age} years old" *)
+(* Interpolated expressions are converted to strings at runtime. *)
 
 
 (* -------------------------------------------------------------------------- *)
