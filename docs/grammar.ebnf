@@ -27,6 +27,8 @@ module_decl = "module" , identifier , "version" , string_literal , ";" ;
 top_level_decl = function_decl
                | entity_decl
                | enum_decl
+               | trait_decl
+               | impl_block
                | import_decl
                | intent_block ;
 
@@ -47,6 +49,30 @@ enum_decl = [ "public" ] , "enum" , identifier , "{" , enum_variant , { "," , en
 
 enum_variant = identifier ;
 (* Unit variants only in the POC. No associated data on user-defined enums. *)
+
+
+(* -------------------------------------------------------------------------- *)
+(* Trait Declarations                                                          *)
+(* -------------------------------------------------------------------------- *)
+
+trait_decl = [ "public" ] , "trait" , identifier , "{" , { trait_method_sig } , "}" ;
+
+trait_method_sig = "method" , identifier , "(" , [ param_list ] , ")" ,
+                   "returns" , type_ref ,
+                   { requires_clause } ,
+                   { ensures_clause } , ";" ;
+(* Trait methods are signatures only -- no body. *)
+(* Contracts on trait methods apply to all implementations. *)
+
+
+(* -------------------------------------------------------------------------- *)
+(* Impl Blocks                                                                 *)
+(* -------------------------------------------------------------------------- *)
+
+impl_block = "impl" , identifier , "for" , identifier , "{" , { method_decl } , "}" ;
+(* The first identifier is the trait name, the second is the entity name. *)
+(* Each method must match a trait method signature exactly. *)
+(* Static dispatch only -- no trait objects or dynamic dispatch. *)
 
 
 (* -------------------------------------------------------------------------- *)

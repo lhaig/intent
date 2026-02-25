@@ -62,6 +62,8 @@ const (
 	ARROW
 	IMPORT
 	PUBLIC
+	TRAIT
+	IMPL
 
 	// Type keywords
 	INT_TYPE
@@ -212,6 +214,10 @@ func (t TokenType) String() string {
 		return "IMPORT"
 	case PUBLIC:
 		return "PUBLIC"
+	case TRAIT:
+		return "TRAIT"
+	case IMPL:
+		return "IMPL"
 	case INT_TYPE:
 		return "INT_TYPE"
 	case FLOAT_TYPE:
@@ -320,6 +326,8 @@ var keywords = map[string]TokenType{
 	"match":       MATCH,
 	"import":      IMPORT,
 	"public":      PUBLIC,
+	"trait":       TRAIT,
+	"impl":        IMPL,
 	"Int":         INT_TYPE,
 	"Float":       FLOAT_TYPE,
 	"String":      STRING_TYPE,

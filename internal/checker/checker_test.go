@@ -3074,3 +3074,70 @@ entry function main() returns Int {
 		t.Errorf("Expected no errors for len() on Map, got: %s", diag.Format("test"))
 	}
 }
+
+func TestCheckTraitBasic(t *testing.T) {
+	source := `module test version "1.0.0";
+entity Ctx { field v: Int; constructor(n: Int) { self.v = n; } method get() returns Int { return self.v; } }
+trait Handler { method execute(c: Ctx) returns Int; }
+entity Start { field code: Int; constructor(c: Int) { self.code = c; } }
+impl Handler for Start { method execute(c: Ctx) returns Int { return self.code + c.get(); } }
+entry function main() returns Int { let s: Start = Start(5); let c: Ctx = Ctx(10); return s.execute(c); }`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for trait basic, got: %s", diag.Format("test"))
+	}
+}
+
+func TestCheckTraitMissingMethod(t *testing.T) {
+	source := `module test version "1.0.0";
+trait Handler { method execute() returns Int; }
+entity Foo { field x: Int; constructor() { self.x = 0; } }
+impl Handler for Foo { }`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Errorf("Expected errors for trait missing method, got none")
+	}
+}
+
+func TestCheckTraitSignatureMismatch(t *testing.T) {
+	source := `module test version "1.0.0";
+trait Handler { method execute() returns Int; }
+entity Foo { field x: Int; constructor() { self.x = 0; } }
+impl Handler for Foo { method execute() returns Bool { return true; } }`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Errorf("Expected errors for trait signature mismatch, got none")
+	}
+}
+
+func TestCheckTraitParamCountMismatch(t *testing.T) {
+	source := `module test version "1.0.0";
+trait Handler { method execute(x: Int) returns Int; }
+entity Foo { field x: Int; constructor() { self.x = 0; } }
+impl Handler for Foo { method execute() returns Int { return 0; } }`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Errorf("Expected errors for trait param count mismatch, got none")
+	}
+}
+
+func TestCheckTraitUnknownTrait(t *testing.T) {
+	source := `module test version "1.0.0";
+entity Foo { field x: Int; constructor() { self.x = 0; } }
+impl Unknown for Foo { method run() returns Int { return 0; } }`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Errorf("Expected errors for unknown trait, got none")
+	}
+}
+
+func TestCheckTraitExtraMethod(t *testing.T) {
+	source := `module test version "1.0.0";
+trait Handler { method execute() returns Int; }
+entity Foo { field x: Int; constructor() { self.x = 0; } }
+impl Handler for Foo { method execute() returns Int { return 0; } method extra() returns Int { return 1; } }`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Errorf("Expected errors for trait extra method, got none")
+	}
+}

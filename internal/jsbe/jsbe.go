@@ -39,6 +39,14 @@ func Generate(mod *ir.Module) string {
 		g.generateEntity(e)
 		g.emitLine("")
 	}
+	for _, t := range mod.Traits {
+		g.generateTrait(t)
+		g.emitLine("")
+	}
+	for _, ib := range mod.ImplBlocks {
+		g.generateImplBlock(ib)
+		g.emitLine("")
+	}
 	for _, f := range mod.Functions {
 		g.generateFunction(f)
 		g.emitLine("")
@@ -105,6 +113,14 @@ func GenerateAll(prog *ir.Program) string {
 		}
 		for _, e := range mod.Entities {
 			g.generateEntity(e)
+			g.emitLine("")
+		}
+		for _, t := range mod.Traits {
+			g.generateTrait(t)
+			g.emitLine("")
+		}
+		for _, ib := range mod.ImplBlocks {
+			g.generateImplBlock(ib)
 			g.emitLine("")
 		}
 		for _, f := range mod.Functions {
@@ -497,6 +513,109 @@ func (g *generator) generateMethod(e *ir.Entity, m *ir.Method) {
 
 	g.decIndent()
 	g.emitLine("}")
+}
+
+// --- Trait generation ---
+
+func (g *generator) generateTrait(t *ir.Trait) {
+	g.emitLine("/**")
+	g.emitLinef(" * @interface %s\n", t.Name)
+	for _, m := range t.Methods {
+		g.emitLinef(" * @method %s\n", m.Name)
+		for _, p := range m.Params {
+			g.emitLinef(" * @param {%s} %s\n", g.mapType(p.Type), p.Name)
+		}
+		g.emitLinef(" * @returns {%s}\n", g.mapType(m.ReturnType))
+	}
+	g.emitLine(" */")
+}
+
+// --- ImplBlock generation ---
+
+func (g *generator) generateImplBlock(ib *ir.ImplBlock) {
+	mangledName := g.mangledEntityName(ib.EntityName)
+
+	g.emitLinef("// impl %s for %s\n", ib.TraitName, ib.EntityName)
+
+	// Look up the entity to get invariant info for result capture decisions.
+	entity := g.entities[ib.EntityName]
+
+	for _, m := range ib.Methods {
+		g.emitLine("/**")
+		g.emitLinef(" * Method: %s (impl %s)\n", m.Name, ib.TraitName)
+		for _, p := range m.Params {
+			g.emitLinef(" * @param {%s} %s\n", g.mapType(p.Type), p.Name)
+		}
+		g.emitLinef(" * @returns {%s}\n", g.mapType(m.ReturnType))
+		g.emitLine(" */")
+
+		// Emit prototype assignment header: EntityName.prototype.methodName = function(params) {
+		g.emitLinef("%s.prototype.%s = function(", mangledName, m.Name)
+		for i, p := range m.Params {
+			if i > 0 {
+				g.emit(", ")
+			}
+			g.emitf("%s", p.Name)
+		}
+		g.emit(") {\n")
+		g.incIndent()
+
+		// Old captures
+		for _, cap := range m.OldCaptures {
+			g.emitLinef("const %s = %s;\n", cap.Name, g.generateExpr(cap.Expr))
+		}
+
+		// Requires
+		for _, req := range m.Requires {
+			g.emitLinef("if (!(%s)) throw new Error(\"Precondition failed: %s\");\n",
+				g.generateExpr(req.Expr), escapeJSString(req.RawText))
+		}
+
+		// Determine whether invariant checks apply.
+		hasInvariants := entity != nil && len(entity.Invariants) > 0
+		needsResultCapture := (m.ReturnType != nil && m.ReturnType.Name != "Void") && (len(m.Ensures) > 0 || hasInvariants)
+
+		if needsResultCapture {
+			g.emitLine("let __result;")
+			g.emitLine("{")
+			g.incIndent()
+			g.generateStmts(m.Body)
+			g.decIndent()
+			g.emitLine("}")
+
+			g.ensuresContext = true
+			for _, ens := range m.Ensures {
+				g.emitLinef("if (!(%s)) throw new Error(\"Postcondition failed: %s\");\n",
+					g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
+			}
+			g.ensuresContext = false
+
+			if hasInvariants {
+				g.emitLine("this.__checkInvariants();")
+			}
+
+			g.emitLine("return __result;")
+		} else {
+			g.generateStmts(m.Body)
+
+			if len(m.Ensures) > 0 {
+				g.ensuresContext = true
+				for _, ens := range m.Ensures {
+					g.emitLinef("if (!(%s)) throw new Error(\"Postcondition failed: %s\");\n",
+						g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
+				}
+				g.ensuresContext = false
+			}
+
+			if hasInvariants {
+				g.emitLine("this.__checkInvariants();")
+			}
+		}
+
+		g.decIndent()
+		g.emitLine("};")
+		g.emitLine("")
+	}
 }
 
 // --- Enum generation ---

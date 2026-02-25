@@ -12,9 +12,11 @@ import (
 
 // lowerer transforms an AST + CheckResult into IR nodes.
 type lowerer struct {
-	exprTypes map[ast.Expression]*checker.Type
-	entities  map[string]*checker.EntityInfo
-	enums     map[string]*checker.EnumInfo
+	exprTypes   map[ast.Expression]*checker.Type
+	entities    map[string]*checker.EntityInfo
+	enums       map[string]*checker.EnumInfo
+	traits      map[string]*checker.TraitInfo
+	implOrigins map[string]string // "Entity.Method" -> "Trait"
 
 	// old() capture state for current method/constructor/while
 	oldCounter  int
@@ -25,9 +27,11 @@ type lowerer struct {
 // Lower transforms a single-file AST program into an IR Module.
 func Lower(prog *ast.Program, result *checker.CheckResult) *Module {
 	l := &lowerer{
-		exprTypes: result.ExprTypes,
-		entities:  result.Entities,
-		enums:     result.Enums,
+		exprTypes:   result.ExprTypes,
+		entities:    result.Entities,
+		enums:       result.Enums,
+		traits:      result.Traits,
+		implOrigins: result.ImplOrigins,
 	}
 
 	modName := ""
@@ -45,6 +49,12 @@ func Lower(prog *ast.Program, result *checker.CheckResult) *Module {
 	}
 	for _, e := range prog.Enums {
 		mod.Enums = append(mod.Enums, l.lowerEnum(e))
+	}
+	for _, t := range prog.Traits {
+		mod.Traits = append(mod.Traits, l.lowerTrait(t))
+	}
+	for _, ib := range prog.ImplBlocks {
+		mod.ImplBlocks = append(mod.ImplBlocks, l.lowerImplBlock(ib))
 	}
 	for _, f := range prog.Functions {
 		mod.Functions = append(mod.Functions, l.lowerFunction(f))
@@ -65,9 +75,11 @@ func LowerAll(registry map[string]*ast.Program, sortedPaths []string, result *ch
 	entryPath := sortedPaths[len(sortedPaths)-1]
 
 	l := &lowerer{
-		exprTypes: result.ExprTypes,
-		entities:  result.Entities,
-		enums:     result.Enums,
+		exprTypes:   result.ExprTypes,
+		entities:    result.Entities,
+		enums:       result.Enums,
+		traits:      result.Traits,
+		implOrigins: result.ImplOrigins,
 	}
 
 	prog := &Program{}
@@ -92,6 +104,12 @@ func LowerAll(registry map[string]*ast.Program, sortedPaths []string, result *ch
 		}
 		for _, e := range p.Enums {
 			mod.Enums = append(mod.Enums, l.lowerEnum(e))
+		}
+		for _, t := range p.Traits {
+			mod.Traits = append(mod.Traits, l.lowerTrait(t))
+		}
+		for _, ib := range p.ImplBlocks {
+			mod.ImplBlocks = append(mod.ImplBlocks, l.lowerImplBlock(ib))
 		}
 		for _, f := range p.Functions {
 			mod.Functions = append(mod.Functions, l.lowerFunction(f))
@@ -247,6 +265,51 @@ func (l *lowerer) lowerEnum(e *ast.EnumDecl) *Enum {
 		en.Variants = append(en.Variants, variant)
 	}
 	return en
+}
+
+func (l *lowerer) lowerTrait(t *ast.TraitDecl) *Trait {
+	trait := &Trait{
+		Name:     t.Name,
+		IsPublic: t.IsPublic,
+	}
+
+	for _, m := range t.Methods {
+		tm := &TraitMethod{
+			Name:       m.Name,
+			ReturnType: l.resolveTypeRef(m.ReturnType),
+		}
+
+		for _, p := range m.Params {
+			tm.Params = append(tm.Params, &Param{
+				Name: p.Name,
+				Type: l.resolveTypeRef(p.Type),
+			})
+		}
+
+		for _, req := range m.Requires {
+			tm.Requires = append(tm.Requires, l.lowerContract(req))
+		}
+		for _, ens := range m.Ensures {
+			tm.Ensures = append(tm.Ensures, l.lowerContract(ens))
+		}
+
+		trait.Methods = append(trait.Methods, tm)
+	}
+
+	return trait
+}
+
+func (l *lowerer) lowerImplBlock(ib *ast.ImplBlock) *ImplBlock {
+	impl := &ImplBlock{
+		TraitName:  ib.TraitName,
+		EntityName: ib.EntityName,
+	}
+
+	for _, m := range ib.Methods {
+		impl.Methods = append(impl.Methods, l.lowerMethod(m))
+	}
+
+	return impl
 }
 
 func (l *lowerer) lowerIntent(i *ast.IntentDecl) *Intent {

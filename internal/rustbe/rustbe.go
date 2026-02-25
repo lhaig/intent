@@ -40,6 +40,14 @@ func Generate(mod *ir.Module) string {
 		g.generateEnumDecl(e)
 		g.emitLine("")
 	}
+	for _, t := range mod.Traits {
+		g.generateTrait(t)
+		g.emitLine("")
+	}
+	for _, ib := range mod.ImplBlocks {
+		g.generateImplBlock(ib)
+		g.emitLine("")
+	}
 	for _, f := range mod.Functions {
 		g.generateFunction(f)
 		g.emitLine("")
@@ -107,6 +115,14 @@ func GenerateAll(prog *ir.Program) string {
 		}
 		for _, e := range mod.Enums {
 			g.generateEnumDecl(e)
+			g.emitLine("")
+		}
+		for _, t := range mod.Traits {
+			g.generateTrait(t)
+			g.emitLine("")
+		}
+		for _, ib := range mod.ImplBlocks {
+			g.generateImplBlock(ib)
 			g.emitLine("")
 		}
 		for _, f := range mod.Functions {
@@ -541,6 +557,52 @@ func (g *generator) generateEnumDecl(e *ir.Enum) {
 			g.emit(" },\n")
 		}
 	}
+	g.decIndent()
+	g.emitLine("}")
+}
+
+// --- Trait generation ---
+
+func (g *generator) generateTrait(t *ir.Trait) {
+	if t.IsPublic {
+		g.emitLinef("pub trait %s {\n", t.Name)
+	} else {
+		g.emitLinef("trait %s {\n", t.Name)
+	}
+	g.incIndent()
+	for _, m := range t.Methods {
+		g.emitLinef("fn %s(&mut self", m.Name)
+		for _, p := range m.Params {
+			g.emitf(", %s: %s", p.Name, g.mapType(p.Type))
+		}
+		if m.ReturnType == nil || m.ReturnType.Name == "Void" {
+			g.emit(");\n")
+		} else {
+			g.emitf(") -> %s;\n", g.mapType(m.ReturnType))
+		}
+	}
+	g.decIndent()
+	g.emitLine("}")
+}
+
+// --- Impl block generation ---
+
+func (g *generator) generateImplBlock(ib *ir.ImplBlock) {
+	g.emitLinef("impl %s for %s {\n", ib.TraitName, ib.EntityName)
+	g.incIndent()
+
+	// Look up the entity so generateMethod can emit invariant checks.
+	entity := g.entities[ib.EntityName]
+	if entity == nil {
+		// Synthesize a minimal entity with no invariants to avoid nil dereference.
+		entity = &ir.Entity{Name: ib.EntityName}
+	}
+
+	for _, m := range ib.Methods {
+		g.generateMethod(entity, m)
+		g.emitLine("")
+	}
+
 	g.decIndent()
 	g.emitLine("}")
 }

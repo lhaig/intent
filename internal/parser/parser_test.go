@@ -2109,3 +2109,184 @@ public entry function main() returns Int {
 		t.Errorf("expected function name 'main', got %q", fn.Name)
 	}
 }
+
+func TestParseTraitDecl(t *testing.T) {
+	input := `module test version "1.0.0";
+trait Handler {
+    method execute(ctx: Int) returns Int;
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	if len(prog.Traits) != 1 {
+		t.Fatalf("expected 1 trait, got %d", len(prog.Traits))
+	}
+
+	trait := prog.Traits[0]
+	if trait.Name != "Handler" {
+		t.Errorf("expected trait name 'Handler', got %q", trait.Name)
+	}
+	if trait.IsPublic {
+		t.Error("expected trait to not be public")
+	}
+	if len(trait.Methods) != 1 {
+		t.Fatalf("expected 1 method, got %d", len(trait.Methods))
+	}
+
+	method := trait.Methods[0]
+	if method.Name != "execute" {
+		t.Errorf("expected method name 'execute', got %q", method.Name)
+	}
+	if len(method.Params) != 1 {
+		t.Fatalf("expected 1 param, got %d", len(method.Params))
+	}
+	if method.Params[0].Name != "ctx" {
+		t.Errorf("expected param name 'ctx', got %q", method.Params[0].Name)
+	}
+	if method.Params[0].Type.Name != "Int" {
+		t.Errorf("expected param type 'Int', got %q", method.Params[0].Type.Name)
+	}
+	if method.ReturnType == nil {
+		t.Fatal("expected return type, got nil")
+	}
+	if method.ReturnType.Name != "Int" {
+		t.Errorf("expected return type 'Int', got %q", method.ReturnType.Name)
+	}
+}
+
+func TestParseTraitMultipleMethods(t *testing.T) {
+	input := `module test version "1.0.0";
+trait Processor {
+    method start() returns Bool;
+    method stop(code: Int) returns Void;
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	if len(prog.Traits) != 1 {
+		t.Fatalf("expected 1 trait, got %d", len(prog.Traits))
+	}
+
+	trait := prog.Traits[0]
+	if len(trait.Methods) != 2 {
+		t.Fatalf("expected 2 methods, got %d", len(trait.Methods))
+	}
+
+	if trait.Methods[0].Name != "start" {
+		t.Errorf("expected first method name 'start', got %q", trait.Methods[0].Name)
+	}
+	if len(trait.Methods[0].Params) != 0 {
+		t.Errorf("expected 0 params for start, got %d", len(trait.Methods[0].Params))
+	}
+	if trait.Methods[0].ReturnType.Name != "Bool" {
+		t.Errorf("expected return type 'Bool', got %q", trait.Methods[0].ReturnType.Name)
+	}
+
+	if trait.Methods[1].Name != "stop" {
+		t.Errorf("expected second method name 'stop', got %q", trait.Methods[1].Name)
+	}
+	if len(trait.Methods[1].Params) != 1 {
+		t.Errorf("expected 1 param for stop, got %d", len(trait.Methods[1].Params))
+	}
+	if trait.Methods[1].ReturnType.Name != "Void" {
+		t.Errorf("expected return type 'Void', got %q", trait.Methods[1].ReturnType.Name)
+	}
+}
+
+func TestParsePublicTrait(t *testing.T) {
+	input := `module test version "1.0.0";
+public trait Handler {
+    method run() returns Int;
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	if len(prog.Traits) != 1 {
+		t.Fatalf("expected 1 trait, got %d", len(prog.Traits))
+	}
+
+	if !prog.Traits[0].IsPublic {
+		t.Error("expected trait to be public")
+	}
+}
+
+func TestParseImplBlock(t *testing.T) {
+	input := `module test version "1.0.0";
+entity Foo {
+    field x: Int;
+    constructor(v: Int) {
+        self.x = v;
+    }
+}
+trait Bar {
+    method run(n: Int) returns Int;
+}
+impl Bar for Foo {
+    method run(n: Int) returns Int {
+        return self.x + n;
+    }
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	if len(prog.ImplBlocks) != 1 {
+		t.Fatalf("expected 1 impl block, got %d", len(prog.ImplBlocks))
+	}
+
+	impl := prog.ImplBlocks[0]
+	if impl.TraitName != "Bar" {
+		t.Errorf("expected trait name 'Bar', got %q", impl.TraitName)
+	}
+	if impl.EntityName != "Foo" {
+		t.Errorf("expected entity name 'Foo', got %q", impl.EntityName)
+	}
+	if len(impl.Methods) != 1 {
+		t.Fatalf("expected 1 method, got %d", len(impl.Methods))
+	}
+	if impl.Methods[0].Name != "run" {
+		t.Errorf("expected method name 'run', got %q", impl.Methods[0].Name)
+	}
+}
+
+func TestParseTraitMethodWithContracts(t *testing.T) {
+	input := `module test version "1.0.0";
+trait Bounded {
+    method get(idx: Int) returns Int
+        requires idx >= 0
+        ensures result >= 0;
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	if len(prog.Traits) != 1 {
+		t.Fatalf("expected 1 trait, got %d", len(prog.Traits))
+	}
+
+	method := prog.Traits[0].Methods[0]
+	if len(method.Requires) != 1 {
+		t.Fatalf("expected 1 requires clause, got %d", len(method.Requires))
+	}
+	if len(method.Ensures) != 1 {
+		t.Fatalf("expected 1 ensures clause, got %d", len(method.Ensures))
+	}
+}

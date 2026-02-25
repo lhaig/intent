@@ -263,6 +263,38 @@ Entity types are user-defined nominal types, declared with the `entity` keyword 
 
 There are no implicit type conversions. `Int` does not implicitly convert to `Float`, `Bool` does not implicitly convert to `Int`, and so on. All conversions, if needed, must be explicit (and in the POC, no conversion functions are provided -- this is a known limitation).
 
+### 4.6 Trait Types
+
+Traits define shared method interfaces that multiple entities can implement:
+
+```
+trait Handler {
+    method execute(ctx: Context) returns Int
+        requires ctx.get_value() >= 0
+        ensures result >= 0;
+}
+```
+
+Entities implement traits via `impl` blocks:
+
+```
+impl Handler for StartHandler {
+    method execute(ctx: Context) returns Int {
+        return self.code + ctx.get_value();
+    }
+}
+```
+
+**Key rules:**
+
+- Traits contain method signatures only (no bodies, no default implementations).
+- `impl` blocks must implement all methods declared in the trait -- no missing, no extra.
+- Parameter count, parameter types, and return types must match exactly.
+- Contracts (`requires`/`ensures`) on trait methods apply to all implementations. Impl methods may add additional contracts.
+- Trait methods are merged into the entity's method table for resolution -- callers use `entity.method()` syntax regardless of whether the method is defined directly or via a trait impl.
+- **Static dispatch only** -- no trait objects, no dynamic dispatch, no vtables. The caller always knows the concrete type at compile time.
+- Impl blocks must be in the same module as either the trait or the entity.
+
 ---
 
 ## 5. Module System

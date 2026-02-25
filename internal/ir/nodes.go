@@ -12,13 +12,15 @@ type Program struct {
 
 // Module represents a single Intent source file after lowering.
 type Module struct {
-	Name      string
-	IsEntry   bool
-	Path      string // original file path
-	Functions []*Function
-	Entities  []*Entity
-	Enums     []*Enum
-	Intents   []*Intent
+	Name       string
+	IsEntry    bool
+	Path       string // original file path
+	Functions  []*Function
+	Entities   []*Entity
+	Enums      []*Enum
+	Traits     []*Trait
+	ImplBlocks []*ImplBlock
+	Intents    []*Intent
 }
 
 // Function represents a function declaration in the IR.
@@ -105,6 +107,29 @@ type Enum struct {
 type EnumVariant struct {
 	Name   string
 	Fields []*Field
+}
+
+// Trait represents a trait declaration.
+type Trait struct {
+	Name     string
+	IsPublic bool
+	Methods  []*TraitMethod
+}
+
+// TraitMethod represents a method signature in a trait.
+type TraitMethod struct {
+	Name       string
+	Params     []*Param
+	ReturnType *checker.Type
+	Requires   []*Contract
+	Ensures    []*Contract
+}
+
+// ImplBlock represents a trait implementation for an entity.
+type ImplBlock struct {
+	TraitName  string
+	EntityName string
+	Methods    []*Method
 }
 
 // Intent represents an intent declaration (documentation/verification).

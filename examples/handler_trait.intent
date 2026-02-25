@@ -1,0 +1,56 @@
+module handler_trait version "1.0";
+
+entity Context {
+    field value: Int;
+
+    constructor(v: Int) {
+        self.value = v;
+    }
+
+    method get_value() returns Int {
+        return self.value;
+    }
+}
+
+trait Handler {
+    method execute(ctx: Context) returns Int;
+}
+
+entity StartHandler {
+    field code: Int;
+
+    constructor(c: Int) {
+        self.code = c;
+    }
+}
+
+impl Handler for StartHandler {
+    method execute(ctx: Context) returns Int {
+        return self.code + ctx.get_value();
+    }
+}
+
+entity StopHandler {
+    field offset: Int;
+
+    constructor(o: Int) {
+        self.offset = o;
+    }
+}
+
+impl Handler for StopHandler {
+    method execute(ctx: Context) returns Int {
+        return self.offset * ctx.get_value();
+    }
+}
+
+entry function main() returns Int {
+    let ctx: Context = Context(10);
+    let start: StartHandler = StartHandler(5);
+    let stop: StopHandler = StopHandler(3);
+    let r1: Int = start.execute(ctx);
+    let r2: Int = stop.execute(ctx);
+    print(r1);
+    print(r2);
+    return 0;
+}

@@ -545,3 +545,64 @@ func findExample(t *testing.T, name string) string {
 		dir = parent
 	}
 }
+
+// generateFromSource runs the full pipeline (parse -> check -> lower -> jsbe)
+// and returns the generated JS source.
+func generateFromSource(t *testing.T, name, src string) string {
+	t.Helper()
+	p := parser.New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("[%s] parse errors: %s", name, p.Diagnostics().Format("test"))
+	}
+	result := checker.CheckWithResult(prog)
+	if result.Diagnostics.HasErrors() {
+		t.Fatalf("[%s] check errors: %s", name, result.Diagnostics.Format("test"))
+	}
+	mod := ir.Lower(prog, result)
+	return Generate(mod)
+}
+
+func TestGenerateTraitJS(t *testing.T) {
+	src := `module test version "1.0";
+trait Handler {
+    method execute(x: Int) returns Int;
+}
+entry function main() returns Int { return 0; }
+`
+	output := generateFromSource(t, "trait", src)
+	for _, want := range []string{"@interface Handler", "@method execute"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output missing %q\n%s", want, output)
+		}
+	}
+}
+
+func TestGenerateImplBlockJS(t *testing.T) {
+	src := `module test version "1.0";
+entity Foo { field x: Int; constructor(v: Int) { self.x = v; } }
+trait Handler { method execute(n: Int) returns Int; }
+impl Handler for Foo { method execute(n: Int) returns Int { return self.x + n; } }
+entry function main() returns Int { let f: Foo = Foo(5); return f.execute(10); }
+`
+	output := generateFromSource(t, "impl", src)
+	for _, want := range []string{"impl Handler for Foo", "Foo.prototype.execute"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output missing %q\n%s", want, output)
+		}
+	}
+}
+
+func TestGenerateHandlerTraitExampleJS(t *testing.T) {
+	path := findExample(t, "handler_trait.intent")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	output := generateFromSource(t, "handler_trait", string(data))
+	for _, want := range []string{"@interface Handler", "StartHandler.prototype.execute", "StopHandler.prototype.execute"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output missing %q\n%s", want, output)
+		}
+	}
+}

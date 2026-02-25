@@ -61,6 +61,16 @@ func (p *Parser) Parse() *ast.Program {
 			enum := p.parseEnumDecl()
 			enum.IsPublic = isPublic
 			prog.Enums = append(prog.Enums, enum)
+		case lexer.TRAIT:
+			trait := p.parseTraitDecl()
+			trait.IsPublic = isPublic
+			prog.Traits = append(prog.Traits, trait)
+		case lexer.IMPL:
+			if isPublic {
+				p.diags.Errorf(p.current().Line, p.current().Column,
+					"'public' cannot be applied to impl blocks")
+			}
+			prog.ImplBlocks = append(prog.ImplBlocks, p.parseImplBlock())
 		case lexer.INTENT:
 			if isPublic {
 				p.diags.Errorf(p.current().Line, p.current().Column,
@@ -70,7 +80,7 @@ func (p *Parser) Parse() *ast.Program {
 		default:
 			if isPublic {
 				p.diags.Errorf(p.current().Line, p.current().Column,
-					"expected function, entity, or enum after 'public'")
+					"expected function, entity, enum, or trait after 'public'")
 			} else {
 				p.diags.Errorf(p.current().Line, p.current().Column,
 					"unexpected token %s at top level", p.current().Type)
@@ -333,6 +343,93 @@ func (p *Parser) parseVariantFields() []*ast.FieldDecl {
 	}
 
 	return fields
+}
+
+// parseTraitDecl parses: trait <Name> { method signatures }
+func (p *Parser) parseTraitDecl() *ast.TraitDecl {
+	tok := p.expect(lexer.TRAIT)
+	name := p.expect(lexer.IDENT)
+	p.expect(lexer.LBRACE)
+
+	trait := &ast.TraitDecl{
+		Name:   name.Literal,
+		Line:   tok.Line,
+		Column: tok.Column,
+	}
+
+	for !p.check(lexer.RBRACE) && !p.check(lexer.EOF) {
+		switch p.current().Type {
+		case lexer.METHOD:
+			trait.Methods = append(trait.Methods, p.parseTraitMethodSig())
+		default:
+			p.diags.Errorf(p.current().Line, p.current().Column,
+				"unexpected token %s in trait body, expected method signature", p.current().Type)
+			startPos := p.pos
+			p.synchronize()
+			if p.pos == startPos {
+				p.advance()
+			}
+		}
+	}
+	p.expect(lexer.RBRACE)
+	return trait
+}
+
+// parseTraitMethodSig parses: method <name>(<params>) returns <type> [requires ...] [ensures ...];
+func (p *Parser) parseTraitMethodSig() *ast.TraitMethodDecl {
+	tok := p.expect(lexer.METHOD)
+	name := p.expect(lexer.IDENT)
+	p.expect(lexer.LPAREN)
+	params := p.parseParamList()
+	p.expect(lexer.RPAREN)
+	p.expect(lexer.RETURNS)
+	retType := p.parseTypeRef()
+	requires := p.parseContractClauses(lexer.REQUIRES)
+	ensures := p.parseContractClauses(lexer.ENSURES)
+	p.expect(lexer.SEMICOLON)
+
+	return &ast.TraitMethodDecl{
+		Name:       name.Literal,
+		Params:     params,
+		ReturnType: retType,
+		Requires:   requires,
+		Ensures:    ensures,
+		Line:       tok.Line,
+		Column:     tok.Column,
+	}
+}
+
+// parseImplBlock parses: impl <TraitName> for <EntityName> { methods }
+func (p *Parser) parseImplBlock() *ast.ImplBlock {
+	tok := p.expect(lexer.IMPL)
+	traitName := p.expect(lexer.IDENT)
+	p.expect(lexer.FOR)
+	entityName := p.expect(lexer.IDENT)
+	p.expect(lexer.LBRACE)
+
+	impl := &ast.ImplBlock{
+		TraitName:  traitName.Literal,
+		EntityName: entityName.Literal,
+		Line:       tok.Line,
+		Column:     tok.Column,
+	}
+
+	for !p.check(lexer.RBRACE) && !p.check(lexer.EOF) {
+		switch p.current().Type {
+		case lexer.METHOD:
+			impl.Methods = append(impl.Methods, p.parseMethodDecl())
+		default:
+			p.diags.Errorf(p.current().Line, p.current().Column,
+				"unexpected token %s in impl block, expected method", p.current().Type)
+			startPos := p.pos
+			p.synchronize()
+			if p.pos == startPos {
+				p.advance()
+			}
+		}
+	}
+	p.expect(lexer.RBRACE)
+	return impl
 }
 
 // parseIntentDecl parses: intent "<desc>" { ... }

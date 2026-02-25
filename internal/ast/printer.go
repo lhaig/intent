@@ -39,6 +39,12 @@ func printNode(sb *strings.Builder, node Node, indent int) {
 		for _, enum := range n.Enums {
 			printNode(sb, enum, indent+1)
 		}
+		for _, trait := range n.Traits {
+			printNode(sb, trait, indent+1)
+		}
+		for _, impl := range n.ImplBlocks {
+			printNode(sb, impl, indent+1)
+		}
 		for _, intent := range n.Intents {
 			printNode(sb, intent, indent+1)
 		}
@@ -262,6 +268,52 @@ func printNode(sb *strings.Builder, node Node, indent int) {
 			sb.WriteString(fmt.Sprintf("%s  Fields:\n", prefix))
 			for _, f := range n.Fields {
 				printNode(sb, f, indent+2)
+			}
+		}
+
+	case *TraitDecl:
+		visibility := ""
+		if n.IsPublic {
+			visibility = " (public)"
+		}
+		sb.WriteString(fmt.Sprintf("%sTrait: %s%s\n", prefix, n.Name, visibility))
+		if len(n.Methods) > 0 {
+			sb.WriteString(fmt.Sprintf("%s  Methods:\n", prefix))
+			for _, m := range n.Methods {
+				printNode(sb, m, indent+2)
+			}
+		}
+
+	case *TraitMethodDecl:
+		sb.WriteString(fmt.Sprintf("%sTraitMethod: %s\n", prefix, n.Name))
+		if len(n.Params) > 0 {
+			sb.WriteString(fmt.Sprintf("%s  Params:\n", prefix))
+			for _, p := range n.Params {
+				printNode(sb, p, indent+2)
+			}
+		}
+		if n.ReturnType != nil {
+			sb.WriteString(fmt.Sprintf("%s  Returns: %s\n", prefix, n.ReturnType.Name))
+		}
+		if len(n.Requires) > 0 {
+			sb.WriteString(fmt.Sprintf("%s  Requires:\n", prefix))
+			for _, req := range n.Requires {
+				printNode(sb, req, indent+2)
+			}
+		}
+		if len(n.Ensures) > 0 {
+			sb.WriteString(fmt.Sprintf("%s  Ensures:\n", prefix))
+			for _, ens := range n.Ensures {
+				printNode(sb, ens, indent+2)
+			}
+		}
+
+	case *ImplBlock:
+		sb.WriteString(fmt.Sprintf("%sImpl: %s for %s\n", prefix, n.TraitName, n.EntityName))
+		if len(n.Methods) > 0 {
+			sb.WriteString(fmt.Sprintf("%s  Methods:\n", prefix))
+			for _, m := range n.Methods {
+				printNode(sb, m, indent+2)
 			}
 		}
 

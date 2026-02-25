@@ -71,7 +71,7 @@ func (f *formatter) formatProgram(prog *ast.Program) {
 		}
 	}
 
-	// Emit declarations in canonical order: enums, entities, functions, intents
+	// Emit declarations in canonical order: enums, entities, traits, impls, functions, intents
 	for _, e := range prog.Enums {
 		f.blankLine()
 		f.formatEnumDecl(e)
@@ -79,6 +79,14 @@ func (f *formatter) formatProgram(prog *ast.Program) {
 	for _, e := range prog.Entities {
 		f.blankLine()
 		f.formatEntityDecl(e)
+	}
+	for _, t := range prog.Traits {
+		f.blankLine()
+		f.formatTraitDecl(t)
+	}
+	for _, ib := range prog.ImplBlocks {
+		f.blankLine()
+		f.formatImplBlock(ib)
 	}
 	for _, fn := range prog.Functions {
 		f.blankLine()
@@ -293,6 +301,65 @@ func (f *formatter) formatIntentDecl(i *ast.IntentDecl) {
 			refs[idx] = strings.Join(vb.Parts, ".")
 		}
 		f.emitLinef("verified_by: [%s];", strings.Join(refs, ", "))
+	}
+	f.decIndent()
+	f.emitLine("}")
+}
+
+func (f *formatter) formatTraitDecl(t *ast.TraitDecl) {
+	if t.IsPublic {
+		f.emit(f.indentStr() + "public ")
+	} else {
+		f.emit(f.indentStr())
+	}
+	f.emitf("trait %s {\n", t.Name)
+	f.incIndent()
+	for i, m := range t.Methods {
+		if i > 0 {
+			f.blankLine()
+		}
+		f.formatTraitMethodSig(m)
+	}
+	f.decIndent()
+	f.emitLine("}")
+}
+
+func (f *formatter) formatTraitMethodSig(m *ast.TraitMethodDecl) {
+	f.emit(f.indentStr())
+	f.emitf("method %s(", m.Name)
+	for i, p := range m.Params {
+		if i > 0 {
+			f.emit(", ")
+		}
+		f.emitf("%s: %s", p.Name, f.formatTypeRef(p.Type))
+	}
+	f.emitf(") returns %s", f.formatTypeRef(m.ReturnType))
+
+	hasContracts := len(m.Requires) > 0 || len(m.Ensures) > 0
+	if hasContracts {
+		f.emit("\n")
+		f.incIndent()
+		for _, req := range m.Requires {
+			f.emitLinef("requires %s", f.formatExpr(req.Expr))
+		}
+		for _, ens := range m.Ensures {
+			f.emitLinef("ensures %s", f.formatExpr(ens.Expr))
+		}
+		f.decIndent()
+		f.emitLine(";")
+	} else {
+		f.emit(";\n")
+	}
+}
+
+func (f *formatter) formatImplBlock(ib *ast.ImplBlock) {
+	f.emitLinef("impl %s for %s {", ib.TraitName, ib.EntityName)
+	f.incIndent()
+	for i, m := range ib.Methods {
+		if i > 0 {
+			f.blankLine()
+		}
+		f.formatMethodDecl(m)
 	}
 	f.decIndent()
 	f.emitLine("}")

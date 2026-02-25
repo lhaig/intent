@@ -354,3 +354,47 @@ func findExample(t *testing.T, name string) string {
 		dir = parent
 	}
 }
+
+func TestGenerateTraitDecl(t *testing.T) {
+	src := `module test version "1.0";
+trait Handler {
+    method execute(x: Int) returns Int;
+}
+entry function main() returns Int { return 0; }
+`
+	output := generateFromSource(t, "trait", src)
+	for _, want := range []string{"trait Handler", "fn execute(&mut self", "i64"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output missing %q\n%s", want, output)
+		}
+	}
+}
+
+func TestGenerateImplBlock(t *testing.T) {
+	src := `module test version "1.0";
+entity Foo { field x: Int; constructor(v: Int) { self.x = v; } }
+trait Handler { method execute(n: Int) returns Int; }
+impl Handler for Foo { method execute(n: Int) returns Int { return self.x + n; } }
+entry function main() returns Int { let f: Foo = Foo(5); return f.execute(10); }
+`
+	output := generateFromSource(t, "impl", src)
+	for _, want := range []string{"impl Handler for Foo", "fn execute(&mut self"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output missing %q\n%s", want, output)
+		}
+	}
+}
+
+func TestGenerateHandlerTraitExample(t *testing.T) {
+	path := findExample(t, "handler_trait.intent")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	output := generateFromSource(t, "handler_trait", string(data))
+	for _, want := range []string{"trait Handler", "impl Handler for StartHandler", "impl Handler for StopHandler"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output missing %q\n%s", want, output)
+		}
+	}
+}

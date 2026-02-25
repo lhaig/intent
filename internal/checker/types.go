@@ -42,6 +42,12 @@ type ParamInfo struct {
 	Type *Type
 }
 
+// TraitInfo holds information about a trait type
+type TraitInfo struct {
+	Name    string
+	Methods map[string]*MethodInfo
+}
+
 // EnumInfo holds information about an enum type
 type EnumInfo struct {
 	Name     string

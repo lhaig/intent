@@ -31,6 +31,7 @@ type ModuleSymbols struct {
 	Functions map[string]*FuncInfo
 	Entities  map[string]*EntityInfo
 	Enums     map[string]*EnumInfo
+	Traits    map[string]*TraitInfo
 	// Keep references to the AST declarations for codegen and contract checking
 	FunctionDecls map[string]*ast.FunctionDecl
 	EntityDecls   map[string]*ast.EntityDecl
@@ -45,6 +46,8 @@ type Checker struct {
 	enums        map[string]*EnumInfo
 	enumVariants map[string]*EnumVariantLookup
 	functions    map[string]*FuncInfo
+	traits       map[string]*TraitInfo
+	implOrigins  map[string]string // "Entity.Method" -> "Trait" for codegen
 	scope        *Scope
 	exprTypes    map[ast.Expression]*Type
 
@@ -79,6 +82,8 @@ type CheckResult struct {
 	ExprTypes   map[ast.Expression]*Type
 	Entities    map[string]*EntityInfo
 	Enums       map[string]*EnumInfo
+	Traits      map[string]*TraitInfo
+	ImplOrigins map[string]string // "Entity.Method" -> "Trait"
 }
 
 // CheckWithResult performs semantic analysis and returns results for downstream stages
@@ -90,6 +95,8 @@ func CheckWithResult(prog *ast.Program) *CheckResult {
 		enums:        make(map[string]*EnumInfo),
 		enumVariants: make(map[string]*EnumVariantLookup),
 		functions:    make(map[string]*FuncInfo),
+		traits:       make(map[string]*TraitInfo),
+		implOrigins:  make(map[string]string),
 		scope:        NewScope(nil),
 		contractCtx:  CtxNormal,
 		entityCtx:    nil,
@@ -98,9 +105,12 @@ func CheckWithResult(prog *ast.Program) *CheckResult {
 
 	c.registerEnums()
 	c.registerEntities()
+	c.registerTraits()
 	c.registerFunctions()
+	c.checkImplBlocks()
 	c.checkFunctions()
 	c.checkEntities()
+	c.checkImplBlockBodies()
 	c.verifyIntents()
 
 	return &CheckResult{
@@ -108,6 +118,8 @@ func CheckWithResult(prog *ast.Program) *CheckResult {
 		ExprTypes:   c.exprTypes,
 		Entities:    c.entities,
 		Enums:       c.enums,
+		Traits:      c.traits,
+		ImplOrigins: c.implOrigins,
 	}
 }
 
@@ -122,6 +134,8 @@ type CheckAllResult struct {
 	ExprTypes   map[ast.Expression]*Type
 	Entities    map[string]*EntityInfo
 	Enums       map[string]*EnumInfo
+	Traits      map[string]*TraitInfo
+	ImplOrigins map[string]string
 }
 
 // moduleNameFromPath derives a module name from a file path.
@@ -139,6 +153,8 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 	allExprTypes := make(map[ast.Expression]*Type)
 	allEntities := make(map[string]*EntityInfo)
 	allEnums := make(map[string]*EnumInfo)
+	allTraits := make(map[string]*TraitInfo)
+	allImplOrigins := make(map[string]string)
 
 	// Pass 1: Register public symbols from all files
 	publicSymbols := make(map[string]*ModuleSymbols) // moduleName -> symbols
@@ -154,6 +170,7 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 			Functions:     make(map[string]*FuncInfo),
 			Entities:      make(map[string]*EntityInfo),
 			Enums:         make(map[string]*EnumInfo),
+			Traits:        make(map[string]*TraitInfo),
 			FunctionDecls: make(map[string]*ast.FunctionDecl),
 			EntityDecls:   make(map[string]*ast.EntityDecl),
 			EnumDecls:     make(map[string]*ast.EnumDecl),
@@ -167,6 +184,8 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 			enums:        make(map[string]*EnumInfo),
 			enumVariants: make(map[string]*EnumVariantLookup),
 			functions:    make(map[string]*FuncInfo),
+			traits:       make(map[string]*TraitInfo),
+			implOrigins:  make(map[string]string),
 			scope:        NewScope(nil),
 			contractCtx:  CtxNormal,
 			exprTypes:    make(map[ast.Expression]*Type),
@@ -202,7 +221,17 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 
 		tmpChecker.registerEnums()
 		tmpChecker.registerEntities()
+		tmpChecker.registerTraits()
 		tmpChecker.registerFunctions()
+
+		// Collect public traits
+		for _, trait := range prog.Traits {
+			if trait.IsPublic {
+				if ti, ok := tmpChecker.traits[trait.Name]; ok {
+					modSyms.Traits[trait.Name] = ti
+				}
+			}
+		}
 
 		// Collect public functions
 		for _, fn := range prog.Functions {
@@ -280,6 +309,8 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 			enums:         make(map[string]*EnumInfo),
 			enumVariants:  make(map[string]*EnumVariantLookup),
 			functions:     make(map[string]*FuncInfo),
+			traits:        make(map[string]*TraitInfo),
+			implOrigins:   make(map[string]string),
 			scope:         NewScope(nil),
 			contractCtx:   CtxNormal,
 			exprTypes:     make(map[ast.Expression]*Type),
@@ -329,12 +360,23 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 			}
 		}
 
+		// Also inject imported traits
+		for _, modSyms := range moduleImports {
+			for name, traitInfo := range modSyms.Traits {
+				if _, exists := c.traits[name]; !exists {
+					c.traits[name] = traitInfo
+				}
+			}
+		}
+
 		c.registerEnums()
 		c.registerEntities()
+		c.registerTraits()
 		c.registerFunctions()
-
+		c.checkImplBlocks()
 		c.checkFunctions()
 		c.checkEntities()
+		c.checkImplBlockBodies()
 		c.verifyIntents()
 
 		// Collect diagnostics with file context
@@ -354,6 +396,12 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 		for name, info := range c.enums {
 			allEnums[name] = info
 		}
+		for name, info := range c.traits {
+			allTraits[name] = info
+		}
+		for key, val := range c.implOrigins {
+			allImplOrigins[key] = val
+		}
 	}
 
 	return &CheckAllResult{
@@ -361,6 +409,8 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 		ExprTypes:   allExprTypes,
 		Entities:    allEntities,
 		Enums:       allEnums,
+		Traits:      allTraits,
+		ImplOrigins: allImplOrigins,
 	}
 }
 

@@ -129,6 +129,31 @@ func (g *generator) addModule(mod *ir.Module) {
 		}
 		g.addFunction(name, fn)
 	}
+
+	// Trait declarations are pure interface definitions; nothing to emit.
+
+	// Emit impl block methods as mangled standalone functions.
+	// Each method becomes a function named "EntityName_MethodName" (with the
+	// module prefix applied when the module is not the entry module).
+	for _, impl := range mod.ImplBlocks {
+		for _, method := range impl.Methods {
+			// Convert the Method to a synthetic Function so we can reuse
+			// addFunction without duplicating the entire compilation path.
+			fn := &ir.Function{
+				Name:       method.Name,
+				IsEntry:    false,
+				IsPublic:   true,
+				Params:     method.Params,
+				ReturnType: method.ReturnType,
+				Requires:   method.Requires,
+				Ensures:    method.Ensures,
+				Body:       method.Body,
+			}
+			// Mangle: EntityName_MethodName, with the optional module prefix.
+			mangledName := prefix + impl.EntityName + "_" + method.Name
+			g.addFunction(mangledName, fn)
+		}
+	}
 }
 
 // addFunction compiles a single IR function to WASM.

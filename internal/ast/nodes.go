@@ -21,12 +21,14 @@ type Expression interface {
 
 // Program represents the entire Intent program
 type Program struct {
-	Module    *ModuleDecl
-	Imports   []*ImportDecl
-	Functions []*FunctionDecl
-	Entities  []*EntityDecl
-	Enums     []*EnumDecl
-	Intents   []*IntentDecl
+	Module     *ModuleDecl
+	Imports    []*ImportDecl
+	Functions  []*FunctionDecl
+	Entities   []*EntityDecl
+	Enums      []*EnumDecl
+	Traits     []*TraitDecl
+	ImplBlocks []*ImplBlock
+	Intents    []*IntentDecl
 }
 
 func (p *Program) Pos() (int, int) {
@@ -171,6 +173,41 @@ type MethodDecl struct {
 }
 
 func (m *MethodDecl) Pos() (int, int) { return m.Line, m.Column }
+
+// TraitDecl represents a trait declaration
+type TraitDecl struct {
+	Name     string
+	IsPublic bool
+	Methods  []*TraitMethodDecl
+	Line     int
+	Column   int
+}
+
+func (t *TraitDecl) Pos() (int, int) { return t.Line, t.Column }
+
+// TraitMethodDecl represents a method signature in a trait (no body)
+type TraitMethodDecl struct {
+	Name       string
+	Params     []*Param
+	ReturnType *TypeRef
+	Requires   []*ContractClause
+	Ensures    []*ContractClause
+	Line       int
+	Column     int
+}
+
+func (t *TraitMethodDecl) Pos() (int, int) { return t.Line, t.Column }
+
+// ImplBlock represents a trait implementation for an entity
+type ImplBlock struct {
+	TraitName  string
+	EntityName string
+	Methods    []*MethodDecl
+	Line       int
+	Column     int
+}
+
+func (i *ImplBlock) Pos() (int, int) { return i.Line, i.Column }
 
 // IntentDecl represents an intent declaration
 type IntentDecl struct {
