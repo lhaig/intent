@@ -1010,6 +1010,32 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr, arrayRefParams map[st
 		}
 	case "None":
 		return "None"
+	case "read_file":
+		if len(expr.Args) == 1 {
+			arg := g.generateExpr(expr.Args[0], arrayRefParams)
+			return fmt.Sprintf("std::fs::read_to_string(%s).map_err(|e| e.to_string())", arg)
+		}
+	case "write_file":
+		if len(expr.Args) == 2 {
+			path := g.generateExpr(expr.Args[0], arrayRefParams)
+			content := g.generateExpr(expr.Args[1], arrayRefParams)
+			return fmt.Sprintf("std::fs::write(%s, %s).map_err(|e| e.to_string())", path, content)
+		}
+	case "create_dir":
+		if len(expr.Args) == 1 {
+			arg := g.generateExpr(expr.Args[0], arrayRefParams)
+			return fmt.Sprintf("std::fs::create_dir_all(%s).map_err(|e| e.to_string())", arg)
+		}
+	case "file_exists":
+		if len(expr.Args) == 1 {
+			arg := g.generateExpr(expr.Args[0], arrayRefParams)
+			return fmt.Sprintf("std::path::Path::new(&%s).exists()", arg)
+		}
+	case "env_get":
+		if len(expr.Args) == 1 {
+			arg := g.generateExpr(expr.Args[0], arrayRefParams)
+			return fmt.Sprintf("std::env::var(%s).ok()", arg)
+		}
 	}
 	// Fallback
 	args := make([]string, len(expr.Args))
@@ -1088,6 +1114,11 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr, arrayRefPara
 	// Result/Option predicate methods
 	if expr.Method == "is_ok" || expr.Method == "is_err" || expr.Method == "is_some" || expr.Method == "is_none" {
 		return fmt.Sprintf("%s.%s()", obj, expr.Method)
+	}
+
+	// to_string() method on Int, Float, Bool
+	if expr.Method == "to_string" && len(expr.Args) == 0 {
+		return fmt.Sprintf("%s.to_string()", obj)
 	}
 
 	// String methods

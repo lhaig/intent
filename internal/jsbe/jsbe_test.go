@@ -606,3 +606,47 @@ func TestGenerateHandlerTraitExampleJS(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateIOBuiltinsJS(t *testing.T) {
+	src := `module test version "1.0";
+
+function test_read(path: String) returns Result<String, String> {
+    return read_file(path);
+}
+
+function test_write(path: String, content: String) returns Result<Void, String> {
+    return write_file(path, content);
+}
+
+function test_mkdir(path: String) returns Result<Void, String> {
+    return create_dir(path);
+}
+
+function test_exists(path: String) returns Bool {
+    return file_exists(path);
+}
+
+function test_env(name: String) returns Option<String> {
+    return env_get(name);
+}
+
+function test_to_str(n: Int) returns String {
+    return n.to_string();
+}
+`
+	output := generateJSFromSource(t, "io_builtins", src)
+
+	expects := []string{
+		"readFileSync(",
+		"writeFileSync(",
+		"mkdirSync(",
+		"existsSync(",
+		"process.env",
+		"String(",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}

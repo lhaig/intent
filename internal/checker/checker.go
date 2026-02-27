@@ -216,12 +216,18 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 						}
 					}
 				}
+				for name, traitInfo := range syms.Traits {
+					if _, exists := tmpChecker.traits[name]; !exists {
+						tmpChecker.traits[name] = traitInfo
+					}
+				}
 			}
 		}
 
 		tmpChecker.registerEnums()
 		tmpChecker.registerEntities()
 		tmpChecker.registerTraits()
+		tmpChecker.checkImplBlocks()
 		tmpChecker.registerFunctions()
 
 		// Collect public traits
@@ -1278,6 +1284,75 @@ func (c *Checker) checkCallExpr(expr *ast.CallExpr, scope *Scope) *Type {
 		return TypeInt
 	}
 
+	// Handle read_file() built-in
+	if expr.Function == "read_file" {
+		if len(expr.Args) != 1 {
+			c.diag.Errorf(line, col, "read_file() requires exactly 1 argument, got %d", len(expr.Args))
+			return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeString, TypeString}, EnumInfo: instantiateResult(TypeString, TypeString)}
+		}
+		argType := c.checkExpression(expr.Args[0], scope)
+		if argType != nil && !argType.Equal(TypeString) {
+			c.diag.Errorf(line, col, "read_file() argument must be String, got %s", argType.String())
+		}
+		return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeString, TypeString}, EnumInfo: instantiateResult(TypeString, TypeString)}
+	}
+
+	// Handle write_file() built-in
+	if expr.Function == "write_file" {
+		if len(expr.Args) != 2 {
+			c.diag.Errorf(line, col, "write_file() requires exactly 2 arguments, got %d", len(expr.Args))
+			return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeVoid, TypeString}, EnumInfo: instantiateResult(TypeVoid, TypeString)}
+		}
+		argType0 := c.checkExpression(expr.Args[0], scope)
+		if argType0 != nil && !argType0.Equal(TypeString) {
+			c.diag.Errorf(line, col, "write_file() argument 1 must be String, got %s", argType0.String())
+		}
+		argType1 := c.checkExpression(expr.Args[1], scope)
+		if argType1 != nil && !argType1.Equal(TypeString) {
+			c.diag.Errorf(line, col, "write_file() argument 2 must be String, got %s", argType1.String())
+		}
+		return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeVoid, TypeString}, EnumInfo: instantiateResult(TypeVoid, TypeString)}
+	}
+
+	// Handle create_dir() built-in
+	if expr.Function == "create_dir" {
+		if len(expr.Args) != 1 {
+			c.diag.Errorf(line, col, "create_dir() requires exactly 1 argument, got %d", len(expr.Args))
+			return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeVoid, TypeString}, EnumInfo: instantiateResult(TypeVoid, TypeString)}
+		}
+		argType := c.checkExpression(expr.Args[0], scope)
+		if argType != nil && !argType.Equal(TypeString) {
+			c.diag.Errorf(line, col, "create_dir() argument must be String, got %s", argType.String())
+		}
+		return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeVoid, TypeString}, EnumInfo: instantiateResult(TypeVoid, TypeString)}
+	}
+
+	// Handle file_exists() built-in
+	if expr.Function == "file_exists" {
+		if len(expr.Args) != 1 {
+			c.diag.Errorf(line, col, "file_exists() requires exactly 1 argument, got %d", len(expr.Args))
+			return TypeBool
+		}
+		argType := c.checkExpression(expr.Args[0], scope)
+		if argType != nil && !argType.Equal(TypeString) {
+			c.diag.Errorf(line, col, "file_exists() argument must be String, got %s", argType.String())
+		}
+		return TypeBool
+	}
+
+	// Handle env_get() built-in
+	if expr.Function == "env_get" {
+		if len(expr.Args) != 1 {
+			c.diag.Errorf(line, col, "env_get() requires exactly 1 argument, got %d", len(expr.Args))
+			return &Type{Name: "Option", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeString}, EnumInfo: instantiateOption(TypeString)}
+		}
+		argType := c.checkExpression(expr.Args[0], scope)
+		if argType != nil && !argType.Equal(TypeString) {
+			c.diag.Errorf(line, col, "env_get() argument must be String, got %s", argType.String())
+		}
+		return &Type{Name: "Option", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeString}, EnumInfo: instantiateOption(TypeString)}
+	}
+
 	// Check if it's a built-in Result/Option variant constructor (Ok, Err, Some)
 	if expr.Function == "Ok" || expr.Function == "Err" || expr.Function == "Some" {
 		return c.checkBuiltinVariant(expr, scope)
@@ -1616,6 +1691,16 @@ func (c *Checker) checkMethodCallExpr(expr *ast.MethodCallExpr, scope *Scope) *T
 		default:
 			c.diag.Errorf(line, col, "String has no method '%s'", expr.Method)
 			return nil
+		}
+	}
+
+	// Handle to_string() method on Int, Float, Bool
+	if expr.Method == "to_string" {
+		if objType.Equal(TypeInt) || objType.Equal(TypeFloat) || objType.Equal(TypeBool) {
+			if len(expr.Args) != 0 {
+				c.diag.Errorf(line, col, "to_string() requires no arguments, got %d", len(expr.Args))
+			}
+			return TypeString
 		}
 	}
 

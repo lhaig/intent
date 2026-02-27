@@ -993,6 +993,32 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr) string {
 		}
 	case "None":
 		return "{ _tag: \"None\" }"
+	case "read_file":
+		if len(expr.Args) == 1 {
+			arg := g.generateExpr(expr.Args[0])
+			return fmt.Sprintf("(() => { try { return { _tag: \"Ok\", value: require(\"fs\").readFileSync(%s, \"utf-8\") }; } catch(e) { return { _tag: \"Err\", value: e.message }; } })()", arg)
+		}
+	case "write_file":
+		if len(expr.Args) == 2 {
+			path := g.generateExpr(expr.Args[0])
+			content := g.generateExpr(expr.Args[1])
+			return fmt.Sprintf("(() => { try { require(\"fs\").writeFileSync(%s, %s); return { _tag: \"Ok\", value: undefined }; } catch(e) { return { _tag: \"Err\", value: e.message }; } })()", path, content)
+		}
+	case "create_dir":
+		if len(expr.Args) == 1 {
+			arg := g.generateExpr(expr.Args[0])
+			return fmt.Sprintf("(() => { try { require(\"fs\").mkdirSync(%s, { recursive: true }); return { _tag: \"Ok\", value: undefined }; } catch(e) { return { _tag: \"Err\", value: e.message }; } })()", arg)
+		}
+	case "file_exists":
+		if len(expr.Args) == 1 {
+			arg := g.generateExpr(expr.Args[0])
+			return fmt.Sprintf("require(\"fs\").existsSync(%s)", arg)
+		}
+	case "env_get":
+		if len(expr.Args) == 1 {
+			arg := g.generateExpr(expr.Args[0])
+			return fmt.Sprintf("(process.env[%s] !== undefined ? { _tag: \"Some\", value: process.env[%s] } : { _tag: \"None\" })", arg, arg)
+		}
 	}
 	// Fallback
 	args := make([]string, len(expr.Args))
@@ -1061,6 +1087,11 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr) string {
 	}
 	if expr.Method == "is_none" {
 		return fmt.Sprintf("(%s._tag === \"None\")", obj)
+	}
+
+	// to_string() method on Int, Float, Bool
+	if expr.Method == "to_string" && len(expr.Args) == 0 {
+		return fmt.Sprintf("String(%s)", obj)
 	}
 
 	// String methods

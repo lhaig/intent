@@ -1,0 +1,37 @@
+module io_demo version "1.0";
+
+// Demonstrates I/O built-in functions
+
+function demo_io() returns Result<String, String> {
+    // Create a directory
+    let dir_result: Result<Void, String> = create_dir("/tmp/intent_demo");
+
+    // Write a file
+    let write_result: Result<Void, String> = write_file("/tmp/intent_demo/test.txt", "hello from intent");
+
+    // Read the file back
+    let content: Result<String, String> = read_file("/tmp/intent_demo/test.txt");
+
+    // Check if file exists
+    let found: Bool = file_exists("/tmp/intent_demo/test.txt");
+
+    // Read an environment variable
+    let home: Option<String> = env_get("HOME");
+
+    // Convert numbers to strings
+    let num: Int = 42;
+    let num_str: String = num.to_string();
+
+    let pi: Float = 3.14;
+    let pi_str: String = pi.to_string();
+
+    let flag: Bool = true;
+    let flag_str: String = flag.to_string();
+
+    return content;
+}
+
+entry function main() returns Int {
+    let res: Result<String, String> = demo_io();
+    return 0;
+}

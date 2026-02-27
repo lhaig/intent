@@ -8,7 +8,7 @@ This is preferable to designing language features in the abstract: every additio
 
 ## Current Coverage
 
-**Phase 1-5 (complete):** Structural and logical skeleton, string stdlib, Array\<String\> entity fields, Map\<K,V\> type, Result\<T,E\> error handling — ~70% of the spec by section count.
+**Phase 1-6 (complete):** Structural and logical skeleton, string stdlib, Array\<String\> entity fields, Map\<K,V\> type, Result\<T,E\> error handling, Handler trait with 5 implementations — ~75% of the spec by section count.
 
 | Spec Area | Status | Files |
 |-----------|--------|-------|
@@ -39,10 +39,12 @@ Both single-file (`attractor.intent`) and multi-file (`main.intent`) versions co
 | Handler execution with retry (execute_with_retry) | Done | retry.intent |
 | Graph validation aggregate (validate_graph) | Done | validation.intent |
 | Loop refactoring (break/continue replacing done flags) | Done | edge_selection.intent, validation.intent |
+| Handler trait + 5 implementations (static dispatch) | Done | handlers.intent |
 
 ### Known limitations in current implementation
 
-- No trait-based handler dispatch -- needs Phase 6
+- HandlerRegistry (dynamic dispatch by string key) deferred -- requires trait objects or a runtime registry pattern not yet supported by Intent's static dispatch model
+- Traits don't support invariants, only method-level requires/ensures contracts
 
 ## Gap-to-Feature Mapping
 
@@ -169,3 +171,6 @@ Each phase should produce both a language improvement and a visible expansion of
 | 2026-02-23 | Phase 3 complete: Array\<String\> entity fields, full 5-step edge selection, BFS reachability, Checkpoint.completed_nodes | No compiler changes needed — Array\<String\> on entity fields already worked |
 | 2026-02-23 | Phase 4 complete: Map\<K,V\> type across checker + Rust/JS/WASM backends. PipelineContext, node_retries, context_updates, context-aware condition evaluation | Map\<Float,V\> not rejected at compile time (Rust HashMap requires Eq+Hash) |
 | 2026-02-24 | Phase 5 complete: Result\<T,E\> error handling in retry and validation, done-flag loop refactoring to break, grammar docs updated, error_handling.intent example | No compiler changes needed -- all features already implemented. Match arms are expression-only (can't contain continue/return). |
+| 2026-02-26 | Phase 6 complete: Handler trait with 5 implementations (Start, Exit, Conditional, Codergen, Tool), dispatch functions for cross-module use | Trait impl methods only merge into entity info within the defining module; cross-module dispatch requires wrapper functions. HandlerRegistry deferred (needs trait objects). |
+| 2026-02-26 | Checker improvements: verified_by supports trait method contracts (Handler.execute.requires), cross-module trait method resolution fixed (Pass 1 now runs checkImplBlocks), dispatch wrappers removed, retry.intent uses trait-based handler dispatch | None -- all workarounds eliminated |
+| 2026-02-26 | Phase 7 complete: I/O standard library -- read_file, write_file, create_dir, file_exists, env_get builtins + to_string() method on Int/Float/Bool. Wired through checker, IR, Rust codegen, JS codegen. | No compiler architecture changes needed -- builtins follow existing name-match pattern |

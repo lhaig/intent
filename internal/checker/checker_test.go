@@ -3141,3 +3141,346 @@ impl Handler for Foo { method execute() returns Int { return 0; } method extra()
 		t.Errorf("Expected errors for trait extra method, got none")
 	}
 }
+
+func TestVerifiedByTraitMethodRequires(t *testing.T) {
+	source := `module test version "1.0.0";
+trait Handler { method execute(x: Int) returns Int requires x > 0; }
+entity Foo { field v: Int; constructor() { self.v = 0; } }
+impl Handler for Foo { method execute(x: Int) returns Int { return x; } }
+intent "Test" { verified_by: [Handler.execute.requires]; }`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for verified_by trait method requires, got: %s", diag.Format("test"))
+	}
+}
+
+func TestVerifiedByTraitMethodEnsures(t *testing.T) {
+	source := `module test version "1.0.0";
+trait Handler { method execute(x: Int) returns Int ensures result > 0; }
+entity Foo { field v: Int; constructor() { self.v = 0; } }
+impl Handler for Foo { method execute(x: Int) returns Int { return x; } }
+intent "Test" { verified_by: [Handler.execute.ensures]; }`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for verified_by trait method ensures, got: %s", diag.Format("test"))
+	}
+}
+
+func TestVerifiedByTraitMethodNoContract(t *testing.T) {
+	source := `module test version "1.0.0";
+trait Handler { method execute(x: Int) returns Int; }
+entity Foo { field v: Int; constructor() { self.v = 0; } }
+impl Handler for Foo { method execute(x: Int) returns Int { return x; } }
+intent "Test" { verified_by: [Handler.execute.requires]; }`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for verified_by referencing trait method with no requires")
+	}
+	found := false
+	for _, d := range diag.All() {
+		if strings.Contains(d.Message, "no requires clause") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected 'no requires clause' error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestVerifiedByUnknownTraitMethod(t *testing.T) {
+	source := `module test version "1.0.0";
+trait Handler { method execute(x: Int) returns Int requires x > 0; }
+entity Foo { field v: Int; constructor() { self.v = 0; } }
+impl Handler for Foo { method execute(x: Int) returns Int { return x; } }
+intent "Test" { verified_by: [Handler.nonexistent.requires]; }`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for verified_by referencing nonexistent trait method")
+	}
+	found := false
+	for _, d := range diag.All() {
+		if strings.Contains(d.Message, "has no method") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected 'has no method' error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestCheckAllCrossModuleTraitMethod(t *testing.T) {
+	// handlers.intent: defines trait + entity + impl
+	handlersSrc := `module handlers version "0.1.0";
+
+public entity Ctx { field v: Int; constructor(n: Int) { self.v = n; } }
+
+public trait Handler {
+    method execute(c: Ctx) returns Int
+        requires c.v >= 0;
+}
+
+public entity Start {
+    field code: Int;
+    constructor(c: Int) { self.code = c; }
+}
+
+impl Handler for Start {
+    method execute(c: Ctx) returns Int {
+        return self.code + c.v;
+    }
+}
+`
+	// main.intent: imports handlers and calls trait method on entity
+	mainSrc := `module main version "0.1.0";
+
+import "handlers.intent";
+
+entry function main() returns Int {
+    let s: Start = Start(5);
+    let c: Ctx = Ctx(10);
+    return s.execute(c);
+}
+`
+	registry := map[string]*ast.Program{
+		"/project/handlers.intent": makeProgram(t, handlersSrc),
+		"/project/main.intent":     makeProgram(t, mainSrc),
+	}
+	sortedPaths := []string{"/project/handlers.intent", "/project/main.intent"}
+
+	result := CheckAll(registry, sortedPaths)
+	if result.Diagnostics.HasErrors() {
+		t.Errorf("Expected no errors for cross-module trait method call, got:\n%s", result.Diagnostics.Format("test"))
+	}
+}
+
+// --- I/O Built-in Tests ---
+
+func TestReadFile(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function load(path: String) returns Result<String, String> {
+    return read_file(path);
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", diag.Format("test"))
+	}
+}
+
+func TestReadFileWrongArgCount(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function load() returns Result<String, String> {
+    return read_file();
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for read_file() with no arguments")
+	}
+	found := false
+	for _, d := range diag.All() {
+		if strings.Contains(d.Message, "read_file() requires exactly 1 argument") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected argument count error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestReadFileWrongArgType(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function load() returns Result<String, String> {
+    return read_file(42);
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for read_file() with Int argument")
+	}
+	found := false
+	for _, d := range diag.All() {
+		if strings.Contains(d.Message, "read_file() argument must be String") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected type error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestWriteFile(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function save(path: String, content: String) returns Result<Void, String> {
+    return write_file(path, content);
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", diag.Format("test"))
+	}
+}
+
+func TestWriteFileWrongArgCount(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function save(path: String) returns Result<Void, String> {
+    return write_file(path);
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for write_file() with 1 argument")
+	}
+	found := false
+	for _, d := range diag.All() {
+		if strings.Contains(d.Message, "write_file() requires exactly 2 arguments") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected argument count error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestCreateDir(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function make_dir(path: String) returns Result<Void, String> {
+    return create_dir(path);
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", diag.Format("test"))
+	}
+}
+
+func TestFileExists(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function check(path: String) returns Bool {
+    return file_exists(path);
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", diag.Format("test"))
+	}
+}
+
+func TestFileExistsWrongArgType(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function check() returns Bool {
+    return file_exists(123);
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for file_exists() with Int argument")
+	}
+	found := false
+	for _, d := range diag.All() {
+		if strings.Contains(d.Message, "file_exists() argument must be String") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected type error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestEnvGet(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function get_home() returns Option<String> {
+    return env_get("HOME");
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", diag.Format("test"))
+	}
+}
+
+func TestEnvGetWrongArgType(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function get_env() returns Option<String> {
+    return env_get(42);
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for env_get() with Int argument")
+	}
+	found := false
+	for _, d := range diag.All() {
+		if strings.Contains(d.Message, "env_get() argument must be String") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected type error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestToStringInt(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function convert(n: Int) returns String {
+    return n.to_string();
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", diag.Format("test"))
+	}
+}
+
+func TestToStringFloat(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function convert(n: Float) returns String {
+    return n.to_string();
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", diag.Format("test"))
+	}
+}
+
+func TestToStringBool(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function convert(b: Bool) returns String {
+    return b.to_string();
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", diag.Format("test"))
+	}
+}
+
+func TestToStringWrongArgs(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function convert(n: Int) returns String {
+    return n.to_string(42);
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for to_string() with arguments")
+	}
+	found := false
+	for _, d := range diag.All() {
+		if strings.Contains(d.Message, "to_string() requires no arguments") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected argument count error, got: %s", diag.Format("test"))
+	}
+}
