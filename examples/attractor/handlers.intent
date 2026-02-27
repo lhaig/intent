@@ -1,6 +1,7 @@
 module attractor_handlers version "0.1.0";
 
 import "types.intent";
+import "llm.intent";
 
 // Handler trait defines the interface for all pipeline node handlers.
 // Each handler type implements execute() to process a node in the pipeline.
@@ -80,7 +81,14 @@ impl Handler for CodergenHandler {
         let mutable empty_ids: Array<String> = [];
         let mutable updates: Map<String, String> = [];
         updates.set("last_executed", node.id);
-        return Ok(Outcome(Success, "", "codergen handler: executed prompt", "", empty_ids, updates));
+
+        // Use LLM API if available, otherwise simulate
+        let llm_result: Result<String, String> = attractor_llm.call_llm_simple(node.prompt);
+        let response_note: String = match llm_result {
+            Ok(r) => "codergen handler: " + r,
+            Err(e) => "codergen handler: LLM call failed",
+        };
+        return Ok(Outcome(Success, "", response_note, "", empty_ids, updates));
     }
 }
 

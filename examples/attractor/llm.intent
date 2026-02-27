@@ -1,0 +1,56 @@
+module attractor_llm version "0.1.0";
+
+// call_llm sends a prompt to an LLM API and returns the response text.
+// Reads LLM_API_KEY and LLM_API_URL from environment variables.
+// Falls back to a simulated response if no API key is configured.
+// Note: headers_json and body_json should be pre-formatted JSON strings.
+public function call_llm(prompt: String, headers_json: String, body_json: String) returns Result<String, String>
+    requires prompt != ""
+{
+    let api_key_opt: Option<String> = env_get("LLM_API_KEY");
+    let has_key: Bool = match api_key_opt {
+        Some(k) => true,
+        None => false,
+    };
+
+    if not has_key {
+        return Ok("[simulated] LLM response for: " + prompt);
+    }
+
+    let url_opt: Option<String> = env_get("LLM_API_URL");
+    let url: String = match url_opt {
+        Some(u) => u,
+        None => "https://api.openai.com/v1/chat/completions",
+    };
+
+    let resp: Result<String, String> = http_post(url, headers_json, body_json);
+    let resp_ok: Bool = resp.is_ok();
+    if not resp_ok {
+        let err_msg: String = match resp {
+            Ok(s) => s,
+            Err(e) => e,
+        };
+        return Err("HTTP request failed: " + err_msg);
+    }
+
+    let resp_body: String = match resp {
+        Ok(s) => s,
+        Err(e) => e,
+    };
+
+    let content_opt: Option<String> = json_get(resp_body, "choices");
+    let content: String = match content_opt {
+        Some(c) => c,
+        None => "unexpected API response format",
+    };
+
+    return Ok(content);
+}
+
+// call_llm_simple is a convenience wrapper that simulates an LLM call
+// without requiring pre-formatted JSON. Used for testing.
+public function call_llm_simple(prompt: String) returns Result<String, String>
+    requires prompt != ""
+{
+    return call_llm(prompt, "", "");
+}

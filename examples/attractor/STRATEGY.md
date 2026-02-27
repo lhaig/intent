@@ -8,7 +8,7 @@ This is preferable to designing language features in the abstract: every additio
 
 ## Current Coverage
 
-**Phase 1-6 (complete):** Structural and logical skeleton, string stdlib, Array\<String\> entity fields, Map\<K,V\> type, Result\<T,E\> error handling, Handler trait with 5 implementations — ~75% of the spec by section count.
+**Phase 1-8 (complete):** Structural and logical skeleton, string stdlib, Array\<String\> entity fields, Map\<K,V\> type, Result\<T,E\> error handling, Handler trait with 5 implementations, I/O standard library, HTTP/JSON/event builtins — ~90% of the spec by section count.
 
 | Spec Area | Status | Files |
 |-----------|--------|-------|
@@ -174,3 +174,4 @@ Each phase should produce both a language improvement and a visible expansion of
 | 2026-02-26 | Phase 6 complete: Handler trait with 5 implementations (Start, Exit, Conditional, Codergen, Tool), dispatch functions for cross-module use | Trait impl methods only merge into entity info within the defining module; cross-module dispatch requires wrapper functions. HandlerRegistry deferred (needs trait objects). |
 | 2026-02-26 | Checker improvements: verified_by supports trait method contracts (Handler.execute.requires), cross-module trait method resolution fixed (Pass 1 now runs checkImplBlocks), dispatch wrappers removed, retry.intent uses trait-based handler dispatch | None -- all workarounds eliminated |
 | 2026-02-26 | Phase 7 complete: I/O standard library -- read_file, write_file, create_dir, file_exists, env_get builtins + to_string() method on Int/Float/Bool. Wired through checker, IR, Rust codegen, JS codegen. | No compiler architecture changes needed -- builtins follow existing name-match pattern |
+| 2026-02-27 | Phase 8 complete: HTTP/JSON/event builtins -- http_post, http_get, json_get, emit_event, timestamp_ms. Cargo.toml dependency management (reqwest, serde_json conditional on usage). New examples: persistence.intent, llm.intent. Updated main.intent and handlers.intent with LLM integration. ADR 0020. | JS HTTP uses curl via execSync (not production-grade). JSON extraction limited to top-level string keys. Cargo.toml scan-based dependency detection could false-positive on string literals. |

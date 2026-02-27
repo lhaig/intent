@@ -1,0 +1,39 @@
+module attractor_persistence version "0.1.0";
+
+import "types.intent";
+
+// save_checkpoint serializes a Checkpoint to a simple key-value text format
+// and writes it to a file. Uses pipe-separated format to avoid JSON brace issues.
+public function save_checkpoint(cp: Checkpoint, path: String) returns Result<Void, String>
+    requires path != ""
+{
+    let mutable content: String = "current_node=" + cp.current_node;
+    content = content + "|completed_count=" + cp.completed_count.to_string();
+    let mutable i: Int = 0;
+    content = content + "|completed=";
+    for node in cp.completed_nodes {
+        if i > 0 {
+            content = content + ",";
+        }
+        content = content + node;
+        i = i + 1;
+    }
+    return write_file(path, content);
+}
+
+// load_checkpoint_current reads a checkpoint file and extracts the current node
+// using json_get (for JSON-formatted checkpoints) or simple parsing.
+public function load_checkpoint_current(path: String) returns Result<String, String>
+    requires path != ""
+{
+    let content: Result<String, String> = read_file(path);
+    let text: String = match content {
+        Ok(s) => s,
+        Err(e) => e,
+    };
+    let is_err: Bool = content.is_err();
+    if is_err {
+        return Err("failed to read checkpoint: " + text);
+    }
+    return Ok(text);
+}

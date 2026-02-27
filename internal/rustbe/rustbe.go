@@ -63,6 +63,29 @@ func Generate(mod *ir.Module) string {
 		marker := "#![allow(unused_parens, unused_variables, dead_code)]\n"
 		result = strings.Replace(result, marker, marker+"use std::collections::HashMap;\n", 1)
 	}
+	if g.needsReqwest {
+		marker := "#![allow(unused_parens, unused_variables, dead_code)]\n"
+		if strings.Contains(result, "use std::collections::HashMap;\n") {
+			afterHashMap := "use std::collections::HashMap;\n"
+			result = strings.Replace(result, afterHashMap, afterHashMap+"use reqwest;\nuse serde_json;\n", 1)
+		} else {
+			result = strings.Replace(result, marker, marker+"use reqwest;\nuse serde_json;\n", 1)
+		}
+		// Inject helper functions before the first fn declaration
+		helpers := g.emitHttpHelpers()
+		fnIdx := strings.Index(result, "\nfn ")
+		if fnIdx >= 0 {
+			result = result[:fnIdx] + helpers + result[fnIdx:]
+		}
+	} else if g.needsSerdeJson {
+		marker := "#![allow(unused_parens, unused_variables, dead_code)]\n"
+		if strings.Contains(result, "use std::collections::HashMap;\n") {
+			afterHashMap := "use std::collections::HashMap;\n"
+			result = strings.Replace(result, afterHashMap, afterHashMap+"use serde_json;\n", 1)
+		} else {
+			result = strings.Replace(result, marker, marker+"use serde_json;\n", 1)
+		}
+	}
 	return result
 }
 
@@ -85,6 +108,8 @@ func GenerateAll(prog *ir.Program) string {
 	sb.WriteString("#![allow(unused_parens, unused_variables, dead_code)]\n\n")
 
 	needsHashMapGlobal := false
+	needsReqwestGlobal := false
+	needsSerdeJsonGlobal := false
 	for _, mod := range prog.Modules {
 		g := &generator{
 			entities:        make(map[string]*ir.Entity),
@@ -134,12 +159,42 @@ func GenerateAll(prog *ir.Program) string {
 		if g.needsHashMap {
 			needsHashMapGlobal = true
 		}
+		if g.needsReqwest {
+			needsReqwestGlobal = true
+		}
+		if g.needsSerdeJson {
+			needsSerdeJsonGlobal = true
+		}
 	}
 
 	output := sb.String()
 	if needsHashMapGlobal {
 		marker := "#![allow(unused_parens, unused_variables, dead_code)]\n"
 		output = strings.Replace(output, marker, marker+"use std::collections::HashMap;\n", 1)
+	}
+	if needsReqwestGlobal {
+		marker := "#![allow(unused_parens, unused_variables, dead_code)]\n"
+		if strings.Contains(output, "use std::collections::HashMap;\n") {
+			afterHashMap := "use std::collections::HashMap;\n"
+			output = strings.Replace(output, afterHashMap, afterHashMap+"use reqwest;\nuse serde_json;\n", 1)
+		} else {
+			output = strings.Replace(output, marker, marker+"use reqwest;\nuse serde_json;\n", 1)
+		}
+		// Use a temporary generator just to call emitHttpHelpers
+		tmpG := &generator{}
+		helpers := tmpG.emitHttpHelpers()
+		fnIdx := strings.Index(output, "\nfn ")
+		if fnIdx >= 0 {
+			output = output[:fnIdx] + helpers + output[fnIdx:]
+		}
+	} else if needsSerdeJsonGlobal {
+		marker := "#![allow(unused_parens, unused_variables, dead_code)]\n"
+		if strings.Contains(output, "use std::collections::HashMap;\n") {
+			afterHashMap := "use std::collections::HashMap;\n"
+			output = strings.Replace(output, afterHashMap, afterHashMap+"use serde_json;\n", 1)
+		} else {
+			output = strings.Replace(output, marker, marker+"use serde_json;\n", 1)
+		}
 	}
 	return output
 }
@@ -154,6 +209,8 @@ type generator struct {
 	inLabeledBlock bool
 	ensuresContext bool
 	needsHashMap   bool
+	needsReqwest   bool
+	needsSerdeJson bool
 
 	// Multi-file fields
 	namePrefix      string
@@ -1036,6 +1093,38 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr, arrayRefParams map[st
 			arg := g.generateExpr(expr.Args[0], arrayRefParams)
 			return fmt.Sprintf("std::env::var(%s).ok()", arg)
 		}
+	case "http_post":
+		if len(expr.Args) == 3 {
+			g.needsReqwest = true
+			g.needsSerdeJson = true
+			url := g.generateExpr(expr.Args[0], arrayRefParams)
+			headers := g.generateExpr(expr.Args[1], arrayRefParams)
+			body := g.generateExpr(expr.Args[2], arrayRefParams)
+			return fmt.Sprintf("__intent_http_post(&%s, &%s, &%s)", url, headers, body)
+		}
+	case "http_get":
+		if len(expr.Args) == 2 {
+			g.needsReqwest = true
+			g.needsSerdeJson = true
+			url := g.generateExpr(expr.Args[0], arrayRefParams)
+			headers := g.generateExpr(expr.Args[1], arrayRefParams)
+			return fmt.Sprintf("__intent_http_get(&%s, &%s)", url, headers)
+		}
+	case "json_get":
+		if len(expr.Args) == 2 {
+			g.needsSerdeJson = true
+			json := g.generateExpr(expr.Args[0], arrayRefParams)
+			key := g.generateExpr(expr.Args[1], arrayRefParams)
+			return fmt.Sprintf("serde_json::from_str::<serde_json::Value>(&%s).ok().and_then(|v| v.get(&*%s).and_then(|v| v.as_str().map(|s| s.to_string())))", json, key)
+		}
+	case "emit_event":
+		if len(expr.Args) == 2 {
+			eventType := g.generateExpr(expr.Args[0], arrayRefParams)
+			payload := g.generateExpr(expr.Args[1], arrayRefParams)
+			return fmt.Sprintf("eprintln!(\"[EVENT] {}: {}\", %s, %s)", eventType, payload)
+		}
+	case "timestamp_ms":
+		return "{ use std::time::{SystemTime, UNIX_EPOCH}; SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64 }"
 	}
 	// Fallback
 	args := make([]string, len(expr.Args))
@@ -1323,6 +1412,39 @@ func escapeRustString(s string) string {
 	s = strings.ReplaceAll(s, "\n", "\\n")
 	s = strings.ReplaceAll(s, "\t", "\\t")
 	return s
+}
+
+func (g *generator) emitHttpHelpers() string {
+	var sb strings.Builder
+	sb.WriteString("\nfn __intent_http_post(url: &str, headers_json: &str, body: &str) -> Result<String, String> {\n")
+	sb.WriteString("    let client = reqwest::blocking::Client::new();\n")
+	sb.WriteString("    let mut req = client.post(url);\n")
+	sb.WriteString("    if let Ok(hdrs) = serde_json::from_str::<serde_json::Value>(headers_json) {\n")
+	sb.WriteString("        if let Some(obj) = hdrs.as_object() {\n")
+	sb.WriteString("            for (k, v) in obj {\n")
+	sb.WriteString("                if let Some(s) = v.as_str() {\n")
+	sb.WriteString("                    req = req.header(k.as_str(), s);\n")
+	sb.WriteString("                }\n")
+	sb.WriteString("            }\n")
+	sb.WriteString("        }\n")
+	sb.WriteString("    }\n")
+	sb.WriteString("    req.body(body.to_string()).send().and_then(|r| r.text()).map_err(|e| e.to_string())\n")
+	sb.WriteString("}\n\n")
+	sb.WriteString("fn __intent_http_get(url: &str, headers_json: &str) -> Result<String, String> {\n")
+	sb.WriteString("    let client = reqwest::blocking::Client::new();\n")
+	sb.WriteString("    let mut req = client.get(url);\n")
+	sb.WriteString("    if let Ok(hdrs) = serde_json::from_str::<serde_json::Value>(headers_json) {\n")
+	sb.WriteString("        if let Some(obj) = hdrs.as_object() {\n")
+	sb.WriteString("            for (k, v) in obj {\n")
+	sb.WriteString("                if let Some(s) = v.as_str() {\n")
+	sb.WriteString("                    req = req.header(k.as_str(), s);\n")
+	sb.WriteString("                }\n")
+	sb.WriteString("            }\n")
+	sb.WriteString("        }\n")
+	sb.WriteString("    }\n")
+	sb.WriteString("    req.send().and_then(|r| r.text()).map_err(|e| e.to_string())\n")
+	sb.WriteString("}\n")
+	return sb.String()
 }
 
 // generateStringInterp generates Rust format!() for string interpolation.

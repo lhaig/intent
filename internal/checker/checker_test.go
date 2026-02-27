@@ -3484,3 +3484,135 @@ function convert(n: Int) returns String {
 		t.Errorf("Expected argument count error, got: %s", diag.Format("test"))
 	}
 }
+
+func TestHttpPost(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function do_post() returns Result<String, String> {
+    return http_post("url", "headers", "body");
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", diag.Format("test"))
+	}
+}
+
+func TestHttpPostWrongArgCount(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function do_post() returns Result<String, String> {
+    return http_post("url");
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for http_post() with wrong arg count")
+	}
+}
+
+func TestHttpPostWrongArgType(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function do_post() returns Result<String, String> {
+    return http_post("url", "headers", 42);
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for http_post() with Int argument")
+	}
+}
+
+func TestHttpGet(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function do_get() returns Result<String, String> {
+    return http_get("url", "headers");
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", diag.Format("test"))
+	}
+}
+
+func TestHttpGetWrongArgCount(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function do_get() returns Result<String, String> {
+    return http_get("url", "headers", "extra");
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for http_get() with wrong arg count")
+	}
+}
+
+func TestJsonGet(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function extract() returns Option<String> {
+    return json_get("data", "key");
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", diag.Format("test"))
+	}
+}
+
+func TestJsonGetWrongArgType(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function extract() returns Option<String> {
+    return json_get(42, "key");
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for json_get() with Int argument")
+	}
+}
+
+func TestEmitEvent(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function notify() returns Void {
+    emit_event("node_start", "payload");
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", diag.Format("test"))
+	}
+}
+
+func TestEmitEventWrongArgCount(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function notify() returns Void {
+    emit_event("only_one");
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for emit_event() with wrong arg count")
+	}
+}
+
+func TestTimestampMs(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function get_time() returns Int {
+    return timestamp_ms();
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors, got: %s", diag.Format("test"))
+	}
+}
+
+func TestTimestampMsWrongArgs(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function get_time() returns Int {
+    return timestamp_ms("arg");
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("Expected error for timestamp_ms() with arguments")
+	}
+}

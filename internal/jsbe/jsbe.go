@@ -1019,6 +1019,39 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr) string {
 			arg := g.generateExpr(expr.Args[0])
 			return fmt.Sprintf("(process.env[%s] !== undefined ? { _tag: \"Some\", value: process.env[%s] } : { _tag: \"None\" })", arg, arg)
 		}
+	case "http_post":
+		if len(expr.Args) == 3 {
+			url := g.generateExpr(expr.Args[0])
+			headers := g.generateExpr(expr.Args[1])
+			body := g.generateExpr(expr.Args[2])
+			return fmt.Sprintf(
+				`(() => { try { const hdrs = JSON.parse(%s); let curlHdrs = ""; for (const [k, v] of Object.entries(hdrs)) { curlHdrs += " -H \"" + k + ": " + v + "\""; } const result = require("child_process").execSync("curl -s -X POST" + curlHdrs + " -d " + JSON.stringify(%s) + " " + JSON.stringify(%s), {encoding: "utf-8"}); return { _tag: "Ok", value: result }; } catch(e) { return { _tag: "Err", value: e.message }; } })()`,
+				headers, body, url)
+		}
+	case "http_get":
+		if len(expr.Args) == 2 {
+			url := g.generateExpr(expr.Args[0])
+			headers := g.generateExpr(expr.Args[1])
+			return fmt.Sprintf(
+				`(() => { try { const hdrs = JSON.parse(%s); let curlHdrs = ""; for (const [k, v] of Object.entries(hdrs)) { curlHdrs += " -H \"" + k + ": " + v + "\""; } const result = require("child_process").execSync("curl -s" + curlHdrs + " " + JSON.stringify(%s), {encoding: "utf-8"}); return { _tag: "Ok", value: result }; } catch(e) { return { _tag: "Err", value: e.message }; } })()`,
+				headers, url)
+		}
+	case "json_get":
+		if len(expr.Args) == 2 {
+			jsonStr := g.generateExpr(expr.Args[0])
+			key := g.generateExpr(expr.Args[1])
+			return fmt.Sprintf(
+				`(() => { try { const val = JSON.parse(%s)[%s]; return val !== undefined ? { _tag: "Some", value: String(val) } : { _tag: "None" }; } catch(e) { return { _tag: "None" }; } })()`,
+				jsonStr, key)
+		}
+	case "emit_event":
+		if len(expr.Args) == 2 {
+			eventType := g.generateExpr(expr.Args[0])
+			payload := g.generateExpr(expr.Args[1])
+			return fmt.Sprintf(`console.error("[EVENT] " + %s + ": " + %s)`, eventType, payload)
+		}
+	case "timestamp_ms":
+		return "BigInt(Date.now())"
 	}
 	// Fallback
 	args := make([]string, len(expr.Args))

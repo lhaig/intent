@@ -215,15 +215,7 @@ func buildWasmFromRust(rustSource, baseName string) error {
 	defer os.RemoveAll(tmpDir)
 
 	// Write Cargo.toml with wasm target
-	cargoToml := `[package]
-name = "intent_output"
-version = "0.1.0"
-edition = "2021"
-
-[lib]
-crate-type = ["cdylib"]
-path = "src/lib.rs"
-`
+	cargoToml := buildCargoToml(rustSource, true)
 	if err := os.WriteFile(filepath.Join(tmpDir, "Cargo.toml"), []byte(cargoToml), 0644); err != nil {
 		return fmt.Errorf("failed to write Cargo.toml: %w", err)
 	}

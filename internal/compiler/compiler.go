@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/lhaig/intent/internal/checker"
 	"github.com/lhaig/intent/internal/diagnostic"
@@ -14,6 +15,37 @@ import (
 	"github.com/lhaig/intent/internal/testgen"
 	"github.com/lhaig/intent/internal/verify"
 )
+
+// buildCargoToml generates a Cargo.toml file content based on the Rust source and target type.
+// If isCdylib is true, a [lib] section with crate-type = ["cdylib"] is added.
+// Dependencies (reqwest, serde_json) are added only if detected in the Rust source.
+func buildCargoToml(rustSource string, isCdylib bool) string {
+	var sb strings.Builder
+	sb.WriteString("[package]\n")
+	sb.WriteString("name = \"intent_output\"\n")
+	sb.WriteString("version = \"0.1.0\"\n")
+	sb.WriteString("edition = \"2021\"\n")
+
+	if isCdylib {
+		sb.WriteString("\n[lib]\n")
+		sb.WriteString("crate-type = [\"cdylib\"]\n")
+		sb.WriteString("path = \"src/lib.rs\"\n")
+	}
+
+	needsReqwest := strings.Contains(rustSource, "reqwest::")
+	needsSerdeJson := strings.Contains(rustSource, "serde_json::")
+	if needsReqwest || needsSerdeJson {
+		sb.WriteString("\n[dependencies]\n")
+		if needsReqwest {
+			sb.WriteString("reqwest = { version = \"0.12\", features = [\"blocking\"] }\n")
+		}
+		if needsSerdeJson {
+			sb.WriteString("serde_json = \"1\"\n")
+		}
+	}
+
+	return sb.String()
+}
 
 // Result holds the output of a compilation
 type Result struct {
@@ -90,11 +122,7 @@ func Build(source, outPath string) error {
 	defer os.RemoveAll(tmpDir)
 
 	// Write Cargo.toml
-	cargoToml := `[package]
-name = "intent_output"
-version = "0.1.0"
-edition = "2021"
-`
+	cargoToml := buildCargoToml(res.RustSource, false)
 	if err := os.WriteFile(filepath.Join(tmpDir, "Cargo.toml"), []byte(cargoToml), 0644); err != nil {
 		return fmt.Errorf("failed to write Cargo.toml: %w", err)
 	}
@@ -247,11 +275,7 @@ func BuildProject(entryPath, outPath string) error {
 	defer os.RemoveAll(tmpDir)
 
 	// Write Cargo.toml
-	cargoToml := `[package]
-name = "intent_output"
-version = "0.1.0"
-edition = "2021"
-`
+	cargoToml := buildCargoToml(res.RustSource, false)
 	if err := os.WriteFile(filepath.Join(tmpDir, "Cargo.toml"), []byte(cargoToml), 0644); err != nil {
 		return fmt.Errorf("failed to write Cargo.toml: %w", err)
 	}

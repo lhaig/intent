@@ -337,6 +337,36 @@ func TestGenerateErrorHandling(t *testing.T) {
 	}
 }
 
+func TestGenerateHttpBuiltins(t *testing.T) {
+	src := `module test version "1.0";
+entry function main() returns Int {
+    let resp: Result<String, String> = http_post("https://api.example.com", "headers", "body");
+    let resp2: Result<String, String> = http_get("https://api.example.com", "headers");
+    let val: Option<String> = json_get("json", "key");
+    emit_event("test", "payload");
+    let ts: Int = timestamp_ms();
+    return 0;
+}
+`
+	output := generateFromSource(t, "test", src)
+
+	expects := []string{
+		"__intent_http_post",
+		"__intent_http_get",
+		"serde_json::from_str",
+		"eprintln!(\"[EVENT]",
+		"SystemTime",
+		"UNIX_EPOCH",
+		"use reqwest;",
+		"use serde_json;",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}
+
 // findExample locates an example file relative to the project root.
 func findExample(t *testing.T, name string) string {
 	t.Helper()

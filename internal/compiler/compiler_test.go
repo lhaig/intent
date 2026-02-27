@@ -381,3 +381,56 @@ entry function main() returns Int {
 		t.Errorf("Expected 'name' variable in format args, got: %s", res.RustSource)
 	}
 }
+
+func TestBuildCargoTomlNoDeps(t *testing.T) {
+	source := `fn main() { println!("hello"); }`
+	toml := buildCargoToml(source, false)
+	if strings.Contains(toml, "[dependencies]") {
+		t.Errorf("Expected no [dependencies] section, got:\n%s", toml)
+	}
+	if !strings.Contains(toml, "[package]") {
+		t.Errorf("Expected [package] section, got:\n%s", toml)
+	}
+}
+
+func TestBuildCargoTomlWithReqwest(t *testing.T) {
+	source := `use reqwest; fn main() { reqwest::blocking::get("url"); }`
+	toml := buildCargoToml(source, false)
+	if !strings.Contains(toml, "[dependencies]") {
+		t.Errorf("Expected [dependencies] section, got:\n%s", toml)
+	}
+	if !strings.Contains(toml, "reqwest") {
+		t.Errorf("Expected reqwest dependency, got:\n%s", toml)
+	}
+	if !strings.Contains(toml, "blocking") {
+		t.Errorf("Expected blocking feature, got:\n%s", toml)
+	}
+}
+
+func TestBuildCargoTomlWithBothDeps(t *testing.T) {
+	source := `use reqwest; use serde_json; fn main() { reqwest::blocking::get("url"); serde_json::from_str("{}"); }`
+	toml := buildCargoToml(source, false)
+	if !strings.Contains(toml, "[dependencies]") {
+		t.Errorf("Expected [dependencies] section, got:\n%s", toml)
+	}
+	if !strings.Contains(toml, "reqwest") {
+		t.Errorf("Expected reqwest dependency, got:\n%s", toml)
+	}
+	if !strings.Contains(toml, "serde_json") {
+		t.Errorf("Expected serde_json dependency, got:\n%s", toml)
+	}
+	if strings.Contains(toml, "[lib]") {
+		t.Errorf("Expected no [lib] section for non-cdylib, got:\n%s", toml)
+	}
+}
+
+func TestBuildCargoTomlCdylib(t *testing.T) {
+	source := `fn main() {}`
+	toml := buildCargoToml(source, true)
+	if !strings.Contains(toml, "[lib]") {
+		t.Errorf("Expected [lib] section for cdylib, got:\n%s", toml)
+	}
+	if !strings.Contains(toml, "cdylib") {
+		t.Errorf("Expected cdylib crate-type, got:\n%s", toml)
+	}
+}

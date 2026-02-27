@@ -1353,6 +1353,74 @@ func (c *Checker) checkCallExpr(expr *ast.CallExpr, scope *Scope) *Type {
 		return &Type{Name: "Option", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeString}, EnumInfo: instantiateOption(TypeString)}
 	}
 
+	// Handle http_post() built-in
+	if expr.Function == "http_post" {
+		if len(expr.Args) != 3 {
+			c.diag.Errorf(line, col, "http_post() requires exactly 3 arguments, got %d", len(expr.Args))
+			return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeString, TypeString}, EnumInfo: instantiateResult(TypeString, TypeString)}
+		}
+		for i, arg := range expr.Args {
+			argType := c.checkExpression(arg, scope)
+			if argType != nil && !argType.Equal(TypeString) {
+				c.diag.Errorf(line, col, "http_post() argument %d must be String, got %s", i+1, argType.String())
+			}
+		}
+		return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeString, TypeString}, EnumInfo: instantiateResult(TypeString, TypeString)}
+	}
+
+	// Handle http_get() built-in
+	if expr.Function == "http_get" {
+		if len(expr.Args) != 2 {
+			c.diag.Errorf(line, col, "http_get() requires exactly 2 arguments, got %d", len(expr.Args))
+			return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeString, TypeString}, EnumInfo: instantiateResult(TypeString, TypeString)}
+		}
+		for i, arg := range expr.Args {
+			argType := c.checkExpression(arg, scope)
+			if argType != nil && !argType.Equal(TypeString) {
+				c.diag.Errorf(line, col, "http_get() argument %d must be String, got %s", i+1, argType.String())
+			}
+		}
+		return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeString, TypeString}, EnumInfo: instantiateResult(TypeString, TypeString)}
+	}
+
+	// Handle json_get() built-in
+	if expr.Function == "json_get" {
+		if len(expr.Args) != 2 {
+			c.diag.Errorf(line, col, "json_get() requires exactly 2 arguments, got %d", len(expr.Args))
+			return &Type{Name: "Option", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeString}, EnumInfo: instantiateOption(TypeString)}
+		}
+		for i, arg := range expr.Args {
+			argType := c.checkExpression(arg, scope)
+			if argType != nil && !argType.Equal(TypeString) {
+				c.diag.Errorf(line, col, "json_get() argument %d must be String, got %s", i+1, argType.String())
+			}
+		}
+		return &Type{Name: "Option", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeString}, EnumInfo: instantiateOption(TypeString)}
+	}
+
+	// Handle emit_event() built-in
+	if expr.Function == "emit_event" {
+		if len(expr.Args) != 2 {
+			c.diag.Errorf(line, col, "emit_event() requires exactly 2 arguments, got %d", len(expr.Args))
+			return TypeVoid
+		}
+		for i, arg := range expr.Args {
+			argType := c.checkExpression(arg, scope)
+			if argType != nil && !argType.Equal(TypeString) {
+				c.diag.Errorf(line, col, "emit_event() argument %d must be String, got %s", i+1, argType.String())
+			}
+		}
+		return TypeVoid
+	}
+
+	// Handle timestamp_ms() built-in
+	if expr.Function == "timestamp_ms" {
+		if len(expr.Args) != 0 {
+			c.diag.Errorf(line, col, "timestamp_ms() takes no arguments, got %d", len(expr.Args))
+		}
+		return TypeInt
+	}
+
 	// Check if it's a built-in Result/Option variant constructor (Ok, Err, Some)
 	if expr.Function == "Ok" || expr.Function == "Err" || expr.Function == "Some" {
 		return c.checkBuiltinVariant(expr, scope)

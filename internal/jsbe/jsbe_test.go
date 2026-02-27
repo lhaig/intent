@@ -546,6 +546,77 @@ func findExample(t *testing.T, name string) string {
 	}
 }
 
+func TestGenerateHttpBuiltinsJS(t *testing.T) {
+	src := `module test version "1.0";
+
+function test_http_post(url: String, headers: String, body: String) returns Result<String, String> {
+    return http_post(url, headers, body);
+}
+
+function test_http_get(url: String, headers: String) returns Result<String, String> {
+    return http_get(url, headers);
+}
+
+function test_json_get(json: String, key: String) returns Option<String> {
+    return json_get(json, key);
+}
+
+function test_emit_event(event_type: String, payload: String) returns Void {
+    emit_event(event_type, payload);
+}
+
+function test_timestamp() returns Int {
+    return 0;
+}
+`
+	output := generateJSFromSource(t, "http_builtins", src)
+
+	expects := []struct {
+		name    string
+		pattern string
+	}{
+		{"http_post execSync", "execSync"},
+		{"http_post curl POST", "curl"},
+		{"http_get curl", "curl"},
+		{"json_get JSON.parse", "JSON.parse"},
+		{"emit_event console.error", "console.error"},
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp.pattern) {
+			t.Errorf("[%s] expected output to contain %q, got:\n%s", exp.name, exp.pattern, output)
+		}
+	}
+}
+
+func TestGenerateTimestampBuiltinJS(t *testing.T) {
+	mod := &ir.Module{
+		Name:    "test",
+		IsEntry: false,
+		Functions: []*ir.Function{
+			{
+				Name:       "get_time",
+				ReturnType: &checker.Type{Name: "Int"},
+				Body: []ir.Stmt{
+					&ir.ReturnStmt{
+						Value: &ir.CallExpr{
+							Function: "timestamp_ms",
+							Args:     []ir.Expr{},
+							Kind:     ir.CallBuiltin,
+							Type:     &checker.Type{Name: "Int"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := Generate(mod)
+
+	if !strings.Contains(result, "Date.now()") {
+		t.Errorf("expected Date.now() for timestamp_ms, got:\n%s", result)
+	}
+}
+
 // generateFromSource runs the full pipeline (parse -> check -> lower -> jsbe)
 // and returns the generated JS source.
 func generateFromSource(t *testing.T, name, src string) string {
