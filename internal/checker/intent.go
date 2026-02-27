@@ -90,6 +90,31 @@ func (c *Checker) verifyContractReference(ref *ast.VerifiedByRef) {
 
 		entity, exists := c.entities[entityName]
 		if !exists {
+			// Check if it's a trait reference (TraitName.MethodName.requires/ensures)
+			if traitInfo, traitExists := c.traits[entityName]; traitExists {
+				method, methodExists := traitInfo.Methods[memberName]
+				if !methodExists {
+					line, col := ref.Pos()
+					c.diag.Errorf(line, col, "trait '%s' has no method '%s'", entityName, memberName)
+					return
+				}
+				switch contractType {
+				case "requires":
+					if !method.HasRequires {
+						line, col := ref.Pos()
+						c.diag.Errorf(line, col, "trait method '%s.%s' has no requires clause", entityName, memberName)
+					}
+				case "ensures":
+					if !method.HasEnsures {
+						line, col := ref.Pos()
+						c.diag.Errorf(line, col, "trait method '%s.%s' has no ensures clause", entityName, memberName)
+					}
+				default:
+					line, col := ref.Pos()
+					c.diag.Errorf(line, col, "invalid contract type '%s'; expected 'requires' or 'ensures'", contractType)
+				}
+				return
+			}
 			line, col := ref.Pos()
 			c.diag.Errorf(line, col, "unknown entity '%s' in verified_by reference", entityName)
 			return

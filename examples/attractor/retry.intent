@@ -1,6 +1,7 @@
 module attractor_retry version "0.1.0";
 
 import "types.intent";
+import "handlers.intent";
 
 public function build_retry_policy(node_max_retries: Int, graph_default_max_retry: Int) returns RetryPolicy
     requires graph_default_max_retry >= 0
@@ -84,19 +85,17 @@ public function max_with_partial(allow_partial: Bool) returns StageStatus
     return Fail;
 }
 
-// Simulate handler execution for a node.
-// Returns Ok(Outcome) on success, Err(error message) on failure.
-// In a real implementation this would dispatch to the appropriate handler type.
+// Execute a handler for a node using trait-based dispatch.
+// Uses CodergenHandler for nodes with prompts, StartHandler otherwise.
 public function execute_handler(node: NodeAttr, context: PipelineContext) returns Result<Outcome, String>
     requires node.id != ""
 {
-    // Simulation: nodes with a prompt succeed, others fail.
     if node.prompt != "" {
-        let mutable empty_ids: Array<String> = [];
-        let mutable empty_updates: Map<String, String> = [];
-        return Ok(Outcome(Success, "", "executed", "", empty_ids, empty_updates));
+        let handler: CodergenHandler = CodergenHandler("codergen");
+        return handler.execute(node, context);
     }
-    return Err("No handler available for node: " + node.id);
+    let handler: StartHandler = StartHandler("start");
+    return handler.execute(node, context);
 }
 
 // Execute a node with retry logic per Attractor spec Section 3.5.
@@ -153,5 +152,5 @@ intent "Retry policy correctness" {
     goal: "Retry policies enforce Attractor spec Section 3.5-3.6 behavior";
     goal: "Handler execution with retry exhausts attempts before returning failure";
     guarantee: "Backoff delays never exceed max_delay_ms and attempts never exceed max_attempts";
-    verified_by: [delay_for_attempt.ensures, build_retry_policy.ensures, is_retriable.requires, execute_with_retry.requires, execute_handler.requires];
+    verified_by: [delay_for_attempt.ensures, build_retry_policy.ensures, is_retriable.requires, execute_with_retry.requires, execute_handler.requires, Handler.execute.requires];
 }

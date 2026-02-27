@@ -4,6 +4,7 @@ import "types.intent";
 import "validation.intent";
 import "edge_selection.intent";
 import "retry.intent";
+import "handlers.intent";
 
 // Build a minimal Attractor pipeline graph: start -> task -> exit
 // Then validate it and run edge selection to prove all modules work.
@@ -126,6 +127,33 @@ entry function main() returns Int {
     };
     let outcome2_success: Bool = outcome2.is_success();
     print(outcome2_success);
+
+    // --- Phase 6: Trait-based handler dispatch tests ---
+
+    // Test StartHandler via trait method directly (cross-module trait resolution)
+    let mutable handler_ctx_values: Map<String, String> = [];
+    let handler_ctx: PipelineContext = PipelineContext(handler_ctx_values);
+    let start_handler: StartHandler = StartHandler("start");
+    let start_result: Result<Outcome, String> = start_handler.execute(nodes[0], handler_ctx);
+    let start_ok: Bool = start_result.is_ok();
+    print(start_ok);
+
+    // Test CodergenHandler on node with prompt (run_tests has a prompt)
+    let codergen_handler: CodergenHandler = CodergenHandler("codergen");
+    let codergen_result: Result<Outcome, String> = codergen_handler.execute(nodes[1], handler_ctx);
+    let codergen_ok: Bool = codergen_result.is_ok();
+    print(codergen_ok);
+
+    // Test CodergenHandler on node without prompt (start has no prompt -- should fail)
+    let codergen_fail_result: Result<Outcome, String> = codergen_handler.execute(nodes[0], handler_ctx);
+    let codergen_fail_ok: Bool = codergen_fail_result.is_ok();
+    print(codergen_fail_ok);
+
+    // Test ExitHandler on exit node
+    let exit_handler: ExitHandler = ExitHandler("exit");
+    let exit_result: Result<Outcome, String> = exit_handler.execute(nodes[2], handler_ctx);
+    let exit_ok: Bool = exit_result.is_ok();
+    print(exit_ok);
 
     return 0;
 }

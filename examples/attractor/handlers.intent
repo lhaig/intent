@@ -1,0 +1,114 @@
+module attractor_handlers version "0.1.0";
+
+import "types.intent";
+
+// Handler trait defines the interface for all pipeline node handlers.
+// Each handler type implements execute() to process a node in the pipeline.
+// Contracts on the trait method apply to all implementations.
+public trait Handler {
+    method execute(node: NodeAttr, context: PipelineContext) returns Result<Outcome, String>
+        requires node.id != "";
+}
+
+// StartHandler (spec 4.3): Initializes the pipeline. No-op that returns Success.
+public entity StartHandler {
+    field name: String;
+
+    constructor(name: String) {
+        self.name = name;
+    }
+}
+
+impl Handler for StartHandler {
+    method execute(node: NodeAttr, context: PipelineContext) returns Result<Outcome, String> {
+        let mutable empty_ids: Array<String> = [];
+        let mutable empty_updates: Map<String, String> = [];
+        return Ok(Outcome(Success, "", "start handler: pipeline initialized", "", empty_ids, empty_updates));
+    }
+}
+
+// ExitHandler (spec 4.4): Finalizes the pipeline. No-op that returns Success.
+public entity ExitHandler {
+    field name: String;
+
+    constructor(name: String) {
+        self.name = name;
+    }
+}
+
+impl Handler for ExitHandler {
+    method execute(node: NodeAttr, context: PipelineContext) returns Result<Outcome, String> {
+        let mutable empty_ids: Array<String> = [];
+        let mutable empty_updates: Map<String, String> = [];
+        return Ok(Outcome(Success, "", "exit handler: pipeline complete", "", empty_ids, empty_updates));
+    }
+}
+
+// ConditionalHandler (spec 4.7): Routing node that evaluates conditions.
+// In this simulation, it always returns Success with a routing note.
+public entity ConditionalHandler {
+    field name: String;
+
+    constructor(name: String) {
+        self.name = name;
+    }
+}
+
+impl Handler for ConditionalHandler {
+    method execute(node: NodeAttr, context: PipelineContext) returns Result<Outcome, String> {
+        let mutable empty_ids: Array<String> = [];
+        let mutable empty_updates: Map<String, String> = [];
+        return Ok(Outcome(Success, "", "conditional handler: routing evaluated for " + node.id, "", empty_ids, empty_updates));
+    }
+}
+
+// CodergenHandler (spec 4.5): Executes LLM-based code generation.
+// Requires a prompt on the node. Simulates execution and sets last_executed context update.
+public entity CodergenHandler {
+    field name: String;
+
+    constructor(name: String) {
+        self.name = name;
+    }
+}
+
+impl Handler for CodergenHandler {
+    method execute(node: NodeAttr, context: PipelineContext) returns Result<Outcome, String> {
+        if node.prompt == "" {
+            return Err("codergen handler requires a prompt on node: " + node.id);
+        }
+        let mutable empty_ids: Array<String> = [];
+        let mutable updates: Map<String, String> = [];
+        updates.set("last_executed", node.id);
+        return Ok(Outcome(Success, "", "codergen handler: executed prompt", "", empty_ids, updates));
+    }
+}
+
+// ToolHandler (spec 4.10): Executes external tool commands.
+// Simulates tool execution and sets tool_result context update.
+public entity ToolHandler {
+    field name: String;
+
+    constructor(name: String) {
+        self.name = name;
+    }
+}
+
+impl Handler for ToolHandler {
+    method execute(node: NodeAttr, context: PipelineContext) returns Result<Outcome, String> {
+        let mutable empty_ids: Array<String> = [];
+        let mutable updates: Map<String, String> = [];
+        updates.set("tool_result", "simulated result for " + node.id);
+        return Ok(Outcome(Success, "", "tool handler: executed tool", "", empty_ids, updates));
+    }
+}
+
+intent "Handler trait correctness" {
+    goal: "All handlers implement the Handler trait with consistent execute() signatures";
+    goal: "CodergenHandler validates that nodes have prompts before execution";
+    goal: "Context updates are set appropriately by handlers that modify pipeline state";
+    constraint: "Handler execute() requires non-empty node ID";
+    guarantee: "StartHandler and ExitHandler always return Success";
+    guarantee: "CodergenHandler returns Err when node has no prompt";
+    verified_by: [Handler.execute.requires];
+}
