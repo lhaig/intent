@@ -77,6 +77,24 @@ func GenerateAll(prog *ir.Program) string {
 	for _, mod := range prog.Modules {
 		if !mod.IsEntry {
 			moduleManglings[mod.Name] = mod.Name + "_"
+			if mod.DeclName != "" && mod.DeclName != mod.Name {
+				moduleManglings[mod.DeclName] = mod.Name + "_"
+			}
+		}
+	}
+
+	// Build typeOrigins: map entity/enum name -> defining module's class prefix
+	typeOrigins := make(map[string]string)
+	for _, mod := range prog.Modules {
+		prefix := ""
+		if !mod.IsEntry {
+			prefix = strings.ToUpper(mod.Name[:1]) + mod.Name[1:]
+		}
+		for _, e := range mod.Entities {
+			typeOrigins[e.Name] = prefix
+		}
+		for _, e := range mod.Enums {
+			typeOrigins[e.Name] = prefix
 		}
 	}
 
@@ -90,6 +108,7 @@ func GenerateAll(prog *ir.Program) string {
 			functions:       make(map[string]*ir.Function),
 			isEntryFile:     mod.IsEntry,
 			moduleManglings: moduleManglings,
+			typeOrigins:     typeOrigins,
 		}
 
 		if !mod.IsEntry {
@@ -161,6 +180,19 @@ type generator struct {
 	classPrefix     string
 	isEntryFile     bool
 	moduleManglings map[string]string
+	typeOrigins     map[string]string // entity/enum name -> defining module's class prefix
+}
+
+func (g *generator) mangledClassName(name string) string {
+	if g.typeOrigins != nil {
+		if prefix, ok := g.typeOrigins[name]; ok {
+			return prefix + name
+		}
+	}
+	if g.classPrefix != "" {
+		return g.classPrefix + name
+	}
+	return name
 }
 
 func (g *generator) emit(s string) {
@@ -964,14 +996,14 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr) string {
 		for i, arg := range expr.Args {
 			args[i] = g.generateExpr(arg)
 		}
-		return fmt.Sprintf("new %s(%s)", expr.Function, strings.Join(args, ", "))
+		return fmt.Sprintf("new %s(%s)", g.mangledClassName(expr.Function), strings.Join(args, ", "))
 
 	default: // CallFunction
 		args := make([]string, len(expr.Args))
 		for i, arg := range expr.Args {
 			args[i] = g.generateExpr(arg)
 		}
-		return fmt.Sprintf("%s(%s)", expr.Function, strings.Join(args, ", "))
+		return fmt.Sprintf("%s(%s)", g.namePrefix+expr.Function, strings.Join(args, ", "))
 	}
 }
 
@@ -1076,6 +1108,7 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr) string {
 
 func (g *generator) generateVariantConstructor(expr *ir.CallExpr) string {
 	enumName := expr.EnumName
+	mangledEnum := g.mangledClassName(enumName)
 
 	// Find variant declaration from IR enums
 	var variant *ir.EnumVariant
@@ -1090,7 +1123,7 @@ func (g *generator) generateVariantConstructor(expr *ir.CallExpr) string {
 
 	// Unit variant
 	if variant == nil || len(variant.Fields) == 0 {
-		return fmt.Sprintf("%s.%s()", enumName, expr.Function)
+		return fmt.Sprintf("%s.%s()", mangledEnum, expr.Function)
 	}
 
 	// Data variant
@@ -1098,7 +1131,7 @@ func (g *generator) generateVariantConstructor(expr *ir.CallExpr) string {
 	for i, arg := range expr.Args {
 		args[i] = g.generateExpr(arg)
 	}
-	return fmt.Sprintf("%s.%s(%s)", enumName, expr.Function, strings.Join(args, ", "))
+	return fmt.Sprintf("%s.%s(%s)", mangledEnum, expr.Function, strings.Join(args, ", "))
 }
 
 func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr) string {
@@ -1115,7 +1148,14 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr) string {
 			return fmt.Sprintf("new %s(%s)", mangledClassName, strings.Join(args, ", "))
 		}
 
-		mangledFnName := expr.ModuleName + "_" + expr.Method
+		// Resolve module prefix: moduleManglings maps declaration names to file-based prefixes
+		prefix := expr.ModuleName + "_"
+		if g.moduleManglings != nil {
+			if p, ok := g.moduleManglings[expr.ModuleName]; ok {
+				prefix = p
+			}
+		}
+		mangledFnName := prefix + expr.Method
 		return fmt.Sprintf("%s(%s)", mangledFnName, strings.Join(args, ", "))
 	}
 
