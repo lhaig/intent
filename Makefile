@@ -16,7 +16,9 @@ test-v:
 clean:
 	rm -f intentc
 	rm -f examples/*.rs
-	rm -f examples/hello examples/bank_account examples/fibonacci
+	rm -f main.rs *.rs
+	rm -rf target/
+	rm -f main integration_test result_option sorted_check array_sum fibonacci hello bank_account enum_basic shape_area try_operator io_demo js_demo map_demo handler_trait task_queue verify_example error_handling
 
 # Install intentc to GOPATH/bin
 install:
