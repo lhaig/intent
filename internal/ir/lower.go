@@ -821,6 +821,20 @@ func (l *lowerer) lowerExpr(e ast.Expression) Expr {
 			Type: l.typeOf(e),
 		}
 
+	case *ast.LambdaExpr:
+		params := make([]*Param, len(expr.Params))
+		for i, p := range expr.Params {
+			params[i] = &Param{
+				Name: p.Name,
+				Type: l.resolveTypeRef(p.Type),
+			}
+		}
+		return &LambdaExpr{
+			Params: params,
+			Body:   l.lowerExpr(expr.Body),
+			Type:   l.typeOf(e),
+		}
+
 	default:
 		return &BoolLit{Value: true, Type: checker.TypeBool}
 	}
@@ -957,7 +971,7 @@ func (l *lowerer) resolveCallKind(expr *ast.CallExpr) (CallKind, string) {
 		return CallConstructor, ""
 	}
 
-	// Regular function
+	// Regular function call (or closure variable call — both use same syntax)
 	return CallFunction, ""
 }
 

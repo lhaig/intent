@@ -64,6 +64,7 @@ const (
 	PUBLIC
 	TRAIT
 	IMPL
+	FN
 
 	// Type keywords
 	INT_TYPE
@@ -99,6 +100,7 @@ const (
 	DOT       // .
 	DOTDOT    // ..
 	QUESTION  // ?
+	PIPE      // |
 )
 
 // Token represents a lexical token
@@ -218,6 +220,8 @@ func (t TokenType) String() string {
 		return "TRAIT"
 	case IMPL:
 		return "IMPL"
+	case FN:
+		return "FN"
 	case INT_TYPE:
 		return "INT_TYPE"
 	case FLOAT_TYPE:
@@ -276,6 +280,8 @@ func (t TokenType) String() string {
 		return "DOTDOT"
 	case QUESTION:
 		return "QUESTION"
+	case PIPE:
+		return "PIPE"
 	default:
 		return fmt.Sprintf("TokenType(%d)", t)
 	}
@@ -328,6 +334,7 @@ var keywords = map[string]TokenType{
 	"public":      PUBLIC,
 	"trait":       TRAIT,
 	"impl":        IMPL,
+	"Fn":          FN,
 	"Int":         INT_TYPE,
 	"Float":       FLOAT_TYPE,
 	"String":      STRING_TYPE,

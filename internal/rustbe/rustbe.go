@@ -330,6 +330,15 @@ func (g *generator) mapType(t *checker.Type) string {
 			return "HashMap<" + g.mapType(t.TypeParams[0]) + ", " + g.mapType(t.TypeParams[1]) + ">"
 		}
 		return "HashMap<_, _>"
+	case "Fn":
+		if t.IsFunction {
+			params := make([]string, len(t.FnParams))
+			for i, p := range t.FnParams {
+				params[i] = g.mapType(p)
+			}
+			return "impl Fn(" + strings.Join(params, ", ") + ") -> " + g.mapType(t.FnReturn)
+		}
+		return "impl Fn()"
 	default:
 		if t.IsEntity {
 			return g.mangledEntityName(t.Name)
@@ -880,7 +889,14 @@ func (g *generator) generateStmt(s ir.Stmt, arrayRefParams map[string]bool) {
 			}
 		}
 
-		if isMut {
+		// Fn types use type inference in let bindings (impl Fn not allowed in variable position)
+		if stmt.Type != nil && stmt.Type.IsFunction {
+			if isMut {
+				g.emitLinef("let mut %s = %s;\n", stmt.Name, valueExpr)
+			} else {
+				g.emitLinef("let %s = %s;\n", stmt.Name, valueExpr)
+			}
+		} else if isMut {
 			g.emitLinef("let mut %s: %s = %s;\n",
 				stmt.Name, g.mapType(stmt.Type), valueExpr)
 		} else {
@@ -1196,6 +1212,9 @@ func (g *generator) generateExpr(e ir.Expr, arrayRefParams map[string]bool) stri
 	case *ir.TryExpr:
 		return g.generateExpr(expr.Expr, arrayRefParams) + "?"
 
+	case *ir.LambdaExpr:
+		return g.generateLambdaExpr(expr, arrayRefParams)
+
 	default:
 		return "<unknown>"
 	}
@@ -1205,6 +1224,9 @@ func (g *generator) generateExpr(e ir.Expr, arrayRefParams map[string]bool) stri
 func isCopyType(t *checker.Type) bool {
 	if t == nil {
 		return true // unknown type, assume copy to be safe
+	}
+	if t.IsFunction {
+		return true // closures are passed by value, not cloned
 	}
 	switch t.Name {
 	case "Int", "Float", "Bool", "Void":
@@ -1702,6 +1724,23 @@ func (g *generator) mapOperator(op lexer.TokenType) string {
 	default:
 		return "?"
 	}
+}
+
+func (g *generator) generateLambdaExpr(expr *ir.LambdaExpr, arrayRefParams map[string]bool) string {
+	var sb strings.Builder
+	sb.WriteString("|")
+	for i, p := range expr.Params {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(fmt.Sprintf("%s: %s", p.Name, g.mapType(p.Type)))
+	}
+	sb.WriteString("| -> ")
+	sb.WriteString(g.mapType(expr.Type.FnReturn))
+	sb.WriteString(" { ")
+	sb.WriteString(g.generateExpr(expr.Body, arrayRefParams))
+	sb.WriteString(" }")
+	return sb.String()
 }
 
 func (g *generator) isEntityType(t *checker.Type) bool {

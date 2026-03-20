@@ -257,6 +257,7 @@ const (
 	CallConstructor                 // entity constructor (Entity::new)
 	CallVariant                     // enum variant constructor
 	CallBuiltin                     // print, len, Ok, Err, Some
+	CallClosure                     // calling a Fn-typed variable
 	CallMethod                      // reserved for future use
 )
 
@@ -452,6 +453,16 @@ type TryExpr struct {
 
 func (e *TryExpr) ExprType() *checker.Type { return e.Type }
 func (*TryExpr) exprNode()                 {}
+
+// LambdaExpr represents a lambda/closure expression.
+type LambdaExpr struct {
+	Params []*Param
+	Body   Expr
+	Type   *checker.Type
+}
+
+func (e *LambdaExpr) ExprType() *checker.Type { return e.Type }
+func (*LambdaExpr) exprNode()                 {}
 
 // StringInterp represents a string with embedded expressions.
 type StringInterp struct {

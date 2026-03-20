@@ -86,10 +86,12 @@ func (p *Param) Pos() (int, int) { return p.Line, p.Column }
 
 // TypeRef represents a type reference
 type TypeRef struct {
-	Name     string
-	TypeArgs []*TypeRef // e.g., []*TypeRef{{Name:"Int"}} for Array<Int>
-	Line     int
-	Column   int
+	Name       string
+	TypeArgs   []*TypeRef // e.g., []*TypeRef{{Name:"Int"}} for Array<Int>
+	ParamTypes []*TypeRef // for Fn(Int, String) -> Bool: the param types
+	ReturnType *TypeRef   // for Fn types: the return type
+	Line       int
+	Column     int
 }
 
 func (t *TypeRef) Pos() (int, int) { return t.Line, t.Column }
@@ -610,3 +612,15 @@ type TryExpr struct {
 
 func (t *TryExpr) Pos() (int, int) { return t.Line, t.Column }
 func (t *TryExpr) exprNode()       {}
+
+// LambdaExpr represents a lambda/closure expression: |x: Int, y: Int| -> Int => x + y
+type LambdaExpr struct {
+	Params     []*Param
+	ReturnType *TypeRef
+	Body       Expression
+	Line       int
+	Column     int
+}
+
+func (l *LambdaExpr) Pos() (int, int) { return l.Line, l.Column }
+func (l *LambdaExpr) exprNode()       {}

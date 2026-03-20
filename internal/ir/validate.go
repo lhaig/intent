@@ -339,6 +339,11 @@ func validateExpr(expr Expr, context string) []string {
 	case *OldRef, *VarRef, *SelfRef, *ResultRef, *IntLit, *FloatLit, *StringLit, *BoolLit:
 		// No validation needed for leaf nodes
 
+	case *LambdaExpr:
+		if e.Body != nil {
+			errors = append(errors, validateExpr(e.Body, context)...)
+		}
+
 	default:
 		errors = append(errors, fmt.Sprintf("%s: unknown expression type %T", context, expr))
 	}

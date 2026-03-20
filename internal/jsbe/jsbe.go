@@ -230,6 +230,8 @@ func (g *generator) mapType(t *checker.Type) string {
 			return "Map<" + g.mapType(t.TypeParams[0]) + ", " + g.mapType(t.TypeParams[1]) + ">"
 		}
 		return "Map<any, any>"
+	case "Fn":
+		return "Function"
 	default:
 		return t.Name
 	}
@@ -941,6 +943,9 @@ func (g *generator) generateExpr(e ir.Expr) string {
 		// For JavaScript, try expressions can be a simple wrapper
 		return g.generateExpr(expr.Expr)
 
+	case *ir.LambdaExpr:
+		return g.generateLambdaExpr(expr)
+
 	default:
 		return "undefined"
 	}
@@ -1217,6 +1222,14 @@ func (g *generator) generateExistsExpr(expr *ir.ExistsExpr) string {
 		"  }\n"+
 		"  return __existsFound;\n"+
 		"})()", expr.Variable, rangeStart, expr.Variable, rangeEnd, expr.Variable, body)
+}
+
+func (g *generator) generateLambdaExpr(expr *ir.LambdaExpr) string {
+	params := make([]string, len(expr.Params))
+	for i, p := range expr.Params {
+		params[i] = p.Name
+	}
+	return "(" + strings.Join(params, ", ") + ") => { return " + g.generateExpr(expr.Body) + "; }"
 }
 
 func (g *generator) generateMatchExpr(expr *ir.MatchExpr) string {

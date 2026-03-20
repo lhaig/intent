@@ -1,0 +1,21 @@
+module closure_demo version "0.1.0";
+
+function apply(x: Int, f: Fn(Int) -> Int) returns Int {
+    return f(x);
+}
+
+function apply_to_pair(a: Int, b: Int, f: Fn(Int, Int) -> Int) returns Int {
+    return f(a, b);
+}
+
+entry function main() returns Int {
+    let double: Fn(Int) -> Int = |x: Int| -> Int => x * 2;
+    let val1: Int = apply(5, double);
+    print(val1);
+
+    let sum: Fn(Int, Int) -> Int = |a: Int, b: Int| -> Int => a + b;
+    let val2: Int = apply_to_pair(3, 7, sum);
+    print(val2);
+
+    return 0;
+}

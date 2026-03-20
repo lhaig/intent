@@ -246,6 +246,8 @@ func (l *Lexer) NextToken() Token {
 		}
 	case '?':
 		tok = Token{Type: QUESTION, Literal: string(l.ch), Line: tok.Line, Column: tok.Column}
+	case '|':
+		tok = Token{Type: PIPE, Literal: string(l.ch), Line: tok.Line, Column: tok.Column}
 	case '"':
 		str, hasInterp, ok := l.readString()
 		if !ok {

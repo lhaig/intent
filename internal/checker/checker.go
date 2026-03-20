@@ -1143,6 +1143,8 @@ func (c *Checker) checkExpression(expr ast.Expression, scope *Scope) *Type {
 		return c.storeExprType(expr, c.checkMatchExpr(e, scope))
 	case *ast.TryExpr:
 		return c.storeExprType(expr, c.checkTryExpr(e, scope))
+	case *ast.LambdaExpr:
+		return c.storeExprType(expr, c.checkLambdaExpr(e, scope))
 	default:
 		return nil
 	}
@@ -1472,6 +1474,25 @@ func (c *Checker) checkCallExpr(expr *ast.CallExpr, scope *Scope) *Type {
 		// In a full implementation, we'd check argument types here
 
 		return &Type{Name: expr.Function, IsEntity: true, Entity: entity}
+	}
+
+	// Check if it's a variable with a function type (closure call)
+	if sym := scope.Resolve(expr.Function); sym != nil && sym.Type != nil && sym.Type.IsFunction {
+		fnType := sym.Type
+		if len(expr.Args) != len(fnType.FnParams) {
+			c.diag.Errorf(line, col, "function '%s' expects %d arguments, got %d",
+				expr.Function, len(fnType.FnParams), len(expr.Args))
+			return fnType.FnReturn
+		}
+		for i, arg := range expr.Args {
+			argType := c.checkExpression(arg, scope)
+			if argType != nil && !argType.Equal(fnType.FnParams[i]) {
+				argLine, argCol := arg.Pos()
+				c.diag.Errorf(argLine, argCol, "argument %d to '%s': expected %s, got %s",
+					i+1, expr.Function, fnType.FnParams[i].String(), argType.String())
+			}
+		}
+		return fnType.FnReturn
 	}
 
 	// Check if it's a function call
@@ -2344,6 +2365,66 @@ func (c *Checker) checkTryExpr(expr *ast.TryExpr, scope *Scope) *Type {
 	}
 
 	return nil
+}
+
+// checkLambdaExpr checks a lambda expression
+func (c *Checker) checkLambdaExpr(expr *ast.LambdaExpr, scope *Scope) *Type {
+	line, col := expr.Pos()
+
+	// Create a new scope for the lambda body
+	lambdaScope := NewScope(scope)
+
+	// Resolve parameter types and add to scope
+	var paramTypes []*Type
+	for _, p := range expr.Params {
+		pType := ResolveType(p.Type, c.entities, c.enums)
+		if pType == nil {
+			pLine, pCol := p.Pos()
+			c.diag.Errorf(pLine, pCol, "unknown type in lambda parameter '%s'", p.Name)
+			return nil
+		}
+		paramTypes = append(paramTypes, pType)
+		lambdaScope.Define(p.Name, &Symbol{
+			Name:    p.Name,
+			Type:    pType,
+			Mutable: false,
+			Kind:    SymVariable,
+		})
+	}
+
+	// Resolve return type if specified
+	var returnType *Type
+	if expr.ReturnType != nil {
+		returnType = ResolveType(expr.ReturnType, c.entities, c.enums)
+		if returnType == nil {
+			c.diag.Errorf(line, col, "unknown return type in lambda")
+			return nil
+		}
+	}
+
+	// Type-check the body expression
+	bodyType := c.checkExpression(expr.Body, lambdaScope)
+	if bodyType == nil {
+		return nil
+	}
+
+	// If return type was specified, verify it matches
+	if returnType != nil {
+		if !bodyType.Equal(returnType) {
+			c.diag.Errorf(line, col, "lambda body type %s does not match declared return type %s",
+				bodyType.String(), returnType.String())
+			return nil
+		}
+	} else {
+		returnType = bodyType
+	}
+
+	return &Type{
+		Name:       "Fn",
+		IsFunction: true,
+		FnParams:   paramTypes,
+		FnReturn:   returnType,
+	}
 }
 
 // findEnumVariant finds a variant by name in an enum

@@ -8,13 +8,16 @@ import (
 
 // Type represents a type in the Intent type system
 type Type struct {
-	Name       string // "Int", "Float", "String", "Bool", "Void", entity name, or enum name
+	Name       string // "Int", "Float", "String", "Bool", "Void", "Fn", entity name, or enum name
 	IsEntity   bool
 	Entity     *EntityInfo // non-nil if IsEntity
 	IsEnum     bool
 	EnumInfo   *EnumInfo // non-nil if IsEnum
 	IsGeneric  bool      // true if TypeParams is non-empty
 	TypeParams []*Type   // e.g., [TypeInt] for Array<Int>
+	IsFunction bool      // true for function types (Fn)
+	FnParams   []*Type   // parameter types for function types
+	FnReturn   *Type     // return type for function types
 }
 
 // EntityInfo holds information about an entity type
@@ -132,6 +135,31 @@ func ResolveType(ref *ast.TypeRef, entities map[string]*EntityInfo, enums map[st
 			TypeParams: []*Type{someType},
 			EnumInfo:   instantiateOption(someType),
 		}
+	case "Fn":
+		// Fn type: Fn(ParamTypes) -> ReturnType
+		var paramTypes []*Type
+		for _, pt := range ref.ParamTypes {
+			resolved := ResolveType(pt, entities, enums)
+			if resolved == nil {
+				return nil
+			}
+			paramTypes = append(paramTypes, resolved)
+		}
+		var returnType *Type
+		if ref.ReturnType != nil {
+			returnType = ResolveType(ref.ReturnType, entities, enums)
+			if returnType == nil {
+				return nil
+			}
+		} else {
+			returnType = TypeVoid
+		}
+		return &Type{
+			Name:       "Fn",
+			IsFunction: true,
+			FnParams:   paramTypes,
+			FnReturn:   returnType,
+		}
 	case "Map":
 		// Map requires exactly 2 type arguments (K, V)
 		if len(ref.TypeArgs) != 2 {
@@ -180,6 +208,20 @@ func (t *Type) Equal(other *Type) bool {
 	if t.Name != other.Name {
 		return false
 	}
+	if t.IsFunction != other.IsFunction {
+		return false
+	}
+	if t.IsFunction {
+		if len(t.FnParams) != len(other.FnParams) {
+			return false
+		}
+		for i := range t.FnParams {
+			if !t.FnParams[i].Equal(other.FnParams[i]) {
+				return false
+			}
+		}
+		return t.FnReturn.Equal(other.FnReturn)
+	}
 	if t.IsGeneric != other.IsGeneric {
 		return false
 	}
@@ -200,6 +242,13 @@ func (t *Type) Equal(other *Type) bool {
 func (t *Type) String() string {
 	if t == nil {
 		return "<nil>"
+	}
+	if t.IsFunction {
+		params := make([]string, len(t.FnParams))
+		for i, p := range t.FnParams {
+			params[i] = p.String()
+		}
+		return "Fn(" + strings.Join(params, ", ") + ") -> " + t.FnReturn.String()
 	}
 	if t.IsGeneric && len(t.TypeParams) > 0 {
 		params := make([]string, len(t.TypeParams))

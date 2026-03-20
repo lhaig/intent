@@ -579,6 +579,9 @@ func (p *Parser) parseTypeRef() *ast.TypeRef {
 	case lexer.VOID_TYPE:
 		p.advance()
 		name = "Void"
+	case lexer.FN:
+		p.advance()
+		return p.parseFnTypeRef(tok)
 	case lexer.IDENT:
 		p.advance()
 		name = tok.Literal
@@ -606,6 +609,35 @@ func (p *Parser) parseTypeRef() *ast.TypeRef {
 		TypeArgs: typeArgs,
 		Line:     tok.Line,
 		Column:   tok.Column,
+	}
+}
+
+// parseFnTypeRef parses: Fn(Int, String) -> Bool
+func (p *Parser) parseFnTypeRef(tok lexer.Token) *ast.TypeRef {
+	p.expect(lexer.LPAREN)
+	var paramTypes []*ast.TypeRef
+	if !p.check(lexer.RPAREN) {
+		for {
+			paramTypes = append(paramTypes, p.parseTypeRef())
+			if !p.check(lexer.COMMA) {
+				break
+			}
+			p.advance() // consume comma
+		}
+	}
+	p.expect(lexer.RPAREN)
+
+	// Parse return type: -> Type
+	p.expect(lexer.MINUS) // -
+	p.expect(lexer.GT)    // >
+	returnType := p.parseTypeRef()
+
+	return &ast.TypeRef{
+		Name:       "Fn",
+		ParamTypes: paramTypes,
+		ReturnType: returnType,
+		Line:       tok.Line,
+		Column:     tok.Column,
 	}
 }
 
@@ -1069,6 +1101,8 @@ func (p *Parser) parsePrimary() ast.Expression {
 		return p.parseExistsExpr()
 	case lexer.MATCH:
 		return p.parseMatchExpr()
+	case lexer.PIPE:
+		return p.parseLambdaExpr()
 	default:
 		p.diags.Errorf(tok.Line, tok.Column, "unexpected token %s in expression", tok.Type)
 		p.advance()
@@ -1278,6 +1312,52 @@ func (p *Parser) parseMatchPattern() *ast.MatchPattern {
 		Bindings:    nil,
 		Line:        tok.Line,
 		Column:      tok.Column,
+	}
+}
+
+// parseLambdaExpr parses: |x: Int, y: Int| -> Int => x + y
+func (p *Parser) parseLambdaExpr() *ast.LambdaExpr {
+	tok := p.expect(lexer.PIPE)
+
+	// Parse parameters: name: Type, name: Type
+	var params []*ast.Param
+	if !p.check(lexer.PIPE) {
+		for {
+			nameTok := p.expect(lexer.IDENT)
+			p.expect(lexer.COLON)
+			typeRef := p.parseTypeRef()
+			params = append(params, &ast.Param{
+				Name:   nameTok.Literal,
+				Type:   typeRef,
+				Line:   nameTok.Line,
+				Column: nameTok.Column,
+			})
+			if !p.check(lexer.COMMA) {
+				break
+			}
+			p.advance() // consume comma
+		}
+	}
+	p.expect(lexer.PIPE)
+
+	// Parse optional return type: -> Type
+	var returnType *ast.TypeRef
+	if p.check(lexer.MINUS) && p.peek().Type == lexer.GT {
+		p.advance() // consume -
+		p.advance() // consume >
+		returnType = p.parseTypeRef()
+	}
+
+	// Parse body: => expr
+	p.expect(lexer.ARROW)
+	body := p.parseExpression()
+
+	return &ast.LambdaExpr{
+		Params:     params,
+		ReturnType: returnType,
+		Body:       body,
+		Line:       tok.Line,
+		Column:     tok.Column,
 	}
 }
 
