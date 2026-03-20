@@ -44,16 +44,29 @@ The Go toolchain handles lexing, parsing, semantic analysis, and Rust code gener
 - Compile to efficient native binaries through Rust as an intermediate representation.
 - Verify at compile time that all declared intents reference valid contracts.
 - Generate runtime assertions for all preconditions, postconditions, and invariants.
-- Keep the proof-of-concept scope minimal: built-in generic containers only, no user-defined generics, no traits.
+- Keep the proof-of-concept scope minimal: built-in generic containers only, no user-defined generics.
 
-### 1.2 Non-Goals (for POC)
+### 1.2 Implemented Since POC
 
-- Standard library.
+The following features were originally non-goals but have been implemented:
+
+- **Traits** with static dispatch and `impl` blocks (Phase 6).
+- **User-defined enums** beyond `Result<T,E>` and `Option<T>` (Phase 5).
+- **Map<K,V>** type with compile-time key type validation (Phase 9).
+- **I/O standard library** -- file operations, environment access, `to_string` (Phase 7).
+- **HTTP and JSON builtins** -- `http_post`, `http_get`, `json_parse`, `json_get`, `json_path` (Phase 8).
+- **String interpolation** (Phase 9).
+- **Quantifier expressions** -- `forall` and `exists` in contracts.
+- **Result<T,E> error handling** with `match` and try operator `?` (Phase 5).
+- **Multi-target codegen** -- Rust and JavaScript backends via IR layer (Phase 4).
+- **Multi-file compilation** with cross-module imports (Phase 8).
+
+### 1.3 Remaining Non-Goals
+
 - Package management.
 - User-defined generic types or type parameters.
-- Enum or union types beyond the built-in `Result<T,E>` and `Option<T>`.
 - Concurrency or async constructs.
-- Pattern matching.
+- Pattern matching beyond `Result`/`Option` `match`.
 - Closures or first-class functions.
 - Operator overloading.
 - Inheritance or subtyping.
@@ -108,6 +121,10 @@ if        else      true      false     entity
 invariant constructor method  self      result
 old       intent    goal      constraint guarantee
 verified_by and     or        not       implies
+while     for       in        break     continue
+enum      match     import    trait     impl
+forall    exists    try       Ok        Err
+Some      None
 ```
 
 ### 3.4 Identifiers
@@ -328,7 +345,11 @@ After the module declaration, the file contains zero or more top-level declarati
 
 - Function declarations
 - Entity declarations
+- Enum declarations
+- Trait declarations
+- Impl blocks (trait implementations for entities)
 - Intent blocks
+- Import statements (`import "<path>.intent";`)
 
 ---
 
@@ -976,7 +997,7 @@ Contract expressions should be side-effect-free. In the POC, this is not enforce
 
 ### 12.1 Pipeline
 
-The Intent compiler (`intentc`) is a Go program that processes `.intent` source files through four phases:
+The Intent compiler (`intentc`) is a Go program that processes `.intent` source files through six phases:
 
 ```
 Source (.intent)
@@ -991,10 +1012,13 @@ Source (.intent)
 [3. Semantic Checker]  -->  Annotated AST (types resolved, contracts validated)
     |
     v
-[4. Code Generator]  -->  Rust source (.rs)
+[4. IR Lowering]  -->  Intermediate Representation (target-independent)
     |
     v
-[cargo build]  -->  Native binary
+[5. Backend]  -->  Rust source (.rs) or JavaScript (.js)
+    |
+    v
+[cargo build]  -->  Native binary (Rust path)
 ```
 
 ### 12.2 Phase 1: Lexing
@@ -1556,15 +1580,21 @@ When compiled and run, the program exits with code 0. If any contract is violate
 
 ## Appendix A: Future Directions
 
-The following features are explicitly deferred from the POC but are candidates for future versions:
+The following features are candidates for future versions:
 
-- **Quantifier expressions**: `forall` and `exists` over `Array<T>` and `Map<K,V>` in contracts.
-- **Pattern matching**: Exhaustive `match` on enums and `Result`/`Option`.
+- **Full pattern matching**: Exhaustive `match` on user-defined enums (currently only `Result`/`Option` match is supported).
 - **User-defined generics**: Parameterized types and functions beyond built-in containers.
-- **Imports**: Cross-module references with dependency resolution.
-- **Standard library**: Basic I/O, math, string manipulation.
+- **Closures and first-class functions**: Lambda expressions and function values.
+- **Concurrency/async**: Async functions and concurrent execution.
+- **Package management**: Dependency resolution and versioning.
 - **Proof integration**: Connecting `verified_by` to formal proof tools.
-- **Property-based testing**: Generating test cases from contracts.
 - **Optimization levels**: Removing contract checks in release builds.
-- **String interpolation**: `"Balance: {self.balance}"` syntax.
-- **Traits/Interfaces**: Behavioral contracts across types.
+
+### Previously Future, Now Implemented
+
+- ~~Quantifier expressions~~: `forall` and `exists` -- implemented.
+- ~~Traits/Interfaces~~: Trait system with static dispatch -- implemented (Phase 6).
+- ~~Standard library~~: I/O, HTTP, JSON builtins -- implemented (Phases 7-8).
+- ~~String interpolation~~: Implemented (Phase 9).
+- ~~Imports~~: Multi-file compilation with `import` -- implemented (Phase 8).
+- ~~Property-based testing~~: Test generation from contracts via `intentc test-gen` -- implemented.
