@@ -38,7 +38,7 @@ public function call_llm(prompt: String, headers_json: String, body_json: String
         Err(e) => e,
     };
 
-    let content_opt: Option<String> = json_get(resp_body, "choices");
+    let content_opt: Option<String> = json_path(resp_body, "choices.0.message.content");
     let content: String = match content_opt {
         Some(c) => c,
         None => "unexpected API response format",

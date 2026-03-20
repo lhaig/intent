@@ -142,6 +142,10 @@ func ResolveType(ref *ast.TypeRef, entities map[string]*EntityInfo, enums map[st
 		if keyType == nil || valType == nil {
 			return nil
 		}
+		// Reject unhashable key types: Float, Array, Map
+		if keyType.Name == "Float" || keyType.Name == "Array" || keyType.Name == "Map" {
+			return nil
+		}
 		return &Type{
 			Name:       "Map",
 			IsGeneric:  true,

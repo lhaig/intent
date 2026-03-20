@@ -16,6 +16,15 @@ public enum Severity {
     Info,
 }
 
+// HandlerKind classifies pipeline node handlers for dispatch.
+public enum HandlerKind {
+    StartKind,
+    ExitKind,
+    ConditionalKind,
+    CodergenKind,
+    ToolKind,
+}
+
 // status_is_success returns true if the status represents any success variant.
 public function status_is_success(s: StageStatus) returns Bool
     requires true

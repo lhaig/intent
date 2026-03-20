@@ -1398,6 +1398,21 @@ func (c *Checker) checkCallExpr(expr *ast.CallExpr, scope *Scope) *Type {
 		return &Type{Name: "Option", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeString}, EnumInfo: instantiateOption(TypeString)}
 	}
 
+	// Handle json_path() built-in
+	if expr.Function == "json_path" {
+		if len(expr.Args) != 2 {
+			c.diag.Errorf(line, col, "json_path() requires exactly 2 arguments, got %d", len(expr.Args))
+			return &Type{Name: "Option", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeString}, EnumInfo: instantiateOption(TypeString)}
+		}
+		for i, arg := range expr.Args {
+			argType := c.checkExpression(arg, scope)
+			if argType != nil && !argType.Equal(TypeString) {
+				c.diag.Errorf(line, col, "json_path() argument %d must be String, got %s", i+1, argType.String())
+			}
+		}
+		return &Type{Name: "Option", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeString}, EnumInfo: instantiateOption(TypeString)}
+	}
+
 	// Handle emit_event() built-in
 	if expr.Function == "emit_event" {
 		if len(expr.Args) != 2 {

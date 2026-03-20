@@ -588,6 +588,22 @@ function test_timestamp() returns Int {
 	}
 }
 
+func TestGenerateJsonPathJS(t *testing.T) {
+	src := `module test version "1.0";
+
+function test_json_path(json: String, path: String) returns Option<String> {
+    return json_path(json, path);
+}
+`
+	output := generateJSFromSource(t, "json_path", src)
+	if !strings.Contains(output, "split('.')") {
+		t.Errorf("Expected json_path to contain path split, got:\n%s", output)
+	}
+	if !strings.Contains(output, "reduce") {
+		t.Errorf("Expected json_path to contain reduce, got:\n%s", output)
+	}
+}
+
 func TestGenerateTimestampBuiltinJS(t *testing.T) {
 	mod := &ir.Module{
 		Name:    "test",

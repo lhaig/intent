@@ -90,12 +90,8 @@ public function max_with_partial(allow_partial: Bool) returns StageStatus
 public function execute_handler(node: NodeAttr, context: PipelineContext) returns Result<Outcome, String>
     requires node.id != ""
 {
-    if node.prompt != "" {
-        let handler: CodergenHandler = CodergenHandler("codergen");
-        return handler.execute(node, context);
-    }
-    let handler: StartHandler = StartHandler("start");
-    return handler.execute(node, context);
+    let kind: HandlerKind = attractor_handlers.resolve_handler(node);
+    return attractor_handlers.dispatch_handler(kind, node, context);
 }
 
 // Execute a node with retry logic per Attractor spec Section 3.5.

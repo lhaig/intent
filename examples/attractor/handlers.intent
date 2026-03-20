@@ -111,6 +111,54 @@ impl Handler for ToolHandler {
     }
 }
 
+// resolve_handler determines the HandlerKind for a node based on its attributes.
+public function resolve_handler(node: NodeAttr) returns HandlerKind
+    requires node.id != ""
+    ensures true
+{
+    if node.is_start() {
+        return StartKind;
+    }
+    if node.is_exit() {
+        return ExitKind;
+    }
+    if node.node_type == "conditional" or node.is_decision() {
+        return ConditionalKind;
+    }
+    if node.node_type == "tool" {
+        return ToolKind;
+    }
+    return CodergenKind;
+}
+
+// dispatch_handler executes the appropriate handler based on HandlerKind.
+public function dispatch_handler(kind: HandlerKind, node: NodeAttr, context: PipelineContext) returns Result<Outcome, String>
+    requires node.id != ""
+{
+    let is_start: Bool = match kind { StartKind => true, _ => false, };
+    if is_start {
+        let handler: StartHandler = StartHandler("start");
+        return handler.execute(node, context);
+    }
+    let is_exit: Bool = match kind { ExitKind => true, _ => false, };
+    if is_exit {
+        let handler: ExitHandler = ExitHandler("exit");
+        return handler.execute(node, context);
+    }
+    let is_conditional: Bool = match kind { ConditionalKind => true, _ => false, };
+    if is_conditional {
+        let handler: ConditionalHandler = ConditionalHandler("conditional");
+        return handler.execute(node, context);
+    }
+    let is_tool: Bool = match kind { ToolKind => true, _ => false, };
+    if is_tool {
+        let handler: ToolHandler = ToolHandler("tool");
+        return handler.execute(node, context);
+    }
+    let handler: CodergenHandler = CodergenHandler("codergen");
+    return handler.execute(node, context);
+}
+
 intent "Handler trait correctness" {
     goal: "All handlers implement the Handler trait with consistent execute() signatures";
     goal: "CodergenHandler validates that nodes have prompts before execution";

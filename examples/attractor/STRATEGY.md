@@ -8,14 +8,14 @@ This is preferable to designing language features in the abstract: every additio
 
 ## Current Coverage
 
-**Phase 1-8 (complete):** Structural and logical skeleton, string stdlib, Array\<String\> entity fields, Map\<K,V\> type, Result\<T,E\> error handling, Handler trait with 5 implementations, I/O standard library, HTTP/JSON/event builtins — ~90% of the spec by section count.
+**Phase 1-9 (complete):** Structural and logical skeleton, string stdlib, Array\<String\> entity fields, Map\<K,V\> type, Result\<T,E\> error handling, Handler trait with 5 implementations, I/O standard library, HTTP/JSON/event builtins, 12/12 lint rules, HandlerRegistry dispatch, Map key type safety, json_path builtin — ~95% of the spec by section count.
 
 | Spec Area | Status | Files |
 |-----------|--------|-------|
 | Type model (entities, enums, invariants) | Done | types.intent |
 | Edge selection (5-step priority algorithm) | Done | edge_selection.intent |
 | Retry policy (exponential backoff, 5 presets) | Done | retry.intent |
-| Graph validation (7 of 12 lint rules) | Done | validation.intent |
+| Graph validation (12 of 12 lint rules) | Done | validation.intent |
 | Status helpers (match on StageStatus variants) | Done | attractor.intent |
 | Contract system (requires/ensures/invariant/intent blocks) | Done | all files |
 | Multi-file module system | Done | main.intent imports 4 modules |
@@ -40,10 +40,14 @@ Both single-file (`attractor.intent`) and multi-file (`main.intent`) versions co
 | Graph validation aggregate (validate_graph) | Done | validation.intent |
 | Loop refactoring (break/continue replacing done flags) | Done | edge_selection.intent, validation.intent |
 | Handler trait + 5 implementations (static dispatch) | Done | handlers.intent |
+| HandlerRegistry (enum-based dispatch) | Done | types.intent, handlers.intent, retry.intent |
+| WARNING lint rules (5 rules + aggregate) | Done | validation.intent |
+| Map\<Float,V\> compile-time rejection | Done | checker types.go |
+| json_path nested JSON extraction | Done | checker, IR, rustbe, jsbe |
 
 ### Known limitations in current implementation
 
-- HandlerRegistry (dynamic dispatch by string key) deferred -- requires trait objects or a runtime registry pattern not yet supported by Intent's static dispatch model
+- HandlerRegistry implemented using enum-based dispatch (HandlerKind + resolve_handler/dispatch_handler) instead of trait objects
 - Traits don't support invariants, only method-level requires/ensures contracts
 
 ## Gap-to-Feature Mapping
@@ -175,3 +179,4 @@ Each phase should produce both a language improvement and a visible expansion of
 | 2026-02-26 | Checker improvements: verified_by supports trait method contracts (Handler.execute.requires), cross-module trait method resolution fixed (Pass 1 now runs checkImplBlocks), dispatch wrappers removed, retry.intent uses trait-based handler dispatch | None -- all workarounds eliminated |
 | 2026-02-26 | Phase 7 complete: I/O standard library -- read_file, write_file, create_dir, file_exists, env_get builtins + to_string() method on Int/Float/Bool. Wired through checker, IR, Rust codegen, JS codegen. | No compiler architecture changes needed -- builtins follow existing name-match pattern |
 | 2026-02-27 | Phase 8 complete: HTTP/JSON/event builtins -- http_post, http_get, json_get, emit_event, timestamp_ms. Cargo.toml dependency management (reqwest, serde_json conditional on usage). New examples: persistence.intent, llm.intent. Updated main.intent and handlers.intent with LLM integration. ADR 0020. | JS HTTP uses curl via execSync (not production-grade). JSON extraction limited to top-level string keys. Cargo.toml scan-based dependency detection could false-positive on string literals. |
+| 2026-02-27 | Phase 9 complete: 5 WARNING lint rules (retry_target_exists, goal_gate_has_retry, prompt_on_llm_nodes, type_known, condition_syntax) + validate_warnings aggregate. HandlerKind enum + resolve_handler/dispatch_handler. Map\<Float,V\> rejected at compile time. json_path builtin (4-layer: checker, IR, rustbe, jsbe). Rust codegen improvements: typeOrigins for cross-module type names, module declaration name mapping, enum variant qualification, intra-module function prefixing, impl block entity name mangling. ADR 0021. | Multi-file Rust codegen has pre-existing ownership/borrowing issues preventing native binary compilation of the full attractor example. Cross-module exprTypes not populated for some enum variant identifiers (workaround: fallback enum variant resolution in IR lowerer). |

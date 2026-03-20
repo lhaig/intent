@@ -238,6 +238,118 @@ public function validate_graph(nodes: Array<NodeAttr>, node_count: Int, edges: A
     return Ok(true);
 }
 
+// --- Warning lint rules ---
+
+public function retry_target_exists(nodes: Array<NodeAttr>, node_count: Int) returns Array<Diagnostic>
+    requires node_count >= 0
+    ensures true
+{
+    let mutable diagnostics: Array<Diagnostic> = [];
+    for i in 0..node_count {
+        if nodes[i].retry_target != "" {
+            let found: Bool = node_exists(nodes, node_count, nodes[i].retry_target);
+            if not found {
+                diagnostics.push(Diagnostic("retry_target_exists", Warning, "retry_target references unknown node: " + nodes[i].retry_target, nodes[i].id));
+            }
+        }
+    }
+    return diagnostics;
+}
+
+public function goal_gate_has_retry(nodes: Array<NodeAttr>, node_count: Int) returns Array<Diagnostic>
+    requires node_count >= 0
+    ensures true
+{
+    let mutable diagnostics: Array<Diagnostic> = [];
+    for i in 0..node_count {
+        if nodes[i].goal_gate == true {
+            if nodes[i].retry_target == "" {
+                diagnostics.push(Diagnostic("goal_gate_has_retry", Warning, "goal_gate node missing retry_target", nodes[i].id));
+            }
+        }
+    }
+    return diagnostics;
+}
+
+public function prompt_on_llm_nodes(nodes: Array<NodeAttr>, node_count: Int) returns Array<Diagnostic>
+    requires node_count >= 0
+    ensures true
+{
+    let mutable diagnostics: Array<Diagnostic> = [];
+    for i in 0..node_count {
+        if nodes[i].node_type.contains("codegen") {
+            if nodes[i].prompt == "" {
+                diagnostics.push(Diagnostic("prompt_on_llm_nodes", Warning, "codegen node missing prompt", nodes[i].id));
+            }
+        }
+    }
+    return diagnostics;
+}
+
+public function type_known(nodes: Array<NodeAttr>, node_count: Int) returns Array<Diagnostic>
+    requires node_count >= 0
+    ensures true
+{
+    let mutable diagnostics: Array<Diagnostic> = [];
+    for i in 0..node_count {
+        let t: String = nodes[i].node_type;
+        if t != "" and t != "start" and t != "exit" and t != "codegen" and t != "conditional" and t != "tool" {
+            diagnostics.push(Diagnostic("type_known", Warning, "unknown node_type: " + t, nodes[i].id));
+        }
+    }
+    return diagnostics;
+}
+
+public function condition_syntax(edges: Array<EdgeAttr>, edge_count: Int) returns Array<Diagnostic>
+    requires edge_count >= 0
+    ensures true
+{
+    let mutable diagnostics: Array<Diagnostic> = [];
+    for i in 0..edge_count {
+        if edges[i].condition != "" {
+            if not edges[i].condition.contains("=") {
+                diagnostics.push(Diagnostic("condition_syntax", Warning, "condition missing '=' operator: " + edges[i].condition, edges[i].from_node));
+            }
+        }
+    }
+    return diagnostics;
+}
+
+public function validate_warnings(nodes: Array<NodeAttr>, node_count: Int, edges: Array<EdgeAttr>, edge_count: Int) returns Array<Diagnostic>
+    requires node_count >= 0
+    requires edge_count >= 0
+    ensures true
+{
+    let mutable all: Array<Diagnostic> = [];
+
+    let r1: Array<Diagnostic> = retry_target_exists(nodes, node_count);
+    for i in 0..len(r1) {
+        all.push(r1[i]);
+    }
+
+    let r2: Array<Diagnostic> = goal_gate_has_retry(nodes, node_count);
+    for i in 0..len(r2) {
+        all.push(r2[i]);
+    }
+
+    let r3: Array<Diagnostic> = prompt_on_llm_nodes(nodes, node_count);
+    for i in 0..len(r3) {
+        all.push(r3[i]);
+    }
+
+    let r4: Array<Diagnostic> = type_known(nodes, node_count);
+    for i in 0..len(r4) {
+        all.push(r4[i]);
+    }
+
+    let r5: Array<Diagnostic> = condition_syntax(edges, edge_count);
+    for i in 0..len(r5) {
+        all.push(r5[i]);
+    }
+
+    return all;
+}
+
 intent "Graph validation completeness" {
     goal: "validate_graph checks all structural invariants in a single call";
     guarantee: "Returns Err with descriptive message on first validation failure";

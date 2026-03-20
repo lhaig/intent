@@ -201,5 +201,20 @@ entry function main() returns Int {
     let end_time: Int = timestamp_ms();
     emit_event("pipeline_complete", "all tests finished");
 
+    // --- Phase 9: Warning lint rules test ---
+    let warnings: Array<Diagnostic> = attractor_validation.validate_warnings(nodes, node_count, edges, edge_count);
+    print(len(warnings));
+
+    // --- Phase 10: HandlerRegistry dispatch test ---
+    let kind_start: HandlerKind = attractor_handlers.resolve_handler(nodes[0]);
+    let kind_task: HandlerKind = attractor_handlers.resolve_handler(nodes[1]);
+    let kind_exit: HandlerKind = attractor_handlers.resolve_handler(nodes[2]);
+    let kind_start_ok: Bool = match kind_start { StartKind => true, _ => false, };
+    let kind_task_ok: Bool = match kind_task { CodergenKind => true, _ => false, };
+    let kind_exit_ok: Bool = match kind_exit { ExitKind => true, _ => false, };
+    print(kind_start_ok);
+    print(kind_task_ok);
+    print(kind_exit_ok);
+
     return 0;
 }

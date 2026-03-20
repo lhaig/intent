@@ -1044,6 +1044,14 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr) string {
 				`(() => { try { const val = JSON.parse(%s)[%s]; return val !== undefined ? { _tag: "Some", value: String(val) } : { _tag: "None" }; } catch(e) { return { _tag: "None" }; } })()`,
 				jsonStr, key)
 		}
+	case "json_path":
+		if len(expr.Args) == 2 {
+			jsonStr := g.generateExpr(expr.Args[0])
+			path := g.generateExpr(expr.Args[1])
+			return fmt.Sprintf(
+				`(() => { try { const val = %s.split('.').reduce((o, k) => { if (o === undefined || o === null) return undefined; const idx = Number(k); return Number.isInteger(idx) && Array.isArray(o) ? o[idx] : o[k]; }, JSON.parse(%s)); return val !== undefined && val !== null ? { _tag: "Some", value: String(val) } : { _tag: "None" }; } catch(e) { return { _tag: "None" }; } })()`,
+				path, jsonStr)
+		}
 	case "emit_event":
 		if len(expr.Args) == 2 {
 			eventType := g.generateExpr(expr.Args[0])

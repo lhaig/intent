@@ -13,6 +13,7 @@ type Program struct {
 // Module represents a single Intent source file after lowering.
 type Module struct {
 	Name       string
+	DeclName   string // module declaration name (e.g., "attractor_validation")
 	IsEntry    bool
 	Path       string // original file path
 	Functions  []*Function

@@ -100,6 +100,41 @@ func GenerateAll(prog *ir.Program) string {
 	for _, mod := range prog.Modules {
 		if !mod.IsEntry {
 			moduleManglings[mod.Name] = mod.Name + "_"
+			// Also map declaration name (e.g., "attractor_validation") to filename-based prefix
+			if mod.DeclName != "" && mod.DeclName != mod.Name {
+				moduleManglings[mod.DeclName] = mod.Name + "_"
+			}
+		}
+	}
+
+	// Build typeOrigins: map entity/enum name -> defining module's struct prefix
+	typeOrigins := make(map[string]string)
+	for _, mod := range prog.Modules {
+		prefix := ""
+		if !mod.IsEntry {
+			prefix = strings.ToUpper(mod.Name[:1]) + mod.Name[1:]
+		}
+		for _, e := range mod.Entities {
+			typeOrigins[e.Name] = prefix
+		}
+		for _, e := range mod.Enums {
+			typeOrigins[e.Name] = prefix
+		}
+	}
+
+	// Build global functions map for cross-module lookups
+	allFunctions := make(map[string]*ir.Function)
+	for _, mod := range prog.Modules {
+		for _, f := range mod.Functions {
+			allFunctions[f.Name] = f
+		}
+	}
+
+	// Build global entities map for cross-module constructor lookups
+	allEntities := make(map[string]*ir.Entity)
+	for _, mod := range prog.Modules {
+		for _, e := range mod.Entities {
+			allEntities[e.Name] = e
 		}
 	}
 
@@ -117,6 +152,9 @@ func GenerateAll(prog *ir.Program) string {
 			functions:       make(map[string]*ir.Function),
 			isEntryFile:     mod.IsEntry,
 			moduleManglings: moduleManglings,
+			typeOrigins:     typeOrigins,
+			allFunctions:    allFunctions,
+			allEntities:     allEntities,
 		}
 
 		if !mod.IsEntry {
@@ -207,6 +245,7 @@ type generator struct {
 	functions      map[string]*ir.Function
 	inConstructor  bool
 	inLabeledBlock bool
+	inImplBlock    bool
 	ensuresContext bool
 	needsHashMap   bool
 	needsReqwest   bool
@@ -217,6 +256,9 @@ type generator struct {
 	structPrefix    string
 	isEntryFile     bool
 	moduleManglings map[string]string
+	typeOrigins     map[string]string      // entity/enum name -> defining module's struct prefix
+	allFunctions    map[string]*ir.Function // all functions across all modules (for cross-module ref lookups)
+	allEntities     map[string]*ir.Entity   // all entities across all modules (for cross-module constructor lookups)
 }
 
 func (g *generator) emit(s string) {
@@ -288,6 +330,12 @@ func (g *generator) mapType(t *checker.Type) string {
 		}
 		return "HashMap<_, _>"
 	default:
+		if t.IsEntity {
+			return g.mangledEntityName(t.Name)
+		}
+		if t.IsEnum {
+			return g.mangledEnumName(t.Name)
+		}
 		return t.Name
 	}
 }
@@ -327,6 +375,11 @@ func (g *generator) defaultValue(t *checker.Type) string {
 }
 
 func (g *generator) mangledEntityName(name string) string {
+	if g.typeOrigins != nil {
+		if prefix, ok := g.typeOrigins[name]; ok {
+			return prefix + name
+		}
+	}
 	if g.structPrefix != "" {
 		return g.structPrefix + name
 	}
@@ -334,6 +387,11 @@ func (g *generator) mangledEntityName(name string) string {
 }
 
 func (g *generator) mangledEnumName(name string) string {
+	if g.typeOrigins != nil {
+		if prefix, ok := g.typeOrigins[name]; ok {
+			return prefix + name
+		}
+	}
 	if g.structPrefix != "" {
 		return g.structPrefix + name
 	}
@@ -523,8 +581,99 @@ func (g *generator) generateConstructor(e *ir.Entity) {
 	g.emitLine("}")
 }
 
+// methodMutatesSelf checks if a method's body mutates self (assigns to self fields,
+// calls mutating methods on self like push/insert/remove/set, etc.).
+func methodMutatesSelf(stmts []Stmt) bool {
+	for _, stmt := range stmts {
+		if stmtMutatesSelf(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtMutatesSelf(stmt Stmt) bool {
+	switch s := stmt.(type) {
+	case *ir.AssignStmt:
+		if targetsMutSelf(s.Target) {
+			return true
+		}
+	case *ir.ExprStmt:
+		if exprMutatesSelf(s.Expr) {
+			return true
+		}
+	case *ir.IfStmt:
+		if methodMutatesSelf(s.Then) || methodMutatesSelf(s.Else) {
+			return true
+		}
+	case *ir.WhileStmt:
+		if methodMutatesSelf(s.Body) {
+			return true
+		}
+	case *ir.ForInStmt:
+		if methodMutatesSelf(s.Body) {
+			return true
+		}
+	case *ir.ReturnStmt:
+		// return doesn't mutate self
+	}
+	return false
+}
+
+// targetsMutSelf checks if an assignment target is a field on self.
+func targetsMutSelf(expr ir.Expr) bool {
+	switch e := expr.(type) {
+	case *ir.FieldAccessExpr:
+		if _, ok := e.Object.(*ir.SelfRef); ok {
+			return true
+		}
+		return targetsMutSelf(e.Object)
+	case *ir.IndexExpr:
+		return targetsMutSelf(e.Object)
+	}
+	return false
+}
+
+// exprMutatesSelf checks if an expression statement mutates self (e.g., self.list.push(x)).
+func exprMutatesSelf(expr ir.Expr) bool {
+	switch e := expr.(type) {
+	case *ir.MethodCallExpr:
+		// Check if object is self or self.field and method is mutating
+		if isSelfOrSelfField(e.Object) {
+			mutatingMethods := map[string]bool{
+				"push": true, "pop": true, "insert": true, "remove": true,
+				"set": true, "clear": true, "sort": true, "reverse": true,
+			}
+			if mutatingMethods[e.Method] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isSelfOrSelfField(expr ir.Expr) bool {
+	switch e := expr.(type) {
+	case *ir.SelfRef:
+		return true
+	case *ir.FieldAccessExpr:
+		return isSelfOrSelfField(e.Object)
+	case *ir.IndexExpr:
+		return isSelfOrSelfField(e.Object)
+	}
+	return false
+}
+
+type Stmt = ir.Stmt
+
 func (g *generator) generateMethod(e *ir.Entity, m *ir.Method) {
-	g.emitLinef("fn %s(&mut self", m.Name)
+	selfReceiver := "&mut self"
+	// Use &self for non-mutating methods, but always use &mut self in impl blocks
+	// to match trait declarations which always declare &mut self.
+	if !g.inImplBlock && !methodMutatesSelf(m.Body) {
+		selfReceiver = "&self"
+	}
+	g.emitLinef("fn %s(%s", m.Name, selfReceiver)
 	for _, p := range m.Params {
 		g.emitf(", %s: %s", p.Name, g.mapType(p.Type))
 	}
@@ -645,7 +794,7 @@ func (g *generator) generateTrait(t *ir.Trait) {
 // --- Impl block generation ---
 
 func (g *generator) generateImplBlock(ib *ir.ImplBlock) {
-	g.emitLinef("impl %s for %s {\n", ib.TraitName, ib.EntityName)
+	g.emitLinef("impl %s for %s {\n", ib.TraitName, g.mangledEntityName(ib.EntityName))
 	g.incIndent()
 
 	// Look up the entity so generateMethod can emit invariant checks.
@@ -655,10 +804,12 @@ func (g *generator) generateImplBlock(ib *ir.ImplBlock) {
 		entity = &ir.Entity{Name: ib.EntityName}
 	}
 
+	g.inImplBlock = true
 	for _, m := range ib.Methods {
 		g.generateMethod(entity, m)
 		g.emitLine("")
 	}
+	g.inImplBlock = false
 
 	g.decIndent()
 	g.emitLine("}")
@@ -718,6 +869,13 @@ func (g *generator) generateStmt(s ir.Stmt, arrayRefParams map[string]bool) {
 			}
 		}
 
+		// Clone index expressions for non-Copy types (e.g., let x: String = arr[i])
+		if _, isIdx := stmt.Value.(*ir.IndexExpr); isIdx && !isCopyType(stmt.Type) {
+			if !strings.HasSuffix(valueExpr, ".clone()") {
+				valueExpr = valueExpr + ".clone()"
+			}
+		}
+
 		if isMut {
 			g.emitLinef("let mut %s: %s = %s;\n",
 				stmt.Name, g.mapType(stmt.Type), valueExpr)
@@ -727,9 +885,21 @@ func (g *generator) generateStmt(s ir.Stmt, arrayRefParams map[string]bool) {
 		}
 
 	case *ir.AssignStmt:
+		valueStr := g.generateExpr(stmt.Value, arrayRefParams)
+		// Clone non-Copy field access and index access to avoid partial moves
+		if fa, ok := stmt.Value.(*ir.FieldAccessExpr); ok && !isCopyType(fa.Type) {
+			if !strings.HasSuffix(valueStr, ".clone()") {
+				valueStr += ".clone()"
+			}
+		}
+		if idx, ok := stmt.Value.(*ir.IndexExpr); ok && !isCopyType(idx.Type) {
+			if !strings.HasSuffix(valueStr, ".clone()") {
+				valueStr += ".clone()"
+			}
+		}
 		g.emitLinef("%s = %s;\n",
 			g.generateExpr(stmt.Target, arrayRefParams),
-			g.generateExpr(stmt.Value, arrayRefParams))
+			valueStr)
 
 	case *ir.ReturnStmt:
 		if g.inLabeledBlock {
@@ -938,12 +1108,25 @@ func (g *generator) generateExpr(e ir.Expr, arrayRefParams map[string]bool) stri
 
 	case *ir.FieldAccessExpr:
 		obj := g.generateExpr(expr.Object, arrayRefParams)
-		return fmt.Sprintf("%s.%s", obj, expr.Field)
+		result := fmt.Sprintf("%s.%s", obj, expr.Field)
+		// Clone field access from indexed Vec elements to avoid moving out of borrowed content
+		if _, isIndex := expr.Object.(*ir.IndexExpr); isIndex {
+			result += ".clone()"
+		}
+		return result
 
 	case *ir.OldRef:
 		return expr.Name
 
 	case *ir.VarRef:
+		// Unit enum variants need to be qualified with their enum name
+		if expr.Type != nil && expr.Type.IsEnum && expr.Type.EnumInfo != nil {
+			for _, v := range expr.Type.EnumInfo.Variants {
+				if v.Name == expr.Name {
+					return fmt.Sprintf("%s::%s", g.mangledEnumName(expr.Type.Name), expr.Name)
+				}
+			}
+		}
 		return expr.Name
 
 	case *ir.SelfRef:
@@ -1014,6 +1197,59 @@ func (g *generator) generateExpr(e ir.Expr, arrayRefParams map[string]bool) stri
 	}
 }
 
+// isCopyType returns true for types that implement Copy in Rust (no clone needed).
+func isCopyType(t *checker.Type) bool {
+	if t == nil {
+		return true // unknown type, assume copy to be safe
+	}
+	switch t.Name {
+	case "Int", "Float", "Bool", "Void":
+		return true
+	}
+	return false
+}
+
+// isLiteralExpr returns true if the expression is a literal that doesn't need cloning.
+func isLiteralExpr(expr ir.Expr) bool {
+	switch expr.(type) {
+	case *ir.IntLit, *ir.FloatLit, *ir.StringLit, *ir.BoolLit, *ir.ArrayLit, *ir.StringInterp:
+		return true
+	}
+	return false
+}
+
+// cloneIfNeeded appends .clone() to an argument string if the expression is a non-Copy
+// variable/field reference that would be moved by Rust's ownership system.
+func (g *generator) cloneIfNeeded(argStr string, arg ir.Expr) string {
+	if isLiteralExpr(arg) {
+		return argStr
+	}
+	// Already a reference, no clone needed
+	if strings.HasPrefix(argStr, "&") {
+		return argStr
+	}
+	// Already cloned, don't double-clone
+	if strings.HasSuffix(argStr, ".clone()") {
+		return argStr
+	}
+	switch e := arg.(type) {
+	case *ir.VarRef:
+		if !isCopyType(e.Type) {
+			return argStr + ".clone()"
+		}
+	case *ir.FieldAccessExpr:
+		if !isCopyType(e.Type) {
+			return argStr + ".clone()"
+		}
+	case *ir.IndexExpr:
+		// vec[i] moves the element -- clone if non-Copy
+		if !isCopyType(e.Type) {
+			return argStr + ".clone()"
+		}
+	}
+	return argStr
+}
+
 func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[string]bool) string {
 	switch expr.Kind {
 	case ir.CallBuiltin:
@@ -1024,14 +1260,30 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[strin
 
 	case ir.CallConstructor:
 		args := make([]string, len(expr.Args))
-		for i, arg := range expr.Args {
-			args[i] = g.generateExpr(arg, arrayRefParams)
+		entity := g.entities[expr.Function]
+		if entity == nil && g.allEntities != nil {
+			entity = g.allEntities[expr.Function]
 		}
-		return fmt.Sprintf("%s::new(%s)", expr.Function, strings.Join(args, ", "))
+		for i, arg := range expr.Args {
+			argStr := g.generateExpr(arg, arrayRefParams)
+			// Fix: empty ArrayLiteral for Map-typed field should emit HashMap::new()
+			if arrLit, ok := arg.(*ir.ArrayLit); ok && len(arrLit.Elements) == 0 {
+				if entity != nil && i < len(entity.Fields) && entity.Fields[i].Type != nil && entity.Fields[i].Type.Name == "Map" {
+					g.needsHashMap = true
+					argStr = "HashMap::new()"
+				}
+			}
+			argStr = g.cloneIfNeeded(argStr, arg)
+			args[i] = argStr
+		}
+		return fmt.Sprintf("%s::new(%s)", g.mangledEntityName(expr.Function), strings.Join(args, ", "))
 
 	default: // CallFunction
 		args := make([]string, len(expr.Args))
 		funcDef := g.functions[expr.Function]
+		if funcDef == nil && g.allFunctions != nil {
+			funcDef = g.allFunctions[expr.Function]
+		}
 		for i, arg := range expr.Args {
 			argStr := g.generateExpr(arg, arrayRefParams)
 			// Pass arrays by reference
@@ -1042,9 +1294,11 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[strin
 					}
 				}
 			}
+			// Clone non-Copy args to avoid ownership moves
+			argStr = g.cloneIfNeeded(argStr, arg)
 			args[i] = argStr
 		}
-		return fmt.Sprintf("%s(%s)", expr.Function, strings.Join(args, ", "))
+		return fmt.Sprintf("%s(%s)", g.namePrefix+expr.Function, strings.Join(args, ", "))
 	}
 }
 
@@ -1063,6 +1317,7 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr, arrayRefParams map[st
 	case "Ok", "Err", "Some":
 		if len(expr.Args) == 1 {
 			arg := g.generateExpr(expr.Args[0], arrayRefParams)
+			arg = g.cloneIfNeeded(arg, expr.Args[0])
 			return fmt.Sprintf("%s(%s)", expr.Function, arg)
 		}
 	case "None":
@@ -1117,6 +1372,31 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr, arrayRefParams map[st
 			key := g.generateExpr(expr.Args[1], arrayRefParams)
 			return fmt.Sprintf("serde_json::from_str::<serde_json::Value>(&%s).ok().and_then(|v| v.get(&*%s).and_then(|v| v.as_str().map(|s| s.to_string())))", json, key)
 		}
+	case "json_path":
+		if len(expr.Args) == 2 {
+			g.needsSerdeJson = true
+			jsonStr := g.generateExpr(expr.Args[0], arrayRefParams)
+			path := g.generateExpr(expr.Args[1], arrayRefParams)
+			return fmt.Sprintf(`{
+    let __jp_json: &str = &%s;
+    let __jp_path: &str = &%s;
+    (|| -> Option<String> {
+        let val: serde_json::Value = serde_json::from_str(__jp_json).ok()?;
+        let mut current = &val;
+        for component in __jp_path.split('.') {
+            if let Ok(idx) = component.parse::<usize>() {
+                current = current.get(idx)?;
+            } else {
+                current = current.get(component)?;
+            }
+        }
+        Some(match current {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+    })()
+}`, jsonStr, path)
+		}
 	case "emit_event":
 		if len(expr.Args) == 2 {
 			eventType := g.generateExpr(expr.Args[0], arrayRefParams)
@@ -1135,7 +1415,7 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr, arrayRefParams map[st
 }
 
 func (g *generator) generateVariantConstructor(expr *ir.CallExpr, arrayRefParams map[string]bool) string {
-	enumName := expr.EnumName
+	enumName := g.mangledEnumName(expr.EnumName)
 
 	// Find variant declaration from IR enums
 	var variant *ir.EnumVariant
@@ -1176,6 +1456,17 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr, arrayRefPara
 	if expr.IsModuleCall && g.moduleManglings != nil {
 		args := make([]string, len(expr.Args))
 		funcDecl := g.functions[expr.Method]
+		if funcDecl == nil && g.allFunctions != nil {
+			funcDecl = g.allFunctions[expr.Method]
+		}
+		// Look up entity for constructor calls to resolve Map-typed fields
+		var moduleEntity *ir.Entity
+		if expr.CallKind == ir.CallConstructor {
+			moduleEntity = g.entities[expr.Method]
+			if moduleEntity == nil && g.allEntities != nil {
+				moduleEntity = g.allEntities[expr.Method]
+			}
+		}
 		for i, arg := range expr.Args {
 			argStr := g.generateExpr(arg, arrayRefParams)
 			if funcDecl != nil && i < len(funcDecl.Params) {
@@ -1185,16 +1476,27 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr, arrayRefPara
 					}
 				}
 			}
+			// Fix: empty ArrayLiteral for Map-typed constructor field should emit HashMap::new()
+			if arrLit, ok := arg.(*ir.ArrayLit); ok && len(arrLit.Elements) == 0 {
+				if moduleEntity != nil && i < len(moduleEntity.Fields) && moduleEntity.Fields[i].Type != nil && moduleEntity.Fields[i].Type.Name == "Map" {
+					g.needsHashMap = true
+					argStr = "HashMap::new()"
+				}
+			}
+			argStr = g.cloneIfNeeded(argStr, arg)
 			args[i] = argStr
 		}
 
 		if expr.CallKind == ir.CallConstructor {
-			modPrefix := strings.ToUpper(expr.ModuleName[:1]) + expr.ModuleName[1:]
-			mangledStructName := modPrefix + expr.Method
-			return fmt.Sprintf("%s::new(%s)", mangledStructName, strings.Join(args, ", "))
+			return fmt.Sprintf("%s::new(%s)", g.mangledEntityName(expr.Method), strings.Join(args, ", "))
 		}
 
-		mangledFnName := expr.ModuleName + "_" + expr.Method
+		// Look up the function name prefix from moduleManglings
+		fnPrefix := expr.ModuleName + "_"
+		if p, ok := g.moduleManglings[expr.ModuleName]; ok {
+			fnPrefix = p
+		}
+		mangledFnName := fnPrefix + expr.Method
 		return fmt.Sprintf("%s(%s)", mangledFnName, strings.Join(args, ", "))
 	}
 
@@ -1255,7 +1557,9 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr, arrayRefPara
 
 	args := make([]string, len(expr.Args))
 	for i, arg := range expr.Args {
-		args[i] = g.generateExpr(arg, arrayRefParams)
+		argStr := g.generateExpr(arg, arrayRefParams)
+		argStr = g.cloneIfNeeded(argStr, arg)
+		args[i] = argStr
 	}
 	return fmt.Sprintf("%s.%s(%s)", obj, expr.Method, strings.Join(args, ", "))
 }
@@ -1296,8 +1600,20 @@ func (g *generator) generateExistsExpr(expr *ir.ExistsExpr, arrayRefParams map[s
 
 func (g *generator) generateMatchExpr(expr *ir.MatchExpr, arrayRefParams map[string]bool) string {
 	var buf strings.Builder
+
+	// For Result/Option scrutinees, clone the scrutinee to avoid moving.
+	// This is simpler than borrowing since match arm bindings remain owned values.
+	scrutineeType := expr.Scrutinee.ExprType()
+	isResultOrOption := scrutineeType != nil && (scrutineeType.Name == "Result" || scrutineeType.Name == "Option")
+
 	buf.WriteString("match ")
-	buf.WriteString(g.generateExpr(expr.Scrutinee, arrayRefParams))
+	scrutineeStr := g.generateExpr(expr.Scrutinee, arrayRefParams)
+	if isResultOrOption {
+		if _, isVar := expr.Scrutinee.(*ir.VarRef); isVar {
+			scrutineeStr += ".clone()"
+		}
+	}
+	buf.WriteString(scrutineeStr)
 	buf.WriteString(" {\n")
 
 	g.incIndent()
@@ -1331,7 +1647,7 @@ func (g *generator) generateMatchPattern(pattern *ir.MatchPattern) string {
 		return pattern.VariantName
 	}
 
-	enumName := pattern.EnumName
+	enumName := g.mangledEnumName(pattern.EnumName)
 
 	// Unit variant
 	if len(pattern.Bindings) == 0 {
@@ -1388,8 +1704,15 @@ func (g *generator) isEntityType(t *checker.Type) bool {
 	if t == nil {
 		return false
 	}
-	_, ok := g.entities[t.Name]
-	return ok
+	if _, ok := g.entities[t.Name]; ok {
+		return true
+	}
+	if g.allEntities != nil {
+		if _, ok := g.allEntities[t.Name]; ok {
+			return true
+		}
+	}
+	return t.IsEntity
 }
 
 func (g *generator) mangleIntentName(desc string) string {

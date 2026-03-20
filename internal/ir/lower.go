@@ -93,10 +93,16 @@ func LowerAll(registry map[string]*ast.Program, sortedPaths []string, result *ch
 		modName := strings.TrimSuffix(filepath.Base(filePath), ".intent")
 		isEntry := filePath == entryPath
 
+		declName := modName
+		if p.Module != nil && p.Module.Name != "" {
+			declName = p.Module.Name
+		}
+
 		mod := &Module{
-			Name:    modName,
-			IsEntry: isEntry,
-			Path:    filePath,
+			Name:     modName,
+			DeclName: declName,
+			IsEntry:  isEntry,
+			Path:     filePath,
 		}
 
 		for _, e := range p.Entities {
@@ -690,6 +696,23 @@ func (l *lowerer) lowerExpr(e ast.Expression) Expr {
 				}
 			}
 		}
+		// Fallback: if type info is missing but it's a known enum variant, still emit correctly
+		if t == nil {
+			enumName := l.resolveEnumForVariant(expr.Name)
+			if enumName != "" {
+				enumInfo := l.enums[enumName]
+				var enumType *checker.Type
+				if enumInfo != nil {
+					enumType = &checker.Type{Name: enumName, IsEnum: true, EnumInfo: enumInfo}
+				}
+				return &CallExpr{
+					Function: expr.Name,
+					Kind:     CallVariant,
+					EnumName: enumName,
+					Type:     enumType,
+				}
+			}
+		}
 		// Handle None specifically
 		if expr.Name == "None" {
 			return &CallExpr{
@@ -917,7 +940,7 @@ func (l *lowerer) resolveCallKind(expr *ast.CallExpr) (CallKind, string) {
 	// Builtins
 	switch expr.Function {
 	case "print", "len", "read_file", "write_file", "create_dir", "file_exists", "env_get",
-		"http_post", "http_get", "json_get", "emit_event", "timestamp_ms":
+		"http_post", "http_get", "json_get", "json_path", "emit_event", "timestamp_ms":
 		return CallBuiltin, ""
 	case "Ok", "Err", "Some":
 		return CallBuiltin, ""

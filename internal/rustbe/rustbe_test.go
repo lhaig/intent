@@ -367,6 +367,22 @@ entry function main() returns Int {
 	}
 }
 
+func TestGenerateJsonPath(t *testing.T) {
+	src := `module test version "1.0";
+entry function main() returns Int {
+    let val: Option<String> = json_path("data", "a.0.b");
+    return 0;
+}
+`
+	output := generateFromSource(t, "json_path", src)
+	if !strings.Contains(output, "split('.')") {
+		t.Errorf("Expected json_path to contain path split, got:\n%s", output)
+	}
+	if !strings.Contains(output, "serde_json") {
+		t.Errorf("Expected json_path to use serde_json, got:\n%s", output)
+	}
+}
+
 // findExample locates an example file relative to the project root.
 func findExample(t *testing.T, name string) string {
 	t.Helper()

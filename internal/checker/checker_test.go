@@ -3616,3 +3616,64 @@ function get_time() returns Int {
 		t.Error("Expected error for timestamp_ms() with arguments")
 	}
 }
+
+func TestMapFloatKeyRejected(t *testing.T) {
+	source := `module test version "1.0";
+function foo() returns Void {
+    let m: Map<Float, String> = [];
+}
+`
+	diags := parseAndCheck(t, source)
+	if !diags.HasErrors() {
+		t.Error("Expected error for Map<Float, String> but got none")
+	}
+}
+
+func TestMapValidKeys(t *testing.T) {
+	source := `module test version "1.0";
+function foo() returns Void {
+    let m1: Map<String, String> = [];
+    let m2: Map<Int, String> = [];
+}
+`
+	diags := parseAndCheck(t, source)
+	if diags.HasErrors() {
+		t.Errorf("Expected no errors for Map<String/Int, ...> but got: %s", diags.Format("test"))
+	}
+}
+
+func TestJsonPath(t *testing.T) {
+	source := `module test version "1.0";
+function foo() returns Option<String> {
+    return json_path("data", "a.b.c");
+}
+`
+	diags := parseAndCheck(t, source)
+	if diags.HasErrors() {
+		t.Errorf("Unexpected errors: %s", diags.Format("test"))
+	}
+}
+
+func TestJsonPathWrongArgCount(t *testing.T) {
+	source := `module test version "1.0";
+function foo() returns Option<String> {
+    return json_path("data");
+}
+`
+	diags := parseAndCheck(t, source)
+	if !diags.HasErrors() {
+		t.Error("Expected error for wrong arg count")
+	}
+}
+
+func TestJsonPathWrongArgType(t *testing.T) {
+	source := `module test version "1.0";
+function foo() returns Option<String> {
+    return json_path("data", 42);
+}
+`
+	diags := parseAndCheck(t, source)
+	if !diags.HasErrors() {
+		t.Error("Expected error for wrong arg type")
+	}
+}
