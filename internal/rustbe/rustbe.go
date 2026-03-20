@@ -29,7 +29,7 @@ func Generate(mod *ir.Module) string {
 	}
 
 	g.emitLine("// Generated Rust code from Intent")
-	g.emitLine("#![allow(unused_parens, unused_variables, dead_code)]")
+	g.emitLine("#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]")
 	g.emitLine("")
 
 	for _, e := range mod.Entities {
@@ -60,11 +60,11 @@ func Generate(mod *ir.Module) string {
 	result := g.sb.String()
 	if g.needsHashMap {
 		// Insert use statement after #![allow(...)] line
-		marker := "#![allow(unused_parens, unused_variables, dead_code)]\n"
+		marker := "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n"
 		result = strings.Replace(result, marker, marker+"use std::collections::HashMap;\n", 1)
 	}
 	if g.needsReqwest {
-		marker := "#![allow(unused_parens, unused_variables, dead_code)]\n"
+		marker := "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n"
 		if strings.Contains(result, "use std::collections::HashMap;\n") {
 			afterHashMap := "use std::collections::HashMap;\n"
 			result = strings.Replace(result, afterHashMap, afterHashMap+"use reqwest;\nuse serde_json;\n", 1)
@@ -78,7 +78,7 @@ func Generate(mod *ir.Module) string {
 			result = result[:fnIdx] + helpers + result[fnIdx:]
 		}
 	} else if g.needsSerdeJson {
-		marker := "#![allow(unused_parens, unused_variables, dead_code)]\n"
+		marker := "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n"
 		if strings.Contains(result, "use std::collections::HashMap;\n") {
 			afterHashMap := "use std::collections::HashMap;\n"
 			result = strings.Replace(result, afterHashMap, afterHashMap+"use serde_json;\n", 1)
@@ -140,7 +140,7 @@ func GenerateAll(prog *ir.Program) string {
 
 	var sb strings.Builder
 	sb.WriteString("// Generated Rust code from Intent (multi-file)\n")
-	sb.WriteString("#![allow(unused_parens, unused_variables, dead_code)]\n\n")
+	sb.WriteString("#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n\n")
 
 	needsHashMapGlobal := false
 	needsReqwestGlobal := false
@@ -207,11 +207,11 @@ func GenerateAll(prog *ir.Program) string {
 
 	output := sb.String()
 	if needsHashMapGlobal {
-		marker := "#![allow(unused_parens, unused_variables, dead_code)]\n"
+		marker := "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n"
 		output = strings.Replace(output, marker, marker+"use std::collections::HashMap;\n", 1)
 	}
 	if needsReqwestGlobal {
-		marker := "#![allow(unused_parens, unused_variables, dead_code)]\n"
+		marker := "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n"
 		if strings.Contains(output, "use std::collections::HashMap;\n") {
 			afterHashMap := "use std::collections::HashMap;\n"
 			output = strings.Replace(output, afterHashMap, afterHashMap+"use reqwest;\nuse serde_json;\n", 1)
@@ -226,7 +226,7 @@ func GenerateAll(prog *ir.Program) string {
 			output = output[:fnIdx] + helpers + output[fnIdx:]
 		}
 	} else if needsSerdeJsonGlobal {
-		marker := "#![allow(unused_parens, unused_variables, dead_code)]\n"
+		marker := "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n"
 		if strings.Contains(output, "use std::collections::HashMap;\n") {
 			afterHashMap := "use std::collections::HashMap;\n"
 			output = strings.Replace(output, afterHashMap, afterHashMap+"use serde_json;\n", 1)
@@ -259,6 +259,7 @@ type generator struct {
 	typeOrigins     map[string]string      // entity/enum name -> defining module's struct prefix
 	allFunctions    map[string]*ir.Function // all functions across all modules (for cross-module ref lookups)
 	allEntities     map[string]*ir.Entity   // all entities across all modules (for cross-module constructor lookups)
+	mutatedVars     map[string]bool         // variables assigned to in current function body
 }
 
 func (g *generator) emit(s string) {
@@ -401,6 +402,7 @@ func (g *generator) mangledEnumName(name string) string {
 // --- Function generation ---
 
 func (g *generator) generateFunction(f *ir.Function) {
+	g.mutatedVars = collectMutatedVars(f.Body)
 	if f.IsEntry {
 		g.emitLine("fn __intent_main() -> i64 {")
 		g.incIndent()
@@ -532,6 +534,7 @@ func (g *generator) generateEntity(e *ir.Entity) {
 func (g *generator) generateConstructor(e *ir.Entity) {
 	mangledName := g.mangledEntityName(e.Name)
 	ctor := e.Constructor
+	g.mutatedVars = collectMutatedVars(ctor.Body)
 
 	g.emitLinef("fn new(")
 	for i, p := range ctor.Params {
@@ -667,6 +670,7 @@ func isSelfOrSelfField(expr ir.Expr) bool {
 type Stmt = ir.Stmt
 
 func (g *generator) generateMethod(e *ir.Entity, m *ir.Method) {
+	g.mutatedVars = collectMutatedVars(m.Body)
 	selfReceiver := "&mut self"
 	// Use &self for non-mutating methods, but always use &mut self in impl blocks
 	// to match trait declarations which always declare &mut self.
@@ -857,7 +861,7 @@ func (g *generator) generateStmtsWithArrayRef(stmts []ir.Stmt, arrayRefParams ma
 func (g *generator) generateStmt(s ir.Stmt, arrayRefParams map[string]bool) {
 	switch stmt := s.(type) {
 	case *ir.LetStmt:
-		isMut := stmt.Mutable || g.isEntityType(stmt.Type)
+		isMut := stmt.Mutable || g.mutatedVars[stmt.Name]
 		valueExpr := g.generateExpr(stmt.Value, arrayRefParams)
 
 		// Clone array/map ref params when binding
@@ -1713,6 +1717,70 @@ func (g *generator) isEntityType(t *checker.Type) bool {
 		}
 	}
 	return t.IsEntity
+}
+
+// collectMutatedVars scans a list of IR statements and returns the set of
+// variable names that are targets of assignments, field mutations, or
+// direct method calls (which may require &mut self).
+func collectMutatedVars(stmts []ir.Stmt) map[string]bool {
+	mutated := make(map[string]bool)
+
+	// collectMethodReceivers finds top-level method call receivers in an expression
+	var collectMethodReceivers func(ir.Expr)
+	collectMethodReceivers = func(e ir.Expr) {
+		if e == nil {
+			return
+		}
+		if mc, ok := e.(*ir.MethodCallExpr); ok && !mc.IsModuleCall {
+			if v, ok := mc.Object.(*ir.VarRef); ok {
+				mutated[v.Name] = true
+			}
+		}
+	}
+
+	var scan func([]ir.Stmt)
+	scan = func(stmts []ir.Stmt) {
+		for _, s := range stmts {
+			switch stmt := s.(type) {
+			case *ir.AssignStmt:
+				switch target := stmt.Target.(type) {
+				case *ir.VarRef:
+					mutated[target.Name] = true
+				case *ir.FieldAccessExpr:
+					root := target.Object
+					for {
+						if fa, ok := root.(*ir.FieldAccessExpr); ok {
+							root = fa.Object
+						} else {
+							break
+						}
+					}
+					if v, ok := root.(*ir.VarRef); ok {
+						mutated[v.Name] = true
+					}
+				case *ir.IndexExpr:
+					if v, ok := target.Object.(*ir.VarRef); ok {
+						mutated[v.Name] = true
+					}
+				}
+			case *ir.ExprStmt:
+				collectMethodReceivers(stmt.Expr)
+			case *ir.LetStmt:
+				collectMethodReceivers(stmt.Value)
+			case *ir.ReturnStmt:
+				collectMethodReceivers(stmt.Value)
+			case *ir.IfStmt:
+				scan(stmt.Then)
+				scan(stmt.Else)
+			case *ir.WhileStmt:
+				scan(stmt.Body)
+			case *ir.ForInStmt:
+				scan(stmt.Body)
+			}
+		}
+	}
+	scan(stmts)
+	return mutated
 }
 
 func (g *generator) mangleIntentName(desc string) string {
