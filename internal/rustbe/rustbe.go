@@ -256,7 +256,7 @@ type generator struct {
 	structPrefix    string
 	isEntryFile     bool
 	moduleManglings map[string]string
-	typeOrigins     map[string]string      // entity/enum name -> defining module's struct prefix
+	typeOrigins     map[string]string       // entity/enum name -> defining module's struct prefix
 	allFunctions    map[string]*ir.Function // all functions across all modules (for cross-module ref lookups)
 	allEntities     map[string]*ir.Entity   // all entities across all modules (for cross-module constructor lookups)
 	mutatedVars     map[string]bool         // variables assigned to in current function body
