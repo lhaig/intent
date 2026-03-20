@@ -60,14 +60,13 @@ The following features were originally non-goals but have been implemented:
 - **Result<T,E> error handling** with `match` and try operator `?` (Phase 5).
 - **Multi-target codegen** -- Rust and JavaScript backends via IR layer (Phase 4).
 - **Multi-file compilation** with cross-module imports (Phase 8).
+- **Closures and first-class functions** -- `Fn(T) -> R` types, lambda expressions (Phase 10).
 
 ### 1.3 Remaining Non-Goals
 
 - Package management.
 - User-defined generic types or type parameters.
 - Concurrency or async constructs.
-- Pattern matching beyond `Result`/`Option` `match`.
-- Closures or first-class functions.
 - Operator overloading.
 - Inheritance or subtyping.
 
@@ -1582,9 +1581,7 @@ When compiled and run, the program exits with code 0. If any contract is violate
 
 The following features are candidates for future versions:
 
-- **Full pattern matching**: Exhaustive `match` on user-defined enums (currently only `Result`/`Option` match is supported).
 - **User-defined generics**: Parameterized types and functions beyond built-in containers.
-- **Closures and first-class functions**: Lambda expressions and function values.
 - **Concurrency/async**: Async functions and concurrent execution.
 - **Package management**: Dependency resolution and versioning.
 - **Proof integration**: Connecting `verified_by` to formal proof tools.
@@ -1598,3 +1595,5 @@ The following features are candidates for future versions:
 - ~~String interpolation~~: Implemented (Phase 9).
 - ~~Imports~~: Multi-file compilation with `import` -- implemented (Phase 8).
 - ~~Property-based testing~~: Test generation from contracts via `intentc test-gen` -- implemented.
+- ~~Closures and first-class functions~~: `Fn(T) -> R` types, lambda expressions -- implemented (Phase 10).
+- ~~Full pattern matching~~: Exhaustive `match` on all enum types -- implemented (Phases 5-6).
