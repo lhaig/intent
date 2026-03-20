@@ -737,3 +737,69 @@ function test_to_str(n: Int) returns String {
 		}
 	}
 }
+
+func TestGenerateLambdaExpressionJS(t *testing.T) {
+	src := `module test version "1.0";
+
+function apply(f: Fn(Int) -> Int, x: Int) returns Int {
+    return f(x);
+}
+
+function test() returns Int {
+    let double: Fn(Int) -> Int = |n: Int| -> Int => n * 2;
+    return apply(double, 5);
+}`
+
+	output := generateJSFromSource(t, "lambda", src)
+
+	expects := []string{
+		"(n) => { return",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}
+
+func TestGenerateLambdaMultipleParamsJS(t *testing.T) {
+	src := `module test version "1.0";
+
+function apply2(f: Fn(Int, Int) -> Int, x: Int, y: Int) returns Int {
+    return f(x, y);
+}
+
+function test() returns Int {
+    let add: Fn(Int, Int) -> Int = |x: Int, y: Int| -> Int => x + y;
+    return apply2(add, 3, 4);
+}`
+
+	output := generateJSFromSource(t, "lambda_multi", src)
+
+	expects := []string{
+		"(x, y) => { return",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}
+
+func TestGenerateInlineLambdaCallJS(t *testing.T) {
+	src := `module test version "1.0";
+
+function apply(f: Fn(Int) -> Int, x: Int) returns Int {
+    return f(x);
+}
+
+function test() returns Int {
+    return apply(|n: Int| -> Int => n * 3, 7);
+}`
+
+	output := generateJSFromSource(t, "lambda_inline", src)
+
+	if !strings.Contains(output, "(n) => { return") {
+		t.Errorf("expected lambda to generate arrow function syntax, got:\n%s", output)
+	}
+}

@@ -2290,3 +2290,175 @@ trait Bounded {
 		t.Fatalf("expected 1 ensures clause, got %d", len(method.Ensures))
 	}
 }
+
+func TestParseLambdaExpression(t *testing.T) {
+	input := `module test version "1.0.0";
+
+function test() returns Void {
+    let f: Fn(Int) -> Int = |x: Int| -> Int => x + 2;
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	if len(prog.Functions) != 1 {
+		t.Fatalf("expected 1 function, got %d", len(prog.Functions))
+	}
+
+	body := prog.Functions[0].Body
+	if len(body.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got %d", len(body.Statements))
+	}
+
+	letStmt, ok := body.Statements[0].(*ast.LetStmt)
+	if !ok {
+		t.Fatalf("expected LetStmt, got %T", body.Statements[0])
+	}
+
+	// Check the declared type is Fn(Int) -> Int
+	if letStmt.Type == nil {
+		t.Fatal("expected type annotation on let statement")
+	}
+	if letStmt.Type.Name != "Fn" {
+		t.Errorf("expected type name 'Fn', got %q", letStmt.Type.Name)
+	}
+	if len(letStmt.Type.ParamTypes) != 1 {
+		t.Fatalf("expected 1 Fn param type, got %d", len(letStmt.Type.ParamTypes))
+	}
+	if letStmt.Type.ParamTypes[0].Name != "Int" {
+		t.Errorf("expected Fn param type 'Int', got %q", letStmt.Type.ParamTypes[0].Name)
+	}
+	if letStmt.Type.ReturnType == nil {
+		t.Fatal("expected Fn return type")
+	}
+	if letStmt.Type.ReturnType.Name != "Int" {
+		t.Errorf("expected Fn return type 'Int', got %q", letStmt.Type.ReturnType.Name)
+	}
+
+	// Check the value is a LambdaExpr
+	lambda, ok := letStmt.Value.(*ast.LambdaExpr)
+	if !ok {
+		t.Fatalf("expected LambdaExpr, got %T", letStmt.Value)
+	}
+	if len(lambda.Params) != 1 {
+		t.Fatalf("expected 1 lambda param, got %d", len(lambda.Params))
+	}
+	if lambda.Params[0].Name != "x" {
+		t.Errorf("expected lambda param name 'x', got %q", lambda.Params[0].Name)
+	}
+	if lambda.Params[0].Type.Name != "Int" {
+		t.Errorf("expected lambda param type 'Int', got %q", lambda.Params[0].Type.Name)
+	}
+	if lambda.ReturnType == nil {
+		t.Fatal("expected lambda return type annotation")
+	}
+	if lambda.ReturnType.Name != "Int" {
+		t.Errorf("expected lambda return type 'Int', got %q", lambda.ReturnType.Name)
+	}
+	if lambda.Body == nil {
+		t.Fatal("expected lambda body")
+	}
+}
+
+func TestParseLambdaMultipleParams(t *testing.T) {
+	input := `module test version "1.0.0";
+
+function test() returns Void {
+    let add: Fn(Int, Int) -> Int = |x: Int, y: Int| -> Int => x + y;
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	letStmt := prog.Functions[0].Body.Statements[0].(*ast.LetStmt)
+
+	// Check the Fn type has two param types
+	if len(letStmt.Type.ParamTypes) != 2 {
+		t.Fatalf("expected 2 Fn param types, got %d", len(letStmt.Type.ParamTypes))
+	}
+
+	lambda := letStmt.Value.(*ast.LambdaExpr)
+	if len(lambda.Params) != 2 {
+		t.Fatalf("expected 2 lambda params, got %d", len(lambda.Params))
+	}
+	if lambda.Params[0].Name != "x" {
+		t.Errorf("expected first param 'x', got %q", lambda.Params[0].Name)
+	}
+	if lambda.Params[1].Name != "y" {
+		t.Errorf("expected second param 'y', got %q", lambda.Params[1].Name)
+	}
+}
+
+func TestParseFnTypeInFunctionParam(t *testing.T) {
+	input := `module test version "1.0.0";
+
+function apply(f: Fn(Int) -> Int, x: Int) returns Int {
+    return f(x);
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	if len(prog.Functions) != 1 {
+		t.Fatalf("expected 1 function, got %d", len(prog.Functions))
+	}
+
+	fn := prog.Functions[0]
+	if len(fn.Params) != 2 {
+		t.Fatalf("expected 2 params, got %d", len(fn.Params))
+	}
+
+	fParam := fn.Params[0]
+	if fParam.Name != "f" {
+		t.Errorf("expected param name 'f', got %q", fParam.Name)
+	}
+	if fParam.Type.Name != "Fn" {
+		t.Errorf("expected param type 'Fn', got %q", fParam.Type.Name)
+	}
+	if len(fParam.Type.ParamTypes) != 1 {
+		t.Fatalf("expected 1 Fn param type, got %d", len(fParam.Type.ParamTypes))
+	}
+	if fParam.Type.ParamTypes[0].Name != "Int" {
+		t.Errorf("expected Fn param type 'Int', got %q", fParam.Type.ParamTypes[0].Name)
+	}
+	if fParam.Type.ReturnType == nil {
+		t.Fatal("expected Fn return type")
+	}
+	if fParam.Type.ReturnType.Name != "Int" {
+		t.Errorf("expected Fn return type 'Int', got %q", fParam.Type.ReturnType.Name)
+	}
+}
+
+func TestParseFnTypeWithNoParams(t *testing.T) {
+	input := `module test version "1.0.0";
+
+function test(callback: Fn() -> Int) returns Int {
+    return callback();
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	param := prog.Functions[0].Params[0]
+	if param.Type.Name != "Fn" {
+		t.Errorf("expected type 'Fn', got %q", param.Type.Name)
+	}
+	if len(param.Type.ParamTypes) != 0 {
+		t.Errorf("expected 0 Fn param types, got %d", len(param.Type.ParamTypes))
+	}
+	if param.Type.ReturnType.Name != "Int" {
+		t.Errorf("expected Fn return type 'Int', got %q", param.Type.ReturnType.Name)
+	}
+}

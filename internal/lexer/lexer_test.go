@@ -625,3 +625,101 @@ func TestNextToken_ImportAndPublicKeywords(t *testing.T) {
 		})
 	}
 }
+
+func TestNextToken_PipeToken(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []TokenType
+	}{
+		{
+			name:     "single pipe",
+			input:    "|",
+			expected: []TokenType{PIPE, EOF},
+		},
+		{
+			// Lambda syntax: |x: Int| -> Int => x
+			// Note: "->" is two tokens (MINUS, GT); "=>" is ARROW
+			name:     "lambda expression tokens",
+			input:    "|x: Int| -> Int => x",
+			expected: []TokenType{PIPE, IDENT, COLON, INT_TYPE, PIPE, MINUS, GT, INT_TYPE, ARROW, IDENT, EOF},
+		},
+		{
+			// Empty-param lambda: || -> Int => 0
+			name:     "empty lambda params",
+			input:    "|| -> Int => 0",
+			expected: []TokenType{PIPE, PIPE, MINUS, GT, INT_TYPE, ARROW, INT_LIT, EOF},
+		},
+		{
+			// Multi-param lambda header (no body)
+			name:     "multi-param lambda tokens",
+			input:    "|x: Int, y: Int| -> Int",
+			expected: []TokenType{PIPE, IDENT, COLON, INT_TYPE, COMMA, IDENT, COLON, INT_TYPE, PIPE, MINUS, GT, INT_TYPE, EOF},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := New(tt.input)
+			for i, expectedType := range tt.expected {
+				tok := l.NextToken()
+				if tok.Type != expectedType {
+					t.Errorf("token[%d] - wrong type. expected=%q, got=%q",
+						i, expectedType, tok.Type)
+				}
+			}
+		})
+	}
+}
+
+func TestNextToken_FnKeyword(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []TokenType
+	}{
+		{
+			// "Fn" (capital F) is the keyword; "fn" (lowercase) is an identifier
+			name:     "Fn keyword alone",
+			input:    "Fn",
+			expected: []TokenType{FN, EOF},
+		},
+		{
+			// Fn type syntax: Fn(Int) -> Int  — note "->" is MINUS + GT
+			name:     "Fn type syntax",
+			input:    "Fn(Int) -> Int",
+			expected: []TokenType{FN, LPAREN, INT_TYPE, RPAREN, MINUS, GT, INT_TYPE, EOF},
+		},
+		{
+			// Fn type with multiple params
+			name:     "Fn type with multiple params",
+			input:    "Fn(Int, String) -> Bool",
+			expected: []TokenType{FN, LPAREN, INT_TYPE, COMMA, STRING_TYPE, RPAREN, MINUS, GT, BOOL_TYPE, EOF},
+		},
+		{
+			// lowercase "fn" is a plain identifier, not the Fn keyword
+			name:     "lowercase fn is an identifier",
+			input:    "fn",
+			expected: []TokenType{IDENT, EOF},
+		},
+		{
+			// identifier starting with "Fn" is not confused with the keyword
+			name:     "Fnthing is an identifier",
+			input:    "Fnthing",
+			expected: []TokenType{IDENT, EOF},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := New(tt.input)
+			for i, expectedType := range tt.expected {
+				tok := l.NextToken()
+				if tok.Type != expectedType {
+					t.Errorf("token[%d] - wrong type. expected=%q, got=%q",
+						i, expectedType, tok.Type)
+				}
+			}
+		})
+	}
+}

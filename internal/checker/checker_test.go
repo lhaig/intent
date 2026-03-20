@@ -3677,3 +3677,127 @@ function foo() returns Option<String> {
 		t.Error("Expected error for wrong arg type")
 	}
 }
+
+func TestLambdaTypeChecking(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test() returns Void {
+    let f: Fn(Int) -> Int = |x: Int| -> Int => x + 1;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for valid lambda, got: %s", diag.Format("test"))
+	}
+}
+
+func TestLambdaMultipleParams(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test() returns Void {
+    let add: Fn(Int, Int) -> Int = |x: Int, y: Int| -> Int => x + y;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for two-param lambda, got: %s", diag.Format("test"))
+	}
+}
+
+func TestFnTypeInFunctionParam(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function apply(f: Fn(Int) -> Int, x: Int) returns Int {
+    return f(x);
+}
+
+function test() returns Int {
+    let double: Fn(Int) -> Int = |n: Int| -> Int => n * 2;
+    return apply(double, 5);
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for Fn-typed param, got: %s", diag.Format("test"))
+	}
+}
+
+func TestCallingFnTypedVariable(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test() returns Int {
+    let increment: Fn(Int) -> Int = |x: Int| -> Int => x + 1;
+    return increment(10);
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for calling Fn-typed variable, got: %s", diag.Format("test"))
+	}
+}
+
+func TestLambdaReturnTypeMismatch(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test() returns Void {
+    let f: Fn(Int) -> Int = |x: Int| -> Int => "not an int";
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if !diag.HasErrors() {
+		t.Error("Expected type mismatch error for lambda body returning wrong type")
+	}
+}
+
+func TestCallingFnTypedVariableWrongArgType(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test() returns Int {
+    let f: Fn(Int) -> Int = |x: Int| -> Int => x + 1;
+    return f("wrong");
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if !diag.HasErrors() {
+		t.Error("Expected error for calling Fn-typed variable with wrong argument type")
+	}
+}
+
+func TestCallingFnTypedVariableWrongArgCount(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function test() returns Int {
+    let f: Fn(Int) -> Int = |x: Int| -> Int => x + 1;
+    return f(1, 2);
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if !diag.HasErrors() {
+		t.Error("Expected error for calling Fn-typed variable with wrong number of arguments")
+	}
+}
+
+func TestLambdaInFunctionCall(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function apply(f: Fn(Int) -> Int, x: Int) returns Int {
+    return f(x);
+}
+
+function test() returns Int {
+    return apply(|n: Int| -> Int => n * 3, 7);
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for inline lambda in call, got: %s", diag.Format("test"))
+	}
+}

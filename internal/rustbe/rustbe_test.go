@@ -488,3 +488,67 @@ function test_to_str(n: Int) returns String {
 		}
 	}
 }
+
+func TestGenerateLambdaExpression(t *testing.T) {
+	src := `module test version "1.0";
+
+function apply(f: Fn(Int) -> Int, x: Int) returns Int {
+    return f(x);
+}
+
+function test() returns Int {
+    let double: Fn(Int) -> Int = |n: Int| -> Int => n * 2;
+    return apply(double, 5);
+}`
+
+	output := generateFromSource(t, "lambda", src)
+
+	expects := []string{
+		"impl Fn(i64) -> i64",
+		"|n: i64| -> i64 {",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}
+
+func TestGenerateLambdaMultipleParams(t *testing.T) {
+	src := `module test version "1.0";
+
+function apply2(f: Fn(Int, Int) -> Int, x: Int, y: Int) returns Int {
+    return f(x, y);
+}
+
+function test() returns Int {
+    let add: Fn(Int, Int) -> Int = |x: Int, y: Int| -> Int => x + y;
+    return apply2(add, 3, 4);
+}`
+
+	output := generateFromSource(t, "lambda_multi", src)
+
+	expects := []string{
+		"impl Fn(i64, i64) -> i64",
+		"|x: i64, y: i64| -> i64 {",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}
+
+func TestGenerateFnTypeParam(t *testing.T) {
+	src := `module test version "1.0";
+
+function call_with_ten(f: Fn(Int) -> Int) returns Int {
+    return f(10);
+}`
+
+	output := generateFromSource(t, "fn_param", src)
+
+	if !strings.Contains(output, "impl Fn(i64) -> i64") {
+		t.Errorf("expected Fn type to map to impl Fn(i64) -> i64, got:\n%s", output)
+	}
+}
