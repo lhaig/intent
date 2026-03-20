@@ -25,8 +25,9 @@ func Lint(prog *ast.Program) *diagnostic.Diagnostics {
 	l.lintFunctions()
 	l.lintEntities()
 	l.lintEnums()
+	l.lintTraits()
+	l.lintImplBlocks()
 	l.lintIntents()
-	// Note: ImportDecl nodes are intentionally skipped -- no lint rules for imports yet
 
 	return l.diag
 }
@@ -84,6 +85,35 @@ func (l *Linter) lintEnums() {
 		l.checkEnumNaming(enum.Name, enum.Line, enum.Column)
 		for _, variant := range enum.Variants {
 			l.checkVariantNaming(enum.Name, variant.Name, variant.Line, variant.Column)
+		}
+	}
+}
+
+// lintTraits checks all trait declarations.
+func (l *Linter) lintTraits() {
+	for _, trait := range l.prog.Traits {
+		l.checkEntityNaming(trait.Name, trait.Line, trait.Column) // traits use PascalCase
+		for _, m := range trait.Methods {
+			l.checkFunctionNaming(m.Name, m.Line, m.Column)
+			if len(m.Requires) == 0 && len(m.Ensures) == 0 {
+				l.diag.Warningf(m.Line, m.Column,
+					"trait method '%s.%s' has no requires or ensures contracts", trait.Name, m.Name)
+			}
+		}
+	}
+}
+
+// lintImplBlocks checks all impl blocks.
+func (l *Linter) lintImplBlocks() {
+	for _, ib := range l.prog.ImplBlocks {
+		for _, m := range ib.Methods {
+			l.checkEmptyFunctionBody(ib.EntityName+"."+m.Name, m.Body, m.Line, m.Column)
+			l.checkFunctionNaming(m.Name, m.Line, m.Column)
+			if m.Body != nil {
+				usedNames := l.collectUsedNames(m.Body.Statements)
+				l.checkUnusedParams(ib.EntityName+"."+m.Name, m.Params, usedNames)
+				l.checkUnusedVariables(m.Body.Statements, usedNames)
+			}
 		}
 	}
 }
@@ -375,6 +405,9 @@ func (l *Linter) collectUsedNamesFromExpr(expr ast.Expression, used map[string]b
 	case *ast.TryExpr:
 		// Collect from inner expression
 		l.collectUsedNamesFromExpr(e.Expr, used)
+	case *ast.LambdaExpr:
+		// Collect from body (lambda params are not external used names)
+		l.collectUsedNamesFromExpr(e.Body, used)
 	}
 }
 
