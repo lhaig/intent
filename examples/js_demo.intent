@@ -1,9 +1,15 @@
-// JavaScript target demo
-
 module js_demo version "1.0";
+
+enum Color {
+    Red,
+    Green,
+    Blue,
+    RGB(r: Int, g: Int, b: Int),
+}
 
 entity Counter {
     field value: Int;
+
     invariant self.value >= 0;
 
     constructor(initial: Int)
@@ -21,13 +27,6 @@ entity Counter {
     }
 }
 
-enum Color {
-    Red,
-    Green,
-    Blue,
-    RGB(r: Int, g: Int, b: Int),
-}
-
 function add(a: Int, b: Int) returns Int
     requires a > 0 and b > 0
     ensures result > a and result > b
@@ -37,16 +36,14 @@ function add(a: Int, b: Int) returns Int
 
 entry function main() returns Int {
     print("JavaScript Backend Demo");
-
     let counter: Counter = Counter(0);
     counter.increment();
     counter.increment();
     print("Counter value:");
     print(counter.get());
-
     let sum: Int = add(5, 3);
     print("Sum:");
     print(sum);
-
     return 0;
 }
+

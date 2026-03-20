@@ -598,6 +598,9 @@ func (f *formatter) formatExprPrec(e ast.Expression, parentPrec int) string {
 		inner := f.formatExpr(expr.Expr)
 		return fmt.Sprintf("old(%s)", inner)
 
+	case *ast.LambdaExpr:
+		return f.formatLambdaExpr(expr)
+
 	default:
 		return "<unknown>"
 	}
@@ -640,6 +643,14 @@ func (f *formatter) formatTypeRef(t *ast.TypeRef) string {
 	if t == nil {
 		return "Void"
 	}
+	// Fn type: Fn(ParamTypes) -> ReturnType
+	if t.Name == "Fn" && t.ReturnType != nil {
+		params := make([]string, len(t.ParamTypes))
+		for i, pt := range t.ParamTypes {
+			params[i] = f.formatTypeRef(pt)
+		}
+		return fmt.Sprintf("Fn(%s) -> %s", strings.Join(params, ", "), f.formatTypeRef(t.ReturnType))
+	}
 	if len(t.TypeArgs) == 0 {
 		return t.Name
 	}
@@ -648,6 +659,19 @@ func (f *formatter) formatTypeRef(t *ast.TypeRef) string {
 		args[i] = f.formatTypeRef(arg)
 	}
 	return fmt.Sprintf("%s<%s>", t.Name, strings.Join(args, ", "))
+}
+
+func (f *formatter) formatLambdaExpr(expr *ast.LambdaExpr) string {
+	params := make([]string, len(expr.Params))
+	for i, p := range expr.Params {
+		params[i] = fmt.Sprintf("%s: %s", p.Name, f.formatTypeRef(p.Type))
+	}
+	result := fmt.Sprintf("|%s|", strings.Join(params, ", "))
+	if expr.ReturnType != nil {
+		result += " -> " + f.formatTypeRef(expr.ReturnType)
+	}
+	result += " => " + f.formatExpr(expr.Body)
+	return result
 }
 
 // --- operator precedence ---

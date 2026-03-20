@@ -12,10 +12,6 @@ entity Context {
     }
 }
 
-trait Handler {
-    method execute(ctx: Context) returns Int;
-}
-
 entity StartHandler {
     field code: Int;
 
@@ -24,17 +20,21 @@ entity StartHandler {
     }
 }
 
-impl Handler for StartHandler {
-    method execute(ctx: Context) returns Int {
-        return self.code + ctx.get_value();
-    }
-}
-
 entity StopHandler {
     field offset: Int;
 
     constructor(o: Int) {
         self.offset = o;
+    }
+}
+
+trait Handler {
+    method execute(ctx: Context) returns Int;
+}
+
+impl Handler for StartHandler {
+    method execute(ctx: Context) returns Int {
+        return self.code + ctx.get_value();
     }
 }
 
@@ -54,3 +54,4 @@ entry function main() returns Int {
     print(r2);
     return 0;
 }
+
