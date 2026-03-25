@@ -49,6 +49,10 @@ func (p *Parser) Parse() *ast.Program {
 			fn := p.parseFunctionDecl()
 			fn.IsPublic = isPublic
 			prog.Functions = append(prog.Functions, fn)
+		case lexer.ASYNC:
+			fn := p.parseFunctionDecl()
+			fn.IsPublic = isPublic
+			prog.Functions = append(prog.Functions, fn)
 		case lexer.FUNCTION:
 			fn := p.parseFunctionDecl()
 			fn.IsPublic = isPublic
@@ -117,9 +121,33 @@ func (p *Parser) parseModuleDecl() *ast.ModuleDecl {
 	}
 }
 
-// parseImportDecl parses: import "path";
+// parseImportDecl parses: import "path"; OR import package_name; OR import package_name.submodule;
 func (p *Parser) parseImportDecl() *ast.ImportDecl {
 	tok := p.expect(lexer.IMPORT)
+
+	// Package import: import identifier[.identifier]*;
+	if p.check(lexer.IDENT) {
+		nameTok := p.advance()
+		name := nameTok.Literal
+
+		// Support dotted access: import graph_types.validation;
+		for p.check(lexer.DOT) {
+			p.advance() // consume '.'
+			sub := p.expect(lexer.IDENT)
+			name += "." + sub.Literal
+		}
+
+		p.expect(lexer.SEMICOLON)
+
+		return &ast.ImportDecl{
+			IsPackage:   true,
+			PackageName: name,
+			Line:        tok.Line,
+			Column:      tok.Column,
+		}
+	}
+
+	// Module import: import "path";
 	pathTok := p.expect(lexer.STRING_LIT)
 	p.expect(lexer.SEMICOLON)
 
@@ -137,10 +165,15 @@ func (p *Parser) parseImportDecl() *ast.ImportDecl {
 	}
 }
 
-// parseFunctionDecl parses: [entry] function <name>(<params>) returns <type> [requires ...] [ensures ...] { ... }
+// parseFunctionDecl parses: [entry] function <name>[<T, U>](<params>) returns <type> [requires ...] [ensures ...] { ... }
 func (p *Parser) parseFunctionDecl() *ast.FunctionDecl {
 	isEntry := false
+	isAsync := false
 	tok := p.current()
+
+	if p.match(lexer.ASYNC) {
+		isAsync = true
+	}
 
 	if p.match(lexer.ENTRY) {
 		isEntry = true
@@ -148,6 +181,13 @@ func (p *Parser) parseFunctionDecl() *ast.FunctionDecl {
 
 	p.expect(lexer.FUNCTION)
 	name := p.expect(lexer.IDENT)
+
+	// Parse optional type parameters: <T, U>
+	var typeParams []*ast.TypeParam
+	if p.check(lexer.LT) {
+		typeParams = p.parseTypeParams()
+	}
+
 	p.expect(lexer.LPAREN)
 	params := p.parseParamList()
 	p.expect(lexer.RPAREN)
@@ -160,6 +200,8 @@ func (p *Parser) parseFunctionDecl() *ast.FunctionDecl {
 	return &ast.FunctionDecl{
 		Name:       name.Literal,
 		IsEntry:    isEntry,
+		IsAsync:    isAsync,
+		TypeParams: typeParams,
 		Params:     params,
 		ReturnType: retType,
 		Requires:   requires,
@@ -170,16 +212,24 @@ func (p *Parser) parseFunctionDecl() *ast.FunctionDecl {
 	}
 }
 
-// parseEntityDecl parses: entity <name> { ... }
+// parseEntityDecl parses: entity <name>[<T, U>] { ... }
 func (p *Parser) parseEntityDecl() *ast.EntityDecl {
 	tok := p.expect(lexer.ENTITY)
 	name := p.expect(lexer.IDENT)
+
+	// Parse optional type parameters: <T, U>
+	var typeParams []*ast.TypeParam
+	if p.check(lexer.LT) {
+		typeParams = p.parseTypeParams()
+	}
+
 	p.expect(lexer.LBRACE)
 
 	entity := &ast.EntityDecl{
-		Name:   name.Literal,
-		Line:   tok.Line,
-		Column: tok.Column,
+		Name:       name.Literal,
+		TypeParams: typeParams,
+		Line:       tok.Line,
+		Column:     tok.Column,
 	}
 
 	for !p.check(lexer.RBRACE) && !p.check(lexer.EOF) {
@@ -530,6 +580,68 @@ func (p *Parser) parseVerifiedByRef() *ast.VerifiedByRef {
 		Line:   tok.Line,
 		Column: tok.Column,
 	}
+}
+
+// tryParseTypeArgs tries to parse <Type, Type, ...> as type arguments.
+// Returns the parsed type args and true if successful, or nil and false if
+// the '<' is not the start of type arguments (e.g., it's a less-than operator).
+// On failure, the parser position is restored.
+func (p *Parser) tryParseTypeArgs() ([]*ast.TypeRef, bool) {
+	savedPos := p.pos
+	savedDiags := p.diags.Count()
+
+	p.advance() // consume '<'
+
+	var typeArgs []*ast.TypeRef
+	for {
+		// A type argument must start with a type name (IDENT or builtin type keyword)
+		tok := p.current()
+		switch tok.Type {
+		case lexer.INT_TYPE, lexer.FLOAT_TYPE, lexer.STRING_TYPE, lexer.BOOL_TYPE, lexer.VOID_TYPE, lexer.IDENT:
+			// Valid start of type
+		default:
+			// Not a type argument list - backtrack
+			p.pos = savedPos
+			p.diags.Truncate(savedDiags)
+			return nil, false
+		}
+
+		typeRef := p.parseTypeRef()
+		typeArgs = append(typeArgs, typeRef)
+
+		if !p.match(lexer.COMMA) {
+			break
+		}
+	}
+
+	if !p.check(lexer.GT) {
+		// Not a valid type argument list - backtrack
+		p.pos = savedPos
+		p.diags.Truncate(savedDiags)
+		return nil, false
+	}
+	p.advance() // consume '>'
+
+	return typeArgs, true
+}
+
+// parseTypeParams parses: <T, U, V>
+func (p *Parser) parseTypeParams() []*ast.TypeParam {
+	p.expect(lexer.LT)
+	var params []*ast.TypeParam
+	for {
+		name := p.expect(lexer.IDENT)
+		params = append(params, &ast.TypeParam{
+			Name:   name.Literal,
+			Line:   name.Line,
+			Column: name.Column,
+		})
+		if !p.match(lexer.COMMA) {
+			break
+		}
+	}
+	p.expect(lexer.GT)
+	return params
 }
 
 // parseParamList parses a comma-separated list of parameters
@@ -1020,6 +1132,31 @@ func (p *Parser) parsePostfix() ast.Expression {
 					Column: name.Column,
 				}
 			}
+		} else if p.check(lexer.LT) {
+			// Generic call: Ident<Type, ...>(args) - only valid if expr is an identifier
+			if ident, ok := expr.(*ast.Identifier); ok {
+				if typeArgs, ok := p.tryParseTypeArgs(); ok {
+					// Must be followed by ( for a call
+					if p.check(lexer.LPAREN) {
+						p.advance()
+						args := p.parseArgList()
+						p.expect(lexer.RPAREN)
+						expr = &ast.CallExpr{
+							Function: ident.Name,
+							TypeArgs: typeArgs,
+							Args:     args,
+							Line:     ident.Line,
+							Column:   ident.Column,
+						}
+					} else {
+						// Not a call - treat as constructor type ref used as expression
+						// e.g., Stack<Int> without () - this is unusual but we break
+						break
+					}
+					continue
+				}
+			}
+			break
 		} else if p.check(lexer.LPAREN) {
 			// function call - only valid if expr is an identifier
 			if ident, ok := expr.(*ast.Identifier); ok {
@@ -1103,6 +1240,14 @@ func (p *Parser) parsePrimary() ast.Expression {
 		return p.parseMatchExpr()
 	case lexer.PIPE:
 		return p.parseLambdaExpr()
+	case lexer.AWAIT:
+		p.advance()
+		expr := p.parseUnary()
+		return &ast.AwaitExpr{Expr: expr, Line: tok.Line, Column: tok.Column}
+	case lexer.SPAWN:
+		p.advance()
+		expr := p.parseUnary()
+		return &ast.SpawnExpr{Expr: expr, Line: tok.Line, Column: tok.Column}
 	default:
 		p.diags.Errorf(tok.Line, tok.Column, "unexpected token %s in expression", tok.Type)
 		p.advance()

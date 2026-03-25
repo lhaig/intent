@@ -1,0 +1,6 @@
+[package]
+name = "app_pkg"
+version = "0.1.0"
+
+[dependencies]
+types_pkg = { path = "../types_pkg" }

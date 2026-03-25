@@ -21,6 +21,7 @@
 12. [Compilation Model](#12-compilation-model)
 13. [Rust Mapping](#13-rust-mapping)
 14. [Complete Example](#14-complete-example)
+15. [Package Management](#15-package-management)
 
 ---
 
@@ -61,12 +62,12 @@ The following features were originally non-goals but have been implemented:
 - **Multi-target codegen** -- Rust and JavaScript backends via IR layer (Phase 4).
 - **Multi-file compilation** with cross-module imports (Phase 8).
 - **Closures and first-class functions** -- `Fn(T) -> R` types, lambda expressions (Phase 10).
+- **User-defined generics** -- `entity Stack<T>`, `function identity<T>()`, monomorphization-based compilation (Phase 11).
+- **Async/await concurrency** -- `async function`, `await`, `spawn`, `Future<T>` (Phase 12).
+- **Package management** -- `intent.toml` manifests, semver constraints, local path dependencies, package cache, `intentc pkg` CLI (Phase 13).
 
 ### 1.3 Remaining Non-Goals
 
-- Package management.
-- User-defined generic types or type parameters.
-- Concurrency or async constructs.
 - Operator overloading.
 - Inheritance or subtyping.
 
@@ -123,7 +124,7 @@ verified_by and     or        not       implies
 while     for       in        break     continue
 enum      match     import    trait     impl
 forall    exists    try       Ok        Err
-Some      None
+Some      None      async     await     spawn
 ```
 
 ### 3.4 Identifiers
@@ -186,7 +187,7 @@ Spaces, tabs, carriage returns, and newlines are whitespace. Whitespace separate
 
 ## 4. Type System
 
-Intent uses a nominal type system with no subtyping and no type inference beyond literal types. It supports a fixed set of generic container types (`Array<T>`, `Map<K,V>`, `Result<T,E>`, `Option<T>`) but not user-defined generics.
+Intent uses a nominal type system with no subtyping and no type inference beyond literal types. It supports built-in generic container types (`Array<T>`, `Map<K,V>`, `Result<T,E>`, `Option<T>`) and user-defined generic entities and functions.
 
 ### 4.1 Primitive Types
 
@@ -200,7 +201,7 @@ Intent uses a nominal type system with no subtyping and no type inference beyond
 
 ### 4.2 Generic Container Types
 
-Intent provides four built-in generic types. User-defined generics are not supported.
+Intent provides four built-in generic types and supports user-defined generic entities and functions via monomorphization.
 
 | Intent Type | Rust Mapping | JS Mapping | Description |
 |-------------|-------------|------------|-------------|
@@ -279,7 +280,15 @@ Entity types are user-defined nominal types, declared with the `entity` keyword 
 
 There are no implicit type conversions. `Int` does not implicitly convert to `Float`, `Bool` does not implicitly convert to `Int`, and so on. All conversions, if needed, must be explicit (and in the POC, no conversion functions are provided -- this is a known limitation).
 
-### 4.6 Trait Types
+### 4.6 Future Type
+
+| Intent Type | Rust Mapping | JS Mapping | Description |
+|-------------|-------------|------------|-------------|
+| `Future<T>` | `impl Future<Output=T>` | `Promise<T>` | Pending async computation |
+
+`Future<T>` is the return type of `spawn` expressions. A `Future<T>` value represents an asynchronous computation that will eventually produce a value of type `T`. Use `await` to obtain the result.
+
+### 4.7 Trait Types
 
 Traits define shared method interfaces that multiple entities can implement:
 
@@ -436,6 +445,46 @@ The keyword `result` is valid only inside `ensures` clauses. It refers to the va
 A function body must contain at least one `return` statement if the return type is not `Void`. The expression in the `return` statement must have the same type as the declared return type.
 
 For `Void` functions, `return;` (with no expression) is permitted, and falling off the end of the function body is equivalent to `return;`.
+
+### 6.7 Async Functions
+
+Functions can be marked `async` to enable asynchronous execution:
+
+```
+async function fetch_data(url: String) returns Result<String, String>
+    requires len(url) > 0
+{
+    let response: String = http_get(url, "")?;
+    return Ok(response);
+}
+```
+
+**Async rules:**
+- The `async` keyword precedes `function` (and optionally `entry`).
+- Contracts work the same as synchronous functions: `requires` is checked at function entry, `ensures` is checked when the future resolves.
+- `await expr` suspends execution until the future resolves, producing the inner value.
+- `spawn expr` creates a concurrent task from an async function call, returning `Future<T>`.
+
+**Example with spawn and await:**
+
+```
+async entry function main() returns Int {
+    let f1: Future<Int> = spawn delayed_add(3, 4);
+    let f2: Future<Int> = spawn delayed_add(10, 20);
+    let r1: Int = await f1;
+    let r2: Int = await f2;
+    return 0;
+}
+```
+
+**Built-in async functions:**
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `await_all(futures)` | `Array<Future<T>> -> Array<T>` | Wait for all futures |
+| `await_any(futures)` | `Array<Future<T>> -> T` | Wait for first to complete |
+| `timeout(future, ms)` | `(Future<T>, Int) -> Result<T, String>` | Timeout wrapper |
+| `sleep(ms)` | `Int -> Future<Void>` | Async sleep |
 
 ---
 
@@ -1577,13 +1626,127 @@ When compiled and run, the program exits with code 0. If any contract is violate
 
 ---
 
+## 15. Package Management
+
+Intent supports package management for code reuse across projects. Packages are Intent projects with an `intent.toml` manifest at the root.
+
+### 15.1 Manifest Format (`intent.toml`)
+
+```toml
+[package]
+name = "graph-validation"
+version = "1.0.0"
+description = "Graph structure validation rules"
+
+[dependencies]
+graph-types = "0.2.0"
+utils = { path = "../utils" }
+core = { version = "1.0.0", path = "../core" }
+```
+
+The `[package]` section declares package metadata. The `[dependencies]` section lists dependencies as either a version string or an inline table with `version` and/or `path` keys.
+
+### 15.2 Package Imports
+
+Package imports use identifier syntax (not string paths):
+
+```intent
+import graph_types;                    // import whole package
+import graph_types.validation;         // import specific submodule
+```
+
+Package names use underscores (matching Intent's identifier rules). The compiler resolves package names via the `intent.toml` dependencies.
+
+**Local imports** (unchanged):
+
+```intent
+import "handlers.intent";             // relative file path
+```
+
+The parser distinguishes package imports (identifier tokens) from module imports (string literals).
+
+### 15.3 Version Constraints
+
+Semver-compatible resolution with the following constraint operators:
+
+| Constraint | Meaning |
+|------------|---------|
+| `"1.0.0"` | Exact version |
+| `"^1.0.0"` | Compatible updates (>=1.0.0, <2.0.0) |
+| `"^0.1.0"` | Compatible updates (>=0.1.0, <0.2.0) |
+| `"^0.0.1"` | Exact version (>=0.0.1, <0.0.2) |
+| `"~1.0.0"` | Patch updates only (>=1.0.0, <1.1.0) |
+| `">=1.0.0"` | Minimum version |
+| `"<2.0.0"` | Maximum version (exclusive) |
+
+The caret operator (`^`) follows standard semver conventions for pre-1.0 versions: `^0.y.z` treats the minor version as the compatibility boundary, and `^0.0.z` pins to the exact patch version. This reflects the expectation that 0.x releases may introduce breaking changes in any minor bump.
+
+Only one version of each package is allowed in the dependency tree. The compiler validates that no conflicting constraints exist.
+
+### 15.4 Local Path Dependencies
+
+For development, dependencies can reference local directories:
+
+```toml
+[dependencies]
+my-lib = { path = "../my-lib" }
+```
+
+Local path dependencies are resolved directly from the filesystem and are never cached.
+
+### 15.5 Package Cache
+
+Resolved packages are cached at `~/.intent/cache/<name>/<version>/`. Cache invalidation uses SHA256 checksums over source file contents. When source files change, the cached entry is invalidated and recompiled.
+
+### 15.6 CLI Commands
+
+```bash
+intentc pkg init                        # create intent.toml in current directory
+intentc pkg add <name> <version>        # add dependency with version constraint
+intentc pkg add <name> --path <dir>     # add local path dependency
+intentc pkg remove <name>               # remove dependency from intent.toml
+intentc pkg install                     # resolve and fetch all dependencies
+intentc pkg list                        # show dependency tree
+intentc build                           # unchanged -- auto-resolves packages
+```
+
+### 15.7 Resolution Flow
+
+1. Read `intent.toml` from the project root
+2. For each dependency, check `~/.intent/cache/`
+3. If not cached (or checksum mismatch), resolve from local path
+4. Validate version constraints (detect conflicts)
+5. Build dependency order via topological sort
+6. Compile dependencies first, then the project
+
+### 15.8 Package Layout
+
+Packages use a **flat layout**: `.intent` source files are placed directly in the package root alongside `intent.toml`. For example:
+
+```
+my_project/
+  types_pkg/
+    intent.toml
+    types.intent
+  app_pkg/
+    intent.toml
+    main.intent
+```
+
+There is no `src/` subdirectory convention. This keeps the structure simple and avoids unnecessary nesting, especially for small packages.
+
+### 15.9 Known Limitations
+
+**Cross-package code generation is not yet fully supported.** Dependency discovery, manifest resolution, and type checking work across package boundaries, but the code generation backends (Rust, JS, WASM) do not yet handle cross-package name mangling or linking. Only single-package builds produce fully correct output. Building a project with cross-package imports emits a compiler warning.
+
+---
+
 ## Appendix A: Future Directions
 
 The following features are candidates for future versions:
 
-- **User-defined generics**: Parameterized types and functions beyond built-in containers.
-- **Concurrency/async**: Async functions and concurrent execution.
-- **Package management**: Dependency resolution and versioning.
+- **Generic type bounds**: Constraints on type parameters (e.g., `T: Comparable`).
+- **Generic type inference**: Inferring type arguments from context (e.g., `identity(42)` instead of `identity<Int>(42)`).
 - **Proof integration**: Connecting `verified_by` to formal proof tools.
 - **Optimization levels**: Removing contract checks in release builds.
 
@@ -1597,3 +1760,5 @@ The following features are candidates for future versions:
 - ~~Property-based testing~~: Test generation from contracts via `intentc test-gen` -- implemented.
 - ~~Closures and first-class functions~~: `Fn(T) -> R` types, lambda expressions -- implemented (Phase 10).
 - ~~Full pattern matching~~: Exhaustive `match` on all enum types -- implemented (Phases 5-6).
+- ~~Concurrency/async~~: `async function`, `await`, `spawn`, `Future<T>` -- implemented (Phase 12).
+- ~~Package management~~: `intent.toml` manifests, semver constraints, package imports, package cache -- implemented (Phase 13).

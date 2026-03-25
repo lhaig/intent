@@ -187,36 +187,34 @@ Create a two-package example:
 
 ```
 examples/packages/
-  types-pkg/
+  types_pkg/
     intent.toml
-    src/
-      types.intent     # public entity Point, public function distance
-  app-pkg/
-    intent.toml        # depends on types-pkg via local path
-    src/
-      main.intent      # imports types-pkg, uses Point and distance
+    types.intent     # public entity Point, public function distance
+  app_pkg/
+    intent.toml      # depends on types_pkg via local path
+    main.intent      # imports types_pkg, uses Point and distance
 ```
 
-`types-pkg/intent.toml`:
+`types_pkg/intent.toml`:
 ```toml
 [package]
-name = "types-pkg"
+name = "types_pkg"
 version = "0.1.0"
 ```
 
-`app-pkg/intent.toml`:
+`app_pkg/intent.toml`:
 ```toml
 [package]
-name = "app-pkg"
+name = "app_pkg"
 version = "0.1.0"
 
 [dependencies]
-types_pkg = { path = "../types-pkg" }
+types_pkg = { path = "../types_pkg" }
 ```
 
 **Acceptance:**
-- `cd examples/packages/app-pkg && intentc build src/main.intent` succeeds
-- Generated code references types from `types-pkg` correctly
+- `cd examples/packages/app_pkg && intentc build main.intent` succeeds
+- Generated code references types from `types_pkg` correctly
 - Runs and produces expected output
 
 ### 13.7 Docs + ADR

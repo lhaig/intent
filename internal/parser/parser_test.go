@@ -2462,3 +2462,504 @@ function test(callback: Fn() -> Int) returns Int {
 		t.Errorf("expected Fn return type 'Int', got %q", param.Type.ReturnType.Name)
 	}
 }
+
+func TestParseGenericEntity(t *testing.T) {
+	input := `module test version "1.0.0";
+
+entity Stack<T> {
+    field items: Array<T>;
+    field count: Int;
+
+    constructor()
+        ensures self.count == 0
+    {
+        self.items = [];
+        self.count = 0;
+    }
+
+    method push(item: T) returns Void
+        ensures self.count == old(self.count) + 1
+    {
+        self.items.push(item);
+        self.count = self.count + 1;
+    }
+
+    method is_empty() returns Bool {
+        return self.count == 0;
+    }
+}
+`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+	if len(prog.Entities) != 1 {
+		t.Fatalf("expected 1 entity, got %d", len(prog.Entities))
+	}
+
+	entity := prog.Entities[0]
+	if entity.Name != "Stack" {
+		t.Errorf("expected entity name 'Stack', got %q", entity.Name)
+	}
+	if len(entity.TypeParams) != 1 {
+		t.Fatalf("expected 1 type param, got %d", len(entity.TypeParams))
+	}
+	if entity.TypeParams[0].Name != "T" {
+		t.Errorf("expected type param 'T', got %q", entity.TypeParams[0].Name)
+	}
+
+	// Check field types reference T
+	if len(entity.Fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(entity.Fields))
+	}
+	itemsField := entity.Fields[0]
+	if itemsField.Type.Name != "Array" || len(itemsField.Type.TypeArgs) != 1 || itemsField.Type.TypeArgs[0].Name != "T" {
+		t.Errorf("expected field type Array<T>, got %s", itemsField.Type.Name)
+	}
+
+	// Check method param references T
+	if len(entity.Methods) != 2 {
+		t.Fatalf("expected 2 methods, got %d", len(entity.Methods))
+	}
+	pushMethod := entity.Methods[0]
+	if pushMethod.Params[0].Type.Name != "T" {
+		t.Errorf("expected push param type 'T', got %q", pushMethod.Params[0].Type.Name)
+	}
+}
+
+func TestParseGenericFunction(t *testing.T) {
+	input := `module test version "1.0.0";
+
+function identity<T>(x: T) returns T
+    ensures result == x
+{
+    return x;
+}
+`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+	if len(prog.Functions) != 1 {
+		t.Fatalf("expected 1 function, got %d", len(prog.Functions))
+	}
+
+	fn := prog.Functions[0]
+	if fn.Name != "identity" {
+		t.Errorf("expected function name 'identity', got %q", fn.Name)
+	}
+	if len(fn.TypeParams) != 1 {
+		t.Fatalf("expected 1 type param, got %d", len(fn.TypeParams))
+	}
+	if fn.TypeParams[0].Name != "T" {
+		t.Errorf("expected type param 'T', got %q", fn.TypeParams[0].Name)
+	}
+	if fn.Params[0].Type.Name != "T" {
+		t.Errorf("expected param type 'T', got %q", fn.Params[0].Type.Name)
+	}
+	if fn.ReturnType.Name != "T" {
+		t.Errorf("expected return type 'T', got %q", fn.ReturnType.Name)
+	}
+}
+
+func TestParseGenericCallExpr(t *testing.T) {
+	input := `module test version "1.0.0";
+
+entry function main() returns Int {
+    let mutable s: Stack<Int> = Stack<Int>();
+    s.push(10);
+    let x: Int = identity<Int>(42);
+    return 0;
+}
+`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+	if len(prog.Functions) != 1 {
+		t.Fatalf("expected 1 function, got %d", len(prog.Functions))
+	}
+
+	fn := prog.Functions[0]
+	// Check let statement type annotation Stack<Int>
+	letStmt := fn.Body.Statements[0].(*ast.LetStmt)
+	if letStmt.Type.Name != "Stack" || len(letStmt.Type.TypeArgs) != 1 || letStmt.Type.TypeArgs[0].Name != "Int" {
+		t.Errorf("expected type Stack<Int>, got %s", letStmt.Type.Name)
+	}
+
+	// Check constructor call Stack<Int>()
+	callExpr := letStmt.Value.(*ast.CallExpr)
+	if callExpr.Function != "Stack" {
+		t.Errorf("expected call to 'Stack', got %q", callExpr.Function)
+	}
+	if len(callExpr.TypeArgs) != 1 || callExpr.TypeArgs[0].Name != "Int" {
+		t.Errorf("expected type args [Int] on Stack call")
+	}
+
+	// Check identity<Int>(42) call
+	letStmt2 := fn.Body.Statements[2].(*ast.LetStmt)
+	callExpr2 := letStmt2.Value.(*ast.CallExpr)
+	if callExpr2.Function != "identity" {
+		t.Errorf("expected call to 'identity', got %q", callExpr2.Function)
+	}
+	if len(callExpr2.TypeArgs) != 1 || callExpr2.TypeArgs[0].Name != "Int" {
+		t.Errorf("expected type args [Int] on identity call")
+	}
+}
+
+func TestParseMultipleTypeParams(t *testing.T) {
+	input := `module test version "1.0.0";
+
+entity Pair<A, B> {
+    field first: A;
+    field second: B;
+
+    constructor(a: A, b: B) {
+        self.first = a;
+        self.second = b;
+    }
+}
+`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	entity := prog.Entities[0]
+	if len(entity.TypeParams) != 2 {
+		t.Fatalf("expected 2 type params, got %d", len(entity.TypeParams))
+	}
+	if entity.TypeParams[0].Name != "A" || entity.TypeParams[1].Name != "B" {
+		t.Errorf("expected type params [A, B], got [%s, %s]",
+			entity.TypeParams[0].Name, entity.TypeParams[1].Name)
+	}
+}
+
+func TestParseAsyncFunctionDecl(t *testing.T) {
+	input := `module test version "1.0.0";
+
+async function fetchData(url: String) returns Future<String> {
+    return url;
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+	if len(prog.Functions) != 1 {
+		t.Fatalf("expected 1 function, got %d", len(prog.Functions))
+	}
+
+	fn := prog.Functions[0]
+	if fn.Name != "fetchData" {
+		t.Errorf("expected function name 'fetchData', got %q", fn.Name)
+	}
+	if !fn.IsAsync {
+		t.Error("expected async function")
+	}
+	if fn.ReturnType.Name != "Future" {
+		t.Errorf("expected return type 'Future', got %q", fn.ReturnType.Name)
+	}
+	if len(fn.ReturnType.TypeArgs) != 1 || fn.ReturnType.TypeArgs[0].Name != "String" {
+		t.Errorf("expected Future<String> return type")
+	}
+}
+
+func TestParseAwaitExpr(t *testing.T) {
+	input := `module test version "1.0.0";
+
+async function getData() returns Future<Int> {
+    return 42;
+}
+
+function main() returns Int {
+    let res: Int = await getData();
+    return res;
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+	if len(prog.Functions) != 2 {
+		t.Fatalf("expected 2 functions, got %d", len(prog.Functions))
+	}
+
+	fn := prog.Functions[1]
+	if fn.Name != "main" {
+		t.Fatalf("expected function 'main', got %q", fn.Name)
+	}
+
+	letStmt, ok := fn.Body.Statements[0].(*ast.LetStmt)
+	if !ok {
+		t.Fatalf("expected LetStmt, got %T", fn.Body.Statements[0])
+	}
+
+	awaitExpr, ok := letStmt.Value.(*ast.AwaitExpr)
+	if !ok {
+		t.Fatalf("expected AwaitExpr, got %T", letStmt.Value)
+	}
+
+	callExpr, ok := awaitExpr.Expr.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected CallExpr inside await, got %T", awaitExpr.Expr)
+	}
+	if callExpr.Function != "getData" {
+		t.Errorf("expected call to 'getData', got %q", callExpr.Function)
+	}
+}
+
+func TestParseSpawnExpr(t *testing.T) {
+	input := `module test version "1.0.0";
+
+async function compute(x: Int) returns Future<Int> {
+    return x;
+}
+
+function main() returns Int {
+    let handle: Future<Int> = spawn compute(42);
+    return await handle;
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	fn := prog.Functions[1]
+	letStmt, ok := fn.Body.Statements[0].(*ast.LetStmt)
+	if !ok {
+		t.Fatalf("expected LetStmt, got %T", fn.Body.Statements[0])
+	}
+
+	spawnExpr, ok := letStmt.Value.(*ast.SpawnExpr)
+	if !ok {
+		t.Fatalf("expected SpawnExpr, got %T", letStmt.Value)
+	}
+
+	callExpr, ok := spawnExpr.Expr.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected CallExpr inside spawn, got %T", spawnExpr.Expr)
+	}
+	if callExpr.Function != "compute" {
+		t.Errorf("expected call to 'compute', got %q", callExpr.Function)
+	}
+
+	// Check second statement: return await handle
+	retStmt, ok := fn.Body.Statements[1].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected ReturnStmt, got %T", fn.Body.Statements[1])
+	}
+	_, ok = retStmt.Value.(*ast.AwaitExpr)
+	if !ok {
+		t.Fatalf("expected AwaitExpr in return, got %T", retStmt.Value)
+	}
+}
+
+func TestParseFutureTypeAnnotation(t *testing.T) {
+	input := `module test version "1.0.0";
+
+function test() returns Void {
+    let f: Future<Int> = x;
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	fn := prog.Functions[0]
+	letStmt, ok := fn.Body.Statements[0].(*ast.LetStmt)
+	if !ok {
+		t.Fatalf("expected LetStmt, got %T", fn.Body.Statements[0])
+	}
+	if letStmt.Type.Name != "Future" {
+		t.Errorf("expected type 'Future', got %q", letStmt.Type.Name)
+	}
+	if len(letStmt.Type.TypeArgs) != 1 || letStmt.Type.TypeArgs[0].Name != "Int" {
+		t.Error("expected Future<Int> type annotation")
+	}
+}
+
+func TestParseAwaitWithoutExpr(t *testing.T) {
+	input := `module test version "1.0.0";
+
+function main() returns Int {
+    return await;
+}`
+	p := New(input)
+	p.Parse()
+
+	if !p.Diagnostics().HasErrors() {
+		t.Fatal("expected error for await without expression")
+	}
+}
+
+func TestParseSpawnWithoutExpr(t *testing.T) {
+	input := `module test version "1.0.0";
+
+function main() returns Int {
+    return spawn;
+}`
+	p := New(input)
+	p.Parse()
+
+	if !p.Diagnostics().HasErrors() {
+		t.Fatal("expected error for spawn without expression")
+	}
+}
+
+func TestParseNonAsyncFunction(t *testing.T) {
+	input := `module test version "1.0.0";
+
+function regular(x: Int) returns Int {
+    return x;
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	fn := prog.Functions[0]
+	if fn.IsAsync {
+		t.Error("expected non-async function")
+	}
+}
+
+func TestLexerAsyncAwaitSpawnKeywords(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected lexer.TokenType
+	}{
+		{"async", lexer.ASYNC},
+		{"await", lexer.AWAIT},
+		{"spawn", lexer.SPAWN},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input)
+		tok := l.NextToken()
+		if tok.Type != tt.expected {
+			t.Errorf("input %q: expected token %s, got %s", tt.input, tt.expected, tok.Type)
+		}
+	}
+}
+
+func TestParsePackageImport(t *testing.T) {
+	input := `module test version "1.0.0";
+
+import types_pkg;
+
+function main() returns Int {
+    return 0;
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	if len(prog.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
+	}
+
+	imp := prog.Imports[0]
+	if !imp.IsPackage {
+		t.Error("expected IsPackage to be true")
+	}
+	if imp.PackageName != "types_pkg" {
+		t.Errorf("expected PackageName 'types_pkg', got %q", imp.PackageName)
+	}
+	if imp.Path != "" {
+		t.Errorf("expected empty Path for package import, got %q", imp.Path)
+	}
+}
+
+func TestParsePackageImportDotted(t *testing.T) {
+	input := `module test version "1.0.0";
+
+import graph_types.validation;
+
+function main() returns Int {
+    return 0;
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	if len(prog.Imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(prog.Imports))
+	}
+
+	imp := prog.Imports[0]
+	if !imp.IsPackage {
+		t.Error("expected IsPackage to be true")
+	}
+	if imp.PackageName != "graph_types.validation" {
+		t.Errorf("expected PackageName 'graph_types.validation', got %q", imp.PackageName)
+	}
+}
+
+func TestParseMixedImports(t *testing.T) {
+	input := `module test version "1.0.0";
+
+import "math.intent";
+import types_pkg;
+import graph_types.validation;
+
+function main() returns Int {
+    return 0;
+}`
+	p := New(input)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	if len(prog.Imports) != 3 {
+		t.Fatalf("expected 3 imports, got %d", len(prog.Imports))
+	}
+
+	// Module import
+	if prog.Imports[0].IsPackage {
+		t.Error("import[0] should not be a package import")
+	}
+	if prog.Imports[0].Path != "math.intent" {
+		t.Errorf("import[0] path: expected 'math.intent', got %q", prog.Imports[0].Path)
+	}
+
+	// Package import
+	if !prog.Imports[1].IsPackage {
+		t.Error("import[1] should be a package import")
+	}
+	if prog.Imports[1].PackageName != "types_pkg" {
+		t.Errorf("import[1] PackageName: expected 'types_pkg', got %q", prog.Imports[1].PackageName)
+	}
+
+	// Dotted package import
+	if !prog.Imports[2].IsPackage {
+		t.Error("import[2] should be a package import")
+	}
+	if prog.Imports[2].PackageName != "graph_types.validation" {
+		t.Errorf("import[2] PackageName: expected 'graph_types.validation', got %q", prog.Imports[2].PackageName)
+	}
+}

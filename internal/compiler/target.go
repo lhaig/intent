@@ -115,6 +115,11 @@ func EmitProjectToTarget(entryPath, target, baseName string) error {
 		return fmt.Errorf("discovery errors:\n%s", diag.Format(entryPath))
 	}
 
+	// Warn if cross-package imports are present
+	if registry.HasCrossPackageImports() {
+		diag.Warningf(0, 0, "cross-package type references (entities, enums, traits) in code generation have limited support; simple imports work but complex type hierarchies may produce incomplete output")
+	}
+
 	// Topological sort
 	sortedPaths, err := registry.TopologicalSort()
 	if err != nil {
@@ -123,13 +128,13 @@ func EmitProjectToTarget(entryPath, target, baseName string) error {
 
 	// Cross-file type checking
 	allModules := registry.AllModules()
-	checkResult := checker.CheckAll(allModules, sortedPaths)
+	checkResult := checker.CheckAll(allModules, sortedPaths, registry.PackageDirs())
 	if checkResult.Diagnostics.HasErrors() {
 		return fmt.Errorf("compilation errors:\n%s", checkResult.Diagnostics.Format(entryPath))
 	}
 
 	// Lower to IR
-	prog := ir.LowerAll(allModules, sortedPaths, checkResult)
+	prog := ir.LowerAll(allModules, sortedPaths, checkResult, registry.PackageDirs())
 
 	// Handle binary targets (WASM)
 	if target == "wasm" {

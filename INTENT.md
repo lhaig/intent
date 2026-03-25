@@ -37,6 +37,7 @@ import "<path>.intent";          // optional, for multi-file projects
 | `Array<T>`        | Dynamic array of element type T    |
 | `Result<T, E>`    | Success (Ok) or failure (Err) type |
 | `Option<T>`       | Present (Some) or absent (None)    |
+| `Future<T>`       | Pending async computation          |
 
 ### User-Defined Types
 
@@ -238,6 +239,60 @@ entity BankAccount {
 - Method calls: `acc.deposit(50);`
 - Mutable entities: `let mutable acc: BankAccount = BankAccount("Alice", 100);` (required if methods mutate state)
 
+## Generics
+
+Intent supports user-defined generic entities and functions. Type parameters are declared with `<T>` syntax and instantiated with concrete types. Compilation uses monomorphization -- each unique instantiation (e.g., `Stack<Int>`, `Stack<String>`) produces a separate specialized version.
+
+### Generic Entities
+
+```
+entity Stack<T> {
+    field items: Array<T>;
+    field count: Int;
+
+    constructor()
+        ensures self.count == 0
+    {
+        self.items = [];
+        self.count = 0;
+    }
+
+    method push(item: T) returns Void
+        ensures self.count == old(self.count) + 1
+    {
+        self.items.push(item);
+        self.count = self.count + 1;
+    }
+}
+```
+
+### Generic Functions
+
+```
+function identity<T>(x: T) returns T
+    ensures result == x
+{
+    return x;
+}
+```
+
+### Instantiation
+
+Type arguments are required (no type inference):
+
+```
+let mutable s: Stack<Int> = Stack<Int>();
+s.push(42);
+
+let x: Int = identity<Int>(42);
+```
+
+### Constraints
+
+- No type bounds (e.g., `T: Comparable`) -- planned for future.
+- No type inference for generic function calls -- explicit type args required.
+- Multiple type parameters supported: `entity Pair<A, B> { ... }`
+
 ## Enums
 
 ### Simple Enums
@@ -360,6 +415,80 @@ let val: Int = match option_expr {
 };
 ```
 
+## Async/Await
+
+Intent supports async/await for concurrent execution. Async functions return futures that can be awaited.
+
+### Async Functions
+
+Mark functions with `async` to make them asynchronous:
+
+```
+async function fetch_data(url: String) returns Result<String, String>
+    requires len(url) > 0
+{
+    let response: String = http_get(url, "")?;
+    return Ok(response);
+}
+```
+
+### Await
+
+Use `await` to suspend execution until a future resolves:
+
+```
+let data: Result<String, String> = await fetch_data("https://api.example.com");
+```
+
+### Spawn
+
+Use `spawn` to create concurrent tasks. `spawn` takes an async function call and returns `Future<T>`:
+
+```
+let f: Future<Int> = spawn compute(42);
+let result: Int = await f;
+```
+
+### Concurrent Execution
+
+Spawn multiple tasks and await their results:
+
+```
+async entry function main() returns Int {
+    let f1: Future<Int> = spawn delayed_add(3, 4);
+    let f2: Future<Int> = spawn delayed_add(10, 20);
+    let r1: Int = await f1;
+    let r2: Int = await f2;
+    print(r1);
+    print(r2);
+    return 0;
+}
+```
+
+### Built-in Async Functions
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `sleep(ms)` | `Int -> Future<Void>` | Async sleep |
+| `await_all(futures)` | `Array<Future<T>> -> Array<T>` | Wait for all futures |
+| `await_any(futures)` | `Array<Future<T>> -> T` | Wait for first to complete |
+| `timeout(future, ms)` | `(Future<T>, Int) -> Result<T, String>` | Timeout wrapper |
+
+### Contracts on Async Functions
+
+Contracts work the same as synchronous functions:
+- `requires` is checked at function entry (before any await)
+- `ensures` is checked when the future resolves (after all awaits)
+
+### Async Code Generation
+
+| Intent | Rust | JavaScript |
+|--------|------|------------|
+| `async function f()` | `async fn f()` | `async function f()` |
+| `await expr` | `expr.await` | `await expr` |
+| `spawn expr` | `tokio::spawn(async move { expr })` | `Promise` wrapper |
+| `Future<T>` | `impl Future<Output=T>` | `Promise<T>` |
+
 ## Contract System
 
 Contracts are the core feature. Every function, entity, and loop should carry contracts that express what the code guarantees.
@@ -469,6 +598,94 @@ intent "Account safety" {
 - `EntityName.constructor.ensures` -- constructor postconditions
 - `function_name.requires` -- function preconditions
 - `function_name.ensures` -- function postconditions
+
+## Packages
+
+Intent supports packages for sharing code across projects. A package is an Intent project with an `intent.toml` manifest.
+
+### Creating a Package
+
+Run `intentc pkg init` to create an `intent.toml` in the current directory:
+
+```toml
+[package]
+name = "my-package"
+version = "1.0.0"
+description = "My reusable Intent library"
+
+[dependencies]
+```
+
+### Adding Dependencies
+
+```bash
+intentc pkg add graph-types 1.0.0              # exact version
+intentc pkg add utils "^2.0.0"                 # compatible range
+intentc pkg remove graph-types                 # remove a dependency
+```
+
+Or edit `intent.toml` directly. Local path dependencies for development:
+
+```toml
+[dependencies]
+my-lib = { path = "../my-lib" }
+```
+
+### Importing Packages
+
+Package imports use identifier syntax (not quoted strings):
+
+```
+import graph_types;                    // import whole package
+import graph_types.validation;         // import specific submodule
+
+let g: graph_types.Graph = graph_types.Graph("node1");
+```
+
+This differs from local file imports which use quoted paths:
+
+```
+import "helpers.intent";               // local file import
+```
+
+### Example Usage
+
+Given a dependency `math_utils` declared in `intent.toml`:
+
+```toml
+[dependencies]
+math_utils = { path = "../math_utils" }
+```
+
+Use it in your code:
+
+```
+module main version "1.0.0";
+
+import math_utils;
+
+entry function main() returns Int {
+    let result: Int = math_utils.add(3, 4);
+    print(result);
+    return 0;
+}
+```
+
+### Version Constraints
+
+| Constraint | Meaning |
+|------------|---------|
+| `"1.0.0"` | Exact version |
+| `"^1.0.0"` | Compatible updates (>=1.0.0, <2.0.0) |
+| `"^0.1.0"` | Compatible updates (>=0.1.0, <0.2.0) |
+| `"^0.0.1"` | Exact version (>=0.0.1, <0.0.2) |
+| `"~1.0.0"` | Patch updates only (>=1.0.0, <1.1.0) |
+| `">=1.0.0"` | Minimum version |
+| `"<2.0.0"` | Maximum version (exclusive) |
+
+The caret operator (`^`) follows standard semver conventions for pre-1.0 versions: `^0.y.z` treats the minor version as the compatibility boundary, and `^0.0.z` pins to the exact patch version.
+
+Resolved packages are cached at `~/.intent/cache/`. Run `intentc pkg install` to resolve and fetch all dependencies.
 
 ## Multi-File Projects
 

@@ -86,6 +86,39 @@ func Generate(mod *ir.Module) string {
 			result = strings.Replace(result, marker, marker+"use serde_json;\n", 1)
 		}
 	}
+	result = injectAsyncUseStatements(result, g.needsTokio, g.needsFutures)
+	return result
+}
+
+// injectAsyncUseStatements adds tokio/futures use statements if needed.
+func injectAsyncUseStatements(result string, needsTokio, needsFutures bool) string {
+	if !needsTokio && !needsFutures {
+		return result
+	}
+	// Find insertion point: after the last existing use statement, or after #![allow(...)]
+	marker := "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n"
+	insertAfter := marker
+	// Find the last use statement to insert after
+	lines := strings.Split(result, "\n")
+	lastUseIdx := -1
+	for i, line := range lines {
+		if strings.HasPrefix(line, "use ") {
+			lastUseIdx = i
+		}
+	}
+	var useStmts string
+	if needsFutures {
+		useStmts += "use futures;\n"
+	}
+	if lastUseIdx >= 0 {
+		// Insert after the last use statement
+		lines = append(lines[:lastUseIdx+1], append([]string{strings.TrimSuffix(useStmts, "\n")}, lines[lastUseIdx+1:]...)...)
+		result = strings.Join(lines, "\n")
+		// Clean up empty lines from insertion
+		result = strings.ReplaceAll(result, "\n\n\n\n", "\n\n")
+	} else if strings.Contains(result, insertAfter) {
+		result = strings.Replace(result, insertAfter, insertAfter+useStmts, 1)
+	}
 	return result
 }
 
@@ -95,14 +128,31 @@ func GenerateAll(prog *ir.Program) string {
 		return ""
 	}
 
-	// Build module manglings map
+	// Build module manglings map.
+	// Keys are the qualifier names users write in source (module name, decl name,
+	// or package name).  Module-name entries are authoritative; decl-name and
+	// package-name entries are only added when they don't collide with an
+	// existing entry, preventing a package name from shadowing another module's
+	// name entry.
 	moduleManglings := make(map[string]string)
+	// First pass: module names (highest priority – always set).
 	for _, mod := range prog.Modules {
 		if !mod.IsEntry {
 			moduleManglings[mod.Name] = mod.Name + "_"
-			// Also map declaration name (e.g., "attractor_validation") to filename-based prefix
+		}
+	}
+	// Second pass: decl names and package names (only if key is free).
+	for _, mod := range prog.Modules {
+		if !mod.IsEntry {
 			if mod.DeclName != "" && mod.DeclName != mod.Name {
-				moduleManglings[mod.DeclName] = mod.Name + "_"
+				if _, exists := moduleManglings[mod.DeclName]; !exists {
+					moduleManglings[mod.DeclName] = mod.Name + "_"
+				}
+			}
+			if mod.PackageName != "" && mod.PackageName != mod.Name {
+				if _, exists := moduleManglings[mod.PackageName]; !exists {
+					moduleManglings[mod.PackageName] = mod.Name + "_"
+				}
 			}
 		}
 	}
@@ -145,6 +195,8 @@ func GenerateAll(prog *ir.Program) string {
 	needsHashMapGlobal := false
 	needsReqwestGlobal := false
 	needsSerdeJsonGlobal := false
+	needsTokioGlobal := false
+	needsFuturesGlobal := false
 	for _, mod := range prog.Modules {
 		g := &generator{
 			entities:        make(map[string]*ir.Entity),
@@ -203,6 +255,12 @@ func GenerateAll(prog *ir.Program) string {
 		if g.needsSerdeJson {
 			needsSerdeJsonGlobal = true
 		}
+		if g.needsTokio {
+			needsTokioGlobal = true
+		}
+		if g.needsFutures {
+			needsFuturesGlobal = true
+		}
 	}
 
 	output := sb.String()
@@ -234,6 +292,7 @@ func GenerateAll(prog *ir.Program) string {
 			output = strings.Replace(output, marker, marker+"use serde_json;\n", 1)
 		}
 	}
+	output = injectAsyncUseStatements(output, needsTokioGlobal, needsFuturesGlobal)
 	return output
 }
 
@@ -250,6 +309,8 @@ type generator struct {
 	needsHashMap   bool
 	needsReqwest   bool
 	needsSerdeJson bool
+	needsTokio     bool
+	needsFutures   bool
 
 	// Multi-file fields
 	namePrefix      string
@@ -330,6 +391,12 @@ func (g *generator) mapType(t *checker.Type) string {
 			return "HashMap<" + g.mapType(t.TypeParams[0]) + ", " + g.mapType(t.TypeParams[1]) + ">"
 		}
 		return "HashMap<_, _>"
+	case "Future":
+		if t.IsGeneric && len(t.TypeParams) == 1 {
+			inner := g.mapType(t.TypeParams[0])
+			return "tokio::task::JoinHandle<" + inner + ">"
+		}
+		return "tokio::task::JoinHandle<()>"
 	case "Fn":
 		if t.IsFunction {
 			params := make([]string, len(t.FnParams))
@@ -413,18 +480,35 @@ func (g *generator) mangledEnumName(name string) string {
 func (g *generator) generateFunction(f *ir.Function) {
 	g.mutatedVars = collectMutatedVars(f.Body)
 	if f.IsEntry {
-		g.emitLine("fn __intent_main() -> i64 {")
-		g.incIndent()
-		g.generateStmts(f.Body)
-		g.decIndent()
-		g.emitLine("}")
-		g.emitLine("")
-		g.emitLine("fn main() {")
-		g.incIndent()
-		g.emitLine("let __exit_code = __intent_main();")
-		g.emitLine("std::process::exit(__exit_code as i32);")
-		g.decIndent()
-		g.emitLine("}")
+		if f.IsAsync {
+			g.needsTokio = true
+			g.emitLine("async fn __intent_main() -> i64 {")
+			g.incIndent()
+			g.generateStmts(f.Body)
+			g.decIndent()
+			g.emitLine("}")
+			g.emitLine("")
+			g.emitLine("#[tokio::main]")
+			g.emitLine("async fn main() {")
+			g.incIndent()
+			g.emitLine("let __exit_code = __intent_main().await;")
+			g.emitLine("std::process::exit(__exit_code as i32);")
+			g.decIndent()
+			g.emitLine("}")
+		} else {
+			g.emitLine("fn __intent_main() -> i64 {")
+			g.incIndent()
+			g.generateStmts(f.Body)
+			g.decIndent()
+			g.emitLine("}")
+			g.emitLine("")
+			g.emitLine("fn main() {")
+			g.incIndent()
+			g.emitLine("let __exit_code = __intent_main();")
+			g.emitLine("std::process::exit(__exit_code as i32);")
+			g.decIndent()
+			g.emitLine("}")
+		}
 	} else {
 		// arrayRefParams tracks Array and Map params that should be passed by reference
 		arrayRefParams := make(map[string]bool)
@@ -439,7 +523,12 @@ func (g *generator) generateFunction(f *ir.Function) {
 			fnName = g.namePrefix + f.Name
 		}
 
-		g.emitLinef("fn %s(", fnName)
+		if f.IsAsync {
+			g.needsTokio = true
+			g.emitLinef("async fn %s(", fnName)
+		} else {
+			g.emitLinef("fn %s(", fnName)
+		}
 		for i, p := range f.Params {
 			if i > 0 {
 				g.emit(", ")
@@ -1209,6 +1298,13 @@ func (g *generator) generateExpr(e ir.Expr, arrayRefParams map[string]bool) stri
 	case *ir.MatchExpr:
 		return g.generateMatchExpr(expr, arrayRefParams)
 
+	case *ir.AwaitExpr:
+		return g.generateExpr(expr.Expr, arrayRefParams) + ".await"
+
+	case *ir.SpawnExpr:
+		g.needsTokio = true
+		return "tokio::spawn(async move { " + g.generateExpr(expr.Expr, arrayRefParams) + " })"
+
 	case *ir.TryExpr:
 		return g.generateExpr(expr.Expr, arrayRefParams) + "?"
 
@@ -1305,6 +1401,34 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[strin
 		return fmt.Sprintf("%s::new(%s)", g.mangledEntityName(expr.Function), strings.Join(args, ", "))
 
 	default: // CallFunction
+		// Handle async built-in functions
+		switch expr.Function {
+		case "await_all":
+			if len(expr.Args) == 1 {
+				g.needsFutures = true
+				arg := g.generateExpr(expr.Args[0], arrayRefParams)
+				return fmt.Sprintf("futures::future::join_all(%s).await", arg)
+			}
+		case "sleep":
+			if len(expr.Args) == 1 {
+				g.needsTokio = true
+				arg := g.generateExpr(expr.Args[0], arrayRefParams)
+				return fmt.Sprintf("tokio::time::sleep(std::time::Duration::from_millis(%s as u64)).await", arg)
+			}
+		case "timeout":
+			if len(expr.Args) == 2 {
+				g.needsTokio = true
+				future := g.generateExpr(expr.Args[0], arrayRefParams)
+				ms := g.generateExpr(expr.Args[1], arrayRefParams)
+				return fmt.Sprintf("tokio::time::timeout(std::time::Duration::from_millis(%s as u64), %s).await.map_err(|_| \"timeout\".to_string())", ms, future)
+			}
+		case "await_any":
+			if len(expr.Args) == 1 {
+				g.needsFutures = true
+				arg := g.generateExpr(expr.Args[0], arrayRefParams)
+				return fmt.Sprintf("futures::future::select_all(%s).await.0", arg)
+			}
+		}
 		args := make([]string, len(expr.Args))
 		funcDef := g.functions[expr.Function]
 		if funcDef == nil && g.allFunctions != nil {

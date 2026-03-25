@@ -12,10 +12,11 @@ type Program struct {
 
 // Module represents a single Intent source file after lowering.
 type Module struct {
-	Name       string
-	DeclName   string // module declaration name (e.g., "attractor_validation")
-	IsEntry    bool
-	Path       string // original file path
+	Name        string
+	DeclName    string // module declaration name (e.g., "attractor_validation")
+	PackageName string // package name from intent.toml (e.g., "types_pkg"); empty for same-package modules
+	IsEntry     bool
+	Path        string // original file path
 	Functions  []*Function
 	Entities   []*Entity
 	Enums      []*Enum
@@ -29,6 +30,7 @@ type Function struct {
 	Name       string
 	IsEntry    bool
 	IsPublic   bool
+	IsAsync    bool
 	Params     []*Param
 	ReturnType *checker.Type
 	Requires   []*Contract
@@ -489,3 +491,21 @@ type StringConcat struct {
 
 func (e *StringConcat) ExprType() *checker.Type { return e.Type }
 func (*StringConcat) exprNode()                 {}
+
+// AwaitExpr represents an await expression that unwraps a Future<T> to T.
+type AwaitExpr struct {
+	Expr Expr
+	Type *checker.Type // the unwrapped type (T from Future<T>)
+}
+
+func (e *AwaitExpr) ExprType() *checker.Type { return e.Type }
+func (*AwaitExpr) exprNode()                 {}
+
+// SpawnExpr represents a spawn expression that creates a Future<T>.
+type SpawnExpr struct {
+	Expr Expr
+	Type *checker.Type // Future<T>
+}
+
+func (e *SpawnExpr) ExprType() *checker.Type { return e.Type }
+func (*SpawnExpr) exprNode()                 {}

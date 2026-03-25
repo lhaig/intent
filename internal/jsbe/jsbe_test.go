@@ -803,3 +803,325 @@ function test() returns Int {
 		t.Errorf("expected lambda to generate arrow function syntax, got:\n%s", output)
 	}
 }
+
+func TestGenerateAsyncFunctionJS(t *testing.T) {
+	mod := &ir.Module{
+		Name:    "test",
+		IsEntry: false,
+		Functions: []*ir.Function{
+			{
+				Name:    "fetchData",
+				IsAsync: true,
+				Params: []*ir.Param{
+					{Name: "url", Type: &checker.Type{Name: "String"}},
+				},
+				ReturnType: &checker.Type{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}},
+				Body: []ir.Stmt{
+					&ir.ReturnStmt{
+						Value: &ir.IntLit{Value: 42, Type: &checker.Type{Name: "Int"}},
+					},
+				},
+			},
+		},
+	}
+
+	result := Generate(mod)
+
+	if !strings.Contains(result, "async function fetchData(url)") {
+		t.Errorf("expected async function declaration, got:\n%s", result)
+	}
+}
+
+func TestGenerateAwaitExprJS(t *testing.T) {
+	mod := &ir.Module{
+		Name:    "test",
+		IsEntry: false,
+		Functions: []*ir.Function{
+			{
+				Name:       "process",
+				IsAsync:    true,
+				ReturnType: &checker.Type{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}},
+				Body: []ir.Stmt{
+					&ir.LetStmt{
+						Name: "val",
+						Type: &checker.Type{Name: "Int"},
+						Value: &ir.AwaitExpr{
+							Expr: &ir.VarRef{Name: "future", Type: &checker.Type{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}}},
+							Type: &checker.Type{Name: "Int"},
+						},
+					},
+					&ir.ReturnStmt{
+						Value: &ir.VarRef{Name: "val", Type: &checker.Type{Name: "Int"}},
+					},
+				},
+			},
+		},
+	}
+
+	result := Generate(mod)
+
+	if !strings.Contains(result, "await future") {
+		t.Errorf("expected await expression, got:\n%s", result)
+	}
+}
+
+func TestGenerateSpawnExprJS(t *testing.T) {
+	mod := &ir.Module{
+		Name:    "test",
+		IsEntry: false,
+		Functions: []*ir.Function{
+			{
+				Name:       "run",
+				IsAsync:    true,
+				ReturnType: &checker.Type{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}},
+				Body: []ir.Stmt{
+					&ir.LetStmt{
+						Name: "handle",
+						Type: &checker.Type{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}},
+						Value: &ir.SpawnExpr{
+							Expr: &ir.CallExpr{
+								Function: "compute",
+								Args: []ir.Expr{
+									&ir.IntLit{Value: 42, Type: &checker.Type{Name: "Int"}},
+								},
+								Kind: ir.CallFunction,
+								Type: &checker.Type{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}},
+							},
+							Type: &checker.Type{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := Generate(mod)
+
+	if !strings.Contains(result, "(async () => { return compute(42); })()") {
+		t.Errorf("expected spawn as IIFE, got:\n%s", result)
+	}
+}
+
+func TestGenerateAwaitAllJS(t *testing.T) {
+	mod := &ir.Module{
+		Name:    "test",
+		IsEntry: false,
+		Functions: []*ir.Function{
+			{
+				Name:       "gather",
+				IsAsync:    true,
+				ReturnType: &checker.Type{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Array", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}}}},
+				Body: []ir.Stmt{
+					&ir.LetStmt{
+						Name: "results",
+						Type: &checker.Type{Name: "Array", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}},
+						Value: &ir.CallExpr{
+							Function: "await_all",
+							Args: []ir.Expr{
+								&ir.VarRef{Name: "futures", Type: &checker.Type{Name: "Array", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}}}}},
+							},
+							Kind: ir.CallFunction,
+							Type: &checker.Type{Name: "Array", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := Generate(mod)
+
+	if !strings.Contains(result, "await Promise.all(futures)") {
+		t.Errorf("expected await Promise.all, got:\n%s", result)
+	}
+}
+
+func TestGenerateAwaitAnyJS(t *testing.T) {
+	mod := &ir.Module{
+		Name:    "test",
+		IsEntry: false,
+		Functions: []*ir.Function{
+			{
+				Name:       "race",
+				IsAsync:    true,
+				ReturnType: &checker.Type{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}},
+				Body: []ir.Stmt{
+					&ir.LetStmt{
+						Name: "first",
+						Type: &checker.Type{Name: "Int"},
+						Value: &ir.CallExpr{
+							Function: "await_any",
+							Args: []ir.Expr{
+								&ir.VarRef{Name: "futures", Type: &checker.Type{Name: "Array", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}}}}},
+							},
+							Kind: ir.CallFunction,
+							Type: &checker.Type{Name: "Int"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := Generate(mod)
+
+	if !strings.Contains(result, "await Promise.race(futures)") {
+		t.Errorf("expected await Promise.race, got:\n%s", result)
+	}
+}
+
+func TestGenerateTimeoutJS(t *testing.T) {
+	mod := &ir.Module{
+		Name:    "test",
+		IsEntry: false,
+		Functions: []*ir.Function{
+			{
+				Name:       "withTimeout",
+				IsAsync:    true,
+				ReturnType: &checker.Type{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Result"}}},
+				Body: []ir.Stmt{
+					&ir.LetStmt{
+						Name: "result",
+						Type: &checker.Type{Name: "Result"},
+						Value: &ir.CallExpr{
+							Function: "timeout",
+							Args: []ir.Expr{
+								&ir.VarRef{Name: "future", Type: &checker.Type{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}}},
+								&ir.IntLit{Value: 5000, Type: &checker.Type{Name: "Int"}},
+							},
+							Kind: ir.CallFunction,
+							Type: &checker.Type{Name: "Result"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := Generate(mod)
+
+	if !strings.Contains(result, "Promise.race") {
+		t.Errorf("expected Promise.race for timeout, got:\n%s", result)
+	}
+	if !strings.Contains(result, "setTimeout") {
+		t.Errorf("expected setTimeout for timeout, got:\n%s", result)
+	}
+	if !strings.Contains(result, "5000") {
+		t.Errorf("expected timeout ms value, got:\n%s", result)
+	}
+}
+
+func TestGenerateSleepJS(t *testing.T) {
+	mod := &ir.Module{
+		Name:    "test",
+		IsEntry: false,
+		Functions: []*ir.Function{
+			{
+				Name:       "delayed",
+				IsAsync:    true,
+				ReturnType: &checker.Type{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Void"}}},
+				Body: []ir.Stmt{
+					&ir.ExprStmt{
+						Expr: &ir.CallExpr{
+							Function: "sleep",
+							Args: []ir.Expr{
+								&ir.IntLit{Value: 1000, Type: &checker.Type{Name: "Int"}},
+							},
+							Kind: ir.CallFunction,
+							Type: &checker.Type{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Void"}}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := Generate(mod)
+
+	if !strings.Contains(result, "new Promise(resolve => setTimeout(resolve, 1000))") {
+		t.Errorf("expected Promise-based sleep, got:\n%s", result)
+	}
+}
+
+func TestGenerateAsyncFunctionWithContractsJS(t *testing.T) {
+	mod := &ir.Module{
+		Name:    "test",
+		IsEntry: false,
+		Functions: []*ir.Function{
+			{
+				Name:    "fetchPositive",
+				IsAsync: true,
+				Params: []*ir.Param{
+					{Name: "id", Type: &checker.Type{Name: "Int"}},
+				},
+				ReturnType: &checker.Type{Name: "Future", IsGeneric: true, TypeParams: []*checker.Type{{Name: "Int"}}},
+				Requires: []*ir.Contract{
+					{
+						Expr: &ir.BinaryExpr{
+							Left:  &ir.VarRef{Name: "id", Type: &checker.Type{Name: "Int"}},
+							Op:    lexer.GT,
+							Right: &ir.IntLit{Value: 0, Type: &checker.Type{Name: "Int"}},
+							Type:  &checker.Type{Name: "Bool"},
+						},
+						RawText: "id > 0",
+					},
+				},
+				Ensures: []*ir.Contract{
+					{
+						Expr: &ir.BinaryExpr{
+							Left:  &ir.ResultRef{Type: &checker.Type{Name: "Int"}},
+							Op:    lexer.GEQ,
+							Right: &ir.IntLit{Value: 0, Type: &checker.Type{Name: "Int"}},
+							Type:  &checker.Type{Name: "Bool"},
+						},
+						RawText: "result >= 0",
+					},
+				},
+				Body: []ir.Stmt{
+					&ir.ReturnStmt{
+						Value: &ir.VarRef{Name: "id", Type: &checker.Type{Name: "Int"}},
+					},
+				},
+			},
+		},
+	}
+
+	result := Generate(mod)
+
+	if !strings.Contains(result, "async function fetchPositive(id)") {
+		t.Errorf("expected async function with contracts, got:\n%s", result)
+	}
+	if !strings.Contains(result, "Precondition failed: id > 0") {
+		t.Errorf("expected precondition check in async function, got:\n%s", result)
+	}
+	if !strings.Contains(result, "Postcondition failed: result >= 0") {
+		t.Errorf("expected postcondition check in async function, got:\n%s", result)
+	}
+}
+
+func TestGenerateAsyncFullPipelineJS(t *testing.T) {
+	src := `module test version "1.0";
+async function fetchData() returns Future<Int> {
+    return 42;
+}
+async function main() returns Future<Int> {
+    let handle: Future<Int> = spawn fetchData();
+    let val: Int = await handle;
+    return val;
+}
+`
+	output := generateFromSource(t, "async_pipeline", src)
+
+	if !strings.Contains(output, "async function fetchData()") {
+		t.Errorf("expected async function fetchData, got:\n%s", output)
+	}
+	if !strings.Contains(output, "async function main()") {
+		t.Errorf("expected async function main, got:\n%s", output)
+	}
+	if !strings.Contains(output, "await handle") {
+		t.Errorf("expected await expression, got:\n%s", output)
+	}
+	if !strings.Contains(output, "(async () => { return fetchData(); })()") {
+		t.Errorf("expected spawn as IIFE, got:\n%s", output)
+	}
+}

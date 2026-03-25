@@ -65,6 +65,9 @@ const (
 	TRAIT
 	IMPL
 	FN
+	ASYNC
+	AWAIT
+	SPAWN
 
 	// Type keywords
 	INT_TYPE
@@ -222,6 +225,12 @@ func (t TokenType) String() string {
 		return "IMPL"
 	case FN:
 		return "FN"
+	case ASYNC:
+		return "ASYNC"
+	case AWAIT:
+		return "AWAIT"
+	case SPAWN:
+		return "SPAWN"
 	case INT_TYPE:
 		return "INT_TYPE"
 	case FLOAT_TYPE:
@@ -335,6 +344,9 @@ var keywords = map[string]TokenType{
 	"trait":       TRAIT,
 	"impl":        IMPL,
 	"Fn":          FN,
+	"async":       ASYNC,
+	"await":       AWAIT,
+	"spawn":       SPAWN,
 	"Int":         INT_TYPE,
 	"Float":       FLOAT_TYPE,
 	"String":      STRING_TYPE,

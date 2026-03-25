@@ -17,21 +17,33 @@ type lowerer struct {
 	enums       map[string]*checker.EnumInfo
 	traits      map[string]*checker.TraitInfo
 	implOrigins map[string]string // "Entity.Method" -> "Trait"
+	functions   map[string]*checker.FuncInfo
 
 	// old() capture state for current method/constructor/while
 	oldCounter  int
 	oldCaptures []*OldCapture
 	oldMap      map[ast.Expression]string // maps AST OldExpr to capture name
+
+	// Generic instantiation tracking
+	genericEntityDecls map[string]*ast.EntityDecl   // name -> original AST decl
+	genericFuncDecls   map[string]*ast.FunctionDecl // name -> original AST decl
+	instantiations     map[string][][]*checker.Type // "Stack" -> [[Int], [String]]
+	funcInstantiations map[string][][]*checker.Type // "identity" -> [[Int]]
 }
 
 // Lower transforms a single-file AST program into an IR Module.
 func Lower(prog *ast.Program, result *checker.CheckResult) *Module {
 	l := &lowerer{
-		exprTypes:   result.ExprTypes,
-		entities:    result.Entities,
-		enums:       result.Enums,
-		traits:      result.Traits,
-		implOrigins: result.ImplOrigins,
+		exprTypes:          result.ExprTypes,
+		entities:           result.Entities,
+		enums:              result.Enums,
+		traits:             result.Traits,
+		implOrigins:        result.ImplOrigins,
+		functions:          result.Functions,
+		genericEntityDecls: make(map[string]*ast.EntityDecl),
+		genericFuncDecls:   make(map[string]*ast.FunctionDecl),
+		instantiations:     make(map[string][][]*checker.Type),
+		funcInstantiations: make(map[string][][]*checker.Type),
 	}
 
 	modName := ""
@@ -44,8 +56,20 @@ func Lower(prog *ast.Program, result *checker.CheckResult) *Module {
 		IsEntry: true,
 	}
 
+	// First pass: collect generic declarations, lower non-generic ones
 	for _, e := range prog.Entities {
-		mod.Entities = append(mod.Entities, l.lowerEntity(e))
+		if len(e.TypeParams) > 0 {
+			l.genericEntityDecls[e.Name] = e
+		} else {
+			mod.Entities = append(mod.Entities, l.lowerEntity(e))
+		}
+	}
+	for _, f := range prog.Functions {
+		if len(f.TypeParams) > 0 {
+			l.genericFuncDecls[f.Name] = f
+		} else {
+			mod.Functions = append(mod.Functions, l.lowerFunction(f))
+		}
 	}
 	for _, e := range prog.Enums {
 		mod.Enums = append(mod.Enums, l.lowerEnum(e))
@@ -56,18 +80,48 @@ func Lower(prog *ast.Program, result *checker.CheckResult) *Module {
 	for _, ib := range prog.ImplBlocks {
 		mod.ImplBlocks = append(mod.ImplBlocks, l.lowerImplBlock(ib))
 	}
-	for _, f := range prog.Functions {
-		mod.Functions = append(mod.Functions, l.lowerFunction(f))
-	}
 	for _, i := range prog.Intents {
 		mod.Intents = append(mod.Intents, l.lowerIntent(i))
 	}
+
+	// Second pass: scan for instantiations and collect them
+	l.collectInstantiations(prog)
+
+	// Third pass: monomorphize generic entities and functions
+	for entityName, typeArgsList := range l.instantiations {
+		decl := l.genericEntityDecls[entityName]
+		if decl == nil {
+			continue
+		}
+		for _, typeArgs := range typeArgsList {
+			monoEntity := l.monomorphizeEntity(decl, typeArgs)
+			if monoEntity != nil {
+				mod.Entities = append(mod.Entities, monoEntity)
+			}
+		}
+	}
+	for funcName, typeArgsList := range l.funcInstantiations {
+		decl := l.genericFuncDecls[funcName]
+		if decl == nil {
+			continue
+		}
+		for _, typeArgs := range typeArgsList {
+			monoFunc := l.monomorphizeFunction(decl, typeArgs)
+			if monoFunc != nil {
+				mod.Functions = append(mod.Functions, monoFunc)
+			}
+		}
+	}
+
+	// Fourth pass: rewrite call expressions to use monomorphized names
+	l.rewriteMonomorphizedCalls(mod)
 
 	return mod
 }
 
 // LowerAll transforms a multi-file project into an IR Program.
-func LowerAll(registry map[string]*ast.Program, sortedPaths []string, result *checker.CheckAllResult) *Program {
+// packageDirs maps package names to their resolved directory paths (may be nil).
+func LowerAll(registry map[string]*ast.Program, sortedPaths []string, result *checker.CheckAllResult, packageDirs map[string]string) *Program {
 	if len(sortedPaths) == 0 {
 		return &Program{}
 	}
@@ -75,11 +129,22 @@ func LowerAll(registry map[string]*ast.Program, sortedPaths []string, result *ch
 	entryPath := sortedPaths[len(sortedPaths)-1]
 
 	l := &lowerer{
-		exprTypes:   result.ExprTypes,
-		entities:    result.Entities,
-		enums:       result.Enums,
-		traits:      result.Traits,
-		implOrigins: result.ImplOrigins,
+		exprTypes:          result.ExprTypes,
+		entities:           result.Entities,
+		enums:              result.Enums,
+		traits:             result.Traits,
+		implOrigins:        result.ImplOrigins,
+		functions:          result.Functions,
+		genericEntityDecls: make(map[string]*ast.EntityDecl),
+		genericFuncDecls:   make(map[string]*ast.FunctionDecl),
+		instantiations:     make(map[string][][]*checker.Type),
+		funcInstantiations: make(map[string][][]*checker.Type),
+	}
+
+	// Build reverse map: directory -> package name
+	dirToPackage := make(map[string]string)
+	for pkgName, dir := range packageDirs {
+		dirToPackage[dir] = pkgName
 	}
 
 	prog := &Program{}
@@ -98,15 +163,33 @@ func LowerAll(registry map[string]*ast.Program, sortedPaths []string, result *ch
 			declName = p.Module.Name
 		}
 
+		// Determine package name from directory
+		pkgName := ""
+		if dir := filepath.Dir(filePath); dir != "" {
+			pkgName = dirToPackage[dir]
+		}
+
 		mod := &Module{
-			Name:     modName,
-			DeclName: declName,
-			IsEntry:  isEntry,
-			Path:     filePath,
+			Name:        modName,
+			DeclName:    declName,
+			PackageName: pkgName,
+			IsEntry:     isEntry,
+			Path:        filePath,
 		}
 
 		for _, e := range p.Entities {
-			mod.Entities = append(mod.Entities, l.lowerEntity(e))
+			if len(e.TypeParams) > 0 {
+				l.genericEntityDecls[e.Name] = e
+			} else {
+				mod.Entities = append(mod.Entities, l.lowerEntity(e))
+			}
+		}
+		for _, f := range p.Functions {
+			if len(f.TypeParams) > 0 {
+				l.genericFuncDecls[f.Name] = f
+			} else {
+				mod.Functions = append(mod.Functions, l.lowerFunction(f))
+			}
 		}
 		for _, e := range p.Enums {
 			mod.Enums = append(mod.Enums, l.lowerEnum(e))
@@ -117,12 +200,37 @@ func LowerAll(registry map[string]*ast.Program, sortedPaths []string, result *ch
 		for _, ib := range p.ImplBlocks {
 			mod.ImplBlocks = append(mod.ImplBlocks, l.lowerImplBlock(ib))
 		}
-		for _, f := range p.Functions {
-			mod.Functions = append(mod.Functions, l.lowerFunction(f))
-		}
 		for _, i := range p.Intents {
 			mod.Intents = append(mod.Intents, l.lowerIntent(i))
 		}
+
+		// Collect instantiations and monomorphize for this module
+		l.collectInstantiations(p)
+		for entityName, typeArgsList := range l.instantiations {
+			decl := l.genericEntityDecls[entityName]
+			if decl == nil {
+				continue
+			}
+			for _, typeArgs := range typeArgsList {
+				monoEntity := l.monomorphizeEntity(decl, typeArgs)
+				if monoEntity != nil {
+					mod.Entities = append(mod.Entities, monoEntity)
+				}
+			}
+		}
+		for funcName, typeArgsList := range l.funcInstantiations {
+			decl := l.genericFuncDecls[funcName]
+			if decl == nil {
+				continue
+			}
+			for _, typeArgs := range typeArgsList {
+				monoFunc := l.monomorphizeFunction(decl, typeArgs)
+				if monoFunc != nil {
+					mod.Functions = append(mod.Functions, monoFunc)
+				}
+			}
+		}
+		l.rewriteMonomorphizedCalls(mod)
 
 		prog.Modules = append(prog.Modules, mod)
 	}
@@ -137,6 +245,7 @@ func (l *lowerer) lowerFunction(f *ast.FunctionDecl) *Function {
 		Name:       f.Name,
 		IsEntry:    f.IsEntry,
 		IsPublic:   f.IsPublic,
+		IsAsync:    f.IsAsync,
 		ReturnType: l.resolveTypeRef(f.ReturnType),
 	}
 
@@ -660,8 +769,24 @@ func (l *lowerer) lowerExpr(e ast.Expression) Expr {
 			args[i] = l.lowerExpr(a)
 		}
 		kind, enumName := l.resolveCallKind(expr)
+		funcName := expr.Function
+
+		// Rewrite generic calls to monomorphized names
+		if len(expr.TypeArgs) > 0 {
+			var typeArgs []*checker.Type
+			for _, ta := range expr.TypeArgs {
+				t := checker.ResolveType(ta, l.entities, l.enums)
+				if t != nil {
+					typeArgs = append(typeArgs, t)
+				}
+			}
+			if len(typeArgs) == len(expr.TypeArgs) {
+				funcName = MangleGenericName(expr.Function, typeArgs)
+			}
+		}
+
 		return &CallExpr{
-			Function: expr.Function,
+			Function: funcName,
 			Args:     args,
 			Kind:     kind,
 			EnumName: enumName,
@@ -835,6 +960,18 @@ func (l *lowerer) lowerExpr(e ast.Expression) Expr {
 			Type:   l.typeOf(e),
 		}
 
+	case *ast.AwaitExpr:
+		return &AwaitExpr{
+			Expr: l.lowerExpr(expr.Expr),
+			Type: l.typeOf(e),
+		}
+
+	case *ast.SpawnExpr:
+		return &SpawnExpr{
+			Expr: l.lowerExpr(expr.Expr),
+			Type: l.typeOf(e),
+		}
+
 	default:
 		return &BoolLit{Value: true, Type: checker.TypeBool}
 	}
@@ -947,6 +1084,489 @@ func (l *lowerer) resolveTypeRef(ref *ast.TypeRef) *checker.Type {
 		return checker.TypeVoid
 	}
 	return checker.ResolveType(ref, l.entities, l.enums)
+}
+
+// --- Monomorphization ---
+
+// MangleGenericName creates a monomorphized name, e.g., Stack + [Int] -> Stack__Int
+func MangleGenericName(baseName string, typeArgs []*checker.Type) string {
+	if len(typeArgs) == 0 {
+		return baseName
+	}
+	parts := make([]string, len(typeArgs))
+	for i, t := range typeArgs {
+		parts[i] = mangleTypeName(t)
+	}
+	return baseName + "__" + strings.Join(parts, "_")
+}
+
+func mangleTypeName(t *checker.Type) string {
+	if t == nil {
+		return "Unknown"
+	}
+	if t.IsGeneric && len(t.TypeParams) > 0 {
+		parts := make([]string, len(t.TypeParams))
+		for i, tp := range t.TypeParams {
+			parts[i] = mangleTypeName(tp)
+		}
+		return t.Name + "_" + strings.Join(parts, "_")
+	}
+	return t.Name
+}
+
+// collectInstantiations scans the program for all generic entity/function instantiations.
+func (l *lowerer) collectInstantiations(prog *ast.Program) {
+	for _, f := range prog.Functions {
+		l.scanStmtsForInstantiations(f.Body)
+	}
+	for _, e := range prog.Entities {
+		if e.Constructor != nil {
+			l.scanStmtsForInstantiations(e.Constructor.Body)
+		}
+		for _, m := range e.Methods {
+			l.scanStmtsForInstantiations(m.Body)
+		}
+	}
+}
+
+func (l *lowerer) scanStmtsForInstantiations(block *ast.Block) {
+	if block == nil {
+		return
+	}
+	for _, stmt := range block.Statements {
+		l.scanStmtForInstantiations(stmt)
+	}
+}
+
+func (l *lowerer) scanStmtForInstantiations(stmt ast.Statement) {
+	switch s := stmt.(type) {
+	case *ast.LetStmt:
+		l.scanExprForInstantiations(s.Value)
+		// Also check the type annotation for generic entity types
+		l.scanTypeRefForInstantiations(s.Type)
+	case *ast.AssignStmt:
+		l.scanExprForInstantiations(s.Target)
+		l.scanExprForInstantiations(s.Value)
+	case *ast.ReturnStmt:
+		if s.Value != nil {
+			l.scanExprForInstantiations(s.Value)
+		}
+	case *ast.IfStmt:
+		l.scanExprForInstantiations(s.Condition)
+		l.scanStmtsForInstantiations(s.Then)
+		if s.Else != nil {
+			if elseBlock, ok := s.Else.(*ast.Block); ok {
+				l.scanStmtsForInstantiations(elseBlock)
+			} else if elseIf, ok := s.Else.(*ast.IfStmt); ok {
+				l.scanStmtForInstantiations(elseIf)
+			}
+		}
+	case *ast.WhileStmt:
+		l.scanExprForInstantiations(s.Condition)
+		l.scanStmtsForInstantiations(s.Body)
+	case *ast.ForInStmt:
+		l.scanExprForInstantiations(s.Iterable)
+		l.scanStmtsForInstantiations(s.Body)
+	case *ast.ExprStmt:
+		l.scanExprForInstantiations(s.Expr)
+	}
+}
+
+func (l *lowerer) scanExprForInstantiations(expr ast.Expression) {
+	if expr == nil {
+		return
+	}
+	switch e := expr.(type) {
+	case *ast.CallExpr:
+		// Check for generic entity constructor or function call
+		if len(e.TypeArgs) > 0 {
+			if _, isGenericEntity := l.genericEntityDecls[e.Function]; isGenericEntity {
+				l.recordEntityInstantiation(e.Function, e.TypeArgs)
+			}
+			if _, isGenericFunc := l.genericFuncDecls[e.Function]; isGenericFunc {
+				l.recordFuncInstantiation(e.Function, e.TypeArgs)
+			}
+		}
+		for _, arg := range e.Args {
+			l.scanExprForInstantiations(arg)
+		}
+	case *ast.MethodCallExpr:
+		l.scanExprForInstantiations(e.Object)
+		for _, arg := range e.Args {
+			l.scanExprForInstantiations(arg)
+		}
+	case *ast.BinaryExpr:
+		l.scanExprForInstantiations(e.Left)
+		l.scanExprForInstantiations(e.Right)
+	case *ast.UnaryExpr:
+		l.scanExprForInstantiations(e.Operand)
+	case *ast.FieldAccessExpr:
+		l.scanExprForInstantiations(e.Object)
+	case *ast.IndexExpr:
+		l.scanExprForInstantiations(e.Object)
+		l.scanExprForInstantiations(e.Index)
+	case *ast.LambdaExpr:
+		l.scanExprForInstantiations(e.Body)
+	case *ast.MatchExpr:
+		l.scanExprForInstantiations(e.Scrutinee)
+		for _, arm := range e.Arms {
+			l.scanExprForInstantiations(arm.Body)
+		}
+	case *ast.SpawnExpr:
+		l.scanExprForInstantiations(e.Expr)
+	case *ast.AwaitExpr:
+		l.scanExprForInstantiations(e.Expr)
+	case *ast.TryExpr:
+		l.scanExprForInstantiations(e.Expr)
+	case *ast.ArrayLit:
+		for _, elem := range e.Elements {
+			l.scanExprForInstantiations(elem)
+		}
+	}
+}
+
+func (l *lowerer) scanTypeRefForInstantiations(ref *ast.TypeRef) {
+	if ref == nil {
+		return
+	}
+	if _, isGenericEntity := l.genericEntityDecls[ref.Name]; isGenericEntity && len(ref.TypeArgs) > 0 {
+		l.recordEntityInstantiation(ref.Name, ref.TypeArgs)
+	}
+	for _, arg := range ref.TypeArgs {
+		l.scanTypeRefForInstantiations(arg)
+	}
+}
+
+func (l *lowerer) recordEntityInstantiation(name string, typeArgRefs []*ast.TypeRef) {
+	var typeArgs []*checker.Type
+	for _, ref := range typeArgRefs {
+		t := checker.ResolveType(ref, l.entities, l.enums)
+		if t != nil {
+			typeArgs = append(typeArgs, t)
+		}
+	}
+	if len(typeArgs) != len(typeArgRefs) {
+		return
+	}
+	mangled := MangleGenericName(name, typeArgs)
+	for _, existing := range l.instantiations[name] {
+		if MangleGenericName(name, existing) == mangled {
+			return
+		}
+	}
+	l.instantiations[name] = append(l.instantiations[name], typeArgs)
+}
+
+func (l *lowerer) recordFuncInstantiation(name string, typeArgRefs []*ast.TypeRef) {
+	var typeArgs []*checker.Type
+	for _, ref := range typeArgRefs {
+		t := checker.ResolveType(ref, l.entities, l.enums)
+		if t != nil {
+			typeArgs = append(typeArgs, t)
+		}
+	}
+	if len(typeArgs) != len(typeArgRefs) {
+		return
+	}
+	mangled := MangleGenericName(name, typeArgs)
+	for _, existing := range l.funcInstantiations[name] {
+		if MangleGenericName(name, existing) == mangled {
+			return
+		}
+	}
+	l.funcInstantiations[name] = append(l.funcInstantiations[name], typeArgs)
+}
+
+// monomorphizeEntity creates a monomorphized copy of a generic entity.
+func (l *lowerer) monomorphizeEntity(decl *ast.EntityDecl, typeArgs []*checker.Type) *Entity {
+	// Validate type arg count matches type param count
+	if len(typeArgs) != len(decl.TypeParams) {
+		return nil
+	}
+
+	// Build substitution map: T -> Int, U -> String, etc.
+	substMap := make(map[string]*checker.Type)
+	for i, tp := range decl.TypeParams {
+		substMap[tp.Name] = typeArgs[i]
+	}
+
+	mangledName := MangleGenericName(decl.Name, typeArgs)
+
+	ent := &Entity{
+		Name:     mangledName,
+		IsPublic: decl.IsPublic,
+	}
+
+	for _, f := range decl.Fields {
+		fieldType := l.resolveTypeRef(f.Type)
+		ent.Fields = append(ent.Fields, &Field{
+			Name: f.Name,
+			Type: checker.SubstituteType(fieldType, substMap),
+		})
+	}
+
+	for _, inv := range decl.Invariants {
+		ent.Invariants = append(ent.Invariants, &Contract{
+			Expr:    l.lowerExpr(inv.Expr),
+			RawText: inv.RawText,
+		})
+	}
+
+	if decl.Constructor != nil {
+		ent.Constructor = l.monomorphizeConstructor(decl.Constructor, substMap)
+	}
+
+	for _, m := range decl.Methods {
+		ent.Methods = append(ent.Methods, l.monomorphizeMethod(m, substMap))
+	}
+
+	return ent
+}
+
+func (l *lowerer) monomorphizeConstructor(ctor *ast.ConstructorDecl, substMap map[string]*checker.Type) *Constructor {
+	c := &Constructor{}
+	for _, p := range ctor.Params {
+		pType := l.resolveTypeRef(p.Type)
+		c.Params = append(c.Params, &Param{
+			Name: p.Name,
+			Type: checker.SubstituteType(pType, substMap),
+		})
+	}
+	for _, req := range ctor.Requires {
+		c.Requires = append(c.Requires, l.lowerContract(req))
+	}
+	l.resetOldCaptures()
+	for _, ens := range ctor.Ensures {
+		l.scanOldExprs(ens.Expr)
+	}
+	c.OldCaptures = l.oldCaptures
+	for _, ens := range ctor.Ensures {
+		c.Ensures = append(c.Ensures, l.lowerContractWithOld(ens))
+	}
+	c.Body = l.lowerBlock(ctor.Body)
+	l.resetOldCaptures()
+	return c
+}
+
+func (l *lowerer) monomorphizeMethod(m *ast.MethodDecl, substMap map[string]*checker.Type) *Method {
+	method := &Method{
+		Name:       m.Name,
+		ReturnType: checker.SubstituteType(l.resolveTypeRef(m.ReturnType), substMap),
+	}
+	for _, p := range m.Params {
+		pType := l.resolveTypeRef(p.Type)
+		method.Params = append(method.Params, &Param{
+			Name: p.Name,
+			Type: checker.SubstituteType(pType, substMap),
+		})
+	}
+	for _, req := range m.Requires {
+		method.Requires = append(method.Requires, l.lowerContract(req))
+	}
+	l.resetOldCaptures()
+	for _, ens := range m.Ensures {
+		l.scanOldExprs(ens.Expr)
+	}
+	method.OldCaptures = l.oldCaptures
+	for _, ens := range m.Ensures {
+		method.Ensures = append(method.Ensures, l.lowerContractWithOld(ens))
+	}
+	method.Body = l.lowerBlock(m.Body)
+	l.resetOldCaptures()
+	return method
+}
+
+// monomorphizeFunction creates a monomorphized copy of a generic function.
+func (l *lowerer) monomorphizeFunction(decl *ast.FunctionDecl, typeArgs []*checker.Type) *Function {
+	// Validate type arg count matches type param count
+	if len(typeArgs) != len(decl.TypeParams) {
+		return nil
+	}
+
+	substMap := make(map[string]*checker.Type)
+	for i, tp := range decl.TypeParams {
+		substMap[tp.Name] = typeArgs[i]
+	}
+
+	mangledName := MangleGenericName(decl.Name, typeArgs)
+
+	fn := &Function{
+		Name:       mangledName,
+		IsEntry:    decl.IsEntry,
+		IsPublic:   decl.IsPublic,
+		IsAsync:    decl.IsAsync,
+		ReturnType: checker.SubstituteType(l.resolveTypeRef(decl.ReturnType), substMap),
+	}
+
+	for _, p := range decl.Params {
+		pType := l.resolveTypeRef(p.Type)
+		fn.Params = append(fn.Params, &Param{
+			Name: p.Name,
+			Type: checker.SubstituteType(pType, substMap),
+		})
+	}
+
+	for _, req := range decl.Requires {
+		fn.Requires = append(fn.Requires, l.lowerContract(req))
+	}
+	for _, ens := range decl.Ensures {
+		fn.Ensures = append(fn.Ensures, l.lowerContract(ens))
+	}
+
+	fn.Body = l.lowerBlock(decl.Body)
+
+	return fn
+}
+
+// rewriteMonomorphizedCalls rewrites CallExpr and type references to use monomorphized names.
+func (l *lowerer) rewriteMonomorphizedCalls(mod *Module) {
+	for _, f := range mod.Functions {
+		l.rewriteStmts(f.Body)
+		l.rewriteContracts(f.Requires)
+		l.rewriteContracts(f.Ensures)
+	}
+	for _, e := range mod.Entities {
+		if e.Constructor != nil {
+			l.rewriteStmts(e.Constructor.Body)
+			l.rewriteContracts(e.Constructor.Requires)
+			l.rewriteContracts(e.Constructor.Ensures)
+		}
+		for _, m := range e.Methods {
+			l.rewriteStmts(m.Body)
+			l.rewriteContracts(m.Requires)
+			l.rewriteContracts(m.Ensures)
+		}
+	}
+}
+
+func (l *lowerer) rewriteContracts(contracts []*Contract) {
+	for _, c := range contracts {
+		c.Expr = l.rewriteExpr(c.Expr)
+	}
+}
+
+func (l *lowerer) rewriteStmts(stmts []Stmt) {
+	for i, s := range stmts {
+		stmts[i] = l.rewriteStmt(s)
+	}
+}
+
+func (l *lowerer) rewriteStmt(stmt Stmt) Stmt {
+	switch s := stmt.(type) {
+	case *LetStmt:
+		s.Value = l.rewriteExpr(s.Value)
+		s.Type = l.rewriteType(s.Type)
+		return s
+	case *AssignStmt:
+		s.Target = l.rewriteExpr(s.Target)
+		s.Value = l.rewriteExpr(s.Value)
+		return s
+	case *ReturnStmt:
+		if s.Value != nil {
+			s.Value = l.rewriteExpr(s.Value)
+		}
+		return s
+	case *IfStmt:
+		s.Condition = l.rewriteExpr(s.Condition)
+		l.rewriteStmts(s.Then)
+		l.rewriteStmts(s.Else)
+		return s
+	case *WhileStmt:
+		s.Condition = l.rewriteExpr(s.Condition)
+		l.rewriteStmts(s.Body)
+		return s
+	case *ForInStmt:
+		s.Iterable = l.rewriteExpr(s.Iterable)
+		l.rewriteStmts(s.Body)
+		return s
+	case *ExprStmt:
+		s.Expr = l.rewriteExpr(s.Expr)
+		return s
+	}
+	return stmt
+}
+
+func (l *lowerer) rewriteExpr(expr Expr) Expr {
+	if expr == nil {
+		return nil
+	}
+	switch e := expr.(type) {
+	case *CallExpr:
+		for i, arg := range e.Args {
+			e.Args[i] = l.rewriteExpr(arg)
+		}
+		e.Type = l.rewriteType(e.Type)
+		// Rewrite generic constructor/function calls to monomorphized names
+		if e.Kind == CallConstructor {
+			if t := e.Type; t != nil && t.IsGeneric && t.IsEntity && len(t.TypeParams) > 0 {
+				mangledName := MangleGenericName(e.Function, t.TypeParams)
+				e.Function = mangledName
+				// Update the type to use the mangled name
+				e.Type = &checker.Type{
+					Name:     mangledName,
+					IsEntity: true,
+				}
+			}
+		}
+		if e.Kind == CallFunction {
+			// Check if this was a generic function call
+			if fi, ok := l.functions[e.Function]; ok && len(fi.TypeParamNames) > 0 {
+				// Need to find the type args from the expression type context
+				// For now, handled by the AST-level rewrite below
+			}
+		}
+		return e
+	case *MethodCallExpr:
+		e.Object = l.rewriteExpr(e.Object)
+		for i, arg := range e.Args {
+			e.Args[i] = l.rewriteExpr(arg)
+		}
+		e.Type = l.rewriteType(e.Type)
+		return e
+	case *BinaryExpr:
+		e.Left = l.rewriteExpr(e.Left)
+		e.Right = l.rewriteExpr(e.Right)
+		return e
+	case *UnaryExpr:
+		e.Operand = l.rewriteExpr(e.Operand)
+		return e
+	case *FieldAccessExpr:
+		e.Object = l.rewriteExpr(e.Object)
+		e.Type = l.rewriteType(e.Type)
+		return e
+	case *IndexExpr:
+		e.Object = l.rewriteExpr(e.Object)
+		e.Index = l.rewriteExpr(e.Index)
+		return e
+	case *StringConcat:
+		e.Left = l.rewriteExpr(e.Left)
+		e.Right = l.rewriteExpr(e.Right)
+		return e
+	case *AwaitExpr:
+		e.Expr = l.rewriteExpr(e.Expr)
+		return e
+	case *SpawnExpr:
+		e.Expr = l.rewriteExpr(e.Expr)
+		return e
+	}
+	return expr
+}
+
+func (l *lowerer) rewriteType(t *checker.Type) *checker.Type {
+	if t == nil {
+		return nil
+	}
+	if t.IsEntity && t.IsGeneric && len(t.TypeParams) > 0 {
+		// Check if this is a generic entity instantiation that needs rewriting
+		if _, ok := l.genericEntityDecls[t.Name]; ok {
+			mangledName := MangleGenericName(t.Name, t.TypeParams)
+			return &checker.Type{
+				Name:     mangledName,
+				IsEntity: true,
+			}
+		}
+	}
+	return t
 }
 
 // resolveCallKind determines the CallKind for a CallExpr.

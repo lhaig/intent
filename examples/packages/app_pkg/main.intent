@@ -1,0 +1,11 @@
+module main version "0.1.0";
+
+import types_pkg;
+
+entry function main() returns Int {
+    let p1: Point = types_pkg.Point(0.0, 0.0);
+    let p2: Point = types_pkg.Point(3.0, 4.0);
+    let d: Float = types_pkg.distance_squared(p1, p2);
+    print(d);
+    return 0;
+}

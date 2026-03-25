@@ -1,0 +1,32 @@
+module types version "0.1.0";
+
+public entity Point {
+    field x: Float;
+    field y: Float;
+
+    constructor(x: Float, y: Float)
+        requires true
+        ensures self.x == x
+        ensures self.y == y
+    {
+        self.x = x;
+        self.y = y;
+    }
+
+    method get_x() returns Float {
+        return self.x;
+    }
+
+    method get_y() returns Float {
+        return self.y;
+    }
+}
+
+public function distance_squared(a: Point, b: Point) returns Float
+    requires true
+    ensures result >= 0.0
+{
+    let dx: Float = b.get_x() - a.get_x();
+    let dy: Float = b.get_y() - a.get_y();
+    return dx * dx + dy * dy;
+}

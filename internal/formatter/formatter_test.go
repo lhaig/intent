@@ -41,6 +41,28 @@ entry function main() returns Int { return 0; }
 	}
 }
 
+func TestFormatPackageImportDecl(t *testing.T) {
+	src := `module main version "0.1.0";
+import math;
+entry function main() returns Int { return 0; }
+`
+	got := formatSource(t, src)
+	if !strings.Contains(got, "import math;\n") {
+		t.Errorf("expected package import decl, got:\n%s", got)
+	}
+}
+
+func TestFormatDottedPackageImportDecl(t *testing.T) {
+	src := `module main version "0.1.0";
+import math.linear;
+entry function main() returns Int { return 0; }
+`
+	got := formatSource(t, src)
+	if !strings.Contains(got, "import math.linear;\n") {
+		t.Errorf("expected dotted package import decl, got:\n%s", got)
+	}
+}
+
 func TestFormatLetStmt(t *testing.T) {
 	src := `module test version "1.0";
 entry function main() returns Int {

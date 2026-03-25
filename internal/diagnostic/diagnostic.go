@@ -208,6 +208,14 @@ func (d *Diagnostics) Format(filename string) string {
 	return builder.String()
 }
 
+// Truncate removes diagnostics added after the given count, restoring the
+// collection to a previous size. Used for speculative parsing with backtracking.
+func (d *Diagnostics) Truncate(n int) {
+	if n < len(d.items) {
+		d.items = d.items[:n]
+	}
+}
+
 // Clear removes all diagnostics from the collection
 func (d *Diagnostics) Clear() {
 	d.items = make([]Diagnostic, 0)

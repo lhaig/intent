@@ -2535,7 +2535,7 @@ entry function main() returns Int {
 	}
 	sortedPaths := []string{"/project/math.intent", "/project/main.intent"}
 
-	result := CheckAll(registry, sortedPaths)
+	result := CheckAll(registry, sortedPaths, nil)
 	if result.Diagnostics.HasErrors() {
 		t.Errorf("Expected no errors, got:\n%s", result.Diagnostics.Format("test"))
 	}
@@ -2565,7 +2565,7 @@ entry function main() returns Int {
 	}
 	sortedPaths := []string{"/project/math.intent", "/project/main.intent"}
 
-	result := CheckAll(registry, sortedPaths)
+	result := CheckAll(registry, sortedPaths, nil)
 	if !result.Diagnostics.HasErrors() {
 		t.Error("Expected error for calling private function from another module")
 	}
@@ -2604,7 +2604,7 @@ entry function main() returns Int {
 	}
 	sortedPaths := []string{"/project/math.intent", "/project/main.intent"}
 
-	result := CheckAll(registry, sortedPaths)
+	result := CheckAll(registry, sortedPaths, nil)
 	if !result.Diagnostics.HasErrors() {
 		t.Error("Expected error for calling non-existent function in module")
 	}
@@ -2647,7 +2647,7 @@ entry function main() returns Int {
 	}
 	sortedPaths := []string{"/project/geometry.intent", "/project/main.intent"}
 
-	result := CheckAll(registry, sortedPaths)
+	result := CheckAll(registry, sortedPaths, nil)
 	if result.Diagnostics.HasErrors() {
 		t.Errorf("Expected no errors, got:\n%s", result.Diagnostics.Format("test"))
 	}
@@ -2679,7 +2679,7 @@ entry function main() returns Int {
 	}
 	sortedPaths := []string{"/project/math.intent", "/project/main.intent"}
 
-	result := CheckAll(registry, sortedPaths)
+	result := CheckAll(registry, sortedPaths, nil)
 	if !result.Diagnostics.HasErrors() {
 		t.Error("Expected error for type mismatch on cross-file function call")
 	}
@@ -2717,7 +2717,7 @@ entry function main() returns Int {
 	}
 	sortedPaths := []string{"/project/math.intent", "/project/main.intent"}
 
-	result := CheckAll(registry, sortedPaths)
+	result := CheckAll(registry, sortedPaths, nil)
 	if !result.Diagnostics.HasErrors() {
 		t.Error("Expected error for using unimported module")
 	}
@@ -3249,7 +3249,7 @@ entry function main() returns Int {
 	}
 	sortedPaths := []string{"/project/handlers.intent", "/project/main.intent"}
 
-	result := CheckAll(registry, sortedPaths)
+	result := CheckAll(registry, sortedPaths, nil)
 	if result.Diagnostics.HasErrors() {
 		t.Errorf("Expected no errors for cross-module trait method call, got:\n%s", result.Diagnostics.Format("test"))
 	}
@@ -3799,5 +3799,527 @@ function test() returns Int {
 
 	if diag.HasErrors() {
 		t.Errorf("Expected no errors for inline lambda in call, got: %s", diag.Format("test"))
+	}
+}
+
+// === Async/Await/Spawn Tests ===
+
+func TestAsyncFunctionDeclaration(t *testing.T) {
+	source := `module test version "1.0.0";
+
+async function fetchData(url: String) returns Future<String> {
+    return url;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for valid async function, got: %s", diag.Format("test"))
+	}
+}
+
+func TestAwaitOutsideAsyncFunction(t *testing.T) {
+	source := `module test version "1.0.0";
+
+async function getData() returns Future<Int> {
+    return 42;
+}
+
+function main() returns Int {
+    let x: Int = await getData();
+    return x;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if !diag.HasErrors() {
+		t.Error("Expected error for await outside async function")
+	}
+	found := false
+	for _, err := range diag.Errors() {
+		if strings.Contains(err.Message, "await can only be used inside async functions") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected 'await can only be used inside async functions' error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestAwaitOnNonFutureType(t *testing.T) {
+	source := `module test version "1.0.0";
+
+async function main() returns Future<Int> {
+    let x: Int = 42;
+    let y: Int = await x;
+    return y;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if !diag.HasErrors() {
+		t.Error("Expected error for await on non-Future type")
+	}
+	found := false
+	for _, err := range diag.Errors() {
+		if strings.Contains(err.Message, "await requires Future type") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected 'await requires Future type' error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestSpawnOnNonAsyncFunction(t *testing.T) {
+	source := `module test version "1.0.0";
+
+function compute(x: Int) returns Int {
+    return x;
+}
+
+async function main() returns Future<Int> {
+    let handle: Int = spawn compute(42);
+    return handle;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if !diag.HasErrors() {
+		t.Error("Expected error for spawn on non-async function")
+	}
+	found := false
+	for _, err := range diag.Errors() {
+		if strings.Contains(err.Message, "spawn requires an async function") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected 'spawn requires an async function' error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestValidSpawnAndAwait(t *testing.T) {
+	source := `module test version "1.0.0";
+
+async function compute(x: Int) returns Future<Int> {
+    return x;
+}
+
+async function main() returns Future<Int> {
+    let handle: Future<Int> = spawn compute(42);
+    let val: Int = await handle;
+    return val;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for valid spawn and await, got: %s", diag.Format("test"))
+	}
+}
+
+func TestFutureTypeResolution(t *testing.T) {
+	source := `module test version "1.0.0";
+
+async function fetchName() returns Future<String> {
+    return "hello";
+}
+
+async function main() returns Future<String> {
+    let f: Future<String> = spawn fetchName();
+    let name: String = await f;
+    return name;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for Future type resolution, got: %s", diag.Format("test"))
+	}
+}
+
+func TestAsyncFunctionWithContracts(t *testing.T) {
+	source := `module test version "1.0.0";
+
+async function fetchPositive(x: Int) returns Future<Int>
+    requires x > 0
+{
+    return x;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for async function with contracts, got: %s", diag.Format("test"))
+	}
+}
+
+func TestAwaitInsideAsyncFunction(t *testing.T) {
+	source := `module test version "1.0.0";
+
+async function inner() returns Future<Int> {
+    return 42;
+}
+
+async function outer() returns Future<Int> {
+    let val: Int = await inner();
+    return val;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for await inside async function, got: %s", diag.Format("test"))
+	}
+}
+
+func TestSleepBuiltin(t *testing.T) {
+	source := `module test version "1.0.0";
+
+async function delayedWork() returns Future<Void> {
+    let f: Future<Void> = sleep(1000);
+    await f;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for sleep builtin, got: %s", diag.Format("test"))
+	}
+}
+
+func TestSleepWrongArgType(t *testing.T) {
+	source := `module test version "1.0.0";
+
+async function delayedWork() returns Future<Void> {
+    let f: Future<Void> = sleep("hello");
+    await f;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if !diag.HasErrors() {
+		t.Error("Expected error for sleep with String argument")
+	}
+	found := false
+	for _, err := range diag.Errors() {
+		if strings.Contains(err.Message, "sleep() argument must be Int") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected 'sleep() argument must be Int' error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestTimeoutBuiltin(t *testing.T) {
+	source := `module test version "1.0.0";
+
+async function fetchData() returns Future<String> {
+    return "data";
+}
+
+async function main() returns Future<String> {
+    let f: Future<String> = spawn fetchData();
+    let r: Result<String, String> = timeout(f, 5000);
+    let value: String = match r {
+        Ok(v) => v,
+        Err(e) => e
+    };
+    return value;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for timeout builtin, got: %s", diag.Format("test"))
+	}
+}
+
+func TestAwaitAllBuiltin(t *testing.T) {
+	source := `module test version "1.0.0";
+
+async function compute(x: Int) returns Future<Int> {
+    return x;
+}
+
+async function main() returns Future<Int> {
+    let f1: Future<Int> = spawn compute(1);
+    let f2: Future<Int> = spawn compute(2);
+    let futures: Array<Future<Int>> = [f1, f2];
+    let results: Array<Int> = await_all(futures);
+    return results[0];
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for await_all builtin, got: %s", diag.Format("test"))
+	}
+}
+
+func TestAwaitAllOutsideAsync(t *testing.T) {
+	source := `module test version "1.0.0";
+
+async function compute(x: Int) returns Future<Int> {
+    return x;
+}
+
+function main() returns Int {
+    let f1: Future<Int> = spawn compute(1);
+    let futures: Array<Future<Int>> = [f1];
+    let results: Array<Int> = await_all(futures);
+    return results[0];
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if !diag.HasErrors() {
+		t.Error("Expected error for await_all outside async function")
+	}
+	found := false
+	for _, err := range diag.Errors() {
+		if strings.Contains(err.Message, "await_all can only be used inside async functions") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected 'await_all can only be used inside async functions' error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestAwaitAnyBuiltin(t *testing.T) {
+	source := `module test version "1.0.0";
+
+async function compute(x: Int) returns Future<Int> {
+    return x;
+}
+
+async function main() returns Future<Int> {
+    let f1: Future<Int> = spawn compute(1);
+    let f2: Future<Int> = spawn compute(2);
+    let futures: Array<Future<Int>> = [f1, f2];
+    let first: Int = await_any(futures);
+    return first;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if diag.HasErrors() {
+		t.Errorf("Expected no errors for await_any builtin, got: %s", diag.Format("test"))
+	}
+}
+
+func TestTimeoutOutsideAsync(t *testing.T) {
+	source := `module test version "1.0.0";
+
+async function fetchData() returns Future<String> {
+    return "data";
+}
+
+function main() returns String {
+    let f: Future<String> = spawn fetchData();
+    let r: Result<String, String> = timeout(f, 5000);
+    let value: String = match r {
+        Ok(v) => v,
+        Err(e) => e
+    };
+    return value;
+}`
+
+	diag := parseAndCheck(t, source)
+
+	if !diag.HasErrors() {
+		t.Error("Expected error for timeout outside async function")
+	}
+	found := false
+	for _, err := range diag.Errors() {
+		if strings.Contains(err.Message, "timeout can only be used inside async functions") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected 'timeout can only be used inside async functions' error, got: %s", diag.Format("test"))
+	}
+}
+
+func TestCheckAllPackageImportCrossPackageCall(t *testing.T) {
+	// Package module: types_pkg/types.intent
+	typesSrc := `module types version "1.0.0";
+
+public function distance(x: Int, y: Int) returns Int {
+    return x + y;
+}
+`
+	// Main module with package import
+	mainSrc := `module main version "1.0.0";
+
+import types_pkg;
+
+entry function main() returns Int {
+    let d: Int = types_pkg.distance(3, 4);
+    return d;
+}
+`
+	// The package import sets IsPackage=true, PackageName="types_pkg"
+	mainProg := makeProgram(t, mainSrc)
+
+	registry := map[string]*ast.Program{
+		"/project/libs/types_pkg/types.intent": makeProgram(t, typesSrc),
+		"/project/main.intent":                 mainProg,
+	}
+	sortedPaths := []string{
+		"/project/libs/types_pkg/types.intent",
+		"/project/main.intent",
+	}
+
+	result := CheckAll(registry, sortedPaths, nil)
+	if result.Diagnostics.HasErrors() {
+		t.Errorf("Expected no errors for cross-package call, got:\n%s", result.Diagnostics.Format("test"))
+	}
+}
+
+func TestCheckAllPackageImportMultipleFiles(t *testing.T) {
+	// Package has two files, both with public functions
+	mathSrc := `module math version "1.0.0";
+
+public function add(a: Int, b: Int) returns Int {
+    return a + b;
+}
+`
+	utilsSrc := `module utils version "1.0.0";
+
+public function negate(x: Int) returns Int {
+    return 0 - x;
+}
+`
+	// Main module imports the package
+	mainSrc := `module main version "1.0.0";
+
+import types_pkg;
+
+entry function main() returns Int {
+    let a: Int = types_pkg.add(1, 2);
+    let b: Int = types_pkg.negate(a);
+    return b;
+}
+`
+	registry := map[string]*ast.Program{
+		"/project/libs/types_pkg/math.intent":  makeProgram(t, mathSrc),
+		"/project/libs/types_pkg/utils.intent": makeProgram(t, utilsSrc),
+		"/project/main.intent":                 makeProgram(t, mainSrc),
+	}
+	sortedPaths := []string{
+		"/project/libs/types_pkg/math.intent",
+		"/project/libs/types_pkg/utils.intent",
+		"/project/main.intent",
+	}
+
+	result := CheckAll(registry, sortedPaths, nil)
+	if result.Diagnostics.HasErrors() {
+		t.Errorf("Expected no errors for cross-package multi-file call, got:\n%s", result.Diagnostics.Format("test"))
+	}
+}
+
+func TestIsFileInPackage_WithPackageDirs(t *testing.T) {
+	packageDirs := map[string]string{
+		"math_utils": "/project/libs/math_utils",
+		"strings":    "/project/libs/strings",
+	}
+
+	tests := []struct {
+		name     string
+		filePath string
+		pkgName  string
+		want     bool
+	}{
+		{
+			name:     "file in known package directory",
+			filePath: "/project/libs/math_utils/add.intent",
+			pkgName:  "math_utils",
+			want:     true,
+		},
+		{
+			name:     "file not in known package directory",
+			filePath: "/project/other/add.intent",
+			pkgName:  "math_utils",
+			want:     false,
+		},
+		{
+			name:     "file in different package directory same name",
+			filePath: "/elsewhere/math_utils/add.intent",
+			pkgName:  "math_utils",
+			want:     false,
+		},
+		{
+			name:     "second package directory match",
+			filePath: "/project/libs/strings/helpers.intent",
+			pkgName:  "strings",
+			want:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isFileInPackage(tt.filePath, tt.pkgName, packageDirs)
+			if got != tt.want {
+				t.Errorf("isFileInPackage(%q, %q, packageDirs) = %v, want %v",
+					tt.filePath, tt.pkgName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsFileInPackage_FallbackWithoutPackageDirs(t *testing.T) {
+	// Empty packageDirs forces fallback to directory-name matching
+	packageDirs := map[string]string{}
+
+	tests := []struct {
+		name     string
+		filePath string
+		pkgName  string
+		want     bool
+	}{
+		{
+			name:     "parent dir matches package name",
+			filePath: "/project/math_utils/add.intent",
+			pkgName:  "math_utils",
+			want:     true,
+		},
+		{
+			name:     "parent dir does not match",
+			filePath: "/project/other/add.intent",
+			pkgName:  "math_utils",
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isFileInPackage(tt.filePath, tt.pkgName, packageDirs)
+			if got != tt.want {
+				t.Errorf("isFileInPackage(%q, %q, {}) = %v, want %v",
+					tt.filePath, tt.pkgName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsFileInPackage_NilPackageDirs(t *testing.T) {
+	// nil packageDirs should also use fallback path
+	got := isFileInPackage("/project/mylib/foo.intent", "mylib", nil)
+	if !got {
+		t.Error("isFileInPackage with nil packageDirs should fallback to dir name matching")
+	}
+	got = isFileInPackage("/project/other/foo.intent", "mylib", nil)
+	if got {
+		t.Error("isFileInPackage with nil packageDirs should not match wrong dir")
 	}
 }

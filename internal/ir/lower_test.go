@@ -3,6 +3,7 @@ package ir
 import (
 	"testing"
 
+	"github.com/lhaig/intent/internal/ast"
 	"github.com/lhaig/intent/internal/checker"
 	"github.com/lhaig/intent/internal/parser"
 )
@@ -304,5 +305,216 @@ entry function main() returns Int {
 	}
 	if boolLit.Type == nil || boolLit.Type.Name != "Bool" {
 		t.Error("expected Bool type on bool literal")
+	}
+}
+
+func TestLowerAsyncFunction(t *testing.T) {
+	src := `module test version "1.0";
+async function fetchData() returns Future<Int> {
+    return 42;
+}
+entry function main() returns Int {
+    return 0;
+}
+`
+	mod := parseAndLower(t, src)
+
+	var asyncFn *Function
+	for _, f := range mod.Functions {
+		if f.Name == "fetchData" {
+			asyncFn = f
+			break
+		}
+	}
+	if asyncFn == nil {
+		t.Fatal("fetchData function not found")
+	}
+	if !asyncFn.IsAsync {
+		t.Error("expected IsAsync=true for fetchData")
+	}
+	if asyncFn.ReturnType == nil || asyncFn.ReturnType.Name != "Future" {
+		t.Error("expected return type Future")
+	}
+
+	// main should not be async
+	for _, f := range mod.Functions {
+		if f.Name == "main" {
+			if f.IsAsync {
+				t.Error("expected IsAsync=false for main")
+			}
+			break
+		}
+	}
+}
+
+func TestLowerAwaitExpr(t *testing.T) {
+	src := `module test version "1.0";
+async function fetchData() returns Future<Int> {
+    return 42;
+}
+async function main() returns Future<Int> {
+    let f: Future<Int> = spawn fetchData();
+    let val: Int = await f;
+    return val;
+}
+`
+	mod := parseAndLower(t, src)
+
+	var mainFn *Function
+	for _, f := range mod.Functions {
+		if f.Name == "main" {
+			mainFn = f
+			break
+		}
+	}
+	if mainFn == nil {
+		t.Fatal("main function not found")
+	}
+	if !mainFn.IsAsync {
+		t.Error("expected IsAsync=true for main")
+	}
+
+	// Statement 1: let result: Int = await f;
+	if len(mainFn.Body) < 2 {
+		t.Fatalf("expected at least 2 statements, got %d", len(mainFn.Body))
+	}
+	letResult, ok := mainFn.Body[1].(*LetStmt)
+	if !ok {
+		t.Fatalf("expected LetStmt for result, got %T", mainFn.Body[1])
+	}
+	awaitExpr, ok := letResult.Value.(*AwaitExpr)
+	if !ok {
+		t.Fatalf("expected AwaitExpr, got %T", letResult.Value)
+	}
+	if awaitExpr.Type == nil || awaitExpr.Type.Name != "Int" {
+		t.Errorf("expected await type Int, got %v", awaitExpr.Type)
+	}
+	if awaitExpr.Expr == nil {
+		t.Error("expected non-nil inner expression in AwaitExpr")
+	}
+}
+
+func TestScanInstantiationsInMatchExpr(t *testing.T) {
+	src := `module test version "1.0";
+entity Stack<T> {
+    field count: Int;
+    constructor()
+        ensures self.count == 0
+    {
+        self.count = 0;
+    }
+}
+enum Choice {
+    A,
+    B,
+}
+entry function main() returns Int {
+    let c: Choice = A;
+    let s: Stack<Int> = match c {
+        A => Stack<Int>(),
+        B => Stack<Int>(),
+    };
+    return s.count;
+}
+`
+	mod := parseAndLower(t, src)
+
+	// The monomorphized entity Stack__Int should be generated
+	found := false
+	for _, e := range mod.Entities {
+		if e.Name == "Stack__Int" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		names := make([]string, len(mod.Entities))
+		for i, e := range mod.Entities {
+			names[i] = e.Name
+		}
+		t.Errorf("expected monomorphized entity Stack__Int, got entities: %v", names)
+	}
+}
+
+func TestLowerSpawnExpr(t *testing.T) {
+	src := `module test version "1.0";
+async function compute(x: Int) returns Future<Int> {
+    return x * 2;
+}
+async function main() returns Future<Int> {
+    let handle: Future<Int> = spawn compute(42);
+    let val: Int = await handle;
+    return val;
+}
+`
+	mod := parseAndLower(t, src)
+
+	var mainFn *Function
+	for _, f := range mod.Functions {
+		if f.Name == "main" {
+			mainFn = f
+			break
+		}
+	}
+	if mainFn == nil {
+		t.Fatal("main function not found")
+	}
+
+	// Statement 0: let handle: Future<Int> = spawn compute(42);
+	letHandle, ok := mainFn.Body[0].(*LetStmt)
+	if !ok {
+		t.Fatalf("expected LetStmt for handle, got %T", mainFn.Body[0])
+	}
+	spawnExpr, ok := letHandle.Value.(*SpawnExpr)
+	if !ok {
+		t.Fatalf("expected SpawnExpr, got %T", letHandle.Value)
+	}
+	if spawnExpr.Type == nil || spawnExpr.Type.Name != "Future" {
+		t.Errorf("expected spawn type Future, got %v", spawnExpr.Type)
+	}
+	if spawnExpr.Expr == nil {
+		t.Error("expected non-nil inner expression in SpawnExpr")
+	}
+	// The inner expression should be a CallExpr
+	if _, ok := spawnExpr.Expr.(*CallExpr); !ok {
+		t.Errorf("expected CallExpr inside SpawnExpr, got %T", spawnExpr.Expr)
+	}
+}
+
+func TestMonomorphizeMismatchedTypeArgs(t *testing.T) {
+	l := &lowerer{
+		exprTypes:          make(map[ast.Expression]*checker.Type),
+		entities:           make(map[string]*checker.EntityInfo),
+		enums:              make(map[string]*checker.EnumInfo),
+		genericEntityDecls: make(map[string]*ast.EntityDecl),
+		genericFuncDecls:   make(map[string]*ast.FunctionDecl),
+		instantiations:     make(map[string][][]*checker.Type),
+		funcInstantiations: make(map[string][][]*checker.Type),
+	}
+
+	// Entity with 2 type params but only 1 type arg
+	entityDecl := &ast.EntityDecl{
+		Name:       "Pair",
+		TypeParams: []*ast.TypeParam{{Name: "T"}, {Name: "U"}},
+	}
+	result := l.monomorphizeEntity(entityDecl, []*checker.Type{checker.TypeInt})
+	if result != nil {
+		t.Error("expected nil from monomorphizeEntity with mismatched type arg count")
+	}
+
+	// Function with 1 type param but 0 type args
+	funcDecl := &ast.FunctionDecl{
+		Name:       "identity",
+		TypeParams: []*ast.TypeParam{{Name: "T"}},
+	}
+	fnResult := l.monomorphizeFunction(funcDecl, []*checker.Type{})
+	if fnResult != nil {
+		t.Error("expected nil from monomorphizeFunction with mismatched type arg count")
+	}
+
+	// Function with 1 type param but 2 type args (too many)
+	fnResult2 := l.monomorphizeFunction(funcDecl, []*checker.Type{checker.TypeInt, checker.TypeString})
+	if fnResult2 != nil {
+		t.Error("expected nil from monomorphizeFunction with too many type args")
 	}
 }

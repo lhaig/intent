@@ -2,7 +2,19 @@
 
 ## Status
 
-Proposed
+Accepted
+
+## Implementation Notes
+
+Implemented in Phase 13. The design was followed closely with these notes:
+
+- **TOML parsing**: Uses a lightweight custom parser (key=value and inline tables) rather than a full TOML library, sufficient for `intent.toml` manifests.
+- **Package imports**: Parser supports both `import package_name;` and dotted `import package_name.submodule;` syntax. Package imports set `IsPackage=true` on the AST `ImportDecl` node.
+- **Version resolution**: Semver parsing, constraint matching (`=`, `^`, `~`, `>=`, `<`), and conflict detection are implemented. Only one version per package in the dependency tree.
+- **Cache**: Package cache at `~/.intent/cache/<name>/<version>/` with SHA256 checksum-based invalidation.
+- **CLI**: `intentc pkg init`, `intentc pkg add`, `intentc pkg remove`, and `intentc pkg install` are implemented. `intentc build` auto-resolves packages.
+- **Local path dependencies**: Supported via inline table syntax `{ path = "../pkg" }`. Local path dependencies are not cached.
+- **Registry (Phase 4)**: Not yet implemented. Only local path dependencies and manual cache population are available.
 
 ## Context
 
@@ -32,23 +44,21 @@ The existing `module <name> version "<semver>";` declarations continue to work f
 ```
 my-project/
   intent.toml
-  src/
-    main.intent          # entry point
-    handlers.intent
-    types.intent
+  main.intent          # entry point
+  handlers.intent
+  types.intent
   deps/                   # resolved dependencies (not committed)
     graph-types/
       intent.toml
-      src/
-        types.intent
-        validation.intent
+      types.intent
+      validation.intent
 ```
 
 ### Import Syntax
 
 **Local imports** (unchanged):
 ```intent
-import "handlers.intent";        // relative to project src/
+import "handlers.intent";        // relative to project root
 import "utils/helpers.intent";   // subdirectory
 ```
 
@@ -80,8 +90,7 @@ Only one version of each package allowed in the dependency tree (no diamond depe
     graph-types/
       1.0.0/
         intent.toml
-        src/
-          ...
+        ...             # .intent files in package root
       1.1.0/
         ...
 ```
@@ -157,6 +166,14 @@ The main additions are:
 
 - Benefits from generics (generic packages are more reusable)
 - Independent of async/concurrency
+
+## Known Limitations
+
+- **Semver overlap heuristic**: `hasValidOverlap` in `semver.go` uses 999 as a heuristic upper bound for minor/patch version components when probing constraint boundaries. This may produce false negatives (failing to detect valid overlaps) for packages with more than 999 minor or patch releases. In practice this is unlikely, but the overlap check is not exhaustive.
+
+- **Minimal TOML parser**: The `intent.toml` parser in `manifest.go` implements a minimal TOML subset. It does not handle inline comments (`key = "value" # comment`), escape sequences in quoted strings, or multi-line values. Full-line comments (lines starting with `#`) are supported.
+
+- **Closure/Fn type syntax**: The `Fn` type syntax was updated to `Fn(ArgType) -> ReturnType` as a drive-by fix in the closures demo (`examples/closure_demo.intent`). This is intentional and reflects the current parser expectations.
 
 ## Consequences
 

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/lhaig/intent/internal/compiler"
@@ -25,6 +28,12 @@ Usage:
   intentc test-gen [--emit] <file.intent>                      Generate Rust with property-based contract tests
   intentc fmt [--check] <file.intent>                          Format source to canonical style
   intentc lint <file.intent>                                   Run lint checks for style/best practices
+  intentc pkg init                                             Create intent.toml from module declarations
+  intentc pkg add <name> <version>                             Add dependency with version constraint
+  intentc pkg add <name> --path <dir>                          Add local path dependency
+  intentc pkg remove <name>                                    Remove dependency from manifest
+  intentc pkg install                                          Resolve and cache all dependencies
+  intentc pkg list                                             Show dependency tree
 
 Options:
   --target <target>   Target platform: rust (default), js, wasm
@@ -83,6 +92,8 @@ func main() {
 		handleFmt(os.Args[2:])
 	case "lint":
 		handleLint(os.Args[2:])
+	case "pkg":
+		handlePkg(os.Args[2:])
 	case "help", "--help", "-h":
 		fmt.Print(usage)
 	default:
@@ -450,4 +461,425 @@ func handleLint(args []string) {
 	fmt.Print(diag.Format(filePath))
 	fmt.Println()
 	fmt.Printf("%d warning(s) found.\n", diag.Count())
+}
+
+const pkgUsage = `Usage:
+  intentc pkg init                     Create intent.toml from module declarations
+  intentc pkg add <name> <version>     Add dependency with version constraint
+  intentc pkg add <name> --path <dir>  Add local path dependency
+  intentc pkg remove <name>            Remove dependency from manifest
+  intentc pkg install                  Resolve and cache all dependencies
+  intentc pkg list                     Show dependency tree
+`
+
+func handlePkg(args []string) {
+	if len(args) == 0 {
+		fmt.Fprint(os.Stderr, pkgUsage)
+		os.Exit(1)
+	}
+
+	switch args[0] {
+	case "init":
+		handlePkgInit()
+	case "add":
+		handlePkgAdd(args[1:])
+	case "remove":
+		handlePkgRemove(args[1:])
+	case "install":
+		handlePkgInstall()
+	case "list":
+		handlePkgList()
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown pkg subcommand: %s\n\n", args[0])
+		fmt.Fprint(os.Stderr, pkgUsage)
+		os.Exit(1)
+	}
+}
+
+// modulePattern matches "module <name> version "<ver>";" declarations.
+var modulePattern = regexp.MustCompile(`^\s*module\s+(\w+)\s+version\s+"[^"]*"\s*;`)
+
+func handlePkgInit() {
+	manifestPath := "intent.toml"
+	if _, err := os.Stat(manifestPath); err == nil {
+		fmt.Fprintln(os.Stderr, "Error: intent.toml already exists")
+		os.Exit(1)
+	}
+
+	// Scan for .intent files in current directory to find module name
+	pkgName := ""
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading directory: %s\n", err)
+		os.Exit(1)
+	}
+
+	// Sort entries by name for deterministic iteration, then prefer main.intent.
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() < entries[j].Name()
+	})
+	pkgSource := ""
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".intent") {
+			continue
+		}
+		name, found := extractModuleName(entry.Name())
+		if found {
+			if entry.Name() == "main.intent" {
+				pkgName = name
+				pkgSource = "main.intent"
+				break
+			}
+			if pkgName == "" {
+				pkgName = name
+				pkgSource = entry.Name()
+			}
+		}
+	}
+	if pkgSource != "" && pkgSource != "main.intent" {
+		fmt.Fprintf(os.Stderr, "Note: Using module name from %s (no main.intent found)\n", pkgSource)
+	}
+
+	// Fall back to directory name
+	if pkgName == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting working directory: %s\n", err)
+			os.Exit(1)
+		}
+		pkgName = filepath.Base(wd)
+	}
+
+	m := &compiler.Manifest{
+		Package: compiler.PackageInfo{
+			Name:    pkgName,
+			Version: "0.1.0",
+		},
+		Dependencies: make(map[string]compiler.DependencySpec),
+	}
+
+	if err := compiler.WriteManifest(manifestPath, m); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing intent.toml: %s\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Created intent.toml for package %q\n", pkgName)
+}
+
+// extractModuleName reads a file and returns the module name from a module declaration.
+func extractModuleName(path string) (string, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		matches := modulePattern.FindStringSubmatch(scanner.Text())
+		if len(matches) >= 2 {
+			return matches[1], true
+		}
+	}
+	return "", false
+}
+
+func handlePkgAdd(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "Error: missing package name")
+		fmt.Fprintln(os.Stderr, "Usage: intentc pkg add <name> <version>")
+		fmt.Fprintln(os.Stderr, "       intentc pkg add <name> --path <dir>")
+		os.Exit(1)
+	}
+
+	name := args[0]
+	var dep compiler.DependencySpec
+
+	// Parse remaining args for version or --path
+	i := 1
+	for i < len(args) {
+		switch args[i] {
+		case "--path":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "Error: --path requires a directory argument")
+				os.Exit(1)
+			}
+			i++ // advance past --path to the directory value before checking for duplicates
+			if dep.Path != "" {
+				fmt.Fprintf(os.Stderr, "Error: duplicate --path argument: %s\n", args[i])
+				os.Exit(1)
+			}
+			dep.Path = args[i]
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				fmt.Fprintf(os.Stderr, "Error: unknown option: %s\n", args[i])
+				os.Exit(1)
+			}
+			if dep.Version != "" {
+				fmt.Fprintf(os.Stderr, "Error: duplicate version argument: %s\n", args[i])
+				os.Exit(1)
+			}
+			dep.Version = args[i]
+		}
+		i++
+	}
+
+	if dep.Version == "" && dep.Path == "" {
+		fmt.Fprintln(os.Stderr, "Error: must specify a version or --path")
+		os.Exit(1)
+	}
+
+	if dep.Version != "" && dep.Path != "" {
+		fmt.Fprintln(os.Stderr, "Error: cannot specify both a version and --path")
+		os.Exit(1)
+	}
+
+	// Validate version constraint if provided
+	if dep.Version != "" {
+		if _, err := compiler.ParseConstraint(dep.Version); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: invalid version constraint %q: %s\n", dep.Version, err)
+			os.Exit(1)
+		}
+	}
+
+	// Resolve manifest directory so path deps are validated relative to it,
+	// consistent with how handlePkgInstall resolves them.
+	manifestDir, err := filepath.Abs(".")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Validate path exists if provided, resolving relative to manifest directory
+	if dep.Path != "" {
+		resolvedPath := dep.Path
+		if !filepath.IsAbs(dep.Path) {
+			resolvedPath = filepath.Join(manifestDir, dep.Path)
+		}
+		info, err := os.Stat(resolvedPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: path %q does not exist\n", dep.Path)
+			os.Exit(1)
+		}
+		if !info.IsDir() {
+			fmt.Fprintf(os.Stderr, "Error: path %q is not a directory\n", dep.Path)
+			os.Exit(1)
+		}
+	}
+
+	m, err := compiler.LoadManifest(manifestDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		fmt.Fprintln(os.Stderr, "Run 'intentc pkg init' to create an intent.toml first.")
+		os.Exit(1)
+	}
+
+	m.Dependencies[name] = dep
+
+	if err := compiler.WriteManifest("intent.toml", m); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing intent.toml: %s\n", err)
+		os.Exit(1)
+	}
+
+	if dep.Path != "" {
+		fmt.Printf("Added dependency %s (path: %s)\n", name, dep.Path)
+	} else {
+		fmt.Printf("Added dependency %s %s\n", name, dep.Version)
+	}
+}
+
+func handlePkgRemove(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "Error: missing package name")
+		fmt.Fprintln(os.Stderr, "Usage: intentc pkg remove <name>")
+		os.Exit(1)
+	}
+
+	name := args[0]
+
+	m, err := compiler.LoadManifest(".")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
+	}
+
+	if _, ok := m.Dependencies[name]; !ok {
+		fmt.Fprintf(os.Stderr, "Error: dependency %q not found in intent.toml\n", name)
+		os.Exit(1)
+	}
+
+	delete(m.Dependencies, name)
+
+	if err := compiler.WriteManifest("intent.toml", m); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing intent.toml: %s\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Removed dependency %s\n", name)
+}
+
+func handlePkgInstall() {
+	manifestDir, err := filepath.Abs(".")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	m, err := compiler.LoadManifest(manifestDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		fmt.Fprintln(os.Stderr, "Run 'intentc pkg init' to create an intent.toml first.")
+		os.Exit(1)
+	}
+
+	if len(m.Dependencies) == 0 {
+		fmt.Println("No dependencies to install.")
+		return
+	}
+
+	cache, err := compiler.NewPackageCache()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
+	}
+
+	// Check if any versioned dependencies exist and warn early.
+	hasVersioned := false
+	for _, dep := range m.Dependencies {
+		if dep.Path == "" && dep.Version != "" {
+			hasVersioned = true
+			break
+		}
+	}
+	if hasVersioned {
+		fmt.Fprintln(os.Stderr, "WARNING: no package registry available. Versioned dependencies can only be resolved from the local cache.")
+	}
+
+	hasErrors := false
+	hasUnresolved := false
+	names := sortedKeys(m.Dependencies)
+	for _, name := range names {
+		dep := m.Dependencies[name]
+
+		if dep.Path != "" {
+			// Local path dependency - resolve relative to manifest directory, not CWD
+			resolvedPath := dep.Path
+			if !filepath.IsAbs(dep.Path) {
+				resolvedPath = filepath.Join(manifestDir, dep.Path)
+			}
+			info, err := os.Stat(resolvedPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  %s: ERROR path %q not found\n", name, dep.Path)
+				hasErrors = true
+				continue
+			}
+			if !info.IsDir() {
+				fmt.Fprintf(os.Stderr, "  %s: ERROR path %q is not a directory\n", name, dep.Path)
+				hasErrors = true
+				continue
+			}
+			fmt.Printf("  %s: ok (local: %s)\n", name, dep.Path)
+			continue
+		}
+
+		// Versioned dependency - check cache
+		if dep.Version == "" {
+			fmt.Fprintf(os.Stderr, "  %s: ERROR no version specified\n", name)
+			hasErrors = true
+			continue
+		}
+
+		// Resolve the constraint to a concrete version for cache lookup.
+		// ConstraintBaseVersion extracts the base version from constraints like
+		// "^1.0.0" -> "1.0.0", ensuring consistent cache keys.
+		//
+		// Limitation: For caret/tilde constraints (e.g. ^1.0.0, ~1.2.0) the
+		// resolved version may differ from the constraint's base version. When
+		// a real package registry is added, the resolved version (not the
+		// constraint base) should be used as the cache key.
+		version, err := compiler.ConstraintBaseVersion(dep.Version)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  %s: ERROR invalid version %q: %s\n", name, dep.Version, err)
+			hasErrors = true
+			continue
+		}
+
+		if cache.Has(name, version) {
+			fmt.Printf("  %s@%s: cached\n", name, version)
+		} else if found, foundVer := cache.FindMatchingVersion(name, dep.Version); found {
+			fmt.Printf("  %s@%s: cached (constraint %s matched cached version)\n", name, foundVer, dep.Version)
+		} else {
+			// TODO: Cache population will happen once a package registry is available. Store/StoreWithChecksum APIs are ready for integration.
+			fmt.Fprintf(os.Stderr, "  %s@%s: not installed — no registry available to fetch this version\n", name, version)
+			hasUnresolved = true
+		}
+	}
+
+	if hasErrors {
+		os.Exit(1)
+	}
+
+	if hasUnresolved {
+		fmt.Fprintln(os.Stderr, "\nSome packages could not be installed (no registry available).")
+		fmt.Fprintln(os.Stderr, "To use local packages instead, add them with: intentc pkg add <name> --path <dir>")
+	} else {
+		fmt.Println("Install complete.")
+	}
+}
+
+func handlePkgList() {
+	m, err := compiler.LoadManifest(".")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("%s %s\n", m.Package.Name, m.Package.Version)
+
+	if len(m.Dependencies) == 0 {
+		fmt.Println("  (no dependencies)")
+		return
+	}
+
+	visited := map[string]bool{m.Package.Name: true}
+	printDeps(m.Dependencies, "", ".", visited)
+}
+
+func printDeps(deps map[string]compiler.DependencySpec, indent string, baseDir string, visited map[string]bool) {
+	names := sortedKeys(deps)
+	for i, name := range names {
+		dep := deps[name]
+		connector := "├── "
+		childIndent := indent + "│   "
+		if i == len(names)-1 {
+			connector = "└── "
+			childIndent = indent + "    "
+		}
+		if dep.Path != "" {
+			fmt.Printf("%s%s%s (local)\n", indent, connector, name)
+			if visited[name] {
+				fmt.Printf("%s(already listed)\n", childIndent)
+				continue
+			}
+			visited[name] = true
+			resolvedPath := dep.Path
+			if !filepath.IsAbs(resolvedPath) {
+				resolvedPath = filepath.Join(baseDir, resolvedPath)
+			}
+			sub, err := compiler.LoadManifest(resolvedPath)
+			if err == nil && len(sub.Dependencies) > 0 {
+				printDeps(sub.Dependencies, childIndent, resolvedPath, visited)
+			}
+		} else {
+			fmt.Printf("%s%s%s %s\n", indent, connector, name, dep.Version)
+		}
+	}
+}
+
+func sortedKeys(m map[string]compiler.DependencySpec) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

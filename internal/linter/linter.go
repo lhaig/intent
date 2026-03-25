@@ -38,12 +38,14 @@ func (l *Linter) lintFunctions() {
 		l.checkEmptyFunctionBody(fn.Name, fn.Body, fn.Line, fn.Column)
 		l.checkMissingContracts(fn.Name, fn.Requires, fn.Ensures, fn.Line, fn.Column)
 		l.checkFunctionNaming(fn.Name, fn.Line, fn.Column)
+		l.checkUnusedTypeParams(fn.Name, fn.TypeParams, fn.Params, fn.ReturnType)
 
 		if fn.Body != nil {
 			usedNames := l.collectUsedNames(fn.Body.Statements)
 			l.checkUnusedParams(fn.Name, fn.Params, usedNames)
 			l.checkUnusedVariables(fn.Body.Statements, usedNames)
 			l.checkMutableNeverReassigned(fn.Body.Statements, usedNames)
+			l.checkSpawnWithoutAwait(fn.Name, fn.Body.Statements)
 		}
 	}
 }
@@ -53,6 +55,7 @@ func (l *Linter) lintEntities() {
 	for _, entity := range l.prog.Entities {
 		l.checkEntityNaming(entity.Name, entity.Line, entity.Column)
 		l.checkEntityWithoutInvariant(entity)
+		l.checkUnusedEntityTypeParams(entity)
 
 		// Check constructor
 		if entity.Constructor != nil {
@@ -269,6 +272,42 @@ func (l *Linter) checkMutableNeverReassigned(stmts []ast.Statement, _ map[string
 	}
 }
 
+// checkSpawnWithoutAwait warns if a spawn expression result is used in an expression
+// statement (discarded) without being assigned to a variable for later await.
+func (l *Linter) checkSpawnWithoutAwait(funcName string, stmts []ast.Statement) {
+	for _, stmt := range stmts {
+		if exprStmt, ok := stmt.(*ast.ExprStmt); ok {
+			if spawn, ok := exprStmt.Expr.(*ast.SpawnExpr); ok {
+				line, col := spawn.Pos()
+				l.diag.Warningf(line, col,
+					"spawn result in '%s' is discarded; assign to a Future variable and await it", funcName)
+			}
+		}
+		// Recurse into nested blocks
+		switch s := stmt.(type) {
+		case *ast.IfStmt:
+			if s.Then != nil {
+				l.checkSpawnWithoutAwait(funcName, s.Then.Statements)
+			}
+			if s.Else != nil {
+				if block, ok := s.Else.(*ast.Block); ok {
+					l.checkSpawnWithoutAwait(funcName, block.Statements)
+				} else if nestedIf, ok := s.Else.(*ast.IfStmt); ok {
+					l.checkSpawnWithoutAwait(funcName, []ast.Statement{nestedIf})
+				}
+			}
+		case *ast.WhileStmt:
+			if s.Body != nil {
+				l.checkSpawnWithoutAwait(funcName, s.Body.Statements)
+			}
+		case *ast.ForInStmt:
+			if s.Body != nil {
+				l.checkSpawnWithoutAwait(funcName, s.Body.Statements)
+			}
+		}
+	}
+}
+
 // --- Name collection helpers ---
 
 // collectUsedNames walks all expressions in a slice of statements and collects
@@ -408,6 +447,10 @@ func (l *Linter) collectUsedNamesFromExpr(expr ast.Expression, used map[string]b
 	case *ast.LambdaExpr:
 		// Collect from body (lambda params are not external used names)
 		l.collectUsedNamesFromExpr(e.Body, used)
+	case *ast.AwaitExpr:
+		l.collectUsedNamesFromExpr(e.Expr, used)
+	case *ast.SpawnExpr:
+		l.collectUsedNamesFromExpr(e.Expr, used)
 	}
 }
 
@@ -491,4 +534,89 @@ func isPascalCase(name string) bool {
 		return false
 	}
 	return !strings.ContainsRune(name, '_')
+}
+
+// checkUnusedTypeParams warns about type parameters not used in function params or return type.
+func (l *Linter) checkUnusedTypeParams(funcName string, typeParams []*ast.TypeParam, params []*ast.Param, returnType *ast.TypeRef) {
+	if len(typeParams) == 0 {
+		return
+	}
+	for _, tp := range typeParams {
+		used := false
+		for _, p := range params {
+			if typeRefUsesName(p.Type, tp.Name) {
+				used = true
+				break
+			}
+		}
+		if !used && returnType != nil {
+			used = typeRefUsesName(returnType, tp.Name)
+		}
+		if !used {
+			l.diag.Warningf(tp.Line, tp.Column,
+				"type parameter '%s' in function '%s' is never used in parameters or return type",
+				tp.Name, funcName)
+		}
+	}
+}
+
+// checkUnusedEntityTypeParams warns about type parameters not used in entity fields or methods.
+func (l *Linter) checkUnusedEntityTypeParams(entity *ast.EntityDecl) {
+	if len(entity.TypeParams) == 0 {
+		return
+	}
+	for _, tp := range entity.TypeParams {
+		used := false
+		for _, f := range entity.Fields {
+			if typeRefUsesName(f.Type, tp.Name) {
+				used = true
+				break
+			}
+		}
+		if !used {
+			for _, m := range entity.Methods {
+				for _, p := range m.Params {
+					if typeRefUsesName(p.Type, tp.Name) {
+						used = true
+						break
+					}
+				}
+				if !used && m.ReturnType != nil {
+					used = typeRefUsesName(m.ReturnType, tp.Name)
+				}
+				if used {
+					break
+				}
+			}
+		}
+		if !used {
+			l.diag.Warningf(tp.Line, tp.Column,
+				"type parameter '%s' in entity '%s' is never used",
+				tp.Name, entity.Name)
+		}
+	}
+}
+
+// typeRefUsesName checks if a type reference uses the given name.
+func typeRefUsesName(ref *ast.TypeRef, name string) bool {
+	if ref == nil {
+		return false
+	}
+	if ref.Name == name {
+		return true
+	}
+	for _, arg := range ref.TypeArgs {
+		if typeRefUsesName(arg, name) {
+			return true
+		}
+	}
+	for _, pt := range ref.ParamTypes {
+		if typeRefUsesName(pt, name) {
+			return true
+		}
+	}
+	if ref.ReturnType != nil {
+		return typeRefUsesName(ref.ReturnType, name)
+	}
+	return false
 }

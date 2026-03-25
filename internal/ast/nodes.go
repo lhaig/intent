@@ -50,19 +50,32 @@ func (m *ModuleDecl) Pos() (int, int) { return m.Line, m.Column }
 
 // ImportDecl represents an import declaration
 type ImportDecl struct {
-	Path   string // import path (e.g. "math.intent")
-	Alias  string // empty for now (no aliasing in v1)
+	Path        string // import path (e.g. "math.intent") for module imports
+	Alias       string // empty for now (no aliasing in v1)
+	IsPackage   bool   // true for package imports (identifier, not string path)
+	PackageName string // package name for package imports (e.g. "graph_types")
+	Line        int
+	Column      int
+}
+
+func (i *ImportDecl) Pos() (int, int) { return i.Line, i.Column }
+
+// TypeParam represents a type parameter in a generic declaration
+type TypeParam struct {
+	Name   string
 	Line   int
 	Column int
 }
 
-func (i *ImportDecl) Pos() (int, int) { return i.Line, i.Column }
+func (t *TypeParam) Pos() (int, int) { return t.Line, t.Column }
 
 // FunctionDecl represents a function declaration
 type FunctionDecl struct {
 	Name       string
 	IsEntry    bool
 	IsPublic   bool
+	IsAsync    bool
+	TypeParams []*TypeParam // generic type parameters, e.g., <T, U>
 	Params     []*Param
 	ReturnType *TypeRef
 	Requires   []*ContractClause
@@ -120,6 +133,7 @@ func (d *DecreaseClause) Pos() (int, int) { return d.Line, d.Column }
 type EntityDecl struct {
 	Name        string
 	IsPublic    bool
+	TypeParams  []*TypeParam // generic type parameters, e.g., <T, U>
 	Fields      []*FieldDecl
 	Invariants  []*InvariantDecl
 	Constructor *ConstructorDecl
@@ -356,6 +370,7 @@ func (u *UnaryExpr) exprNode()       {}
 // CallExpr represents a function call
 type CallExpr struct {
 	Function string
+	TypeArgs []*TypeRef // type arguments for generic calls, e.g., Stack<Int>()
 	Args     []Expression
 	Line     int
 	Column   int
@@ -624,3 +639,23 @@ type LambdaExpr struct {
 
 func (l *LambdaExpr) Pos() (int, int) { return l.Line, l.Column }
 func (l *LambdaExpr) exprNode()       {}
+
+// AwaitExpr represents an await expression
+type AwaitExpr struct {
+	Expr   Expression
+	Line   int
+	Column int
+}
+
+func (a *AwaitExpr) Pos() (int, int) { return a.Line, a.Column }
+func (a *AwaitExpr) exprNode()       {}
+
+// SpawnExpr represents a spawn expression
+type SpawnExpr struct {
+	Expr   Expression
+	Line   int
+	Column int
+}
+
+func (s *SpawnExpr) Pos() (int, int) { return s.Line, s.Column }
+func (s *SpawnExpr) exprNode()       {}

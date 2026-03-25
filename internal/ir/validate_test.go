@@ -407,3 +407,131 @@ func TestValidateEntryModuleWithoutMain(t *testing.T) {
 		t.Errorf("expected error about missing main function, got: %v", errors)
 	}
 }
+
+func TestValidateAwaitExprNilExpr(t *testing.T) {
+	mod := &Module{
+		Name:    "test",
+		IsEntry: true,
+		Functions: []*Function{
+			{
+				Name:       "main",
+				IsEntry:    true,
+				IsAsync:    true,
+				ReturnType: checker.TypeInt,
+				Body: []Stmt{
+					&ExprStmt{
+						Expr: &AwaitExpr{
+							Expr: nil, // Invalid
+							Type: checker.TypeInt,
+						},
+					},
+					&ReturnStmt{
+						Value: &IntLit{Value: 0, Type: checker.TypeInt},
+					},
+				},
+			},
+		},
+	}
+
+	errors := Validate(mod)
+	if len(errors) == 0 {
+		t.Error("expected validation error for AwaitExpr with nil Expr")
+	}
+	found := false
+	for _, err := range errors {
+		if err == "function main statement 0: AwaitExpr has nil Expr" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected error about AwaitExpr nil Expr, got: %v", errors)
+	}
+}
+
+func TestValidateSpawnExprNilExpr(t *testing.T) {
+	mod := &Module{
+		Name:    "test",
+		IsEntry: true,
+		Functions: []*Function{
+			{
+				Name:       "main",
+				IsEntry:    true,
+				IsAsync:    true,
+				ReturnType: checker.TypeInt,
+				Body: []Stmt{
+					&ExprStmt{
+						Expr: &SpawnExpr{
+							Expr: nil, // Invalid
+							Type: checker.TypeInt,
+						},
+					},
+					&ReturnStmt{
+						Value: &IntLit{Value: 0, Type: checker.TypeInt},
+					},
+				},
+			},
+		},
+	}
+
+	errors := Validate(mod)
+	if len(errors) == 0 {
+		t.Error("expected validation error for SpawnExpr with nil Expr")
+	}
+	found := false
+	for _, err := range errors {
+		if err == "function main statement 0: SpawnExpr has nil Expr" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected error about SpawnExpr nil Expr, got: %v", errors)
+	}
+}
+
+func TestValidateAsyncNodesValid(t *testing.T) {
+	// Valid AwaitExpr and SpawnExpr should pass validation
+	mod := &Module{
+		Name:    "test",
+		IsEntry: true,
+		Functions: []*Function{
+			{
+				Name:       "main",
+				IsEntry:    true,
+				IsAsync:    true,
+				ReturnType: checker.TypeInt,
+				Body: []Stmt{
+					&LetStmt{
+						Name: "handle",
+						Type: checker.TypeInt,
+						Value: &SpawnExpr{
+							Expr: &CallExpr{
+								Function: "compute",
+								Kind:     CallFunction,
+								Type:     checker.TypeInt,
+							},
+							Type: checker.TypeInt,
+						},
+					},
+					&LetStmt{
+						Name: "result",
+						Type: checker.TypeInt,
+						Value: &AwaitExpr{
+							Expr: &VarRef{Name: "handle", Type: checker.TypeInt},
+							Type: checker.TypeInt,
+						},
+					},
+					&ReturnStmt{
+						Value: &IntLit{Value: 0, Type: checker.TypeInt},
+					},
+				},
+			},
+		},
+	}
+
+	errors := Validate(mod)
+	if len(errors) > 0 {
+		t.Errorf("expected no errors for valid async nodes, got: %v", errors)
+	}
+}

@@ -106,7 +106,11 @@ func (f *formatter) formatModuleDecl(m *ast.ModuleDecl) {
 }
 
 func (f *formatter) formatImportDecl(imp *ast.ImportDecl) {
-	f.emitLinef("import \"%s\";", imp.Path)
+	if imp.IsPackage {
+		f.emitLinef("import %s;", imp.PackageName)
+	} else {
+		f.emitLinef("import \"%s\";", imp.Path)
+	}
 }
 
 // --- declarations ---
@@ -144,7 +148,7 @@ func (f *formatter) formatEntityDecl(e *ast.EntityDecl) {
 	} else {
 		f.emit(f.indentStr())
 	}
-	f.emitf("entity %s {\n", e.Name)
+	f.emitf("entity %s%s {\n", e.Name, f.formatTypeParams(e.TypeParams))
 	f.incIndent()
 
 	// Fields
@@ -245,10 +249,13 @@ func (f *formatter) formatFunctionDecl(fn *ast.FunctionDecl) {
 	if fn.IsPublic {
 		f.emit("public ")
 	}
+	if fn.IsAsync {
+		f.emit("async ")
+	}
 	if fn.IsEntry {
 		f.emit("entry ")
 	}
-	f.emitf("function %s(", fn.Name)
+	f.emitf("function %s%s(", fn.Name, f.formatTypeParams(fn.TypeParams))
 	for i, p := range fn.Params {
 		if i > 0 {
 			f.emit(", ")
@@ -503,7 +510,15 @@ func (f *formatter) formatExprPrec(e ast.Expression, parentPrec int) string {
 		for i, arg := range expr.Args {
 			args[i] = f.formatExpr(arg)
 		}
-		return fmt.Sprintf("%s(%s)", expr.Function, strings.Join(args, ", "))
+		typeArgsStr := ""
+		if len(expr.TypeArgs) > 0 {
+			typeArgStrs := make([]string, len(expr.TypeArgs))
+			for i, ta := range expr.TypeArgs {
+				typeArgStrs[i] = f.formatTypeRef(ta)
+			}
+			typeArgsStr = "<" + strings.Join(typeArgStrs, ", ") + ">"
+		}
+		return fmt.Sprintf("%s%s(%s)", expr.Function, typeArgsStr, strings.Join(args, ", "))
 
 	case *ast.MethodCallExpr:
 		obj := f.formatExpr(expr.Object)
@@ -601,6 +616,12 @@ func (f *formatter) formatExprPrec(e ast.Expression, parentPrec int) string {
 	case *ast.LambdaExpr:
 		return f.formatLambdaExpr(expr)
 
+	case *ast.AwaitExpr:
+		return "await " + f.formatExprPrec(expr.Expr, 10)
+
+	case *ast.SpawnExpr:
+		return "spawn " + f.formatExprPrec(expr.Expr, 10)
+
 	default:
 		return "<unknown>"
 	}
@@ -635,6 +656,19 @@ func (f *formatter) formatMatchPattern(p *ast.MatchPattern) string {
 		return p.VariantName
 	}
 	return fmt.Sprintf("%s(%s)", p.VariantName, strings.Join(p.Bindings, ", "))
+}
+
+// --- type parameters ---
+
+func (f *formatter) formatTypeParams(params []*ast.TypeParam) string {
+	if len(params) == 0 {
+		return ""
+	}
+	names := make([]string, len(params))
+	for i, p := range params {
+		names[i] = p.Name
+	}
+	return "<" + strings.Join(names, ", ") + ">"
 }
 
 // --- type references ---

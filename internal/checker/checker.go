@@ -57,6 +57,7 @@ type Checker struct {
 	loopDepth       int
 	currentFunc     *FuncInfo // Track current function for Result/Option variant inference
 	letDeclaredType *Type     // Track type annotation from let statement for variant inference
+	inAsyncFunc     bool      // Track whether we're inside an async function
 
 	// Cross-file (multi-module) context
 	moduleImports map[string]*ModuleSymbols // module alias -> public symbols
@@ -71,9 +72,11 @@ type EnumVariantLookup struct {
 
 // FuncInfo holds information about a function
 type FuncInfo struct {
-	Name       string
-	Params     []ParamInfo
-	ReturnType *Type
+	Name           string
+	Params         []ParamInfo
+	ReturnType     *Type
+	TypeParamNames []string // non-empty for generic functions
+	IsAsync        bool     // true for async functions
 }
 
 // CheckResult holds the results of type checking for use by later pipeline stages
@@ -84,6 +87,7 @@ type CheckResult struct {
 	Enums       map[string]*EnumInfo
 	Traits      map[string]*TraitInfo
 	ImplOrigins map[string]string // "Entity.Method" -> "Trait"
+	Functions   map[string]*FuncInfo
 }
 
 // CheckWithResult performs semantic analysis and returns results for downstream stages
@@ -120,6 +124,7 @@ func CheckWithResult(prog *ast.Program) *CheckResult {
 		Enums:       c.enums,
 		Traits:      c.traits,
 		ImplOrigins: c.implOrigins,
+		Functions:   c.functions,
 	}
 }
 
@@ -136,6 +141,21 @@ type CheckAllResult struct {
 	Enums       map[string]*EnumInfo
 	Traits      map[string]*TraitInfo
 	ImplOrigins map[string]string
+	Functions   map[string]*FuncInfo
+}
+
+// isFileInPackage checks if a file path belongs to a package directory.
+// When a resolved package directory is provided, the file must be directly
+// inside that directory. Otherwise, falls back to matching the parent
+// directory name against the package name.
+func isFileInPackage(filePath, pkgName string, packageDirs map[string]string) bool {
+	if pkgDir, ok := packageDirs[pkgName]; ok {
+		cleanFile := filepath.Clean(filePath)
+		cleanDir := filepath.Clean(pkgDir)
+		return filepath.Dir(cleanFile) == cleanDir
+	}
+	dir := filepath.Base(filepath.Dir(filepath.Clean(filePath)))
+	return dir == pkgName
 }
 
 // moduleNameFromPath derives a module name from a file path.
@@ -148,13 +168,19 @@ func moduleNameFromPath(filePath string) string {
 // CheckAll performs two-pass cross-file type checking.
 // Pass 1: Register public symbols from all files.
 // Pass 2: Type-check each file with cross-file context (qualified name resolution, visibility).
-func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllResult {
+func CheckAll(registry map[string]*ast.Program, sortedPaths []string, packageDirs map[string]string) *CheckAllResult {
+	pkgDirs := map[string]string{}
+	if packageDirs != nil {
+		pkgDirs = packageDirs
+	}
+
 	diag := diagnostic.New()
 	allExprTypes := make(map[ast.Expression]*Type)
 	allEntities := make(map[string]*EntityInfo)
 	allEnums := make(map[string]*EnumInfo)
 	allTraits := make(map[string]*TraitInfo)
 	allImplOrigins := make(map[string]string)
+	allFunctions := make(map[string]*FuncInfo)
 
 	// Pass 1: Register public symbols from all files
 	publicSymbols := make(map[string]*ModuleSymbols) // moduleName -> symbols
@@ -196,29 +222,52 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 		// comes from an imported module. sortedPaths is in dependency order,
 		// so imported modules have already been processed.
 		for _, imp := range prog.Imports {
-			importedModName := strings.TrimSuffix(filepath.Base(imp.Path), ".intent")
-			if syms, ok := publicSymbols[importedModName]; ok {
-				for name, entityInfo := range syms.Entities {
-					if _, exists := tmpChecker.entities[name]; !exists {
-						tmpChecker.entities[name] = entityInfo
+			var importNames []string
+			if imp.IsPackage {
+				// Package import: find all module names for this package
+				pkgBase := strings.SplitN(imp.PackageName, ".", 2)[0]
+				for symName := range publicSymbols {
+					if symName == pkgBase {
+						importNames = append(importNames, symName)
 					}
 				}
-				for name, enumInfo := range syms.Enums {
-					if _, exists := tmpChecker.enums[name]; !exists {
-						tmpChecker.enums[name] = enumInfo
-						for _, variant := range enumInfo.Variants {
-							if _, exists := tmpChecker.enumVariants[variant.Name]; !exists {
-								tmpChecker.enumVariants[variant.Name] = &EnumVariantLookup{
-									EnumInfo:    enumInfo,
-									VariantInfo: variant,
+				// Also check individual module names that belong to this package
+				for _, sp := range sortedPaths {
+					if !isFileInPackage(sp, pkgBase, pkgDirs) {
+						continue
+					}
+					mn := moduleNameFromPath(sp)
+					if _, ok := publicSymbols[mn]; ok {
+						importNames = append(importNames, mn)
+					}
+				}
+			} else {
+				importNames = []string{strings.TrimSuffix(filepath.Base(imp.Path), ".intent")}
+			}
+			for _, importedModName := range importNames {
+				if syms, ok := publicSymbols[importedModName]; ok {
+					for name, entityInfo := range syms.Entities {
+						if _, exists := tmpChecker.entities[name]; !exists {
+							tmpChecker.entities[name] = entityInfo
+						}
+					}
+					for name, enumInfo := range syms.Enums {
+						if _, exists := tmpChecker.enums[name]; !exists {
+							tmpChecker.enums[name] = enumInfo
+							for _, variant := range enumInfo.Variants {
+								if _, exists := tmpChecker.enumVariants[variant.Name]; !exists {
+									tmpChecker.enumVariants[variant.Name] = &EnumVariantLookup{
+										EnumInfo:    enumInfo,
+										VariantInfo: variant,
+									}
 								}
 							}
 						}
 					}
-				}
-				for name, traitInfo := range syms.Traits {
-					if _, exists := tmpChecker.traits[name]; !exists {
-						tmpChecker.traits[name] = traitInfo
+					for name, traitInfo := range syms.Traits {
+						if _, exists := tmpChecker.traits[name]; !exists {
+							tmpChecker.traits[name] = traitInfo
+						}
 					}
 				}
 			}
@@ -287,22 +336,55 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 		// Register by both file-derived name and declared module name
 		moduleImports := make(map[string]*ModuleSymbols)
 		for _, imp := range prog.Imports {
-			importedModName := strings.TrimSuffix(filepath.Base(imp.Path), ".intent")
-			if syms, ok := publicSymbols[importedModName]; ok {
-				moduleImports[importedModName] = syms
-				// Also look up the declared module name from the imported program
-				importedProg := registry[imp.Path]
-				if importedProg == nil {
-					// Try resolving relative to current file directory
-					for regPath, regProg := range registry {
-						if strings.TrimSuffix(filepath.Base(regPath), ".intent") == importedModName {
-							importedProg = regProg
-							break
-						}
+			if imp.IsPackage {
+				// Package import: merge all public symbols from package modules
+				// under the package name (e.g., "types_pkg")
+				pkgBase := strings.SplitN(imp.PackageName, ".", 2)[0]
+				merged := &ModuleSymbols{
+					Functions:     make(map[string]*FuncInfo),
+					Entities:      make(map[string]*EntityInfo),
+					Enums:         make(map[string]*EnumInfo),
+					Traits:        make(map[string]*TraitInfo),
+					FunctionDecls: make(map[string]*ast.FunctionDecl),
+					EntityDecls:   make(map[string]*ast.EntityDecl),
+					EnumDecls:     make(map[string]*ast.EnumDecl),
+				}
+				// Collect symbols from all modules that might belong to this package
+				for symName, syms := range publicSymbols {
+					// Include the package-level symbols and any individual modules
+					if symName == pkgBase {
+						mergeModuleSymbols(merged, syms)
 					}
 				}
-				if importedProg != nil && importedProg.Module != nil && importedProg.Module.Name != importedModName {
-					moduleImports[importedProg.Module.Name] = syms
+				// Also check each sorted path for files belonging to this package
+				for _, sp := range sortedPaths {
+					if !isFileInPackage(sp, pkgBase, pkgDirs) {
+						continue
+					}
+					mn := moduleNameFromPath(sp)
+					if syms, ok := publicSymbols[mn]; ok {
+						mergeModuleSymbols(merged, syms)
+					}
+				}
+				moduleImports[pkgBase] = merged
+			} else {
+				importedModName := strings.TrimSuffix(filepath.Base(imp.Path), ".intent")
+				if syms, ok := publicSymbols[importedModName]; ok {
+					moduleImports[importedModName] = syms
+					// Also look up the declared module name from the imported program
+					importedProg := registry[imp.Path]
+					if importedProg == nil {
+						// Try resolving relative to current file directory
+						for regPath, regProg := range registry {
+							if strings.TrimSuffix(filepath.Base(regPath), ".intent") == importedModName {
+								importedProg = regProg
+								break
+							}
+						}
+					}
+					if importedProg != nil && importedProg.Module != nil && importedProg.Module.Name != importedModName {
+						moduleImports[importedProg.Module.Name] = syms
+					}
 				}
 			}
 		}
@@ -408,6 +490,9 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 		for key, val := range c.implOrigins {
 			allImplOrigins[key] = val
 		}
+		for name, info := range c.functions {
+			allFunctions[name] = info
+		}
 	}
 
 	return &CheckAllResult{
@@ -417,6 +502,46 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string) *CheckAllR
 		Enums:       allEnums,
 		Traits:      allTraits,
 		ImplOrigins: allImplOrigins,
+		Functions:   allFunctions,
+	}
+}
+
+// mergeModuleSymbols merges src symbols into dst without overwriting existing entries.
+func mergeModuleSymbols(dst, src *ModuleSymbols) {
+	for k, v := range src.Functions {
+		if _, exists := dst.Functions[k]; !exists {
+			dst.Functions[k] = v
+		}
+	}
+	for k, v := range src.Entities {
+		if _, exists := dst.Entities[k]; !exists {
+			dst.Entities[k] = v
+		}
+	}
+	for k, v := range src.Enums {
+		if _, exists := dst.Enums[k]; !exists {
+			dst.Enums[k] = v
+		}
+	}
+	for k, v := range src.Traits {
+		if _, exists := dst.Traits[k]; !exists {
+			dst.Traits[k] = v
+		}
+	}
+	for k, v := range src.FunctionDecls {
+		if _, exists := dst.FunctionDecls[k]; !exists {
+			dst.FunctionDecls[k] = v
+		}
+	}
+	for k, v := range src.EntityDecls {
+		if _, exists := dst.EntityDecls[k]; !exists {
+			dst.EntityDecls[k] = v
+		}
+	}
+	for k, v := range src.EnumDecls {
+		if _, exists := dst.EnumDecls[k]; !exists {
+			dst.EnumDecls[k] = v
+		}
 	}
 }
 
@@ -438,9 +563,19 @@ func (c *Checker) registerEntities() {
 			HasConstructor: entity.Constructor != nil,
 		}
 
+		// Build type param map for generic entities
+		var typeParamMap map[string]bool
+		if len(entity.TypeParams) > 0 {
+			typeParamMap = make(map[string]bool)
+			for _, tp := range entity.TypeParams {
+				typeParamMap[tp.Name] = true
+				info.TypeParamNames = append(info.TypeParamNames, tp.Name)
+			}
+		}
+
 		// Register fields
 		for _, field := range entity.Fields {
-			fieldType := ResolveType(field.Type, c.entities, c.enums)
+			fieldType := ResolveTypeWithParams(field.Type, c.entities, c.enums, typeParamMap)
 			if fieldType == nil {
 				line, col := field.Pos()
 				c.diag.Errorf(line, col, "unknown type '%s'", field.Type.Name)
@@ -454,7 +589,7 @@ func (c *Checker) registerEntities() {
 		for _, method := range entity.Methods {
 			params := make([]ParamInfo, 0, len(method.Params))
 			for _, p := range method.Params {
-				pType := ResolveType(p.Type, c.entities, c.enums)
+				pType := ResolveTypeWithParams(p.Type, c.entities, c.enums, typeParamMap)
 				if pType == nil {
 					line, col := p.Pos()
 					c.diag.Errorf(line, col, "unknown type '%s'", p.Type.Name)
@@ -465,7 +600,7 @@ func (c *Checker) registerEntities() {
 
 			returnType := TypeVoid
 			if method.ReturnType != nil {
-				returnType = ResolveType(method.ReturnType, c.entities, c.enums)
+				returnType = ResolveTypeWithParams(method.ReturnType, c.entities, c.enums, typeParamMap)
 				if returnType == nil {
 					line, col := method.Pos()
 					c.diag.Errorf(line, col, "unknown type '%s'", method.ReturnType.Name)
@@ -572,9 +707,20 @@ func (c *Checker) registerFunctions() {
 			continue
 		}
 
+		// Build type param map for generic functions
+		var typeParamMap map[string]bool
+		var typeParamNames []string
+		if len(fn.TypeParams) > 0 {
+			typeParamMap = make(map[string]bool)
+			for _, tp := range fn.TypeParams {
+				typeParamMap[tp.Name] = true
+				typeParamNames = append(typeParamNames, tp.Name)
+			}
+		}
+
 		params := make([]ParamInfo, 0, len(fn.Params))
 		for _, p := range fn.Params {
-			pType := ResolveType(p.Type, c.entities, c.enums)
+			pType := ResolveTypeWithParams(p.Type, c.entities, c.enums, typeParamMap)
 			if pType == nil {
 				line, col := p.Pos()
 				c.diag.Errorf(line, col, "unknown type '%s'", p.Type.Name)
@@ -585,7 +731,7 @@ func (c *Checker) registerFunctions() {
 
 		returnType := TypeVoid
 		if fn.ReturnType != nil {
-			returnType = ResolveType(fn.ReturnType, c.entities, c.enums)
+			returnType = ResolveTypeWithParams(fn.ReturnType, c.entities, c.enums, typeParamMap)
 			if returnType == nil {
 				line, col := fn.Pos()
 				c.diag.Errorf(line, col, "unknown type '%s'", fn.ReturnType.Name)
@@ -594,9 +740,11 @@ func (c *Checker) registerFunctions() {
 		}
 
 		c.functions[fn.Name] = &FuncInfo{
-			Name:       fn.Name,
-			Params:     params,
-			ReturnType: returnType,
+			Name:           fn.Name,
+			Params:         params,
+			ReturnType:     returnType,
+			TypeParamNames: typeParamNames,
+			IsAsync:        fn.IsAsync,
 		}
 
 		c.scope.Define(fn.Name, &Symbol{
@@ -616,10 +764,19 @@ func (c *Checker) checkFunctions() {
 
 // checkFunction checks a single function
 func (c *Checker) checkFunction(fn *ast.FunctionDecl) {
+	// Skip detailed body checking for generic functions (type params are placeholders)
+	if len(fn.TypeParams) > 0 {
+		return
+	}
+
 	funcScope := NewScope(c.scope)
 
 	// Set current function context for Result/Option variant checking
 	c.currentFunc = c.functions[fn.Name]
+
+	// Track async context
+	oldAsync := c.inAsyncFunc
+	c.inAsyncFunc = fn.IsAsync
 
 	// Add parameters to function scope
 	for _, p := range fn.Params {
@@ -663,11 +820,17 @@ func (c *Checker) checkFunction(fn *ast.FunctionDecl) {
 
 	// Clear current function context
 	c.currentFunc = nil
+	c.inAsyncFunc = oldAsync
 }
 
 // checkEntities checks all entity constructors and methods
 func (c *Checker) checkEntities() {
 	for _, entity := range c.prog.Entities {
+		// Skip detailed body checking for generic entities (type params are placeholders)
+		if len(entity.TypeParams) > 0 {
+			continue
+		}
+
 		info := c.entities[entity.Name]
 
 		// Set entity context
@@ -1145,6 +1308,10 @@ func (c *Checker) checkExpression(expr ast.Expression, scope *Scope) *Type {
 		return c.storeExprType(expr, c.checkTryExpr(e, scope))
 	case *ast.LambdaExpr:
 		return c.storeExprType(expr, c.checkLambdaExpr(e, scope))
+	case *ast.AwaitExpr:
+		return c.storeExprType(expr, c.checkAwaitExpr(e, scope))
+	case *ast.SpawnExpr:
+		return c.storeExprType(expr, c.checkSpawnExpr(e, scope))
 	default:
 		return nil
 	}
@@ -1438,6 +1605,97 @@ func (c *Checker) checkCallExpr(expr *ast.CallExpr, scope *Scope) *Type {
 		return TypeInt
 	}
 
+	// Handle sleep() built-in: sleep(Int) -> Future<Void>
+	if expr.Function == "sleep" {
+		if len(expr.Args) != 1 {
+			c.diag.Errorf(line, col, "sleep() requires exactly 1 argument, got %d", len(expr.Args))
+			return &Type{Name: "Future", IsGeneric: true, TypeParams: []*Type{TypeVoid}}
+		}
+		argType := c.checkExpression(expr.Args[0], scope)
+		if argType != nil && !argType.Equal(TypeInt) {
+			c.diag.Errorf(line, col, "sleep() argument must be Int, got %s", argType.String())
+		}
+		return &Type{Name: "Future", IsGeneric: true, TypeParams: []*Type{TypeVoid}}
+	}
+
+	// Handle await_all() built-in: await_all(Array<Future<T>>) -> Array<T>
+	if expr.Function == "await_all" {
+		if len(expr.Args) != 1 {
+			c.diag.Errorf(line, col, "await_all() requires exactly 1 argument, got %d", len(expr.Args))
+			return nil
+		}
+		if !c.inAsyncFunc {
+			c.diag.Errorf(line, col, "await_all can only be used inside async functions")
+		}
+		argType := c.checkExpression(expr.Args[0], scope)
+		if argType == nil {
+			return nil
+		}
+		// Must be Array<Future<T>>
+		if argType.Name != "Array" || !argType.IsGeneric || len(argType.TypeParams) != 1 {
+			c.diag.Errorf(line, col, "await_all() requires Array<Future<T>> argument, got %s", argType.String())
+			return nil
+		}
+		elemType := argType.TypeParams[0]
+		if elemType.Name != "Future" || !elemType.IsGeneric || len(elemType.TypeParams) != 1 {
+			c.diag.Errorf(line, col, "await_all() requires Array<Future<T>> argument, got %s", argType.String())
+			return nil
+		}
+		innerType := elemType.TypeParams[0]
+		return &Type{Name: "Array", IsGeneric: true, TypeParams: []*Type{innerType}}
+	}
+
+	// Handle await_any() built-in: await_any(Array<Future<T>>) -> T
+	if expr.Function == "await_any" {
+		if len(expr.Args) != 1 {
+			c.diag.Errorf(line, col, "await_any() requires exactly 1 argument, got %d", len(expr.Args))
+			return nil
+		}
+		if !c.inAsyncFunc {
+			c.diag.Errorf(line, col, "await_any can only be used inside async functions")
+		}
+		argType := c.checkExpression(expr.Args[0], scope)
+		if argType == nil {
+			return nil
+		}
+		// Must be Array<Future<T>>
+		if argType.Name != "Array" || !argType.IsGeneric || len(argType.TypeParams) != 1 {
+			c.diag.Errorf(line, col, "await_any() requires Array<Future<T>> argument, got %s", argType.String())
+			return nil
+		}
+		elemType := argType.TypeParams[0]
+		if elemType.Name != "Future" || !elemType.IsGeneric || len(elemType.TypeParams) != 1 {
+			c.diag.Errorf(line, col, "await_any() requires Array<Future<T>> argument, got %s", argType.String())
+			return nil
+		}
+		return elemType.TypeParams[0]
+	}
+
+	// Handle timeout() built-in: timeout(Future<T>, Int) -> Result<T, String>
+	if expr.Function == "timeout" {
+		if len(expr.Args) != 2 {
+			c.diag.Errorf(line, col, "timeout() requires exactly 2 arguments, got %d", len(expr.Args))
+			return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeVoid, TypeString}, EnumInfo: instantiateResult(TypeVoid, TypeString)}
+		}
+		if !c.inAsyncFunc {
+			c.diag.Errorf(line, col, "timeout can only be used inside async functions")
+		}
+		futureType := c.checkExpression(expr.Args[0], scope)
+		timeoutArg := c.checkExpression(expr.Args[1], scope)
+		if timeoutArg != nil && !timeoutArg.Equal(TypeInt) {
+			c.diag.Errorf(line, col, "timeout() second argument must be Int, got %s", timeoutArg.String())
+		}
+		if futureType == nil {
+			return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeVoid, TypeString}, EnumInfo: instantiateResult(TypeVoid, TypeString)}
+		}
+		if futureType.Name != "Future" || !futureType.IsGeneric || len(futureType.TypeParams) != 1 {
+			c.diag.Errorf(line, col, "timeout() first argument must be Future<T>, got %s", futureType.String())
+			return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeVoid, TypeString}, EnumInfo: instantiateResult(TypeVoid, TypeString)}
+		}
+		innerType := futureType.TypeParams[0]
+		return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{innerType, TypeString}, EnumInfo: instantiateResult(innerType, TypeString)}
+	}
+
 	// Check if it's a built-in Result/Option variant constructor (Ok, Err, Some)
 	if expr.Function == "Ok" || expr.Function == "Err" || expr.Function == "Some" {
 		return c.checkBuiltinVariant(expr, scope)
@@ -1470,8 +1728,39 @@ func (c *Checker) checkCallExpr(expr *ast.CallExpr, scope *Scope) *Type {
 			return nil
 		}
 
-		// For now, we don't track constructor parameter info separately
-		// In a full implementation, we'd check argument types here
+		// Check args
+		for _, arg := range expr.Args {
+			c.checkExpression(arg, scope)
+		}
+
+		// Handle generic entity constructor with type args: Stack<Int>()
+		if len(entity.TypeParamNames) > 0 {
+			if len(expr.TypeArgs) == 0 {
+				c.diag.Errorf(line, col, "generic entity '%s' requires type arguments", expr.Function)
+				return &Type{Name: expr.Function, IsEntity: true, Entity: entity}
+			}
+			if len(expr.TypeArgs) != len(entity.TypeParamNames) {
+				c.diag.Errorf(line, col, "entity '%s' expects %d type arguments, got %d",
+					expr.Function, len(entity.TypeParamNames), len(expr.TypeArgs))
+				return &Type{Name: expr.Function, IsEntity: true, Entity: entity}
+			}
+			var resolvedArgs []*Type
+			for _, ta := range expr.TypeArgs {
+				resolved := ResolveType(ta, c.entities, c.enums)
+				if resolved == nil {
+					c.diag.Errorf(line, col, "unknown type '%s' in type argument", ta.Name)
+					return nil
+				}
+				resolvedArgs = append(resolvedArgs, resolved)
+			}
+			return &Type{
+				Name:       expr.Function,
+				IsEntity:   true,
+				Entity:     entity,
+				IsGeneric:  true,
+				TypeParams: resolvedArgs,
+			}
+		}
 
 		return &Type{Name: expr.Function, IsEntity: true, Entity: entity}
 	}
@@ -1500,6 +1789,50 @@ func (c *Checker) checkCallExpr(expr *ast.CallExpr, scope *Scope) *Type {
 	if !exists {
 		c.diag.Errorf(line, col, "unknown function '%s'", expr.Function)
 		return nil
+	}
+
+	// Handle generic function call with type args: identity<Int>(42)
+	if len(fn.TypeParamNames) > 0 {
+		if len(expr.TypeArgs) == 0 {
+			c.diag.Errorf(line, col, "generic function '%s' requires type arguments", expr.Function)
+		} else if len(expr.TypeArgs) != len(fn.TypeParamNames) {
+			c.diag.Errorf(line, col, "function '%s' expects %d type arguments, got %d",
+				expr.Function, len(fn.TypeParamNames), len(expr.TypeArgs))
+		}
+		// Build substitution map
+		substMap := make(map[string]*Type)
+		for i, ta := range expr.TypeArgs {
+			resolved := ResolveType(ta, c.entities, c.enums)
+			if resolved == nil {
+				c.diag.Errorf(line, col, "unknown type '%s' in type argument", ta.Name)
+				continue
+			}
+			if i < len(fn.TypeParamNames) {
+				substMap[fn.TypeParamNames[i]] = resolved
+			}
+		}
+
+		// Check argument count
+		if len(expr.Args) != len(fn.Params) {
+			c.diag.Errorf(line, col, "function '%s' expects %d arguments, got %d",
+				expr.Function, len(fn.Params), len(expr.Args))
+		}
+
+		// Check argument types with substitution
+		for i, arg := range expr.Args {
+			argType := c.checkExpression(arg, scope)
+			if i < len(fn.Params) && argType != nil {
+				expectedType := SubstituteType(fn.Params[i].Type, substMap)
+				if !argType.Equal(expectedType) && !expectedType.IsTypeParam {
+					argLine, argCol := arg.Pos()
+					c.diag.Errorf(argLine, argCol, "argument %d to '%s': expected %s, got %s",
+						i+1, expr.Function, expectedType.String(), argType.String())
+				}
+			}
+		}
+
+		// Return substituted return type
+		return SubstituteType(fn.ReturnType, substMap)
 	}
 
 	// Check argument count
@@ -1827,17 +2160,31 @@ func (c *Checker) checkMethodCallExpr(expr *ast.MethodCallExpr, scope *Scope) *T
 		return method.ReturnType
 	}
 
-	// Check argument types
+	// Check argument types (skip for type params since they match anything)
 	for i, arg := range expr.Args {
 		argType := c.checkExpression(arg, scope)
-		if argType != nil && !argType.Equal(method.Params[i].Type) {
+		expectedType := method.Params[i].Type
+		if argType != nil && !argType.Equal(expectedType) && !expectedType.IsTypeParam {
 			argLine, argCol := arg.Pos()
 			c.diag.Errorf(argLine, argCol, "argument %d to method '%s': expected %s, got %s",
-				i+1, expr.Method, method.Params[i].Type.Name, argType.Name)
+				i+1, expr.Method, expectedType.Name, argType.Name)
 		}
 	}
 
-	return method.ReturnType
+	// Return type: if it's a type param, return the concrete type based on the object's type args
+	returnType := method.ReturnType
+	if returnType != nil && returnType.IsTypeParam && objType.IsGeneric && len(objType.TypeParams) > 0 {
+		if entity, ok := c.entities[objType.Name]; ok {
+			for i, tpName := range entity.TypeParamNames {
+				if tpName == returnType.Name && i < len(objType.TypeParams) {
+					returnType = objType.TypeParams[i]
+					break
+				}
+			}
+		}
+	}
+
+	return returnType
 }
 
 // checkModuleQualifiedCall checks a module-qualified function call or entity constructor
@@ -2425,6 +2772,62 @@ func (c *Checker) checkLambdaExpr(expr *ast.LambdaExpr, scope *Scope) *Type {
 		FnParams:   paramTypes,
 		FnReturn:   returnType,
 	}
+}
+
+// checkAwaitExpr checks an await expression
+func (c *Checker) checkAwaitExpr(expr *ast.AwaitExpr, scope *Scope) *Type {
+	line, col := expr.Pos()
+
+	// await is only valid inside async functions
+	if !c.inAsyncFunc {
+		c.diag.Errorf(line, col, "await can only be used inside async functions")
+	}
+
+	innerType := c.checkExpression(expr.Expr, scope)
+	if innerType == nil {
+		return nil
+	}
+
+	// The inner expression must be a Future<T>
+	if innerType.Name != "Future" || !innerType.IsGeneric || len(innerType.TypeParams) != 1 {
+		c.diag.Errorf(line, col, "await requires Future type, got %s", innerType.String())
+		return nil
+	}
+
+	// Unwrap Future<T> -> T
+	return innerType.TypeParams[0]
+}
+
+// checkSpawnExpr checks a spawn expression
+func (c *Checker) checkSpawnExpr(expr *ast.SpawnExpr, scope *Scope) *Type {
+	line, col := expr.Pos()
+
+	// spawn argument must be a call expression
+	callExpr, ok := expr.Expr.(*ast.CallExpr)
+	if !ok {
+		c.diag.Errorf(line, col, "spawn requires a function call")
+		return nil
+	}
+
+	// Check the call expression to get the return type
+	callType := c.checkCallExpr(callExpr, scope)
+
+	// The target function must be async
+	fn, exists := c.functions[callExpr.Function]
+	if exists && !fn.IsAsync {
+		c.diag.Errorf(line, col, "spawn requires an async function, '%s' is not async", callExpr.Function)
+	}
+
+	if callType == nil {
+		return nil
+	}
+
+	// If the call already returns Future<T> (async functions declare Future<T> as return type),
+	// return it as-is; otherwise wrap in Future<T>
+	if callType.Name == "Future" && callType.IsGeneric && len(callType.TypeParams) == 1 {
+		return callType
+	}
+	return &Type{Name: "Future", IsGeneric: true, TypeParams: []*Type{callType}}
 }
 
 // findEnumVariant finds a variant by name in an enum

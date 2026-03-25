@@ -336,6 +336,20 @@ func validateExpr(expr Expr, context string) []string {
 			}
 		}
 
+	case *AwaitExpr:
+		if e.Expr == nil {
+			errors = append(errors, fmt.Sprintf("%s: AwaitExpr has nil Expr", context))
+		} else {
+			errors = append(errors, validateExpr(e.Expr, context)...)
+		}
+
+	case *SpawnExpr:
+		if e.Expr == nil {
+			errors = append(errors, fmt.Sprintf("%s: SpawnExpr has nil Expr", context))
+		} else {
+			errors = append(errors, validateExpr(e.Expr, context)...)
+		}
+
 	case *OldRef, *VarRef, *SelfRef, *ResultRef, *IntLit, *FloatLit, *StringLit, *BoolLit:
 		// No validation needed for leaf nodes
 

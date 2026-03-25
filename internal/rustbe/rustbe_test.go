@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lhaig/intent/internal/ast"
 	"github.com/lhaig/intent/internal/checker"
 	"github.com/lhaig/intent/internal/ir"
 	"github.com/lhaig/intent/internal/parser"
@@ -539,6 +540,135 @@ function test() returns Int {
 	}
 }
 
+func TestGenerateAsyncFunction(t *testing.T) {
+	src := `module test version "1.0";
+async function fetchData() returns Future<Int> {
+    return 42;
+}
+entry function main() returns Int {
+    return 0;
+}
+`
+	output := generateFromSource(t, "async_fn", src)
+
+	expects := []string{
+		"async fn fetchData(",
+		"tokio::task::JoinHandle<i64>",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+	// Non-async entry should remain sync
+	if strings.Contains(output, "#[tokio::main]") {
+		t.Errorf("non-async main should not have #[tokio::main], got:\n%s", output)
+	}
+}
+
+func TestGenerateAsyncEntryFunction(t *testing.T) {
+	src := `module test version "1.0";
+async function fetchData() returns Future<Int> {
+    return 42;
+}
+async entry function main() returns Future<Int> {
+    let f: Future<Int> = spawn fetchData();
+    let val: Int = await f;
+    return val;
+}
+`
+	output := generateFromSource(t, "async_entry", src)
+
+	expects := []string{
+		"async fn __intent_main()",
+		"#[tokio::main]",
+		"async fn main()",
+		"__intent_main().await",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}
+
+func TestGenerateAwaitExpr(t *testing.T) {
+	src := `module test version "1.0";
+async function fetchData() returns Future<Int> {
+    return 42;
+}
+async entry function main() returns Future<Int> {
+    let f: Future<Int> = spawn fetchData();
+    let val: Int = await f;
+    return val;
+}
+`
+	output := generateFromSource(t, "await", src)
+
+	expects := []string{
+		".await",
+		"tokio::spawn(async move {",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}
+
+func TestGenerateAsyncBuiltins(t *testing.T) {
+	src := `module test version "1.0";
+async function work() returns Future<Int> {
+    return 42;
+}
+async entry function main() returns Future<Int> {
+    sleep(100);
+    let futures: Array<Future<Int>> = [];
+    let results: Array<Int> = await_all(futures);
+    let f: Future<Int> = spawn work();
+    let r: Result<Int, String> = timeout(f, 5000);
+    return 0;
+}
+`
+	output := generateFromSource(t, "async_builtins", src)
+
+	expects := []string{
+		"tokio::time::sleep(std::time::Duration::from_millis(",
+		"futures::future::join_all(",
+		"tokio::time::timeout(std::time::Duration::from_millis(",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}
+
+func TestGenerateAsyncWithContracts(t *testing.T) {
+	src := `module test version "1.0";
+async function fetchPositive(x: Int) returns Future<Int>
+    requires x > 0
+{
+    return x;
+}
+entry function main() returns Int {
+    return 0;
+}
+`
+	output := generateFromSource(t, "async_contracts", src)
+
+	expects := []string{
+		"async fn fetchPositive(",
+		"assert!(",
+		"Precondition failed",
+	}
+	for _, exp := range expects {
+		if !strings.Contains(output, exp) {
+			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
+		}
+	}
+}
+
 func TestGenerateFnTypeParam(t *testing.T) {
 	src := `module test version "1.0";
 
@@ -550,5 +680,135 @@ function call_with_ten(f: Fn(Int) -> Int) returns Int {
 
 	if !strings.Contains(output, "impl Fn(i64) -> i64") {
 		t.Errorf("expected Fn type to map to impl Fn(i64) -> i64, got:\n%s", output)
+	}
+}
+
+func makeProgram(t *testing.T, src string) *ast.Program {
+	t.Helper()
+	p := parser.New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("parse errors: %s", p.Diagnostics().Format("test"))
+	}
+	return prog
+}
+
+func TestGenerateCrossPackageFunctionCall(t *testing.T) {
+	// Package module: types_pkg/types.intent
+	typesSrc := `module types version "1.0.0";
+
+public function distance(x: Int, y: Int) returns Int {
+    return x + y;
+}
+`
+	// Main module imports via package name
+	mainSrc := `module main version "1.0.0";
+
+import types_pkg;
+
+entry function main() returns Int {
+    let d: Int = types_pkg.distance(3, 4);
+    return d;
+}
+`
+	packageDirs := map[string]string{
+		"types_pkg": "/project/libs/types_pkg",
+	}
+
+	registry := map[string]*ast.Program{
+		"/project/libs/types_pkg/types.intent": makeProgram(t, typesSrc),
+		"/project/main.intent":                 makeProgram(t, mainSrc),
+	}
+	sortedPaths := []string{
+		"/project/libs/types_pkg/types.intent",
+		"/project/main.intent",
+	}
+
+	checkResult := checker.CheckAll(registry, sortedPaths, packageDirs)
+	if checkResult.Diagnostics.HasErrors() {
+		t.Fatalf("check errors: %s", checkResult.Diagnostics.Format("test"))
+	}
+
+	prog := ir.LowerAll(registry, sortedPaths, checkResult, packageDirs)
+	output := GenerateAll(prog)
+
+	// The function should be called as types_distance (using module name "types"),
+	// not types_pkg_distance (using package name "types_pkg").
+	if !strings.Contains(output, "types_distance(") {
+		t.Errorf("expected cross-package call to use module name prefix 'types_distance(', got:\n%s", output)
+	}
+	if strings.Contains(output, "types_pkg_distance(") {
+		t.Errorf("cross-package call should NOT use package name prefix 'types_pkg_distance(', got:\n%s", output)
+	}
+}
+
+func TestGenerateModuleManglingNoCollision(t *testing.T) {
+	// Collision scenario: package named "math" contains module "math"
+	// (math/math.intent), AND a separate package named "strings_pkg"
+	// contains module "strings" whose PackageName is "math" — this would
+	// overwrite the "math" module-name entry in the old code.
+	//
+	// We use a simpler reproducer: module named "alpha" from package "alpha_pkg",
+	// and module named "beta" from package "alpha" (package name == other module name).
+	// The package-name entry for "alpha" must not overwrite the module-name entry
+	// for the "alpha" module.
+
+	alphaSrc := `module alpha version "1.0.0";
+
+public function greet() returns String {
+    return "hello from alpha";
+}
+`
+	betaSrc := `module beta version "1.0.0";
+
+public function farewell() returns String {
+    return "goodbye from beta";
+}
+`
+	mainSrc := `module main version "1.0.0";
+
+import alpha_pkg;
+import alpha;
+
+entry function main() returns Int {
+    let g: String = alpha_pkg.greet();
+    let f: String = alpha.farewell();
+    return 0;
+}
+`
+	packageDirs := map[string]string{
+		"alpha_pkg": "/project/libs/alpha_pkg",
+		"alpha":     "/project/libs/alpha",
+	}
+
+	registry := map[string]*ast.Program{
+		"/project/libs/alpha_pkg/alpha.intent": makeProgram(t, alphaSrc),
+		"/project/libs/alpha/beta.intent":      makeProgram(t, betaSrc),
+		"/project/main.intent":                 makeProgram(t, mainSrc),
+	}
+	sortedPaths := []string{
+		"/project/libs/alpha_pkg/alpha.intent",
+		"/project/libs/alpha/beta.intent",
+		"/project/main.intent",
+	}
+
+	checkResult := checker.CheckAll(registry, sortedPaths, packageDirs)
+	if checkResult.Diagnostics.HasErrors() {
+		t.Fatalf("check errors: %s", checkResult.Diagnostics.Format("test"))
+	}
+
+	prog := ir.LowerAll(registry, sortedPaths, checkResult, packageDirs)
+	output := GenerateAll(prog)
+
+	// alpha_pkg.greet() should resolve to alpha_greet (module name "alpha")
+	if !strings.Contains(output, "alpha_greet(") {
+		t.Errorf("expected alpha_pkg.greet() to resolve to alpha_greet(, got:\n%s", output)
+	}
+	// alpha.farewell() should resolve to beta_farewell (module name "beta"),
+	// NOT alpha_farewell. The package "alpha" maps to module "beta".
+	// However, the module-name entry for "alpha" (from the alpha module) must
+	// not be overwritten by the package-name entry for "alpha" (from beta's package).
+	if !strings.Contains(output, "beta_farewell(") {
+		t.Errorf("expected alpha.farewell() to resolve to beta_farewell(, got:\n%s", output)
 	}
 }

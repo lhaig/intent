@@ -37,8 +37,10 @@ top_level_decl = function_decl
 (* Import Declarations                                                         *)
 (* -------------------------------------------------------------------------- *)
 
-import_decl = "import" , string_literal , ";" ;
-(* Imports another .intent module file. The string is a relative path. *)
+import_decl = "import" , ( string_literal | identifier , { "." , identifier } ) , ";" ;
+(* File import: import "path.intent";  -- string is a relative path. *)
+(* Package import: import pkg_name;  -- identifier resolved via intent.toml. *)
+(* Dotted package import: import pkg_name.submodule;  -- imports specific submodule. *)
 
 
 (* -------------------------------------------------------------------------- *)
@@ -79,12 +81,17 @@ impl_block = "impl" , identifier , "for" , identifier , "{" , { method_decl } , 
 (* Function Declarations                                                       *)
 (* -------------------------------------------------------------------------- *)
 
-function_decl = [ "public" ] , [ "entry" ] , "function" , identifier ,
+function_decl = [ "public" ] , [ "async" ] , [ "entry" ] , "function" , identifier ,
+                [ type_param_list ] ,
                 "(" , [ param_list ] , ")" ,
                 "returns" , type_ref ,
                 { requires_clause } ,
                 { ensures_clause } ,
                 block ;
+
+type_param_list = "<" , type_param , { "," , type_param } , ">" ;
+
+type_param = identifier ;  (* e.g., T, U, K, V *)
 
 param_list = param , { "," , param } ;
 
@@ -99,7 +106,7 @@ ensures_clause = "ensures" , expression ;
 (* Entity Declarations                                                         *)
 (* -------------------------------------------------------------------------- *)
 
-entity_decl = [ "public" ] , "entity" , identifier , "{" , { entity_member } , "}" ;
+entity_decl = [ "public" ] , "entity" , identifier , [ type_param_list ] , "{" , { entity_member } , "}" ;
 
 entity_member = field_decl
               | invariant_decl
@@ -262,8 +269,18 @@ primary_expr = int_literal
              | array_literal
              | forall_expr
              | exists_expr
+             | await_expr
+             | spawn_expr
              | identifier
              | "(" , expression , ")" ;
+
+await_expr = "await" , expression ;
+(* Suspends execution until the Future resolves, producing the inner value. *)
+(* Valid only inside async functions. *)
+
+spawn_expr = "spawn" , expression ;
+(* Creates a concurrent task from an async function call, returning Future<T>. *)
+(* Valid only inside async functions. *)
 
 match_expr = "match" , expression , "{" , match_arm , { "," , match_arm } , [ "," ] , "}" ;
 
@@ -297,6 +314,7 @@ type_ref = "Int"
          | "Map" , "<" , type_ref , "," , type_ref , ">"
          | "Result" , "<" , type_ref , "," , type_ref , ">"
          | "Option" , "<" , type_ref , ">"
+         | "Future" , "<" , type_ref , ">"
          | identifier ;
 (* The identifier alternative covers entity and enum types. *)
 (* Generic types (Array, Map, Result, Option) are recursive. *)

@@ -8,16 +8,17 @@ import (
 
 // Type represents a type in the Intent type system
 type Type struct {
-	Name       string // "Int", "Float", "String", "Bool", "Void", "Fn", entity name, or enum name
-	IsEntity   bool
-	Entity     *EntityInfo // non-nil if IsEntity
-	IsEnum     bool
-	EnumInfo   *EnumInfo // non-nil if IsEnum
-	IsGeneric  bool      // true if TypeParams is non-empty
-	TypeParams []*Type   // e.g., [TypeInt] for Array<Int>
-	IsFunction bool      // true for function types (Fn)
-	FnParams   []*Type   // parameter types for function types
-	FnReturn   *Type     // return type for function types
+	Name        string // "Int", "Float", "String", "Bool", "Void", "Fn", entity name, or enum name
+	IsEntity    bool
+	Entity      *EntityInfo // non-nil if IsEntity
+	IsEnum      bool
+	EnumInfo    *EnumInfo // non-nil if IsEnum
+	IsGeneric   bool      // true if TypeParams is non-empty
+	TypeParams  []*Type   // e.g., [TypeInt] for Array<Int>
+	IsFunction  bool      // true for function types (Fn)
+	FnParams    []*Type   // parameter types for function types
+	FnReturn    *Type     // return type for function types
+	IsTypeParam bool      // true for unresolved type parameters like T
 }
 
 // EntityInfo holds information about an entity type
@@ -28,6 +29,7 @@ type EntityInfo struct {
 	HasInvariant   bool
 	Methods        map[string]*MethodInfo
 	HasConstructor bool
+	TypeParamNames []string // non-empty for generic entities, e.g., ["T", "U"]
 }
 
 // MethodInfo holds information about a method
@@ -74,6 +76,11 @@ var (
 
 // ResolveType resolves a type reference to a Type object
 func ResolveType(ref *ast.TypeRef, entities map[string]*EntityInfo, enums map[string]*EnumInfo) *Type {
+	return ResolveTypeWithParams(ref, entities, enums, nil)
+}
+
+// ResolveTypeWithParams resolves a type reference, checking typeParams for generic type parameter names.
+func ResolveTypeWithParams(ref *ast.TypeRef, entities map[string]*EntityInfo, enums map[string]*EnumInfo, typeParams map[string]bool) *Type {
 	if ref == nil {
 		return nil
 	}
@@ -93,7 +100,7 @@ func ResolveType(ref *ast.TypeRef, entities map[string]*EntityInfo, enums map[st
 		if len(ref.TypeArgs) != 1 {
 			return nil // caller should emit error
 		}
-		elemType := ResolveType(ref.TypeArgs[0], entities, enums)
+		elemType := ResolveTypeWithParams(ref.TypeArgs[0], entities, enums, typeParams)
 		if elemType == nil {
 			return nil
 		}
@@ -107,8 +114,8 @@ func ResolveType(ref *ast.TypeRef, entities map[string]*EntityInfo, enums map[st
 		if len(ref.TypeArgs) != 2 {
 			return nil // caller should emit error
 		}
-		okType := ResolveType(ref.TypeArgs[0], entities, enums)
-		errType := ResolveType(ref.TypeArgs[1], entities, enums)
+		okType := ResolveTypeWithParams(ref.TypeArgs[0], entities, enums, typeParams)
+		errType := ResolveTypeWithParams(ref.TypeArgs[1], entities, enums, typeParams)
 		if okType == nil || errType == nil {
 			return nil
 		}
@@ -124,7 +131,7 @@ func ResolveType(ref *ast.TypeRef, entities map[string]*EntityInfo, enums map[st
 		if len(ref.TypeArgs) != 1 {
 			return nil // caller should emit error
 		}
-		someType := ResolveType(ref.TypeArgs[0], entities, enums)
+		someType := ResolveTypeWithParams(ref.TypeArgs[0], entities, enums, typeParams)
 		if someType == nil {
 			return nil
 		}
@@ -135,11 +142,25 @@ func ResolveType(ref *ast.TypeRef, entities map[string]*EntityInfo, enums map[st
 			TypeParams: []*Type{someType},
 			EnumInfo:   instantiateOption(someType),
 		}
+	case "Future":
+		// Future requires exactly 1 type argument (T)
+		if len(ref.TypeArgs) != 1 {
+			return nil // caller should emit error
+		}
+		innerType := ResolveTypeWithParams(ref.TypeArgs[0], entities, enums, typeParams)
+		if innerType == nil {
+			return nil
+		}
+		return &Type{
+			Name:       "Future",
+			IsGeneric:  true,
+			TypeParams: []*Type{innerType},
+		}
 	case "Fn":
 		// Fn type: Fn(ParamTypes) -> ReturnType
 		var paramTypes []*Type
 		for _, pt := range ref.ParamTypes {
-			resolved := ResolveType(pt, entities, enums)
+			resolved := ResolveTypeWithParams(pt, entities, enums, typeParams)
 			if resolved == nil {
 				return nil
 			}
@@ -147,7 +168,7 @@ func ResolveType(ref *ast.TypeRef, entities map[string]*EntityInfo, enums map[st
 		}
 		var returnType *Type
 		if ref.ReturnType != nil {
-			returnType = ResolveType(ref.ReturnType, entities, enums)
+			returnType = ResolveTypeWithParams(ref.ReturnType, entities, enums, typeParams)
 			if returnType == nil {
 				return nil
 			}
@@ -165,8 +186,8 @@ func ResolveType(ref *ast.TypeRef, entities map[string]*EntityInfo, enums map[st
 		if len(ref.TypeArgs) != 2 {
 			return nil // caller should emit error
 		}
-		keyType := ResolveType(ref.TypeArgs[0], entities, enums)
-		valType := ResolveType(ref.TypeArgs[1], entities, enums)
+		keyType := ResolveTypeWithParams(ref.TypeArgs[0], entities, enums, typeParams)
+		valType := ResolveTypeWithParams(ref.TypeArgs[1], entities, enums, typeParams)
 		if keyType == nil || valType == nil {
 			return nil
 		}
@@ -180,8 +201,35 @@ func ResolveType(ref *ast.TypeRef, entities map[string]*EntityInfo, enums map[st
 			TypeParams: []*Type{keyType, valType},
 		}
 	default:
-		// Check if it's an entity type
+		// Check if it's a type parameter (e.g., T, U)
+		if typeParams != nil {
+			if typeParams[ref.Name] {
+				return &Type{Name: ref.Name, IsTypeParam: true}
+			}
+		}
+		// Check if it's a generic entity instantiation (e.g., Stack<Int>)
 		if entity, ok := entities[ref.Name]; ok {
+			if len(entity.TypeParamNames) > 0 && len(ref.TypeArgs) > 0 {
+				// Generic entity instantiation
+				if len(ref.TypeArgs) != len(entity.TypeParamNames) {
+					return nil // wrong number of type args
+				}
+				var resolvedArgs []*Type
+				for _, arg := range ref.TypeArgs {
+					resolved := ResolveTypeWithParams(arg, entities, enums, typeParams)
+					if resolved == nil {
+						return nil
+					}
+					resolvedArgs = append(resolvedArgs, resolved)
+				}
+				return &Type{
+					Name:       ref.Name,
+					IsEntity:   true,
+					Entity:     entity,
+					IsGeneric:  true,
+					TypeParams: resolvedArgs,
+				}
+			}
 			return &Type{
 				Name:     ref.Name,
 				IsEntity: true,
@@ -204,6 +252,10 @@ func ResolveType(ref *ast.TypeRef, entities map[string]*EntityInfo, enums map[st
 func (t *Type) Equal(other *Type) bool {
 	if t == nil || other == nil {
 		return t == other
+	}
+	// Type params are equal if they have the same name
+	if t.IsTypeParam || other.IsTypeParam {
+		return t.Name == other.Name && t.IsTypeParam == other.IsTypeParam
 	}
 	if t.Name != other.Name {
 		return false
@@ -243,6 +295,9 @@ func (t *Type) String() string {
 	if t == nil {
 		return "<nil>"
 	}
+	if t.IsTypeParam {
+		return t.Name
+	}
 	if t.IsFunction {
 		params := make([]string, len(t.FnParams))
 		for i, p := range t.FnParams {
@@ -258,6 +313,35 @@ func (t *Type) String() string {
 		return t.Name + "<" + strings.Join(params, ", ") + ">"
 	}
 	return t.Name
+}
+
+// SubstituteType replaces type parameters with concrete types from the substitution map.
+func SubstituteType(t *Type, substMap map[string]*Type) *Type {
+	if t == nil {
+		return nil
+	}
+	if t.IsTypeParam {
+		if concrete, ok := substMap[t.Name]; ok {
+			return concrete
+		}
+		return t
+	}
+	if t.IsGeneric && len(t.TypeParams) > 0 {
+		newParams := make([]*Type, len(t.TypeParams))
+		changed := false
+		for i, tp := range t.TypeParams {
+			newParams[i] = SubstituteType(tp, substMap)
+			if newParams[i] != tp {
+				changed = true
+			}
+		}
+		if changed {
+			newType := *t
+			newType.TypeParams = newParams
+			return &newType
+		}
+	}
+	return t
 }
 
 // instantiateResult creates an EnumInfo for Result<T, E>

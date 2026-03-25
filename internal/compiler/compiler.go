@@ -105,15 +105,9 @@ func EmitRust(source, outPath string) error {
 	return os.WriteFile(outPath, []byte(res.RustSource), 0644)
 }
 
-// Build runs the full pipeline and produces a native binary.
-// It creates a temp Cargo project, writes generated Rust, runs cargo build,
-// and copies the binary to outPath.
-func Build(source, outPath string) error {
-	res := Compile(source)
-	if res.Diagnostics != nil && res.Diagnostics.HasErrors() {
-		return fmt.Errorf("compilation errors:\n%s", res.Diagnostics.Format("input"))
-	}
-
+// cargoBuild creates a temporary Cargo project from rustSource, runs cargo build --release,
+// and copies the resulting binary to outPath.
+func cargoBuild(rustSource, outPath string) error {
 	// Create temp directory for Cargo project
 	tmpDir, err := os.MkdirTemp("", "intent-build-*")
 	if err != nil {
@@ -122,7 +116,7 @@ func Build(source, outPath string) error {
 	defer os.RemoveAll(tmpDir)
 
 	// Write Cargo.toml
-	cargoToml := buildCargoToml(res.RustSource, false)
+	cargoToml := buildCargoToml(rustSource, false)
 	if err := os.WriteFile(filepath.Join(tmpDir, "Cargo.toml"), []byte(cargoToml), 0644); err != nil {
 		return fmt.Errorf("failed to write Cargo.toml: %w", err)
 	}
@@ -133,7 +127,7 @@ func Build(source, outPath string) error {
 		return fmt.Errorf("failed to create src dir: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(srcDir, "main.rs"), []byte(res.RustSource), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(srcDir, "main.rs"), []byte(rustSource), 0644); err != nil {
 		return fmt.Errorf("failed to write main.rs: %w", err)
 	}
 
@@ -167,6 +161,18 @@ func Build(source, outPath string) error {
 	}
 
 	return nil
+}
+
+// Build runs the full pipeline and produces a native binary.
+// It creates a temp Cargo project, writes generated Rust, runs cargo build,
+// and copies the binary to outPath.
+func Build(source, outPath string) error {
+	res := Compile(source)
+	if res.Diagnostics != nil && res.Diagnostics.HasErrors() {
+		return fmt.Errorf("compilation errors:\n%s", res.Diagnostics.Format("input"))
+	}
+
+	return cargoBuild(res.RustSource, outPath)
 }
 
 // HasImports checks if a source file contains import declarations by parsing it.
@@ -204,6 +210,11 @@ func CompileProject(entryPath string) *Result {
 		return res
 	}
 
+	// Warn if cross-package imports are present (codegen doesn't handle them fully)
+	if registry.HasCrossPackageImports() {
+		diag.Warningf(0, 0, "cross-package type references (entities, enums, traits) in code generation have limited support; simple imports work but complex type hierarchies may produce incomplete output")
+	}
+
 	// Topological sort
 	sortedPaths, err := registry.TopologicalSort()
 	if err != nil {
@@ -214,7 +225,7 @@ func CompileProject(entryPath string) *Result {
 
 	// Cross-file type checking
 	allModules := registry.AllModules()
-	checkResult := checker.CheckAll(allModules, sortedPaths)
+	checkResult := checker.CheckAll(allModules, sortedPaths, registry.PackageDirs())
 	if checkResult.Diagnostics.HasErrors() {
 		res.Diagnostics = checkResult.Diagnostics
 		return res
@@ -222,7 +233,7 @@ func CompileProject(entryPath string) *Result {
 	res.Diagnostics = checkResult.Diagnostics
 
 	// Lower to IR, then generate Rust
-	prog := ir.LowerAll(allModules, sortedPaths, checkResult)
+	prog := ir.LowerAll(allModules, sortedPaths, checkResult, registry.PackageDirs())
 	res.RustSource = rustbe.GenerateAll(prog)
 
 	return res
@@ -256,7 +267,7 @@ func CheckProject(entryPath string) *diagnostic.Diagnostics {
 	}
 
 	allModules := registry.AllModules()
-	checkResult := checker.CheckAll(allModules, sortedPaths)
+	checkResult := checker.CheckAll(allModules, sortedPaths, registry.PackageDirs())
 	return checkResult.Diagnostics
 }
 
@@ -267,59 +278,7 @@ func BuildProject(entryPath, outPath string) error {
 		return fmt.Errorf("compilation errors:\n%s", res.Diagnostics.Format(entryPath))
 	}
 
-	// Create temp directory for Cargo project
-	tmpDir, err := os.MkdirTemp("", "intent-build-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Write Cargo.toml
-	cargoToml := buildCargoToml(res.RustSource, false)
-	if err := os.WriteFile(filepath.Join(tmpDir, "Cargo.toml"), []byte(cargoToml), 0644); err != nil {
-		return fmt.Errorf("failed to write Cargo.toml: %w", err)
-	}
-
-	// Create src directory and write main.rs
-	srcDir := filepath.Join(tmpDir, "src")
-	if err := os.MkdirAll(srcDir, 0755); err != nil {
-		return fmt.Errorf("failed to create src dir: %w", err)
-	}
-
-	if err := os.WriteFile(filepath.Join(srcDir, "main.rs"), []byte(res.RustSource), 0644); err != nil {
-		return fmt.Errorf("failed to write main.rs: %w", err)
-	}
-
-	// Run cargo build --release
-	cmd := exec.Command("cargo", "build", "--release")
-	cmd.Dir = tmpDir
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("cargo build failed: %w", err)
-	}
-
-	// Copy binary to output path
-	binaryName := "intent_output"
-	binarySrc := filepath.Join(tmpDir, "target", "release", binaryName)
-
-	// Ensure output directory exists
-	outDir := filepath.Dir(outPath)
-	if outDir != "." && outDir != "" {
-		if err := os.MkdirAll(outDir, 0755); err != nil {
-			return fmt.Errorf("failed to create output dir: %w", err)
-		}
-	}
-
-	srcBin, err := os.ReadFile(binarySrc)
-	if err != nil {
-		return fmt.Errorf("failed to read built binary: %w", err)
-	}
-
-	if err := os.WriteFile(outPath, srcBin, 0755); err != nil {
-		return fmt.Errorf("failed to write output binary: %w", err)
-	}
-
-	return nil
+	return cargoBuild(res.RustSource, outPath)
 }
 
 // GenerateTests runs parse -> check -> codegen -> testgen for a single file.
@@ -384,6 +343,11 @@ func GenerateTestsProject(entryPath string) *Result {
 		return res
 	}
 
+	// Warn if cross-package imports are present
+	if registry.HasCrossPackageImports() {
+		diag.Warningf(0, 0, "cross-package type references (entities, enums, traits) in code generation have limited support; simple imports work but complex type hierarchies may produce incomplete output")
+	}
+
 	// Topological sort
 	sortedPaths, err := registry.TopologicalSort()
 	if err != nil {
@@ -394,7 +358,7 @@ func GenerateTestsProject(entryPath string) *Result {
 
 	// Cross-file type checking
 	allModules := registry.AllModules()
-	checkResult := checker.CheckAll(allModules, sortedPaths)
+	checkResult := checker.CheckAll(allModules, sortedPaths, registry.PackageDirs())
 	if checkResult.Diagnostics.HasErrors() {
 		res.Diagnostics = checkResult.Diagnostics
 		return res
@@ -402,7 +366,7 @@ func GenerateTestsProject(entryPath string) *Result {
 	res.Diagnostics = checkResult.Diagnostics
 
 	// Multi-file code generation via IR pipeline
-	prog := ir.LowerAll(allModules, sortedPaths, checkResult)
+	prog := ir.LowerAll(allModules, sortedPaths, checkResult, registry.PackageDirs())
 	rustSource := rustbe.GenerateAll(prog)
 
 	// Generate tests from the entry file's AST (still uses codegen internally)
@@ -496,6 +460,11 @@ func VerifyProjectWithReport(entryPath string) (*VerifyOutput, error) {
 		return nil, fmt.Errorf("discovery errors:\n%s", diag.Format(entryPath))
 	}
 
+	// Warn if cross-package imports are present
+	if registry.HasCrossPackageImports() {
+		diag.Warningf(0, 0, "cross-package type references (entities, enums, traits) in code generation have limited support; simple imports work but complex type hierarchies may produce incomplete output")
+	}
+
 	// Topological sort
 	sortedPaths, err := registry.TopologicalSort()
 	if err != nil {
@@ -504,13 +473,13 @@ func VerifyProjectWithReport(entryPath string) (*VerifyOutput, error) {
 
 	// Cross-file type checking
 	allModules := registry.AllModules()
-	checkResult := checker.CheckAll(allModules, sortedPaths)
+	checkResult := checker.CheckAll(allModules, sortedPaths, registry.PackageDirs())
 	if checkResult.Diagnostics.HasErrors() {
 		return nil, fmt.Errorf("type check errors:\n%s", checkResult.Diagnostics.Format(entryPath))
 	}
 
 	// Lower to IR
-	prog := ir.LowerAll(allModules, sortedPaths, checkResult)
+	prog := ir.LowerAll(allModules, sortedPaths, checkResult, registry.PackageDirs())
 
 	// Verify all modules and collect intent reports
 	var results []*verify.VerifyResult

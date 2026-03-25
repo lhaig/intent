@@ -77,24 +77,20 @@ func GenerateAll(prog *ir.Program) string {
 	for _, mod := range prog.Modules {
 		if !mod.IsEntry {
 			moduleManglings[mod.Name] = mod.Name + "_"
-			if mod.DeclName != "" && mod.DeclName != mod.Name {
-				moduleManglings[mod.DeclName] = mod.Name + "_"
-			}
 		}
 	}
 
-	// Build typeOrigins: map entity/enum name -> defining module's class prefix
+	// Build type origins map: entity/enum name -> defining module's class prefix
 	typeOrigins := make(map[string]string)
 	for _, mod := range prog.Modules {
-		prefix := ""
 		if !mod.IsEntry {
-			prefix = strings.ToUpper(mod.Name[:1]) + mod.Name[1:]
-		}
-		for _, e := range mod.Entities {
-			typeOrigins[e.Name] = prefix
-		}
-		for _, e := range mod.Enums {
-			typeOrigins[e.Name] = prefix
+			prefix := strings.ToUpper(mod.Name[:1]) + mod.Name[1:]
+			for _, e := range mod.Entities {
+				typeOrigins[e.Name] = prefix
+			}
+			for _, e := range mod.Enums {
+				typeOrigins[e.Name] = prefix
+			}
 		}
 	}
 
@@ -328,7 +324,11 @@ func (g *generator) generateFunction(f *ir.Function) {
 		}
 		g.emitLinef(" * @returns {%s}\n", g.mapType(f.ReturnType))
 		g.emitLine(" */")
-		g.emitLinef("function %s(", fnName)
+		if f.IsAsync {
+			g.emitLinef("async function %s(", fnName)
+		} else {
+			g.emitLinef("function %s(", fnName)
+		}
 		for i, p := range f.Params {
 			if i > 0 {
 				g.emit(", ")
@@ -978,6 +978,12 @@ func (g *generator) generateExpr(e ir.Expr) string {
 	case *ir.LambdaExpr:
 		return g.generateLambdaExpr(expr)
 
+	case *ir.AwaitExpr:
+		return fmt.Sprintf("await %s", g.generateExpr(expr.Expr))
+
+	case *ir.SpawnExpr:
+		return fmt.Sprintf("(async () => { return %s; })()", g.generateExpr(expr.Expr))
+
 	default:
 		return "undefined"
 	}
@@ -999,11 +1005,35 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr) string {
 		return fmt.Sprintf("new %s(%s)", g.mangledClassName(expr.Function), strings.Join(args, ", "))
 
 	default: // CallFunction
+		// Handle async built-in functions
+		switch expr.Function {
+		case "await_all":
+			if len(expr.Args) == 1 {
+				arg := g.generateExpr(expr.Args[0])
+				return fmt.Sprintf("await Promise.all(%s)", arg)
+			}
+		case "await_any":
+			if len(expr.Args) == 1 {
+				arg := g.generateExpr(expr.Args[0])
+				return fmt.Sprintf("await Promise.race(%s)", arg)
+			}
+		case "timeout":
+			if len(expr.Args) == 2 {
+				future := g.generateExpr(expr.Args[0])
+				ms := g.generateExpr(expr.Args[1])
+				return fmt.Sprintf(`await Promise.race([%s, new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), %s))]).then(v => ({ _tag: "Ok", value: v })).catch(e => ({ _tag: "Err", value: e.message }))`, future, ms)
+			}
+		case "sleep":
+			if len(expr.Args) == 1 {
+				ms := g.generateExpr(expr.Args[0])
+				return fmt.Sprintf("new Promise(resolve => setTimeout(resolve, %s))", ms)
+			}
+		}
 		args := make([]string, len(expr.Args))
 		for i, arg := range expr.Args {
 			args[i] = g.generateExpr(arg)
 		}
-		return fmt.Sprintf("%s(%s)", g.namePrefix+expr.Function, strings.Join(args, ", "))
+		return fmt.Sprintf("%s(%s)", expr.Function, strings.Join(args, ", "))
 	}
 }
 
@@ -1108,7 +1138,6 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr) string {
 
 func (g *generator) generateVariantConstructor(expr *ir.CallExpr) string {
 	enumName := expr.EnumName
-	mangledEnum := g.mangledClassName(enumName)
 
 	// Find variant declaration from IR enums
 	var variant *ir.EnumVariant
@@ -1123,7 +1152,7 @@ func (g *generator) generateVariantConstructor(expr *ir.CallExpr) string {
 
 	// Unit variant
 	if variant == nil || len(variant.Fields) == 0 {
-		return fmt.Sprintf("%s.%s()", mangledEnum, expr.Function)
+		return fmt.Sprintf("%s.%s()", enumName, expr.Function)
 	}
 
 	// Data variant
@@ -1131,7 +1160,7 @@ func (g *generator) generateVariantConstructor(expr *ir.CallExpr) string {
 	for i, arg := range expr.Args {
 		args[i] = g.generateExpr(arg)
 	}
-	return fmt.Sprintf("%s.%s(%s)", mangledEnum, expr.Function, strings.Join(args, ", "))
+	return fmt.Sprintf("%s.%s(%s)", enumName, expr.Function, strings.Join(args, ", "))
 }
 
 func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr) string {
