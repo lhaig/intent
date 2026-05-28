@@ -172,15 +172,31 @@ See [ADR 0009](decisions/0009-multi-target-codegen.md) for full rationale.
 These are deferred until the IR and verification foundations are in place,
 because each feature needs to work across all backends and with the verifier.
 
-### Generics
-- Type parameters on functions and entities
-- Monomorphization in codegen (one concrete type per instantiation)
-- Contract expressions over generic types
+### Generics -- DONE
+- [x] Type parameters on functions and entities (Phase 11)
+- [x] Monomorphization in codegen (one concrete type per instantiation)
+- [x] Contract expressions over generic types
+- [x] Rust, JS, WASM backends emit monomorphized output
 
-### Traits / Interfaces
-- Behavioral contracts across types
-- Default method implementations
-- Trait-based dispatch in codegen
+### Traits / Interfaces -- DONE
+- [x] Behavioral contracts across types
+- [x] Default method implementations
+- [x] Trait-based static dispatch in codegen
+- [x] ADR 0018 accepted
+
+### Async / Concurrency -- DONE (Rust and JS; not WASM)
+- [x] `async function`, `await`, `spawn` (Phase 12)
+- [x] `Future<T>` as built-in generic; `await_all`, `await_any`, `timeout`, `sleep` builtins
+- [x] Contracts on async functions (`requires` at entry, `ensures` at resolve)
+- [x] Rust backend: `tokio` runtime, `JoinHandle`-based futures
+- [x] JS backend: native async/Promise
+- [x] WASM target rejects async with clear error (no runtime to host it)
+
+### Package Management -- DONE (local path deps; registry deferred)
+- [x] `intent.toml` manifest, semver constraints (Phase 13)
+- [x] Local path dependencies, `intentc pkg` CLI
+- [x] Cross-package type references (entities, enums, traits) on Rust and JS
+- [ ] Real package registry (versioned remote fetch) — deferred; ADR 0027
 
 ### String Interpolation -- DONE
 - [x] `"Balance: {self.balance}"` syntax across lexer, parser, checker, IR, backends

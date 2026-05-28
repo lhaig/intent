@@ -18,3 +18,4 @@ async entry function main() returns Int {
     print(r2);
     return 0;
 }
+

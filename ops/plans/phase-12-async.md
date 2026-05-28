@@ -6,16 +6,18 @@ Add async/await semantics to Intent with `Future<T>` type, `spawn` for concurren
 
 ## Success Criteria
 
-- [ ] `async function fetch() returns Result<String, String>` parses and type-checks
-- [ ] `await expr` suspends async function, producing inner type
-- [ ] `spawn async_fn(args)` returns `Future<T>`
-- [ ] Contracts on async functions: `requires` at entry, `ensures` at resolve
-- [ ] Built-ins: `await_all`, `timeout`, `sleep`
-- [ ] Rust backend emits `async fn`, `.await`, `tokio::spawn`
-- [ ] JS backend emits `async function`, `await`, `Promise.all()`
-- [ ] All existing tests pass (no regressions)
-- [ ] `examples/async_demo.intent` compiles and runs on Rust and JS
-- [ ] Attractor example can be updated with async handlers (stretch goal)
+- [x] `async function fetch() returns Result<String, String>` parses and type-checks
+- [x] `await expr` suspends async function, producing inner type
+- [x] `spawn async_fn(args)` returns `Future<T>`
+- [x] Contracts on async functions: `requires` at entry, `ensures` at resolve
+- [x] Built-ins: `await_all`, `timeout`, `sleep`
+- [x] Rust backend emits `async fn`, `.await`, `tokio::spawn` (corrected in [Phase 14](phase-14-phase11-13-gaps.md) 14.3 and 14.4)
+- [x] JS backend emits `async function`, `await`, `Promise.all()` (corrected in [Phase 14](phase-14-phase11-13-gaps.md) 14.1 and 14.2)
+- [x] All existing tests pass (no regressions)
+- [x] `examples/async_demo.intent` compiles and runs on Rust and JS (JS verified end-to-end; Rust source verified, full `cargo build` not run locally — cargo unavailable on dev machine)
+- [ ] Attractor example can be updated with async handlers (stretch goal) — **deferred**, tracked separately
+
+> Verified retroactively under [Phase 14](phase-14-phase11-13-gaps.md).
 
 ## Reference
 

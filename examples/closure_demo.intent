@@ -12,9 +12,9 @@ entry function main() returns Int {
     let double: Fn(Int) -> Int = |x: Int| -> Int => x * 2;
     let val1: Int = apply(5, double);
     print(val1);
-
     let sum: Fn(Int, Int) -> Int = |a: Int, b: Int| -> Int => a + b;
     let val2: Int = apply_to_pair(3, 7, sum);
     print(val2);
     return 0;
 }
+

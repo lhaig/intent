@@ -182,3 +182,7 @@ The main additions are:
 - Local path dependencies enable monorepo-style development
 - Version resolution prevents breaking changes from propagating
 - Cache avoids redundant compilation of dependencies
+
+## Implementation Notes (Phase 14)
+
+Phase 13 landed the manifest parser, semver, registry, cache, CLI, and example, but the JS backend's cross-package name mangling was inconsistent: entity/function definitions used the *module* name as the prefix (matching the Rust backend) while call sites recomputed the prefix from the *package* name in `MethodCallExpr.ModuleName`, producing `ReferenceError` at runtime when the two differed (e.g. package `types_pkg` containing module `types`). Phase 14 made the JS backend mirror the Rust backend: `internal/jsbe/jsbe.go:GenerateAll` now keys `moduleManglings` by all three of module name, decl name, and package name (with module-name entries taking precedence), and the constructor call site uses `g.mangledClassName(...)` which consults `typeOrigins` instead of recomputing. Test: `TestGenerateCrossPackageJSNameMangling` in `internal/jsbe/jsbe_test.go`.

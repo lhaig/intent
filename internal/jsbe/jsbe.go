@@ -57,8 +57,12 @@ func Generate(mod *ir.Module) string {
 		for _, f := range mod.Functions {
 			if f.IsEntry {
 				g.emitLine("// Entry point invocation")
-				g.emitLine("const __exitCode = __intent_main();")
-				g.emitLine("process.exit(__exitCode);")
+				if f.IsAsync {
+					g.emitLine("__intent_main().then(code => process.exit(code)).catch(err => { console.error(err); process.exit(1); });")
+				} else {
+					g.emitLine("const __exitCode = __intent_main();")
+					g.emitLine("process.exit(__exitCode);")
+				}
 			}
 		}
 	}
@@ -72,11 +76,29 @@ func GenerateAll(prog *ir.Program) string {
 		return ""
 	}
 
-	// Build module manglings map
+	// Build module manglings map.
+	// Keys are the qualifier names users write in source (module name, decl name,
+	// or package name from intent.toml). Module-name entries are authoritative;
+	// decl-name and package-name entries are only added when they don't collide
+	// with an existing entry.
 	moduleManglings := make(map[string]string)
 	for _, mod := range prog.Modules {
 		if !mod.IsEntry {
 			moduleManglings[mod.Name] = mod.Name + "_"
+		}
+	}
+	for _, mod := range prog.Modules {
+		if !mod.IsEntry {
+			if mod.DeclName != "" && mod.DeclName != mod.Name {
+				if _, exists := moduleManglings[mod.DeclName]; !exists {
+					moduleManglings[mod.DeclName] = mod.Name + "_"
+				}
+			}
+			if mod.PackageName != "" && mod.PackageName != mod.Name {
+				if _, exists := moduleManglings[mod.PackageName]; !exists {
+					moduleManglings[mod.PackageName] = mod.Name + "_"
+				}
+			}
 		}
 	}
 
@@ -152,8 +174,12 @@ func GenerateAll(prog *ir.Program) string {
 			for _, f := range mod.Functions {
 				if f.IsEntry {
 					sb.WriteString("\n// Entry point invocation\n")
-					sb.WriteString("const __exitCode = __intent_main();\n")
-					sb.WriteString("process.exit(__exitCode);\n")
+					if f.IsAsync {
+						sb.WriteString("__intent_main().then(code => process.exit(code)).catch(err => { console.error(err); process.exit(1); });\n")
+					} else {
+						sb.WriteString("const __exitCode = __intent_main();\n")
+						sb.WriteString("process.exit(__exitCode);\n")
+					}
 				}
 			}
 		}
@@ -170,6 +196,7 @@ type generator struct {
 	functions      map[string]*ir.Function
 	inConstructor  bool
 	ensuresContext bool
+	inResultBlock  bool // inside the labeled body block of an ensures-bearing function/method; ReturnStmt should assign __result and break __body
 
 	// Multi-file fields
 	namePrefix      string
@@ -307,7 +334,11 @@ func (g *generator) generateFunction(f *ir.Function) {
 		g.emitLine(" * Entry function")
 		g.emitLine(" * @returns {number}")
 		g.emitLine(" */")
-		g.emitLine("function __intent_main() {")
+		if f.IsAsync {
+			g.emitLine("async function __intent_main() {")
+		} else {
+			g.emitLine("function __intent_main() {")
+		}
 		g.incIndent()
 		g.generateStmts(f.Body)
 		g.decIndent()
@@ -349,9 +380,11 @@ func (g *generator) generateFunction(f *ir.Function) {
 
 		if needsResultCapture {
 			g.emitLine("let __result;")
-			g.emitLine("{")
+			g.emitLine("__body: {")
 			g.incIndent()
+			g.inResultBlock = true
 			g.generateStmts(f.Body)
+			g.inResultBlock = false
 			g.decIndent()
 			g.emitLine("}")
 
@@ -510,9 +543,11 @@ func (g *generator) generateMethod(e *ir.Entity, m *ir.Method) {
 
 	if needsResultCapture {
 		g.emitLine("let __result;")
-		g.emitLine("{")
+		g.emitLine("__body: {")
 		g.incIndent()
+		g.inResultBlock = true
 		g.generateStmts(m.Body)
+		g.inResultBlock = false
 		g.decIndent()
 		g.emitLine("}")
 
@@ -611,9 +646,11 @@ func (g *generator) generateImplBlock(ib *ir.ImplBlock) {
 
 		if needsResultCapture {
 			g.emitLine("let __result;")
-			g.emitLine("{")
+			g.emitLine("__body: {")
 			g.incIndent()
+			g.inResultBlock = true
 			g.generateStmts(m.Body)
+			g.inResultBlock = false
 			g.decIndent()
 			g.emitLine("}")
 
@@ -709,8 +746,16 @@ func (g *generator) generateStmt(s ir.Stmt) {
 			g.generateExpr(stmt.Value))
 
 	case *ir.ReturnStmt:
-		if g.ensuresContext {
-			// Inside ensures context, assign to __result
+		if g.inResultBlock {
+			// Inside the labeled body of an ensures-bearing function/method.
+			// Assign to __result and break out of the body so the postcondition
+			// checks below the block actually execute.
+			if stmt.Value != nil {
+				g.emitLinef("__result = %s;\n", g.generateExpr(stmt.Value))
+			}
+			g.emitLine("break __body;")
+		} else if g.ensuresContext {
+			// Inside an ensures expression (unusual, but preserved for safety).
 			if stmt.Value != nil {
 				g.emitLinef("__result = %s;\n", g.generateExpr(stmt.Value))
 			}
@@ -1172,9 +1217,10 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr) string {
 		}
 
 		if expr.CallKind == ir.CallConstructor {
-			modPrefix := strings.ToUpper(expr.ModuleName[:1]) + expr.ModuleName[1:]
-			mangledClassName := modPrefix + expr.Method
-			return fmt.Sprintf("new %s(%s)", mangledClassName, strings.Join(args, ", "))
+			// Use typeOrigins (keyed by entity name) so the prefix matches the
+			// definition regardless of whether the user qualified with module
+			// name or package name.
+			return fmt.Sprintf("new %s(%s)", g.mangledClassName(expr.Method), strings.Join(args, ", "))
 		}
 
 		// Resolve module prefix: moduleManglings maps declaration names to file-based prefixes

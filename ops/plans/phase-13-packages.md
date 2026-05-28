@@ -6,16 +6,20 @@ Enable cross-project code reuse through a package system with `intent.toml` mani
 
 ## Success Criteria
 
-- [ ] `intent.toml` manifest file parsed and used by compiler
-- [ ] `import graph_types;` resolves to a package dependency
-- [ ] Local path dependencies: `graph-types = { path = "../graph-types" }`
-- [ ] Semver version constraints validated
-- [ ] `intentc pkg init` creates a new manifest
-- [ ] `intentc pkg add <name> <version>` adds a dependency
-- [ ] `intentc build` auto-resolves package dependencies
-- [ ] Cross-package type references work (entities, enums, traits)
-- [ ] All existing tests pass (no regressions)
-- [ ] Example multi-package project compiles and runs
+- [x] `intent.toml` manifest file parsed and used by compiler
+- [x] `import graph_types;` resolves to a package dependency
+- [x] Local path dependencies: `graph-types = { path = "../graph-types" }`
+- [x] Semver version constraints validated
+- [x] `intentc pkg init` creates a new manifest
+- [x] `intentc pkg add <name> <version>` adds a dependency
+- [x] `intentc build` auto-resolves package dependencies
+- [x] Cross-package type references work (entities, enums, traits) (JS code path fixed in [Phase 14](phase-14-phase11-13-gaps.md) 14.6)
+- [x] All existing tests pass (no regressions)
+- [x] Example multi-package project compiles and runs (Rust and JS both verified end-to-end after 14.6)
+
+> Verified retroactively under [Phase 14](phase-14-phase11-13-gaps.md).
+>
+> Note: `intentc pkg install` for *versioned* dependencies prints a "no registry available" warning. A real package registry is intentionally out of scope per ADR 0027; local path dependencies are the supported workflow.
 
 ## Reference
 

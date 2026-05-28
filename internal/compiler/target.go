@@ -34,6 +34,30 @@ func getBinaryBackend(target string) (backend.BinaryBackend, error) {
 	}
 }
 
+// asyncFunctionNames returns the names of any async functions in the program.
+// Used to reject async code when targeting WASM (which has no runtime).
+func asyncFunctionNames(prog *ir.Program) []string {
+	var names []string
+	for _, mod := range prog.Modules {
+		for _, f := range mod.Functions {
+			if f.IsAsync {
+				names = append(names, f.Name)
+			}
+		}
+	}
+	return names
+}
+
+func asyncFunctionNamesInModule(mod *ir.Module) []string {
+	var names []string
+	for _, f := range mod.Functions {
+		if f.IsAsync {
+			names = append(names, f.Name)
+		}
+	}
+	return names
+}
+
 // getFileExtension returns the file extension for the given target
 func getFileExtension(target string) string {
 	switch target {
@@ -68,6 +92,9 @@ func EmitToTarget(source, target, baseName string) error {
 
 	// Handle binary targets (WASM)
 	if target == "wasm" {
+		if names := asyncFunctionNamesInModule(mod); len(names) > 0 {
+			return fmt.Errorf("async functions are not supported on the wasm target (found: %v); use --target rust or --target js", names)
+		}
 		bbe, err := getBinaryBackend(target)
 		if err != nil {
 			return err
@@ -138,6 +165,9 @@ func EmitProjectToTarget(entryPath, target, baseName string) error {
 
 	// Handle binary targets (WASM)
 	if target == "wasm" {
+		if names := asyncFunctionNames(prog); len(names) > 0 {
+			return fmt.Errorf("async functions are not supported on the wasm target (found: %v); use --target rust or --target js", names)
+		}
 		bbe, err := getBinaryBackend(target)
 		if err != nil {
 			return err

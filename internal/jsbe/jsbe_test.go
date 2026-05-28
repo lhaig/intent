@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lhaig/intent/internal/ast"
 	"github.com/lhaig/intent/internal/checker"
 	"github.com/lhaig/intent/internal/ir"
 	"github.com/lhaig/intent/internal/lexer"
@@ -1123,5 +1124,183 @@ async function main() returns Future<Int> {
 	}
 	if !strings.Contains(output, "(async () => { return fetchData(); })()") {
 		t.Errorf("expected spawn as IIFE, got:\n%s", output)
+	}
+}
+
+// Regression for ops/plans/phase-14-phase11-13-gaps.md item 14.2: when a
+// function has an `ensures` clause and the body uses an explicit `return X;`,
+// the previous JS codegen placed the postcondition checks AFTER the return,
+// making them dead code. The labeled-block pattern (mirroring Rust's 'body)
+// captures the return value in __result and breaks out, then runs ensures.
+func TestGenerateEnsuresLabeledBlockJS(t *testing.T) {
+	src := `module result_block version "1.0";
+
+function inc(x: Int) returns Int
+    ensures result == x + 1
+{
+    return x + 1;
+}
+
+entry function main() returns Int {
+    return inc(1);
+}
+`
+	output := generateFromSource(t, "result_block", src)
+
+	if !strings.Contains(output, "__body: {") {
+		t.Errorf("expected labeled __body block around result-capturing function body, got:\n%s", output)
+	}
+	if !strings.Contains(output, "__result = (x + 1);") {
+		t.Errorf("expected return rewritten to __result assignment, got:\n%s", output)
+	}
+	if !strings.Contains(output, "break __body;") {
+		t.Errorf("expected break __body; to exit the labeled block, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Postcondition failed: result == x + 1") {
+		t.Errorf("expected postcondition check after the body block, got:\n%s", output)
+	}
+	// Ensure the postcondition check appears AFTER the body block, not skipped.
+	bodyIdx := strings.Index(output, "__body: {")
+	postIdx := strings.Index(output, "Postcondition failed: result == x + 1")
+	if bodyIdx < 0 || postIdx < 0 || postIdx < bodyIdx {
+		t.Errorf("postcondition check must appear after labeled block, got:\n%s", output)
+	}
+}
+
+// Regression for ops/plans/phase-14-phase11-13-gaps.md item 14.1: when the
+// entry function is async, the generated JS must mark __intent_main as async
+// and await it at the top-level invocation; otherwise `await` inside the body
+// raises SyntaxError at runtime and the returned Promise is never resolved.
+func TestGenerateAsyncEntryFunctionJS(t *testing.T) {
+	src := `module async_entry version "1.0";
+
+async function delayed_add(a: Int, b: Int) returns Int
+    ensures result == a + b
+{
+    await sleep(0);
+    return a + b;
+}
+
+async entry function main() returns Int {
+    let f: Future<Int> = spawn delayed_add(1, 2);
+    let r: Int = await f;
+    return r;
+}
+`
+	output := generateFromSource(t, "async_entry", src)
+
+	if !strings.Contains(output, "async function __intent_main()") {
+		t.Errorf("expected async function __intent_main(), got:\n%s", output)
+	}
+	if !strings.Contains(output, "__intent_main().then(") {
+		t.Errorf("expected __intent_main().then(...) top-level invocation, got:\n%s", output)
+	}
+	// Make sure we did not regress: non-async entry uses the sync form
+	syncSrc := `module sync_entry version "1.0";
+
+entry function main() returns Int {
+    return 0;
+}
+`
+	syncOutput := generateFromSource(t, "sync_entry", syncSrc)
+	if !strings.Contains(syncOutput, "function __intent_main()") {
+		t.Errorf("expected sync function __intent_main(), got:\n%s", syncOutput)
+	}
+	if strings.Contains(syncOutput, "async function __intent_main") {
+		t.Errorf("non-async entry must not be marked async, got:\n%s", syncOutput)
+	}
+	if !strings.Contains(syncOutput, "const __exitCode = __intent_main();") {
+		t.Errorf("expected sync invocation, got:\n%s", syncOutput)
+	}
+}
+
+func makeJSProgram(t *testing.T, src string) *ast.Program {
+	t.Helper()
+	p := parser.New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("parse errors: %s", p.Diagnostics().Format("test"))
+	}
+	return prog
+}
+
+// Regression for ops/plans/phase-14-phase11-13-gaps.md item 14.6: when a
+// package alias differs from the module name, both the entity definition and
+// the constructor/function call site must agree on the mangled name.
+func TestGenerateCrossPackageJSNameMangling(t *testing.T) {
+	typesSrc := `module types version "1.0.0";
+
+public entity Point {
+    field x: Float;
+    field y: Float;
+
+    constructor(x: Float, y: Float)
+        ensures self.x == x
+        ensures self.y == y
+    {
+        self.x = x;
+        self.y = y;
+    }
+}
+
+public function distance_squared(a: Point, b: Point) returns Float
+    ensures result >= 0.0
+{
+    return 0.0;
+}
+`
+	mainSrc := `module main version "1.0.0";
+
+import types_pkg;
+
+entry function main() returns Int {
+    let p1: Point = types_pkg.Point(0.0, 0.0);
+    let p2: Point = types_pkg.Point(3.0, 4.0);
+    let d: Float = types_pkg.distance_squared(p1, p2);
+    return 0;
+}
+`
+	packageDirs := map[string]string{
+		"types_pkg": "/project/libs/types_pkg",
+	}
+	registry := map[string]*ast.Program{
+		"/project/libs/types_pkg/types.intent": makeJSProgram(t, typesSrc),
+		"/project/main.intent":                 makeJSProgram(t, mainSrc),
+	}
+	sortedPaths := []string{
+		"/project/libs/types_pkg/types.intent",
+		"/project/main.intent",
+	}
+
+	checkResult := checker.CheckAll(registry, sortedPaths, packageDirs)
+	if checkResult.Diagnostics.HasErrors() {
+		t.Fatalf("check errors: %s", checkResult.Diagnostics.Format("test"))
+	}
+
+	prog := ir.LowerAll(registry, sortedPaths, checkResult, packageDirs)
+	output := GenerateAll(prog)
+
+	// Entity defined as TypesPoint (module-name mangling). Call site must use
+	// the same prefix, NOT package-name mangling like Types_pkgPoint.
+	if !strings.Contains(output, "class TypesPoint") {
+		t.Errorf("expected entity class TypesPoint, got:\n%s", output)
+	}
+	if !strings.Contains(output, "new TypesPoint(") {
+		t.Errorf("expected constructor call new TypesPoint(, got:\n%s", output)
+	}
+	if strings.Contains(output, "Types_pkgPoint") {
+		t.Errorf("constructor call must not use package-name prefix Types_pkgPoint, got:\n%s", output)
+	}
+
+	// Function defined as types_distance_squared (module-name prefix). Call
+	// site must agree.
+	if !strings.Contains(output, "function types_distance_squared(") {
+		t.Errorf("expected function types_distance_squared, got:\n%s", output)
+	}
+	if !strings.Contains(output, "types_distance_squared(p1, p2)") {
+		t.Errorf("expected call types_distance_squared(p1, p2), got:\n%s", output)
+	}
+	if strings.Contains(output, "types_pkg_distance_squared") {
+		t.Errorf("function call must not use package-name prefix types_pkg_distance_squared, got:\n%s", output)
 	}
 }

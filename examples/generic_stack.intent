@@ -21,7 +21,7 @@ entity Stack<T> {
     }
 
     method is_empty() returns Bool
-        ensures (result == true) implies (self.count == 0)
+        ensures result == true implies self.count == 0
     {
         return self.count == 0;
     }
@@ -32,10 +32,9 @@ entry function main() returns Int {
     int_stack.push(10);
     int_stack.push(20);
     print(int_stack.count);
-
     let mutable str_stack: Stack<String> = Stack<String>();
     str_stack.push("hello");
     print(str_stack.is_empty());
-
     return 0;
 }
+

@@ -138,3 +138,25 @@ async function fetch(url: String) returns Result<String, String>
 - Rust backend gets efficient async via tokio
 - JS backend maps cleanly to native Promises
 - Foundation for channels and structured concurrency in future
+
+## Implementation Notes (Phase 14)
+
+Phase 12 implemented this ADR but several codegen choices were ambiguous and produced uncompilable output. Phase 14 (`ops/plans/phase-14-phase11-13-gaps.md`) locked in the following decisions:
+
+### Rust target: uniform `Future<T>` = `JoinHandle<T>`
+
+- `Future<T>` in Intent always maps to `tokio::task::JoinHandle<T>` in generated Rust.
+- `spawn fn(args)` lowers to `tokio::spawn(async move { fn(args).await })` — the inner async call is awaited *inside* the spawned task so the JoinHandle resolves to `T`, not `Future<T>`.
+- `await f` lowers to `(f).await.expect("spawned task panicked")` — JoinError is treated as a panic; this matches typical Rust idiom for cooperatively-cancelled tasks.
+- The `sleep` built-in is also wrapped in `tokio::spawn(...)` (not just `tokio::time::sleep(...)`) so it conforms to the uniform JoinHandle invariant. This keeps `AwaitExpr` lowering single-rule with no per-builtin special-casing.
+- `await_all` / `await_any` / `timeout` builtins return *values* (not Futures), so they include `.await` in the generated expression themselves; they are not subject to the JoinHandle rule.
+- `Cargo.toml` generation in `internal/compiler/compiler.go:buildCargoToml` sniffs for `tokio::` and `futures::` in the emitted source and adds `tokio = { version = "1", features = ["full"] }` and `futures = "0.3"` accordingly.
+
+### JS target
+
+- Entry function's `IsAsync` is honored: emitted as `async function __intent_main()` and invoked as `__intent_main().then(code => process.exit(code)).catch(err => { console.error(err); process.exit(1); });`.
+- Functions/methods with `ensures` clauses use a labeled `__body: { ... }` block with `__result = X; break __body;` rewriting on `ReturnStmt`. This mirrors the Rust backend's labeled-block pattern and ensures postconditions are not bypassed by explicit early returns.
+
+### WASM target: async rejected at compile time
+
+The original ADR said "WASM backend: async not supported initially." Phase 14 made this concrete: `internal/compiler/target.go` rejects WASM builds whose IR contains any `IsAsync` function with a clear error message naming the offending functions and suggesting `--target rust` or `--target js`. This replaces the prior behavior of silently emitting invalid WASM bytecode.

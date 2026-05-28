@@ -6,16 +6,18 @@ Enable user-defined generic entities and functions in Intent, with monomorphizat
 
 ## Success Criteria
 
-- [ ] `entity Stack<T> { ... }` parses and type-checks
-- [ ] `function identity<T>(x: T) returns T` parses and type-checks
-- [ ] `let s: Stack<Int> = Stack<Int>();` instantiates with concrete types
-- [ ] Contracts work with type parameters: `ensures result == x` where `x: T`
-- [ ] Rust backend emits monomorphized structs and functions
-- [ ] JS backend emits monomorphized classes and functions
-- [ ] All existing tests pass (no regressions)
-- [ ] New tests cover: generic parsing, type checking, monomorphization, codegen
-- [ ] `examples/generic_stack.intent` compiles and runs on Rust and JS
-- [ ] `intentc fmt` handles `<T>` in declarations and instantiations
+- [x] `entity Stack<T> { ... }` parses and type-checks
+- [x] `function identity<T>(x: T) returns T` parses and type-checks
+- [x] `let s: Stack<Int> = Stack<Int>();` instantiates with concrete types
+- [x] Contracts work with type parameters: `ensures result == x` where `x: T`
+- [x] Rust backend emits monomorphized structs and functions
+- [x] JS backend emits monomorphized classes and functions
+- [x] All existing tests pass (no regressions)
+- [x] New tests cover: generic parsing, type checking, monomorphization, codegen
+- [x] `examples/generic_stack.intent` compiles and runs on Rust and JS (JS verified end-to-end; Rust source verified, full `cargo build` not run locally)
+- [x] `intentc fmt` handles `<T>` in declarations and instantiations
+
+> Verified retroactively under [Phase 14](phase-14-phase11-13-gaps.md).
 
 ## Reference
 

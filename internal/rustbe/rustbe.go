@@ -1299,11 +1299,20 @@ func (g *generator) generateExpr(e ir.Expr, arrayRefParams map[string]bool) stri
 		return g.generateMatchExpr(expr, arrayRefParams)
 
 	case *ir.AwaitExpr:
-		return g.generateExpr(expr.Expr, arrayRefParams) + ".await"
+		// Future<T> always maps to tokio::task::JoinHandle<T> (see mapType),
+		// so the await unwraps the JoinResult and panics on JoinError. This
+		// mirrors the typical Rust idiom for awaiting spawned tasks and keeps
+		// the rule uniform across all Future producers (spawn and built-ins
+		// like sleep, all of which we route through tokio::spawn).
+		return "(" + g.generateExpr(expr.Expr, arrayRefParams) + ").await.expect(\"spawned task panicked\")"
 
 	case *ir.SpawnExpr:
 		g.needsTokio = true
-		return "tokio::spawn(async move { " + g.generateExpr(expr.Expr, arrayRefParams) + " })"
+		// The argument to spawn is a call to an async fn (returns a Future).
+		// Await it inside the spawned task so the JoinHandle resolves to the
+		// inner T, not to another Future. Without the `.await` the spawned
+		// task would simply construct a future and drop it.
+		return "tokio::spawn(async move { " + g.generateExpr(expr.Expr, arrayRefParams) + ".await })"
 
 	case *ir.TryExpr:
 		return g.generateExpr(expr.Expr, arrayRefParams) + "?"
@@ -1413,7 +1422,11 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[strin
 			if len(expr.Args) == 1 {
 				g.needsTokio = true
 				arg := g.generateExpr(expr.Args[0], arrayRefParams)
-				return fmt.Sprintf("tokio::time::sleep(std::time::Duration::from_millis(%s as u64)).await", arg)
+				// sleep : Int -> Future<Void>. Future<T> maps to JoinHandle<T>
+				// in the generated Rust, so wrap the Sleep future in a spawned
+				// task. This keeps the Future-is-always-a-JoinHandle invariant
+				// that AwaitExpr lowering relies on.
+				return fmt.Sprintf("tokio::spawn(tokio::time::sleep(std::time::Duration::from_millis(%s as u64)))", arg)
 			}
 		case "timeout":
 			if len(expr.Args) == 2 {

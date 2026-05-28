@@ -156,6 +156,39 @@ entry function main() returns Int {
 	}
 }
 
+// Regression for ops/plans/phase-14-phase11-13-gaps.md item 14.5: the WASM
+// backend has no async runtime and previously emitted invalid bytecode when
+// the input contained async functions. EmitToTarget must reject async
+// programs targeting wasm with a clear error instead of producing broken
+// output silently.
+func TestEmitToTargetWasmRejectsAsync(t *testing.T) {
+	source := `module test version "1.0";
+async function compute() returns Future<Int> {
+    return 42;
+}
+entry function main() returns Int {
+    return 0;
+}
+`
+	baseName := t.TempDir() + "/test_async_wasm"
+
+	err := EmitToTarget(source, "wasm", baseName)
+	if err == nil {
+		t.Fatalf("expected EmitToTarget to reject async on wasm, got no error")
+	}
+	if !strings.Contains(err.Error(), "async functions are not supported on the wasm target") {
+		t.Errorf("expected clear async-not-supported error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "compute") {
+		t.Errorf("error should name the offending function, got: %v", err)
+	}
+
+	// And the wasm file should not have been written.
+	if _, statErr := os.Stat(baseName + ".wasm"); statErr == nil {
+		t.Error("wasm file must not be written when async is detected")
+	}
+}
+
 func TestGetFileExtension(t *testing.T) {
 	tests := []struct {
 		target   string

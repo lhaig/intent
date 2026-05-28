@@ -644,6 +644,70 @@ async entry function main() returns Future<Int> {
 	}
 }
 
+// Regression for ops/plans/phase-14-phase11-13-gaps.md item 14.4: previously
+// `spawn delayed_add(3, 4)` emitted `tokio::spawn(async move { delayed_add(3, 4) })`,
+// which spawns a Future<Future<T>>, and `await f` emitted `f.await`, which
+// yields Result<T, JoinError> — both produced uncompilable Rust. The fix:
+// spawn awaits the inner async call (`async move { expr.await }`), and await
+// unwraps the JoinHandle.
+func TestGenerateAsyncSpawnAwaitJoinHandle(t *testing.T) {
+	src := `module test version "1.0";
+
+async function compute(x: Int) returns Future<Int> {
+    return x + 1;
+}
+
+async entry function main() returns Future<Int> {
+    let f: Future<Int> = spawn compute(5);
+    let r: Int = await f;
+    return r;
+}
+`
+	output := generateFromSource(t, "spawn_await_join", src)
+
+	// spawn must await the inner call so the JoinHandle resolves to T, not Future<T>.
+	if !strings.Contains(output, "tokio::spawn(async move { compute(5i64).await })") {
+		t.Errorf("expected spawn to await the inner call, got:\n%s", output)
+	}
+
+	// await on a JoinHandle must unwrap the JoinError.
+	if !strings.Contains(output, "(f).await.expect(") {
+		t.Errorf("expected await to unwrap JoinHandle with .expect(), got:\n%s", output)
+	}
+
+	// Negative: no bare `f.await` on a JoinHandle.
+	if strings.Contains(output, "= f.await;") || strings.Contains(output, "= (f).await;") {
+		t.Errorf("await on JoinHandle must not be a bare .await (it returns Result), got:\n%s", output)
+	}
+}
+
+// Regression for ops/plans/phase-14-phase11-13-gaps.md item 14.3: per ADR
+// 0026, sleep(ms) returns Future<Void>. The source-level `await` adds the
+// `.await`; the sleep builtin must NOT add its own `.await` or the emitted
+// Rust contains `sleep(...).await.await` which does not compile.
+func TestGenerateAsyncSleepNoDoubleAwait(t *testing.T) {
+	src := `module test version "1.0";
+async entry function main() returns Future<Int> {
+    await sleep(100);
+    return 0;
+}
+`
+	output := generateFromSource(t, "sleep_no_double_await", src)
+
+	if strings.Contains(output, ".await.await") {
+		t.Errorf("emitted Rust must not contain double .await on sleep, got:\n%s", output)
+	}
+	// sleep is wrapped in tokio::spawn so it conforms to the uniform
+	// Future<T> = JoinHandle<T> invariant. The source-level `await` then
+	// resolves the JoinHandle via .await.expect(...).
+	if !strings.Contains(output, "tokio::spawn(tokio::time::sleep(std::time::Duration::from_millis(100i64 as u64)))") {
+		t.Errorf("expected sleep wrapped in tokio::spawn, got:\n%s", output)
+	}
+	if !strings.Contains(output, ".await.expect(") {
+		t.Errorf("expected JoinHandle unwrap via .await.expect(...), got:\n%s", output)
+	}
+}
+
 func TestGenerateAsyncWithContracts(t *testing.T) {
 	src := `module test version "1.0";
 async function fetchPositive(x: Int) returns Future<Int>
