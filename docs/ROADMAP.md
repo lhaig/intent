@@ -216,11 +216,14 @@ because each feature needs to work across all backends and with the verifier.
 - [x] Float/Array/Map key types rejected at type-check time
 - [x] Drove Attractor Context (state passing) and HandlerRegistry
 
-### Rust FFI / Crate Imports
-- Call Rust crate functions from Intent (Rust backend only)
-- Type-safe bridge declarations with contracts on the boundary
-- Unlocks the Rust ecosystem for Intent programs
-- **Status:** not started; no ADR yet. Last remaining Milestone 7 feature.
+### Rust FFI / Crate Imports -- DONE
+- [x] `extern function NAME(...) returns T from "crate::path"` declaration (Phase 15, ADR 0028)
+- [x] Type-bridge restricted to Int/Float/Bool/String/Void/Array<T>/Result<T,E>/Option<T>; entity, user enum, Map, Future, Fn rejected at type-check
+- [x] Contracts surround the call (requires/ensures compile to asserts)
+- [x] `[rust_dependencies]` in intent.toml (version pin or local path) flows through to generated Cargo.toml
+- [x] JS and WASM targets reject extern at codegen with named-function error
+- [x] Formatter + linter (warn on contractless extern)
+- [x] `examples/ffi_blake3/` builds via cargo and prints the 64-char hex digest
 
 ---
 

@@ -687,6 +687,57 @@ The caret operator (`^`) follows standard semver conventions for pre-1.0 version
 
 Resolved packages are cached at `~/.intent/cache/`. Run `intentc pkg install` to resolve and fetch all dependencies.
 
+## Rust FFI (Crate Imports)
+
+The Rust target can call functions from any Cargo crate via `extern function` declarations. Crates are listed in `intent.toml`'s `[rust_dependencies]` section.
+
+```intent
+extern function blake3_hash_hex(input: String) returns String
+    from "blake3_intent::hash_hex"
+    requires len(input) > 0
+    ensures len(result) == 64;
+```
+
+The Rust path after `from` names the function exactly as the crate exposes it (first segment is the crate name, the rest is the path inside the crate). Contracts work as on regular functions and compile to runtime asserts around the call.
+
+### Bridge types
+
+Only these types may appear in an `extern function` signature:
+
+| Intent type | Rust mapping |
+|---|---|
+| `Int` | `i64` |
+| `Float` | `f64` |
+| `Bool` | `bool` |
+| `String` | owned `String` |
+| `Void` | `()` |
+| `Array<T>` | `Vec<T>` where `T` is bridged |
+| `Result<T, E>` | `Result<T, E>` with both sides bridged |
+| `Option<T>` | `Option<T>` with `T` bridged |
+
+Entity types, user-defined enums, `Map<K, V>`, `Future<T>`, `Fn(...)` and trait references are rejected. If you need to expose a Rust type that does not bridge cleanly (e.g. `blake3::Hash`), write a tiny wrapper crate that returns a bridgeable shape — see `examples/ffi_blake3/`.
+
+### intent.toml
+
+```toml
+[package]
+name = "my_project"
+version = "0.1.0"
+
+[rust_dependencies]
+blake3 = "1.5"
+intent_zstd = { version = "0.13", features = ["std"] }
+my_wrapper = { path = "./wrapper" }
+```
+
+Relative `path` entries are resolved against the directory containing `intent.toml`. User pins override the compiler's default sniffer entries (for example, pinning `tokio` here replaces the default `tokio = { version = "1", features = ["full"] }`).
+
+### Target compatibility
+
+`extern function` declarations are Rust-only. Building any program containing one with `--target js` or `--target wasm` fails at codegen with a clear error.
+
+See ADR 0028 for the full design rationale.
+
 ## Multi-File Projects
 
 ### Imports

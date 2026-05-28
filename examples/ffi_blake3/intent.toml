@@ -1,0 +1,7 @@
+[package]
+name = "ffi_blake3"
+version = "0.1.0"
+description = "Example of calling a Rust crate from Intent via the extern function FFI (ADR 0028, Phase 15)."
+
+[rust_dependencies]
+blake3_intent = { path = "blake3_intent" }

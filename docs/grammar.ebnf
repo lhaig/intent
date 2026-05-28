@@ -25,6 +25,7 @@ program = module_decl , { top_level_decl } ;
 module_decl = "module" , identifier , "version" , string_literal , ";" ;
 
 top_level_decl = function_decl
+               | extern_function_decl
                | entity_decl
                | enum_decl
                | trait_decl
@@ -88,6 +89,16 @@ function_decl = [ "public" ] , [ "async" ] , [ "entry" ] , "function" , identifi
                 { requires_clause } ,
                 { ensures_clause } ,
                 block ;
+
+(* Phase 15 / ADR 0028: Rust FFI / crate-import declaration. Has no body.
+   The "from" keyword is contextual — lexed as an identifier and matched here. *)
+extern_function_decl = "extern" , "function" , identifier ,
+                       "(" , [ param_list ] , ")" ,
+                       "returns" , type_ref ,
+                       "from" , string_literal ,
+                       { requires_clause } ,
+                       { ensures_clause } ,
+                       ";" ;
 
 type_param_list = "<" , type_param , { "," , type_param } , ">" ;
 

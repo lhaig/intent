@@ -1,0 +1,20 @@
+module ffi_blake3 version "0.1.0";
+
+// Demonstrates Rust FFI / crate imports per ADR 0028 (Phase 15).
+//
+// blake3_intent is a tiny path-dependency wrapper crate (see ./blake3_intent/)
+// that exposes a single function with an Intent-bridgeable signature
+// (String -> String). The actual blake3 crate is pulled in transitively;
+// Intent doesn't see it directly because blake3::Hash is not in the type
+// bridge table (ADR 0028).
+
+extern function blake3_hash_hex(input: String) returns String
+    from "blake3_intent::hash_hex"
+    requires len(input) > 0
+    ensures len(result) == 64;
+
+entry function main() returns Int {
+    let h: String = blake3_hash_hex("hello, intent");
+    print(h);
+    return 0;
+}
