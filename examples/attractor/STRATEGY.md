@@ -148,11 +148,26 @@ Each gap found while implementing Attractor maps to an Intent language feature. 
 
 **Attractor deliverable:** Full Attractor runtime — a working AI pipeline orchestrator.
 
+### Phase 10: Async retry + parallel handler fan-out (Phases 11-13 follow-up)
+
+**Attractor need:** Retries with real exponential backoff (the original sync retry loop computed `delay_for_attempt()` but never slept). Parallel `stack.manager_loop` fan-out so independent handlers can run concurrently — previously listed under "Features Not Driven by Attractor" because Intent had no concurrency primitives.
+
+**Intent feature:** Phase 12 — async/await/spawn, `sleep`, `await_all`. Phase 13 — `intent.toml` manifest.
+
+**Attractor deliverable:**
+- `examples/attractor/async_retry.intent` — `execute_with_retry_async` awaits `sleep(delay_for_attempt(prev, policy))` between attempts.
+- `examples/attractor/parallel.intent` — `execute_handlers_parallel` spawns one task per node and joins them with `await_all`, preserving outcome-by-index correlation.
+- `examples/attractor/main_async.intent` — entry point binding both features end-to-end on the Rust target (verified: prints `true\n3`).
+- `examples/attractor/intent.toml` — package manifest.
+
+**Compiler-side discoveries during this work (all fixed):** async fn Rust signature must emit `-> T` not `-> JoinHandle<T>`; `tokio::spawn` should receive the future directly (no inner `async move` wrapper that forces by-move capture of every variable); `AwaitExpr` needs an `IsJoinHandle` flag to distinguish spawn-handle await from direct async-fn await; `await_all`/`await_any` must unwrap per-handle `JoinError`; `sleep` no longer wraps in `tokio::spawn`; spawn checker accepts module-qualified calls; `Ok()`/`Err()`/`Some()` inference peels `Future<>` from async-fn return types; `cloneIfNeeded` skips `Future` types (JoinHandle is non-Clone).
+
+**Phase 11 (user-defined generics):** N/A for Attractor — its domain model is fixed-shape (NodeAttr, EdgeAttr, Outcome, …) and the built-in generics (`Array<T>`, `Map<K,V>`, `Result<T,E>`, `Option<T>`, `Future<T>`) cover everything it actually needs. User-defined generics were not exercised by this round.
+
 ## Features Not Driven by Attractor
 
 Some spec requirements fall outside Intent's design goals:
 
-- **Concurrency** (parallel handler fan-out) — explicitly a non-goal for Intent. The parallel handler would need to be implemented in the Rust runtime layer.
 - **Timestamp/Duration type** — needed for checkpoints and timeouts but could be modeled as Int (epoch millis) until a proper type is added.
 - **Random number generation** — needed for retry jitter only. Low priority.
 
@@ -180,3 +195,4 @@ Each phase should produce both a language improvement and a visible expansion of
 | 2026-02-26 | Phase 7 complete: I/O standard library -- read_file, write_file, create_dir, file_exists, env_get builtins + to_string() method on Int/Float/Bool. Wired through checker, IR, Rust codegen, JS codegen. | No compiler architecture changes needed -- builtins follow existing name-match pattern |
 | 2026-02-27 | Phase 8 complete: HTTP/JSON/event builtins -- http_post, http_get, json_get, emit_event, timestamp_ms. Cargo.toml dependency management (reqwest, serde_json conditional on usage). New examples: persistence.intent, llm.intent. Updated main.intent and handlers.intent with LLM integration. ADR 0020. | JS HTTP uses curl via execSync (not production-grade). JSON extraction limited to top-level string keys. Cargo.toml scan-based dependency detection could false-positive on string literals. |
 | 2026-02-27 | Phase 9 complete: 5 WARNING lint rules (retry_target_exists, goal_gate_has_retry, prompt_on_llm_nodes, type_known, condition_syntax) + validate_warnings aggregate. HandlerKind enum + resolve_handler/dispatch_handler. Map\<Float,V\> rejected at compile time. json_path builtin (4-layer: checker, IR, rustbe, jsbe). Rust codegen improvements: typeOrigins for cross-module type names, module declaration name mapping, enum variant qualification, intra-module function prefixing, impl block entity name mangling. ADR 0021. | Multi-file Rust codegen has pre-existing ownership/borrowing issues preventing native binary compilation of the full attractor example. Cross-module exprTypes not populated for some enum variant identifiers (workaround: fallback enum variant resolution in IR lowerer). |
+| 2026-05-28 | Phase 10 complete: applied Phases 11-13 to Attractor. New async_retry.intent (sleep-backed backoff closing the long-standing "delay computed but never waited" gap), parallel.intent (spawn + await_all fan-out — was listed as a non-goal), main_async.intent entry point, intent.toml manifest. Drive-by fix to retry.intent (pre-existing bare-array literal). | Phase 14 follow-up bugs surfaced: async-fn Rust signature was JoinHandle<T> instead of T (broke all async builds with cargo); SpawnExpr async-move wrapper forced by-move capture preventing multi-spawn; AwaitExpr needed IsJoinHandle distinction; await_all over JoinHandles needed per-element JoinError unwrap; checker spawn rejected module-qualified calls; Ok()/Err() inference didn't peel Future from async return type; cloneIfNeeded tried to clone non-Clone JoinHandle. All fixed; six rustbe tests updated to match new (cargo-verified) emit patterns. |

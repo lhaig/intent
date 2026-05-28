@@ -117,9 +117,11 @@ public function execute_with_retry(node: NodeAttr, context: PipelineContext, pol
         }
 
         // Extract the outcome from Ok result
+        let mutable empty_ids: Array<String> = [];
+        let mutable empty_updates: Map<String, String> = [];
         let outcome: Outcome = match handler_result {
             Ok(o) => o,
-            Err(e) => Outcome(Fail, "", "", e, [], []),
+            Err(e) => Outcome(Fail, "", "", e, empty_ids, empty_updates),
         };
 
         // If success, return immediately

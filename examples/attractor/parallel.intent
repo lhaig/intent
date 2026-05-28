@@ -1,0 +1,50 @@
+module attractor_parallel version "0.1.0";
+
+import "types.intent";
+import "retry.intent";
+
+// Fan-out execution: run an async handler invocation per node concurrently
+// and collect every outcome before returning. The previous STRATEGY.md
+// section "Features Not Driven by Attractor" listed "Concurrency (parallel
+// handler fan-out) — explicitly a non-goal" because Intent had no async
+// primitives. Phase 12 lifted that constraint; this module shows the spec's
+// `stack.manager_loop` fan-out pattern expressed natively.
+//
+// Semantics: each node's handler runs on its own task. The function blocks
+// on await_all so the returned array preserves the input ordering — caller
+// can correlate by index.
+
+// Wrap the sync execute_handler in a future so we can spawn it. The handler
+// is sync inside, but spawning it lets the runtime schedule N invocations
+// concurrently. If/when handlers themselves become async (e.g. for HTTP
+// calls), this wrapper drops away.
+public async function handler_task(node: NodeAttr, context: PipelineContext) returns Future<Result<Outcome, String>>
+    requires node.id != ""
+{
+    return attractor_retry.execute_handler(node, context);
+}
+
+// Fan out execute_handler over an array of nodes. Each returned element is
+// the Result<Outcome, String> for the node at the same index in `nodes`.
+public async function execute_handlers_parallel(nodes: Array<NodeAttr>, context: PipelineContext) returns Future<Array<Result<Outcome, String>>>
+    requires len(nodes) >= 0
+{
+    let mutable futures: Array<Future<Result<Outcome, String>>> = [];
+    let total: Int = len(nodes);
+    let mutable i: Int = 0;
+    while i < total {
+        let node: NodeAttr = nodes[i];
+        let f: Future<Result<Outcome, String>> = spawn handler_task(node, context);
+        futures.push(f);
+        i = i + 1;
+    }
+    let results: Array<Result<Outcome, String>> = await_all(futures);
+    return results;
+}
+
+intent "Parallel handler fan-out preserves outcome correlation" {
+    goal: "Spawning one task per node lets independent handlers run concurrently";
+    goal: "Returned Outcomes line up with input nodes by index";
+    guarantee: "All spawned tasks are awaited before the function returns";
+    verified_by: [execute_handlers_parallel.requires, handler_task.requires];
+}

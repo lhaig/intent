@@ -1,0 +1,72 @@
+module attractor_async_retry version "0.1.0";
+
+import "types.intent";
+import "retry.intent";
+import "handlers.intent";
+
+// Async version of execute_with_retry. Unlike the sync version in retry.intent,
+// this actually waits between attempts using the backoff delay computed by
+// delay_for_attempt — closing a long-standing gap noted in STRATEGY.md where
+// the sync retry loop discarded the backoff entirely.
+//
+// Backoff semantics:
+//   attempt 1: no delay (first try)
+//   attempt N (N > 1): sleep(delay_for_attempt(N-1, policy)) ms before retrying
+//
+// All retry-policy invariants from retry.intent carry over: max_attempts >= 1
+// is required, and the loop is bounded by policy.max_attempts.
+
+public async function execute_with_retry_async(node: NodeAttr, context: PipelineContext, policy: RetryPolicy) returns Future<Result<Outcome, String>>
+    requires policy.max_attempts >= 1
+    requires node.id != ""
+{
+    let mutable last_outcome_status: StageStatus = Fail;
+    for attempt in 1..policy.max_attempts + 1 {
+        if attempt > 1 {
+            let delay_ms: Int = attractor_retry.delay_for_attempt(attempt - 1, policy);
+            await sleep(delay_ms);
+        }
+
+        let handler_result: Result<Outcome, String> = attractor_retry.execute_handler(node, context);
+
+        let is_error: Bool = handler_result.is_err();
+        if is_error {
+            if attempt < policy.max_attempts {
+                continue;
+            }
+            let mutable fail_ids: Array<String> = [];
+            let mutable fail_updates: Map<String, String> = [];
+            return Ok(Outcome(Fail, "", "all attempts exhausted", "handler error", fail_ids, fail_updates));
+        }
+
+        let mutable empty_ids: Array<String> = [];
+        let mutable empty_updates: Map<String, String> = [];
+        let outcome: Outcome = match handler_result {
+            Ok(o) => o,
+            Err(e) => Outcome(Fail, "", "", e, empty_ids, empty_updates),
+        };
+
+        if outcome.is_success() {
+            return Ok(outcome);
+        }
+
+        last_outcome_status = outcome.status;
+        let can_retry: Bool = attractor_retry.is_retriable(last_outcome_status, attempt, policy.max_attempts);
+        if can_retry {
+            continue;
+        }
+
+        return Ok(outcome);
+    }
+
+    let mutable final_ids: Array<String> = [];
+    let mutable final_updates: Map<String, String> = [];
+    return Ok(Outcome(Fail, "", "all retry attempts exhausted", "", final_ids, final_updates));
+}
+
+intent "Async retry with real backoff" {
+    goal: "Failed handlers retry with exponential backoff actually applied (sleep between attempts)";
+    goal: "Async retry preserves the same retry-policy invariants as the sync version";
+    guarantee: "First attempt has no delay; subsequent attempts wait delay_for_attempt(prev)";
+    verified_by: [execute_with_retry_async.requires];
+}

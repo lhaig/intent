@@ -1,0 +1,4 @@
+[package]
+name = "attractor"
+version = "0.1.0"
+description = "DOT-based AI pipeline orchestration, written in Intent. Driving example for the Intent language."

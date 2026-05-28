@@ -1,0 +1,43 @@
+module attractor_main_async version "0.1.0";
+
+import "types.intent";
+import "retry.intent";
+import "async_retry.intent";
+import "parallel.intent";
+
+// Entry point that exercises the Phase 12 async additions to Attractor:
+// 1. execute_with_retry_async with real sleep-backed backoff.
+// 2. execute_handlers_parallel for concurrent handler fan-out.
+//
+// The handlers themselves do no I/O (they return Outcomes synchronously),
+// so the demonstration value is structural: this entry point would not have
+// type-checked before Phase 12, and the parallel fan-out runs N tasks
+// concurrently on the tokio runtime in the Rust target.
+
+async entry function main() returns Future<Int> {
+    let mutable empty_updates: Map<String, String> = [];
+    let ctx: PipelineContext = PipelineContext(empty_updates);
+
+    let mutable nodes: Array<NodeAttr> = [
+        NodeAttr("a", "A", "box", "", "", 1, false, "", 0),
+        NodeAttr("b", "B", "box", "", "", 1, false, "", 0),
+        NodeAttr("c", "C", "box", "", "", 1, false, "", 0)
+    ];
+
+    // 1. Async retry with backoff -- single node, fast policy so the demo
+    //    exits quickly (initial_delay 10ms, factor 2.0, max 2 attempts).
+    // Spawn-then-await is the supported Intent idiom for invoking an async
+    // function from another async function.
+    let fast_policy: RetryPolicy = RetryPolicy(2, 10, 2.0, 1000);
+    let retry_fut: Future<Result<Outcome, String>> = spawn attractor_async_retry.execute_with_retry_async(nodes[0], ctx, fast_policy);
+    let retry_result: Result<Outcome, String> = await retry_fut;
+    let retry_ok: Bool = retry_result.is_ok();
+    print(retry_ok);
+
+    // 2. Parallel fan-out -- the parallel module already spawns per-node
+    //    tasks internally and joins them; no need for an outer spawn here.
+    let results: Array<Result<Outcome, String>> = await attractor_parallel.execute_handlers_parallel(nodes, ctx);
+    print(len(results));
+
+    return 0;
+}
