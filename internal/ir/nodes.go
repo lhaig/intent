@@ -496,6 +496,11 @@ func (*StringConcat) exprNode()                 {}
 type AwaitExpr struct {
 	Expr Expr
 	Type *checker.Type // the unwrapped type (T from Future<T>)
+	// IsJoinHandle is true when the inner expression yields a spawn result
+	// (mapped to tokio::task::JoinHandle<T> in Rust). The Rust backend then
+	// emits `.await.expect(...)` to unwrap the JoinError; direct async-fn
+	// calls produce `impl Future<Output = T>` and use bare `.await` instead.
+	IsJoinHandle bool
 }
 
 func (e *AwaitExpr) ExprType() *checker.Type { return e.Type }

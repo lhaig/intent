@@ -143,14 +143,25 @@ async function fetch(url: String) returns Result<String, String>
 
 Phase 12 implemented this ADR but several codegen choices were ambiguous and produced uncompilable output. Phase 14 (`ops/plans/phase-14-phase11-13-gaps.md`) locked in the following decisions:
 
-### Rust target: uniform `Future<T>` = `JoinHandle<T>`
+### Rust target: source-aware `Future<T>` lowering (revised by Phase 10 Attractor work)
 
-- `Future<T>` in Intent always maps to `tokio::task::JoinHandle<T>` in generated Rust.
-- `spawn fn(args)` lowers to `tokio::spawn(async move { fn(args).await })` — the inner async call is awaited *inside* the spawned task so the JoinHandle resolves to `T`, not `Future<T>`.
-- `await f` lowers to `(f).await.expect("spawned task panicked")` — JoinError is treated as a panic; this matches typical Rust idiom for cooperatively-cancelled tasks.
-- The `sleep` built-in is also wrapped in `tokio::spawn(...)` (not just `tokio::time::sleep(...)`) so it conforms to the uniform JoinHandle invariant. This keeps `AwaitExpr` lowering single-rule with no per-builtin special-casing.
-- `await_all` / `await_any` / `timeout` builtins return *values* (not Futures), so they include `.await` in the generated expression themselves; they are not subject to the JoinHandle rule.
-- `Cargo.toml` generation in `internal/compiler/compiler.go:buildCargoToml` sniffs for `tokio::` and `futures::` in the emitted source and adds `tokio = { version = "1", features = ["full"] }` and `futures = "0.3"` accordingly.
+The original Phase 14 rule "`Future<T>` always maps to `JoinHandle<T>`" was too coarse — it broke when async functions were called *directly* (without `spawn`) and when the same value was used by multiple spawn sites. The final lowering is:
+
+- **Async function signatures:** an Intent `async function f() returns Future<T>` emits Rust `async fn f() -> T`. The Future wrapping is implicit in `async fn`; emitting `-> JoinHandle<T>` here was wrong because the body returns `T`, not a JoinHandle. The Rust backend's `fnReturnType` helper peels the `Future<>` wrapper for async-fn signatures only.
+- **`spawn fn(args)`** lowers to `tokio::spawn(fn(args))`. Because the async fn already returns `impl Future<Output=T>`, `tokio::spawn` takes that future directly. Wrapping in `async move { fn(args).await }` (the earlier Phase 14 form) forced a by-move capture of every argument variable in the enclosing scope, which broke the common pattern of using the same variable across multiple spawn sites.
+- **`await expr`:** the IR's `AwaitExpr` carries an `IsJoinHandle` flag set during lowering. It is `true` when the inner expression is structurally a `SpawnExpr` *or* a `VarRef` whose binding was a spawn (tracked via `joinHandleVars` on the lowerer).
+  - `IsJoinHandle = true` → `(expr).await.expect("spawned task panicked")`. JoinError is treated as a panic; this matches typical Rust idiom for cooperatively-cancelled tasks.
+  - `IsJoinHandle = false` → bare `(expr).await`. The inner is an `impl Future<Output=T>` from a direct async-fn call (or a builtin like `sleep`), and `.await` yields `T` directly with no JoinError layer.
+- **`sleep` builtin** emits the bare Sleep future: `tokio::time::sleep(Duration::from_millis(ms as u64))`. The source-level `await sleep(...)` adds the single `.await`. (The earlier Phase 14 form wrapped sleep in `tokio::spawn(...)` to make `Future<T> = JoinHandle<T>` uniform; this is no longer needed once `IsJoinHandle` carries the distinction in the IR.)
+- **`await_all` / `await_any`** unwrap each per-task `JoinError`: `futures::future::join_all(handles).await.into_iter().map(|r| r.expect("spawned task panicked")).collect::<Vec<_>>()` and `select_all(handles).await.0.expect("spawned task panicked")`. They return concrete values (`Array<T>`, `T`), not Futures, so they are not subject to the `IsJoinHandle` rule at the await site.
+- **`timeout`** returns `Result<T, String>` (the Intent type) — `tokio::time::timeout(...).await.map_err(|_| "timeout".to_string())`.
+- **`cloneIfNeeded`** skips `Future` types: `tokio::task::JoinHandle` is non-Clone and represents unique ownership of a spawned task, so its values must be moved, never cloned.
+- **`Cargo.toml` generation** in `internal/compiler/compiler.go:buildCargoToml` sniffs for `tokio::` and `futures::` in the emitted source and adds `tokio = { version = "1", features = ["full"] }` and `futures = "0.3"` accordingly.
+
+### Checker
+
+- `spawn` accepts either a direct call `f(args)` or a module-qualified call `module.f(args)`. The earlier "spawn requires a function call" was too strict — multi-file Attractor code spawns across module boundaries.
+- `Ok()` / `Err()` / `Some()` variant inference peels a `Future<>` wrapper from the enclosing function's declared return type, so an async function declared `returns Future<Result<T,E>>` can still write `return Ok(...)` in its body.
 
 ### JS target
 

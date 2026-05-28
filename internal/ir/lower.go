@@ -29,6 +29,11 @@ type lowerer struct {
 	genericFuncDecls   map[string]*ast.FunctionDecl // name -> original AST decl
 	instantiations     map[string][][]*checker.Type // "Stack" -> [[Int], [String]]
 	funcInstantiations map[string][][]*checker.Type // "identity" -> [[Int]]
+
+	// joinHandleVars tracks let-bindings whose initializer was a spawn — so
+	// later `await var` knows to emit JoinHandle-style unwrap. Cleared between
+	// function bodies; not lexical-scope-aware (current limitation).
+	joinHandleVars map[string]bool
 }
 
 // Lower transforms a single-file AST program into an IR Module.
@@ -628,11 +633,20 @@ func (l *lowerer) lowerBlock(b *ast.Block) []Stmt {
 func (l *lowerer) lowerStmt(s ast.Statement) Stmt {
 	switch stmt := s.(type) {
 	case *ast.LetStmt:
+		value := l.lowerExpr(stmt.Value)
+		// If this binding holds a spawn result, remember it so a later
+		// `await name` lowers with the IsJoinHandle flag.
+		if _, ok := value.(*SpawnExpr); ok {
+			if l.joinHandleVars == nil {
+				l.joinHandleVars = make(map[string]bool)
+			}
+			l.joinHandleVars[stmt.Name] = true
+		}
 		return &LetStmt{
 			Name:    stmt.Name,
 			Mutable: stmt.Mutable,
 			Type:    l.resolveTypeRef(stmt.Type),
-			Value:   l.lowerExpr(stmt.Value),
+			Value:   value,
 		}
 	case *ast.AssignStmt:
 		return &AssignStmt{
@@ -961,9 +975,24 @@ func (l *lowerer) lowerExpr(e ast.Expression) Expr {
 		}
 
 	case *ast.AwaitExpr:
+		inner := l.lowerExpr(expr.Expr)
+		// Detect "await of a spawn result" so the Rust backend can emit
+		// JoinHandle-style unwrap. Direct structural case: `await spawn ...`.
+		// VarRef case (`let f = spawn ...; await f;`) is handled by tracking
+		// spawned variable bindings in joinHandleVars.
+		isJoinHandle := false
+		switch v := inner.(type) {
+		case *SpawnExpr:
+			isJoinHandle = true
+		case *VarRef:
+			if l.joinHandleVars != nil && l.joinHandleVars[v.Name] {
+				isJoinHandle = true
+			}
+		}
 		return &AwaitExpr{
-			Expr: l.lowerExpr(expr.Expr),
-			Type: l.typeOf(e),
+			Expr:         inner,
+			Type:         l.typeOf(e),
+			IsJoinHandle: isJoinHandle,
 		}
 
 	case *ast.SpawnExpr:

@@ -1865,6 +1865,12 @@ func (c *Checker) checkBuiltinVariant(expr *ast.CallExpr, scope *Scope) *Type {
 	// First, check if we're in a function with a Result/Option return type
 	if c.currentFunc != nil && c.currentFunc.ReturnType != nil {
 		returnType := c.currentFunc.ReturnType
+		// Async functions may declare their return as `Future<Result<T,E>>` or
+		// `Future<Option<T>>`; the body still returns the inner Result/Option.
+		// Peel the Future wrapper before inferring the variant context.
+		if returnType.Name == "Future" && returnType.IsGeneric && len(returnType.TypeParams) == 1 {
+			returnType = returnType.TypeParams[0]
+		}
 		if returnType.Name == "Result" || returnType.Name == "Option" {
 			expectedType = returnType
 		}
@@ -2802,20 +2808,38 @@ func (c *Checker) checkAwaitExpr(expr *ast.AwaitExpr, scope *Scope) *Type {
 func (c *Checker) checkSpawnExpr(expr *ast.SpawnExpr, scope *Scope) *Type {
 	line, col := expr.Pos()
 
-	// spawn argument must be a call expression
-	callExpr, ok := expr.Expr.(*ast.CallExpr)
-	if !ok {
+	// spawn accepts either a direct call expression `f(args)` or a
+	// module-qualified call `mod.f(args)` where the object identifier
+	// resolves to no type (i.e. it's an imported module name).
+	var callType *Type
+	switch callExpr := expr.Expr.(type) {
+	case *ast.CallExpr:
+		callType = c.checkCallExpr(callExpr, scope)
+		if fn, exists := c.functions[callExpr.Function]; exists && !fn.IsAsync {
+			c.diag.Errorf(line, col, "spawn requires an async function, '%s' is not async", callExpr.Function)
+		}
+	case *ast.MethodCallExpr:
+		// Module-qualified call: `module.fn(args)` where module is an imported
+		// module name. Method-on-an-entity cannot be spawned currently.
+		ident, identOk := callExpr.Object.(*ast.Identifier)
+		isModule := false
+		if identOk && c.moduleImports != nil {
+			_, isModule = c.moduleImports[ident.Name]
+		}
+		if !isModule {
+			c.diag.Errorf(line, col, "spawn requires a function call or module-qualified call to an async function")
+			return nil
+		}
+		callType = c.checkMethodCallExpr(callExpr, scope)
+		// Async check: look up the function in the same module's symbols.
+		if modSyms, ok := c.moduleImports[ident.Name]; ok {
+			if fn, exists := modSyms.Functions[callExpr.Method]; exists && !fn.IsAsync {
+				c.diag.Errorf(line, col, "spawn requires an async function, '%s.%s' is not async", ident.Name, callExpr.Method)
+			}
+		}
+	default:
 		c.diag.Errorf(line, col, "spawn requires a function call")
 		return nil
-	}
-
-	// Check the call expression to get the return type
-	callType := c.checkCallExpr(callExpr, scope)
-
-	// The target function must be async
-	fn, exists := c.functions[callExpr.Function]
-	if exists && !fn.IsAsync {
-		c.diag.Errorf(line, col, "spawn requires an async function, '%s' is not async", callExpr.Function)
 	}
 
 	if callType == nil {

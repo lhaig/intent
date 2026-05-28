@@ -355,6 +355,27 @@ func (g *generator) indentStr() string {
 
 // --- Type mapping ---
 
+// fnReturnType maps an Intent function's declared return type to its Rust
+// signature type. For async functions whose Intent signature declares
+// `returns Future<T>`, the Rust signature drops the Future wrapper because
+// `async fn ... -> X` already produces an `impl Future<Output = X>`. Without
+// this peel, the emitted signature `async fn f() -> JoinHandle<X>` does not
+// match the body which returns X.
+func (g *generator) fnReturnType(f *ir.Function) string {
+	t := f.ReturnType
+	if f.IsAsync && t != nil && t.Name == "Future" && t.IsGeneric && len(t.TypeParams) == 1 {
+		return g.mapType(t.TypeParams[0])
+	}
+	return g.mapType(t)
+}
+
+// fnResultType is the type assigned to __result inside a labeled-block body.
+// Same Future-peeling rule as fnReturnType because __result is what gets
+// returned from the function.
+func (g *generator) fnResultType(f *ir.Function) string {
+	return g.fnReturnType(f)
+}
+
 func (g *generator) mapType(t *checker.Type) string {
 	if t == nil {
 		return "()"
@@ -539,7 +560,7 @@ func (g *generator) generateFunction(f *ir.Function) {
 			}
 			g.emitf("%s: %s", p.Name, paramType)
 		}
-		g.emitf(") -> %s {\n", g.mapType(f.ReturnType))
+		g.emitf(") -> %s {\n", g.fnReturnType(f))
 		g.incIndent()
 
 		// Requires
@@ -552,7 +573,7 @@ func (g *generator) generateFunction(f *ir.Function) {
 		needsLabeledBlock := len(f.Ensures) > 0 && f.ReturnType != nil && f.ReturnType.Name != "Void"
 
 		if needsLabeledBlock {
-			g.emitLinef("let __result: %s = 'body: {\n", g.mapType(f.ReturnType))
+			g.emitLinef("let __result: %s = 'body: {\n", g.fnResultType(f))
 			g.incIndent()
 			g.inLabeledBlock = true
 			g.generateStmtsWithArrayRef(f.Body, arrayRefParams)
@@ -1299,20 +1320,24 @@ func (g *generator) generateExpr(e ir.Expr, arrayRefParams map[string]bool) stri
 		return g.generateMatchExpr(expr, arrayRefParams)
 
 	case *ir.AwaitExpr:
-		// Future<T> always maps to tokio::task::JoinHandle<T> (see mapType),
-		// so the await unwraps the JoinResult and panics on JoinError. This
-		// mirrors the typical Rust idiom for awaiting spawned tasks and keeps
-		// the rule uniform across all Future producers (spawn and built-ins
-		// like sleep, all of which we route through tokio::spawn).
-		return "(" + g.generateExpr(expr.Expr, arrayRefParams) + ").await.expect(\"spawned task panicked\")"
+		inner := g.generateExpr(expr.Expr, arrayRefParams)
+		if expr.IsJoinHandle {
+			// JoinHandle<T>.await yields Result<T, JoinError>; unwrap it.
+			return "(" + inner + ").await.expect(\"spawned task panicked\")"
+		}
+		// Direct async-fn call yields impl Future<Output = T>; plain .await
+		// gives T.
+		return "(" + inner + ").await"
 
 	case *ir.SpawnExpr:
 		g.needsTokio = true
-		// The argument to spawn is a call to an async fn (returns a Future).
-		// Await it inside the spawned task so the JoinHandle resolves to the
-		// inner T, not to another Future. Without the `.await` the spawned
-		// task would simply construct a future and drop it.
-		return "tokio::spawn(async move { " + g.generateExpr(expr.Expr, arrayRefParams) + ".await })"
+		// async fn signatures emit `-> T` (see fnReturnType), so a direct call
+		// to an async fn returns `impl Future<Output = T>`. Pass that future
+		// straight to tokio::spawn — wrapping in `async move { ... }` would
+		// force a by-move capture of every argument variable in the enclosing
+		// scope, breaking ownership when the same variable is used in
+		// multiple spawn sites.
+		return "tokio::spawn(" + g.generateExpr(expr.Expr, arrayRefParams) + ")"
 
 	case *ir.TryExpr:
 		return g.generateExpr(expr.Expr, arrayRefParams) + "?"
@@ -1365,20 +1390,27 @@ func (g *generator) cloneIfNeeded(argStr string, arg ir.Expr) string {
 	}
 	switch e := arg.(type) {
 	case *ir.VarRef:
-		if !isCopyType(e.Type) {
+		if !isCopyType(e.Type) && !isFutureType(e.Type) {
 			return argStr + ".clone()"
 		}
 	case *ir.FieldAccessExpr:
-		if !isCopyType(e.Type) {
+		if !isCopyType(e.Type) && !isFutureType(e.Type) {
 			return argStr + ".clone()"
 		}
 	case *ir.IndexExpr:
 		// vec[i] moves the element -- clone if non-Copy
-		if !isCopyType(e.Type) {
+		if !isCopyType(e.Type) && !isFutureType(e.Type) {
 			return argStr + ".clone()"
 		}
 	}
 	return argStr
+}
+
+// isFutureType reports whether the type is Future<T>, which maps to
+// tokio::task::JoinHandle<T> in Rust. JoinHandle is non-Clone and represents
+// unique ownership of a spawned task — values should be moved, never cloned.
+func isFutureType(t *checker.Type) bool {
+	return t != nil && t.Name == "Future" && t.IsGeneric
 }
 
 func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[string]bool) string {
@@ -1416,17 +1448,22 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[strin
 			if len(expr.Args) == 1 {
 				g.needsFutures = true
 				arg := g.generateExpr(expr.Args[0], arrayRefParams)
-				return fmt.Sprintf("futures::future::join_all(%s).await", arg)
+				// join_all over a Vec<JoinHandle<T>> yields Vec<Result<T, JoinError>>.
+				// Per Phase 14 ADR 0026, Future<T> = JoinHandle<T> uniformly and
+				// awaiting a JoinHandle panics on JoinError, so unwrap each
+				// element to give the caller the Array<T> shape Intent declares.
+				return fmt.Sprintf("futures::future::join_all(%s).await.into_iter().map(|r| r.expect(\"spawned task panicked\")).collect::<Vec<_>>()", arg)
 			}
 		case "sleep":
 			if len(expr.Args) == 1 {
 				g.needsTokio = true
 				arg := g.generateExpr(expr.Args[0], arrayRefParams)
-				// sleep : Int -> Future<Void>. Future<T> maps to JoinHandle<T>
-				// in the generated Rust, so wrap the Sleep future in a spawned
-				// task. This keeps the Future-is-always-a-JoinHandle invariant
-				// that AwaitExpr lowering relies on.
-				return fmt.Sprintf("tokio::spawn(tokio::time::sleep(std::time::Duration::from_millis(%s as u64)))", arg)
+				// sleep : Int -> Future<Void>. Returns the unawaited Sleep
+				// future; the source-level `await` adds the `.await`. Since
+				// `await sleep(ms)` is structurally not a JoinHandle await,
+				// AwaitExpr's IsJoinHandle is false and the emit is bare
+				// `.await` rather than `.await.expect(...)`.
+				return fmt.Sprintf("tokio::time::sleep(std::time::Duration::from_millis(%s as u64))", arg)
 			}
 		case "timeout":
 			if len(expr.Args) == 2 {
@@ -1439,7 +1476,9 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[strin
 			if len(expr.Args) == 1 {
 				g.needsFutures = true
 				arg := g.generateExpr(expr.Args[0], arrayRefParams)
-				return fmt.Sprintf("futures::future::select_all(%s).await.0", arg)
+				// select_all(handles).await -> (Result<T, JoinError>, idx, rest);
+				// take the result and unwrap the JoinError as per Phase 14 rule.
+				return fmt.Sprintf("futures::future::select_all(%s).await.0.expect(\"spawned task panicked\")", arg)
 			}
 		}
 		args := make([]string, len(expr.Args))

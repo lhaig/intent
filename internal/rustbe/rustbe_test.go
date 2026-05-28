@@ -551,14 +551,22 @@ entry function main() returns Int {
 `
 	output := generateFromSource(t, "async_fn", src)
 
+	// Async functions declared `returns Future<T>` in Intent should emit a
+	// Rust signature with the inner type directly — `async fn` already wraps
+	// the return in a Future. Emitting `-> JoinHandle<T>` here was the
+	// Phase 14 mistake that broke compilation; the JoinHandle only appears
+	// on the spawn *result* (i.e., at a `let h = spawn fn(...)` binding).
 	expects := []string{
-		"async fn fetchData(",
-		"tokio::task::JoinHandle<i64>",
+		"async fn fetchData() -> i64",
 	}
 	for _, exp := range expects {
 		if !strings.Contains(output, exp) {
 			t.Errorf("expected output to contain %q, got:\n%s", exp, output)
 		}
+	}
+	// Function signature must NOT advertise JoinHandle.
+	if strings.Contains(output, "fetchData() -> tokio::task::JoinHandle") {
+		t.Errorf("async fn signature must not return JoinHandle directly, got:\n%s", output)
 	}
 	// Non-async entry should remain sync
 	if strings.Contains(output, "#[tokio::main]") {
@@ -605,9 +613,13 @@ async entry function main() returns Future<Int> {
 `
 	output := generateFromSource(t, "await", src)
 
+	// Spawn passes the async-fn call's Future directly to tokio::spawn —
+	// no inner `async move` wrapper, no double-await. Await on the resulting
+	// JoinHandle uses `.await.expect(...)`.
 	expects := []string{
 		".await",
-		"tokio::spawn(async move {",
+		"tokio::spawn(fetchData())",
+		".await.expect(",
 	}
 	for _, exp := range expects {
 		if !strings.Contains(output, exp) {
@@ -644,12 +656,14 @@ async entry function main() returns Future<Int> {
 	}
 }
 
-// Regression for ops/plans/phase-14-phase11-13-gaps.md item 14.4: previously
-// `spawn delayed_add(3, 4)` emitted `tokio::spawn(async move { delayed_add(3, 4) })`,
-// which spawns a Future<Future<T>>, and `await f` emitted `f.await`, which
-// yields Result<T, JoinError> — both produced uncompilable Rust. The fix:
-// spawn awaits the inner async call (`async move { expr.await }`), and await
-// unwraps the JoinHandle.
+// Regression for ops/plans/phase-14-phase11-13-gaps.md item 14.4 (revised
+// follow-up): async-fn signatures emit `-> T` so a direct call returns
+// `impl Future<Output = T>`. `spawn` passes that future straight to
+// tokio::spawn (no `async move {...}` wrapper) — wrapping would force a
+// by-move capture of every argument in the enclosing scope, breaking
+// ownership across multiple spawn sites. The spawn result is a
+// JoinHandle<T> and `await` on a JoinHandle-bound variable unwraps via
+// `.await.expect(...)`.
 func TestGenerateAsyncSpawnAwaitJoinHandle(t *testing.T) {
 	src := `module test version "1.0";
 
@@ -665,19 +679,18 @@ async entry function main() returns Future<Int> {
 `
 	output := generateFromSource(t, "spawn_await_join", src)
 
-	// spawn must await the inner call so the JoinHandle resolves to T, not Future<T>.
-	if !strings.Contains(output, "tokio::spawn(async move { compute(5i64).await })") {
-		t.Errorf("expected spawn to await the inner call, got:\n%s", output)
+	// spawn passes the inner async-fn call directly.
+	if !strings.Contains(output, "tokio::spawn(compute(5i64))") {
+		t.Errorf("expected spawn to pass the future directly, got:\n%s", output)
+	}
+	// Must NOT wrap in an inner async move block (forces by-move capture).
+	if strings.Contains(output, "tokio::spawn(async move {") {
+		t.Errorf("spawn must not wrap the call in async move, got:\n%s", output)
 	}
 
 	// await on a JoinHandle must unwrap the JoinError.
 	if !strings.Contains(output, "(f).await.expect(") {
 		t.Errorf("expected await to unwrap JoinHandle with .expect(), got:\n%s", output)
-	}
-
-	// Negative: no bare `f.await` on a JoinHandle.
-	if strings.Contains(output, "= f.await;") || strings.Contains(output, "= (f).await;") {
-		t.Errorf("await on JoinHandle must not be a bare .await (it returns Result), got:\n%s", output)
 	}
 }
 
@@ -697,14 +710,15 @@ async entry function main() returns Future<Int> {
 	if strings.Contains(output, ".await.await") {
 		t.Errorf("emitted Rust must not contain double .await on sleep, got:\n%s", output)
 	}
-	// sleep is wrapped in tokio::spawn so it conforms to the uniform
-	// Future<T> = JoinHandle<T> invariant. The source-level `await` then
-	// resolves the JoinHandle via .await.expect(...).
-	if !strings.Contains(output, "tokio::spawn(tokio::time::sleep(std::time::Duration::from_millis(100i64 as u64)))") {
-		t.Errorf("expected sleep wrapped in tokio::spawn, got:\n%s", output)
+	// sleep emits the bare Sleep future; the source-level `await` adds the
+	// `.await`. AwaitExpr's IsJoinHandle is false because the inner is a
+	// CallExpr (not a SpawnExpr), so the emit is plain `.await` rather than
+	// `.await.expect(...)`.
+	if !strings.Contains(output, "tokio::time::sleep(std::time::Duration::from_millis(100i64 as u64))") {
+		t.Errorf("expected bare tokio::time::sleep, got:\n%s", output)
 	}
-	if !strings.Contains(output, ".await.expect(") {
-		t.Errorf("expected JoinHandle unwrap via .await.expect(...), got:\n%s", output)
+	if strings.Contains(output, "tokio::spawn(tokio::time::sleep(") {
+		t.Errorf("sleep must not be wrapped in tokio::spawn (would change unwrap semantics), got:\n%s", output)
 	}
 }
 
