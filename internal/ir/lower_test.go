@@ -518,3 +518,79 @@ func TestMonomorphizeMismatchedTypeArgs(t *testing.T) {
 		t.Error("expected nil from monomorphizeFunction with too many type args")
 	}
 }
+
+// Regression: monomorphizing an entity whose body uses a type parameter
+// (e.g. `field items: Array<T>`) must resolve T as a type parameter before
+// substitution. Previously the lowerer called ResolveType without typeParams,
+// so T failed to resolve, Array<T> collapsed to nil, and the Rust backend
+// emitted `items: ()` (unit), breaking compilation.
+func TestMonomorphizeUsesTypeParamsInBody(t *testing.T) {
+	src := `module test version "1.0";
+entity Box<T> {
+    field value: T;
+    field items: Array<T>;
+
+    constructor(v: T)
+        ensures self.value == v
+    {
+        self.value = v;
+        self.items = [];
+    }
+
+    method get() returns T
+        ensures result == self.value
+    {
+        return self.value;
+    }
+}
+
+entry function main() returns Int {
+    let b: Box<Int> = Box<Int>(42);
+    return b.get();
+}
+`
+	mod := parseAndLower(t, src)
+
+	var box *Entity
+	for _, e := range mod.Entities {
+		if e.Name == "Box__Int" {
+			box = e
+			break
+		}
+	}
+	if box == nil {
+		t.Fatalf("expected monomorphized entity Box__Int, got %v", entityNames(mod))
+	}
+
+	// field value: T -> Int
+	if got := box.Fields[0].Type; got == nil || got.Name != "Int" {
+		t.Errorf("field 'value': expected Int, got %v", got)
+	}
+
+	// field items: Array<T> -> Array<Int>
+	itemsType := box.Fields[1].Type
+	if itemsType == nil || itemsType.Name != "Array" {
+		t.Fatalf("field 'items': expected Array, got %v", itemsType)
+	}
+	if len(itemsType.TypeParams) != 1 || itemsType.TypeParams[0].Name != "Int" {
+		t.Errorf("field 'items': expected Array<Int>, got Array<%v>", itemsType.TypeParams)
+	}
+
+	// constructor param v: T -> Int
+	if got := box.Constructor.Params[0].Type; got == nil || got.Name != "Int" {
+		t.Errorf("ctor param 'v': expected Int, got %v", got)
+	}
+
+	// method get() return type: T -> Int
+	if got := box.Methods[0].ReturnType; got == nil || got.Name != "Int" {
+		t.Errorf("method 'get' return: expected Int, got %v", got)
+	}
+}
+
+func entityNames(mod *Module) []string {
+	names := make([]string, len(mod.Entities))
+	for i, e := range mod.Entities {
+		names[i] = e.Name
+	}
+	return names
+}

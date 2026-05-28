@@ -1086,6 +1086,29 @@ func (l *lowerer) resolveTypeRef(ref *ast.TypeRef) *checker.Type {
 	return checker.ResolveType(ref, l.entities, l.enums)
 }
 
+// resolveTypeRefWithParams resolves a type reference where the listed names
+// should be treated as in-scope type parameters (e.g. `T`, `U`). Used by the
+// monomorphize* helpers below: without `typeParams`, references to `T` inside
+// a generic body fail to resolve and collapse to nil, which the backends then
+// emit as the unit type `()`.
+func (l *lowerer) resolveTypeRefWithParams(ref *ast.TypeRef, typeParams map[string]bool) *checker.Type {
+	if ref == nil {
+		return checker.TypeVoid
+	}
+	return checker.ResolveTypeWithParams(ref, l.entities, l.enums, typeParams)
+}
+
+func typeParamSet(params []*ast.TypeParam) map[string]bool {
+	if len(params) == 0 {
+		return nil
+	}
+	s := make(map[string]bool, len(params))
+	for _, tp := range params {
+		s[tp.Name] = true
+	}
+	return s
+}
+
 // --- Monomorphization ---
 
 // MangleGenericName creates a monomorphized name, e.g., Stack + [Int] -> Stack__Int
@@ -1289,6 +1312,7 @@ func (l *lowerer) monomorphizeEntity(decl *ast.EntityDecl, typeArgs []*checker.T
 	for i, tp := range decl.TypeParams {
 		substMap[tp.Name] = typeArgs[i]
 	}
+	tps := typeParamSet(decl.TypeParams)
 
 	mangledName := MangleGenericName(decl.Name, typeArgs)
 
@@ -1298,7 +1322,7 @@ func (l *lowerer) monomorphizeEntity(decl *ast.EntityDecl, typeArgs []*checker.T
 	}
 
 	for _, f := range decl.Fields {
-		fieldType := l.resolveTypeRef(f.Type)
+		fieldType := l.resolveTypeRefWithParams(f.Type, tps)
 		ent.Fields = append(ent.Fields, &Field{
 			Name: f.Name,
 			Type: checker.SubstituteType(fieldType, substMap),
@@ -1313,20 +1337,20 @@ func (l *lowerer) monomorphizeEntity(decl *ast.EntityDecl, typeArgs []*checker.T
 	}
 
 	if decl.Constructor != nil {
-		ent.Constructor = l.monomorphizeConstructor(decl.Constructor, substMap)
+		ent.Constructor = l.monomorphizeConstructor(decl.Constructor, substMap, tps)
 	}
 
 	for _, m := range decl.Methods {
-		ent.Methods = append(ent.Methods, l.monomorphizeMethod(m, substMap))
+		ent.Methods = append(ent.Methods, l.monomorphizeMethod(m, substMap, tps))
 	}
 
 	return ent
 }
 
-func (l *lowerer) monomorphizeConstructor(ctor *ast.ConstructorDecl, substMap map[string]*checker.Type) *Constructor {
+func (l *lowerer) monomorphizeConstructor(ctor *ast.ConstructorDecl, substMap map[string]*checker.Type, tps map[string]bool) *Constructor {
 	c := &Constructor{}
 	for _, p := range ctor.Params {
-		pType := l.resolveTypeRef(p.Type)
+		pType := l.resolveTypeRefWithParams(p.Type, tps)
 		c.Params = append(c.Params, &Param{
 			Name: p.Name,
 			Type: checker.SubstituteType(pType, substMap),
@@ -1348,13 +1372,13 @@ func (l *lowerer) monomorphizeConstructor(ctor *ast.ConstructorDecl, substMap ma
 	return c
 }
 
-func (l *lowerer) monomorphizeMethod(m *ast.MethodDecl, substMap map[string]*checker.Type) *Method {
+func (l *lowerer) monomorphizeMethod(m *ast.MethodDecl, substMap map[string]*checker.Type, tps map[string]bool) *Method {
 	method := &Method{
 		Name:       m.Name,
-		ReturnType: checker.SubstituteType(l.resolveTypeRef(m.ReturnType), substMap),
+		ReturnType: checker.SubstituteType(l.resolveTypeRefWithParams(m.ReturnType, tps), substMap),
 	}
 	for _, p := range m.Params {
-		pType := l.resolveTypeRef(p.Type)
+		pType := l.resolveTypeRefWithParams(p.Type, tps)
 		method.Params = append(method.Params, &Param{
 			Name: p.Name,
 			Type: checker.SubstituteType(pType, substMap),
@@ -1387,6 +1411,7 @@ func (l *lowerer) monomorphizeFunction(decl *ast.FunctionDecl, typeArgs []*check
 	for i, tp := range decl.TypeParams {
 		substMap[tp.Name] = typeArgs[i]
 	}
+	tps := typeParamSet(decl.TypeParams)
 
 	mangledName := MangleGenericName(decl.Name, typeArgs)
 
@@ -1395,11 +1420,11 @@ func (l *lowerer) monomorphizeFunction(decl *ast.FunctionDecl, typeArgs []*check
 		IsEntry:    decl.IsEntry,
 		IsPublic:   decl.IsPublic,
 		IsAsync:    decl.IsAsync,
-		ReturnType: checker.SubstituteType(l.resolveTypeRef(decl.ReturnType), substMap),
+		ReturnType: checker.SubstituteType(l.resolveTypeRefWithParams(decl.ReturnType, tps), substMap),
 	}
 
 	for _, p := range decl.Params {
-		pType := l.resolveTypeRef(p.Type)
+		pType := l.resolveTypeRefWithParams(p.Type, tps)
 		fn.Params = append(fn.Params, &Param{
 			Name: p.Name,
 			Type: checker.SubstituteType(pType, substMap),

@@ -34,13 +34,21 @@ func buildCargoToml(rustSource string, isCdylib bool) string {
 
 	needsReqwest := strings.Contains(rustSource, "reqwest::")
 	needsSerdeJson := strings.Contains(rustSource, "serde_json::")
-	if needsReqwest || needsSerdeJson {
+	needsTokio := strings.Contains(rustSource, "tokio::") || strings.Contains(rustSource, "#[tokio::main]")
+	needsFutures := strings.Contains(rustSource, "futures::")
+	if needsReqwest || needsSerdeJson || needsTokio || needsFutures {
 		sb.WriteString("\n[dependencies]\n")
 		if needsReqwest {
 			sb.WriteString("reqwest = { version = \"0.12\", features = [\"blocking\"] }\n")
 		}
 		if needsSerdeJson {
 			sb.WriteString("serde_json = \"1\"\n")
+		}
+		if needsTokio {
+			sb.WriteString("tokio = { version = \"1\", features = [\"full\"] }\n")
+		}
+		if needsFutures {
+			sb.WriteString("futures = \"0.3\"\n")
 		}
 	}
 

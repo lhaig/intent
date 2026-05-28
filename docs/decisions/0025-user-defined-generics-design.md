@@ -117,3 +117,7 @@ None -- this is a standalone feature.
 - Enables reusable generic data structures and algorithms
 - Monomorphization keeps JS/WASM backends simple
 - Foundation for generic traits and type bounds in future
+
+## Implementation Notes (Phase 14)
+
+Phase 11 landed the parser, checker, IR monomorphization, and backend output, but the IR's monomorphize helpers called `resolveTypeRef` (no `typeParams` argument), so references to a type parameter `T` inside a generic body failed to resolve. `Array<T>` collapsed to nil, the Rust backend emitted unit `()` for the field type, and generated code did not compile. The JS backend hid the bug because it does not type-check field declarations. Phase 14 added `resolveTypeRefWithParams` plus a `typeParamSet` helper in `internal/ir/lower.go` and threaded the type-param set through `monomorphizeEntity`, `monomorphizeConstructor`, `monomorphizeMethod`, and `monomorphizeFunction`. Test: `TestMonomorphizeUsesTypeParamsInBody` in `internal/ir/lower_test.go`.
