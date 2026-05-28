@@ -753,6 +753,125 @@ func (c *Checker) registerFunctions() {
 			Kind: SymFunction,
 		})
 	}
+
+	// Register extern (FFI) function declarations alongside regular functions
+	// so call sites resolve through the same path. ADR 0028 / Phase 15.
+	for _, ext := range c.prog.ExternFunctions {
+		if _, exists := c.functions[ext.Name]; exists {
+			line, col := ext.Pos()
+			c.diag.Errorf(line, col, "function '%s' already defined", ext.Name)
+			continue
+		}
+
+		// Validate rust_path: must be non-empty and contain a `::` separator
+		// (the first segment is the crate, the rest is the path inside it).
+		if !strings.Contains(ext.RustPath, "::") {
+			line, col := ext.Pos()
+			c.diag.Errorf(line, col,
+				"extern function '%s': from path %q must be of the form \"crate::path::to::function\"",
+				ext.Name, ext.RustPath)
+		}
+
+		params := make([]ParamInfo, 0, len(ext.Params))
+		for _, p := range ext.Params {
+			pType := ResolveType(p.Type, c.entities, c.enums)
+			if pType == nil {
+				line, col := p.Pos()
+				c.diag.Errorf(line, col, "unknown type '%s'", p.Type.Name)
+				pType = TypeInt // fallback
+			} else if reason := isFFIBridgeableType(pType); reason != "" {
+				line, col := p.Pos()
+				c.diag.Errorf(line, col,
+					"extern function '%s' parameter '%s': %s",
+					ext.Name, p.Name, reason)
+			}
+			params = append(params, ParamInfo{Name: p.Name, Type: pType})
+		}
+
+		returnType := TypeVoid
+		if ext.ReturnType != nil {
+			returnType = ResolveType(ext.ReturnType, c.entities, c.enums)
+			if returnType == nil {
+				line, col := ext.Pos()
+				c.diag.Errorf(line, col, "unknown type '%s'", ext.ReturnType.Name)
+				returnType = TypeVoid
+			} else if reason := isFFIBridgeableType(returnType); reason != "" {
+				line, col := ext.Pos()
+				c.diag.Errorf(line, col,
+					"extern function '%s' return type: %s",
+					ext.Name, reason)
+			}
+		}
+
+		c.functions[ext.Name] = &FuncInfo{
+			Name:       ext.Name,
+			Params:     params,
+			ReturnType: returnType,
+		}
+
+		c.scope.Define(ext.Name, &Symbol{
+			Name: ext.Name,
+			Type: returnType,
+			Kind: SymFunction,
+		})
+	}
+}
+
+// isFFIBridgeableType reports the empty string when t is allowed in an extern
+// function signature, or a human-readable reason why it is not. ADR 0028
+// defines the supported set: Int, Float, Bool, String, Void, Array<T>,
+// Result<T,E>, Option<T> with bridged inner types.
+func isFFIBridgeableType(t *Type) string {
+	if t == nil {
+		return "unknown type"
+	}
+	switch t.Name {
+	case "Int", "Float", "Bool", "String", "Void":
+		return ""
+	case "Array":
+		if len(t.TypeParams) == 1 {
+			if reason := isFFIBridgeableType(t.TypeParams[0]); reason != "" {
+				return "Array element type: " + reason
+			}
+			return ""
+		}
+		return "Array missing type parameter"
+	case "Result":
+		if len(t.TypeParams) == 2 {
+			if reason := isFFIBridgeableType(t.TypeParams[0]); reason != "" {
+				return "Result Ok type: " + reason
+			}
+			if reason := isFFIBridgeableType(t.TypeParams[1]); reason != "" {
+				return "Result Err type: " + reason
+			}
+			return ""
+		}
+		return "Result needs exactly two type parameters"
+	case "Option":
+		if len(t.TypeParams) == 1 {
+			if reason := isFFIBridgeableType(t.TypeParams[0]); reason != "" {
+				return "Option inner type: " + reason
+			}
+			return ""
+		}
+		return "Option missing type parameter"
+	case "Map":
+		return "Map<K,V> is not supported across the FFI boundary (see ADR 0028)"
+	case "Future":
+		return "Future<T> is not supported across the FFI boundary"
+	case "Fn":
+		return "Fn(...) closures are not supported across the FFI boundary"
+	}
+	if t.IsEntity {
+		return "entity types are not supported across the FFI boundary"
+	}
+	if t.IsEnum {
+		return "user-defined enums are not supported across the FFI boundary (only Result and Option)"
+	}
+	if t.IsTypeParam {
+		return "extern functions cannot be generic"
+	}
+	return "type '" + t.Name + "' is not bridgeable; supported: Int, Float, Bool, String, Void, Array<T>, Result<T,E>, Option<T>"
 }
 
 // checkFunctions checks all function bodies

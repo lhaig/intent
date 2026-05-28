@@ -16,6 +16,7 @@ func Generate(mod *ir.Module) string {
 		entities:  make(map[string]*ir.Entity),
 		enums:     make(map[string]*ir.Enum),
 		functions: make(map[string]*ir.Function),
+		externs:   make(map[string]*ir.ExternFunction),
 	}
 
 	for _, e := range mod.Entities {
@@ -26,6 +27,9 @@ func Generate(mod *ir.Module) string {
 	}
 	for _, f := range mod.Functions {
 		g.functions[f.Name] = f
+	}
+	for _, ext := range mod.ExternFunctions {
+		g.externs[ext.Name] = ext
 	}
 
 	g.emitLine("// Generated Rust code from Intent")
@@ -188,6 +192,14 @@ func GenerateAll(prog *ir.Program) string {
 		}
 	}
 
+	// Build global extern (FFI) functions map. Phase 15.
+	allExterns := make(map[string]*ir.ExternFunction)
+	for _, mod := range prog.Modules {
+		for _, ext := range mod.ExternFunctions {
+			allExterns[ext.Name] = ext
+		}
+	}
+
 	var sb strings.Builder
 	sb.WriteString("// Generated Rust code from Intent (multi-file)\n")
 	sb.WriteString("#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n\n")
@@ -202,11 +214,13 @@ func GenerateAll(prog *ir.Program) string {
 			entities:        make(map[string]*ir.Entity),
 			enums:           make(map[string]*ir.Enum),
 			functions:       make(map[string]*ir.Function),
+			externs:         make(map[string]*ir.ExternFunction),
 			isEntryFile:     mod.IsEntry,
 			moduleManglings: moduleManglings,
 			typeOrigins:     typeOrigins,
 			allFunctions:    allFunctions,
 			allEntities:     allEntities,
+			allExterns:      allExterns,
 		}
 
 		if !mod.IsEntry {
@@ -222,6 +236,9 @@ func GenerateAll(prog *ir.Program) string {
 		}
 		for _, f := range mod.Functions {
 			g.functions[f.Name] = f
+		}
+		for _, ext := range mod.ExternFunctions {
+			g.externs[ext.Name] = ext
 		}
 
 		for _, e := range mod.Entities {
@@ -302,6 +319,7 @@ type generator struct {
 	entities       map[string]*ir.Entity
 	enums          map[string]*ir.Enum
 	functions      map[string]*ir.Function
+	externs        map[string]*ir.ExternFunction // Phase 15: FFI declarations
 	inConstructor  bool
 	inLabeledBlock bool
 	inImplBlock    bool
@@ -318,8 +336,9 @@ type generator struct {
 	isEntryFile     bool
 	moduleManglings map[string]string
 	typeOrigins     map[string]string       // entity/enum name -> defining module's struct prefix
-	allFunctions    map[string]*ir.Function // all functions across all modules (for cross-module ref lookups)
-	allEntities     map[string]*ir.Entity   // all entities across all modules (for cross-module constructor lookups)
+	allFunctions    map[string]*ir.Function       // all functions across all modules (for cross-module ref lookups)
+	allEntities     map[string]*ir.Entity         // all entities across all modules (for cross-module constructor lookups)
+	allExterns      map[string]*ir.ExternFunction // all extern (FFI) functions across all modules
 	mutatedVars     map[string]bool         // variables assigned to in current function body
 }
 
@@ -1481,6 +1500,27 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[strin
 				return fmt.Sprintf("futures::future::select_all(%s).await.0.expect(\"spawned task panicked\")", arg)
 			}
 		}
+		// Phase 15 / ADR 0028: extern (FFI) functions emit a call to the
+		// Rust crate function named in `from "..."`. No namePrefix mangling
+		// — the Rust path is authoritative.
+		if ext := g.lookupExtern(expr.Function); ext != nil {
+			args := make([]string, len(expr.Args))
+			for i, arg := range expr.Args {
+				argStr := g.generateExpr(arg, arrayRefParams)
+				if i < len(ext.Params) && ext.Params[i].Type != nil {
+					tn := ext.Params[i].Type.Name
+					if (tn == "Array" || tn == "Map") {
+						if _, ok := arg.(*ir.VarRef); ok {
+							argStr = "&" + argStr
+						}
+					}
+				}
+				argStr = g.cloneIfNeeded(argStr, arg)
+				args[i] = argStr
+			}
+			return fmt.Sprintf("%s(%s)", ext.RustPath, strings.Join(args, ", "))
+		}
+
 		args := make([]string, len(expr.Args))
 		funcDef := g.functions[expr.Function]
 		if funcDef == nil && g.allFunctions != nil {
@@ -1502,6 +1542,20 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[strin
 		}
 		return fmt.Sprintf("%s(%s)", g.namePrefix+expr.Function, strings.Join(args, ", "))
 	}
+}
+
+// lookupExtern resolves an FFI declaration by name, consulting the current
+// module first and falling back to the cross-module map.
+func (g *generator) lookupExtern(name string) *ir.ExternFunction {
+	if ext, ok := g.externs[name]; ok {
+		return ext
+	}
+	if g.allExterns != nil {
+		if ext, ok := g.allExterns[name]; ok {
+			return ext
+		}
+	}
+	return nil
 }
 
 func (g *generator) generateBuiltinCall(expr *ir.CallExpr, arrayRefParams map[string]bool) string {

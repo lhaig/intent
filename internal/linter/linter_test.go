@@ -444,3 +444,41 @@ func TestIsPascalCase(t *testing.T) {
 		}
 	}
 }
+
+// Phase 15 / ADR 0028: extern declarations without contracts should warn.
+func TestLintExternFunctionMissingContracts(t *testing.T) {
+	source := `module test version "1.0";
+
+extern function plain(input: String) returns String
+    from "crate::plain";
+
+entry function main() returns Int { return 0; }
+`
+	warnings := parseAndLint(t, source)
+	if !containsWarning(warnings, "FFI declarations should document the boundary contract") {
+		t.Errorf("expected contractless-extern warning, got: %v", warnings)
+	}
+}
+
+func TestLintExternFunctionWithContractsIsClean(t *testing.T) {
+	source := `module test version "1.0";
+
+extern function hash(input: String) returns String
+    from "crate::hash"
+    requires len(input) > 0
+    ensures len(result) == 64;
+
+entry function main() returns Int
+    requires true
+    ensures result == 0
+{
+    return 0;
+}
+`
+	warnings := parseAndLint(t, source)
+	for _, w := range warnings {
+		if containsWarning([]string{w}, "FFI declarations should document the boundary contract") {
+			t.Errorf("unexpected contract warning on extern with contracts: %s", w)
+		}
+	}
+}

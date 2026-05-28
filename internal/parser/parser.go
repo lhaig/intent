@@ -57,6 +57,12 @@ func (p *Parser) Parse() *ast.Program {
 			fn := p.parseFunctionDecl()
 			fn.IsPublic = isPublic
 			prog.Functions = append(prog.Functions, fn)
+		case lexer.EXTERN:
+			if isPublic {
+				p.diags.Errorf(p.current().Line, p.current().Column,
+					"'public' cannot be applied to extern function declarations")
+			}
+			prog.ExternFunctions = append(prog.ExternFunctions, p.parseExternFunctionDecl())
 		case lexer.ENTITY:
 			ent := p.parseEntityDecl()
 			ent.IsPublic = isPublic
@@ -207,6 +213,55 @@ func (p *Parser) parseFunctionDecl() *ast.FunctionDecl {
 		Requires:   requires,
 		Ensures:    ensures,
 		Body:       body,
+		Line:       tok.Line,
+		Column:     tok.Column,
+	}
+}
+
+// parseExternFunctionDecl parses an FFI declaration:
+//
+//	extern function NAME ( PARAMS ) returns T
+//	    from "crate::path"
+//	    [requires ...] [ensures ...]
+//	;
+//
+// See ADR 0028 / phase-15. The trailing `;` distinguishes it from a normal
+// function definition (which has a `{ ... }` body).
+func (p *Parser) parseExternFunctionDecl() *ast.ExternFunctionDecl {
+	tok := p.expect(lexer.EXTERN)
+	p.expect(lexer.FUNCTION)
+	name := p.expect(lexer.IDENT)
+	p.expect(lexer.LPAREN)
+	params := p.parseParamList()
+	p.expect(lexer.RPAREN)
+	p.expect(lexer.RETURNS)
+	retType := p.parseTypeRef()
+
+	// `from "..."` is required and contextual on an IDENT.
+	rustPath := ""
+	if p.check(lexer.IDENT) && p.current().Literal == "from" {
+		p.advance()
+		pathTok := p.expect(lexer.STRING_LIT)
+		rustPath = pathTok.Literal
+		if len(rustPath) >= 2 && rustPath[0] == '"' && rustPath[len(rustPath)-1] == '"' {
+			rustPath = rustPath[1 : len(rustPath)-1]
+		}
+	} else {
+		p.diags.Errorf(p.current().Line, p.current().Column,
+			"extern function '%s': missing 'from \"crate::path\"' clause", name.Literal)
+	}
+
+	requires := p.parseContractClauses(lexer.REQUIRES)
+	ensures := p.parseContractClauses(lexer.ENSURES)
+	p.expect(lexer.SEMICOLON)
+
+	return &ast.ExternFunctionDecl{
+		Name:       name.Literal,
+		Params:     params,
+		ReturnType: retType,
+		RustPath:   rustPath,
+		Requires:   requires,
+		Ensures:    ensures,
 		Line:       tok.Line,
 		Column:     tok.Column,
 	}

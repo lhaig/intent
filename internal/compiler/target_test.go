@@ -189,6 +189,48 @@ entry function main() returns Int {
 	}
 }
 
+// Phase 15 / ADR 0028: extern function declarations must be rejected on
+// non-Rust targets, before any output file is written.
+func TestEmitToTargetExternRejectedOnJS(t *testing.T) {
+	source := `module test version "1.0";
+extern function hash(input: String) returns String
+    from "blake3::hash";
+entry function main() returns Int { return 0; }
+`
+	baseName := t.TempDir() + "/test_extern_js"
+
+	err := EmitToTarget(source, "js", baseName)
+	if err == nil {
+		t.Fatal("expected EmitToTarget to reject extern on js")
+	}
+	if !strings.Contains(err.Error(), "extern (Rust FFI) declarations are not supported on the js target") {
+		t.Errorf("expected clear FFI-not-supported error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "hash") {
+		t.Errorf("error should name the offending function, got: %v", err)
+	}
+	if _, statErr := os.Stat(baseName + ".js"); statErr == nil {
+		t.Error("js file must not be written when extern is detected")
+	}
+}
+
+func TestEmitToTargetExternRejectedOnWasm(t *testing.T) {
+	source := `module test version "1.0";
+extern function hash(input: String) returns String
+    from "blake3::hash";
+entry function main() returns Int { return 0; }
+`
+	baseName := t.TempDir() + "/test_extern_wasm"
+
+	err := EmitToTarget(source, "wasm", baseName)
+	if err == nil {
+		t.Fatal("expected EmitToTarget to reject extern on wasm")
+	}
+	if !strings.Contains(err.Error(), "extern (Rust FFI) declarations are not supported on the wasm target") {
+		t.Errorf("expected clear FFI-not-supported error, got: %v", err)
+	}
+}
+
 func TestGetFileExtension(t *testing.T) {
 	tests := []struct {
 		target   string

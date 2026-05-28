@@ -384,7 +384,7 @@ entry function main() returns Int {
 
 func TestBuildCargoTomlNoDeps(t *testing.T) {
 	source := `fn main() { println!("hello"); }`
-	toml := buildCargoToml(source, false)
+	toml := buildCargoToml(source, false, nil)
 	if strings.Contains(toml, "[dependencies]") {
 		t.Errorf("Expected no [dependencies] section, got:\n%s", toml)
 	}
@@ -395,7 +395,7 @@ func TestBuildCargoTomlNoDeps(t *testing.T) {
 
 func TestBuildCargoTomlWithReqwest(t *testing.T) {
 	source := `use reqwest; fn main() { reqwest::blocking::get("url"); }`
-	toml := buildCargoToml(source, false)
+	toml := buildCargoToml(source, false, nil)
 	if !strings.Contains(toml, "[dependencies]") {
 		t.Errorf("Expected [dependencies] section, got:\n%s", toml)
 	}
@@ -409,7 +409,7 @@ func TestBuildCargoTomlWithReqwest(t *testing.T) {
 
 func TestBuildCargoTomlWithBothDeps(t *testing.T) {
 	source := `use reqwest; use serde_json; fn main() { reqwest::blocking::get("url"); serde_json::from_str("{}"); }`
-	toml := buildCargoToml(source, false)
+	toml := buildCargoToml(source, false, nil)
 	if !strings.Contains(toml, "[dependencies]") {
 		t.Errorf("Expected [dependencies] section, got:\n%s", toml)
 	}
@@ -426,11 +426,73 @@ func TestBuildCargoTomlWithBothDeps(t *testing.T) {
 
 func TestBuildCargoTomlCdylib(t *testing.T) {
 	source := `fn main() {}`
-	toml := buildCargoToml(source, true)
+	toml := buildCargoToml(source, true, nil)
 	if !strings.Contains(toml, "[lib]") {
 		t.Errorf("Expected [lib] section for cdylib, got:\n%s", toml)
 	}
 	if !strings.Contains(toml, "cdylib") {
 		t.Errorf("Expected cdylib crate-type, got:\n%s", toml)
+	}
+}
+
+// Phase 15 / ADR 0028: [rust_dependencies] in intent.toml carries Cargo
+// crate pins through to the generated Cargo.toml.
+func TestBuildCargoTomlWithRustDeps(t *testing.T) {
+	source := `fn main() {}`
+	rustDeps := map[string]RustDependencySpec{
+		"blake3":      {Version: "1.5"},
+		"intent_zstd": {Version: "0.13", Features: []string{"std"}},
+	}
+	toml := buildCargoToml(source, false, rustDeps)
+	if !strings.Contains(toml, `blake3 = "1.5"`) {
+		t.Errorf("expected pinned blake3 dep, got:\n%s", toml)
+	}
+	if !strings.Contains(toml, `intent_zstd = { version = "0.13", features = ["std"] }`) {
+		t.Errorf("expected intent_zstd dep with features, got:\n%s", toml)
+	}
+}
+
+func TestBuildCargoTomlUserPinOverridesSniffer(t *testing.T) {
+	// Source triggers the tokio sniffer; user pin for tokio should take precedence.
+	source := `#[tokio::main] async fn main() {}`
+	rustDeps := map[string]RustDependencySpec{
+		"tokio": {Version: "1.40", Features: []string{"rt", "macros"}},
+	}
+	toml := buildCargoToml(source, false, rustDeps)
+	// Only the user-pinned line should appear; the sniffer default (1, full)
+	// must NOT.
+	if strings.Contains(toml, `tokio = { version = "1", features = ["full"] }`) {
+		t.Errorf("sniffer default leaked despite user pin, got:\n%s", toml)
+	}
+	if !strings.Contains(toml, `tokio = { version = "1.40", features = ["rt", "macros"] }`) {
+		t.Errorf("expected user-pinned tokio, got:\n%s", toml)
+	}
+}
+
+func TestParseManifestWithRustDependencies(t *testing.T) {
+	input := `[package]
+name = "demo"
+version = "0.1.0"
+
+[rust_dependencies]
+blake3 = "1.5"
+intent_zstd = { version = "0.13", features = ["std", "experimental"] }
+`
+	m, err := ParseManifest([]byte(input))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if len(m.RustDependencies) != 2 {
+		t.Fatalf("expected 2 rust deps, got %d", len(m.RustDependencies))
+	}
+	if m.RustDependencies["blake3"].Version != "1.5" {
+		t.Errorf("blake3 version: expected 1.5, got %q", m.RustDependencies["blake3"].Version)
+	}
+	zstd := m.RustDependencies["intent_zstd"]
+	if zstd.Version != "0.13" {
+		t.Errorf("intent_zstd version: expected 0.13, got %q", zstd.Version)
+	}
+	if len(zstd.Features) != 2 || zstd.Features[0] != "std" || zstd.Features[1] != "experimental" {
+		t.Errorf("intent_zstd features: expected [std experimental], got %v", zstd.Features)
 	}
 }

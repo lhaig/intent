@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/lhaig/intent/internal/checker"
@@ -18,8 +19,11 @@ import (
 
 // buildCargoToml generates a Cargo.toml file content based on the Rust source and target type.
 // If isCdylib is true, a [lib] section with crate-type = ["cdylib"] is added.
-// Dependencies (reqwest, serde_json) are added only if detected in the Rust source.
-func buildCargoToml(rustSource string, isCdylib bool) string {
+// Sniffer dependencies (tokio/futures/reqwest/serde_json) are added only if
+// detected in the Rust source. User-supplied rustDeps (from intent.toml's
+// [rust_dependencies] section, Phase 15 / ADR 0028) are appended afterwards
+// and override the sniffer for any clashing crate name.
+func buildCargoToml(rustSource string, isCdylib bool, rustDeps map[string]RustDependencySpec) string {
 	var sb strings.Builder
 	sb.WriteString("[package]\n")
 	sb.WriteString("name = \"intent_output\"\n")
@@ -36,19 +40,40 @@ func buildCargoToml(rustSource string, isCdylib bool) string {
 	needsSerdeJson := strings.Contains(rustSource, "serde_json::")
 	needsTokio := strings.Contains(rustSource, "tokio::") || strings.Contains(rustSource, "#[tokio::main]")
 	needsFutures := strings.Contains(rustSource, "futures::")
-	if needsReqwest || needsSerdeJson || needsTokio || needsFutures {
+
+	// User-supplied entries take precedence — skip the sniffer's defaults for
+	// any crate that the user already pinned a version for.
+	hasUser := func(name string) bool {
+		if rustDeps == nil {
+			return false
+		}
+		_, ok := rustDeps[name]
+		return ok
+	}
+
+	if needsReqwest || needsSerdeJson || needsTokio || needsFutures || len(rustDeps) > 0 {
 		sb.WriteString("\n[dependencies]\n")
-		if needsReqwest {
+		if needsReqwest && !hasUser("reqwest") {
 			sb.WriteString("reqwest = { version = \"0.12\", features = [\"blocking\"] }\n")
 		}
-		if needsSerdeJson {
+		if needsSerdeJson && !hasUser("serde_json") {
 			sb.WriteString("serde_json = \"1\"\n")
 		}
-		if needsTokio {
+		if needsTokio && !hasUser("tokio") {
 			sb.WriteString("tokio = { version = \"1\", features = [\"full\"] }\n")
 		}
-		if needsFutures {
+		if needsFutures && !hasUser("futures") {
 			sb.WriteString("futures = \"0.3\"\n")
+		}
+		// Emit user crates in sorted order for deterministic output.
+		names := make([]string, 0, len(rustDeps))
+		for name := range rustDeps {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			sb.WriteString(rustDeps[name].CargoLine(name))
+			sb.WriteString("\n")
 		}
 	}
 
@@ -114,8 +139,10 @@ func EmitRust(source, outPath string) error {
 }
 
 // cargoBuild creates a temporary Cargo project from rustSource, runs cargo build --release,
-// and copies the resulting binary to outPath.
-func cargoBuild(rustSource, outPath string) error {
+// and copies the resulting binary to outPath. rustDeps may be nil; when present
+// it is the resolved [rust_dependencies] section from the entry package's
+// intent.toml.
+func cargoBuild(rustSource, outPath string, rustDeps map[string]RustDependencySpec) error {
 	// Create temp directory for Cargo project
 	tmpDir, err := os.MkdirTemp("", "intent-build-*")
 	if err != nil {
@@ -124,7 +151,7 @@ func cargoBuild(rustSource, outPath string) error {
 	defer os.RemoveAll(tmpDir)
 
 	// Write Cargo.toml
-	cargoToml := buildCargoToml(rustSource, false)
+	cargoToml := buildCargoToml(rustSource, false, rustDeps)
 	if err := os.WriteFile(filepath.Join(tmpDir, "Cargo.toml"), []byte(cargoToml), 0644); err != nil {
 		return fmt.Errorf("failed to write Cargo.toml: %w", err)
 	}
@@ -180,7 +207,7 @@ func Build(source, outPath string) error {
 		return fmt.Errorf("compilation errors:\n%s", res.Diagnostics.Format("input"))
 	}
 
-	return cargoBuild(res.RustSource, outPath)
+	return cargoBuild(res.RustSource, outPath, nil)
 }
 
 // HasImports checks if a source file contains import declarations by parsing it.
@@ -281,12 +308,81 @@ func CheckProject(entryPath string) *diagnostic.Diagnostics {
 
 // BuildProject runs the full multi-file pipeline and produces a native binary.
 func BuildProject(entryPath, outPath string) error {
-	res := CompileProject(entryPath)
+	registry, err := NewModuleRegistry(entryPath)
+	if err != nil {
+		return fmt.Errorf("failed to initialize module registry: %w", err)
+	}
+	res := compileFromRegistry(registry, entryPath)
 	if res.Diagnostics != nil && res.Diagnostics.HasErrors() {
 		return fmt.Errorf("compilation errors:\n%s", res.Diagnostics.Format(entryPath))
 	}
 
-	return cargoBuild(res.RustSource, outPath)
+	var rustDeps map[string]RustDependencySpec
+	if m := registry.Manifest(); m != nil {
+		rustDeps = resolveRustDepPaths(m.RustDependencies, registry.ProjectRoot())
+	}
+	return cargoBuild(res.RustSource, outPath, rustDeps)
+}
+
+// resolveRustDepPaths converts any relative `path` fields in rustDeps to
+// absolute paths anchored at the intent.toml's directory, so the generated
+// Cargo.toml (which lives in a temp directory) can resolve them correctly.
+func resolveRustDepPaths(deps map[string]RustDependencySpec, projectRoot string) map[string]RustDependencySpec {
+	if len(deps) == 0 {
+		return deps
+	}
+	out := make(map[string]RustDependencySpec, len(deps))
+	for name, dep := range deps {
+		if dep.Path != "" && !filepath.IsAbs(dep.Path) {
+			dep.Path = filepath.Join(projectRoot, dep.Path)
+		}
+		out[name] = dep
+	}
+	return out
+}
+
+// compileFromRegistry runs the multi-file pipeline using a pre-built registry,
+// so callers (like BuildProject) can reuse the registry to access the parsed
+// manifest. Mirrors CompileProject otherwise.
+func compileFromRegistry(registry *ModuleRegistry, entryPath string) *Result {
+	res := &Result{}
+
+	diag, err := registry.DiscoverDependencies()
+	if err != nil {
+		if diag == nil {
+			diag = diagnostic.New()
+		}
+		diag.Errorf(0, 0, "%s", err)
+		res.Diagnostics = diag
+		return res
+	}
+	if diag.HasErrors() {
+		res.Diagnostics = diag
+		return res
+	}
+
+	if registry.HasCrossPackageImports() {
+		diag.Warningf(0, 0, "cross-package type references (entities, enums, traits) in code generation have limited support; simple imports work but complex type hierarchies may produce incomplete output")
+	}
+
+	sortedPaths, err := registry.TopologicalSort()
+	if err != nil {
+		res.Diagnostics = diagnostic.New()
+		res.Diagnostics.Errorf(0, 0, "%s", err)
+		return res
+	}
+
+	allModules := registry.AllModules()
+	checkResult := checker.CheckAll(allModules, sortedPaths, registry.PackageDirs())
+	if checkResult.Diagnostics.HasErrors() {
+		res.Diagnostics = checkResult.Diagnostics
+		return res
+	}
+	res.Diagnostics = checkResult.Diagnostics
+
+	prog := ir.LowerAll(allModules, sortedPaths, checkResult, registry.PackageDirs())
+	res.RustSource = rustbe.GenerateAll(prog)
+	return res
 }
 
 // GenerateTests runs parse -> check -> codegen -> testgen for a single file.
@@ -387,8 +483,10 @@ func GenerateTestsProject(entryPath string) *Result {
 	return res
 }
 
-// IsMultiFile checks if the given file path is a multi-file project
-// by parsing it and checking for import declarations.
+// IsMultiFile checks if the given file path is a multi-file project.
+// A file is multi-file if it contains import declarations OR sits next to an
+// intent.toml manifest (the manifest may carry [rust_dependencies] entries
+// that the single-file Build path cannot see).
 func IsMultiFile(filePath string) (bool, error) {
 	source, err := os.ReadFile(filePath)
 	if err != nil {
@@ -396,7 +494,14 @@ func IsMultiFile(filePath string) (bool, error) {
 	}
 	p := parser.New(string(source))
 	prog := p.Parse()
-	return len(prog.Imports) > 0, nil
+	if len(prog.Imports) > 0 {
+		return true, nil
+	}
+	manifestPath := filepath.Join(filepath.Dir(filePath), "intent.toml")
+	if _, statErr := os.Stat(manifestPath); statErr == nil {
+		return true, nil
+	}
+	return false, nil
 }
 
 // VerifyOutput holds verification results and intent reports.

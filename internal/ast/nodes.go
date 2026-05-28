@@ -21,14 +21,15 @@ type Expression interface {
 
 // Program represents the entire Intent program
 type Program struct {
-	Module     *ModuleDecl
-	Imports    []*ImportDecl
-	Functions  []*FunctionDecl
-	Entities   []*EntityDecl
-	Enums      []*EnumDecl
-	Traits     []*TraitDecl
-	ImplBlocks []*ImplBlock
-	Intents    []*IntentDecl
+	Module          *ModuleDecl
+	Imports         []*ImportDecl
+	Functions       []*FunctionDecl
+	ExternFunctions []*ExternFunctionDecl
+	Entities        []*EntityDecl
+	Enums           []*EnumDecl
+	Traits          []*TraitDecl
+	ImplBlocks      []*ImplBlock
+	Intents         []*IntentDecl
 }
 
 func (p *Program) Pos() (int, int) {
@@ -86,6 +87,21 @@ type FunctionDecl struct {
 }
 
 func (f *FunctionDecl) Pos() (int, int) { return f.Line, f.Column }
+
+// ExternFunctionDecl represents a Rust FFI / crate-import declaration.
+// See ADR 0028. Has no body; the call lowers to the named Rust function.
+type ExternFunctionDecl struct {
+	Name       string
+	Params     []*Param
+	ReturnType *TypeRef
+	RustPath   string // e.g. "blake3::hash" — first segment is the crate name
+	Requires   []*ContractClause
+	Ensures    []*ContractClause
+	Line       int
+	Column     int
+}
+
+func (f *ExternFunctionDecl) Pos() (int, int) { return f.Line, f.Column }
 
 // Param represents a function parameter
 type Param struct {

@@ -76,6 +76,9 @@ func Lower(prog *ast.Program, result *checker.CheckResult) *Module {
 			mod.Functions = append(mod.Functions, l.lowerFunction(f))
 		}
 	}
+	for _, ext := range prog.ExternFunctions {
+		mod.ExternFunctions = append(mod.ExternFunctions, l.lowerExternFunction(ext))
+	}
 	for _, e := range prog.Enums {
 		mod.Enums = append(mod.Enums, l.lowerEnum(e))
 	}
@@ -196,6 +199,9 @@ func LowerAll(registry map[string]*ast.Program, sortedPaths []string, result *ch
 				mod.Functions = append(mod.Functions, l.lowerFunction(f))
 			}
 		}
+		for _, ext := range p.ExternFunctions {
+			mod.ExternFunctions = append(mod.ExternFunctions, l.lowerExternFunction(ext))
+		}
 		for _, e := range p.Enums {
 			mod.Enums = append(mod.Enums, l.lowerEnum(e))
 		}
@@ -271,6 +277,27 @@ func (l *lowerer) lowerFunction(f *ast.FunctionDecl) *Function {
 	fn.Body = l.lowerBlock(f.Body)
 
 	return fn
+}
+
+func (l *lowerer) lowerExternFunction(f *ast.ExternFunctionDecl) *ExternFunction {
+	ext := &ExternFunction{
+		Name:       f.Name,
+		RustPath:   f.RustPath,
+		ReturnType: l.resolveTypeRef(f.ReturnType),
+	}
+	for _, p := range f.Params {
+		ext.Params = append(ext.Params, &Param{
+			Name: p.Name,
+			Type: l.resolveTypeRef(p.Type),
+		})
+	}
+	for _, req := range f.Requires {
+		ext.Requires = append(ext.Requires, l.lowerContract(req))
+	}
+	for _, ens := range f.Ensures {
+		ext.Ensures = append(ext.Ensures, l.lowerContract(ens))
+	}
+	return ext
 }
 
 func (l *lowerer) lowerEntity(e *ast.EntityDecl) *Entity {

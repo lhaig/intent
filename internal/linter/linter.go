@@ -23,6 +23,7 @@ func Lint(prog *ast.Program) *diagnostic.Diagnostics {
 	}
 
 	l.lintFunctions()
+	l.lintExternFunctions()
 	l.lintEntities()
 	l.lintEnums()
 	l.lintTraits()
@@ -30,6 +31,20 @@ func Lint(prog *ast.Program) *diagnostic.Diagnostics {
 	l.lintIntents()
 
 	return l.diag
+}
+
+// lintExternFunctions warns on extern declarations with no requires/ensures.
+// Phase 15 / ADR 0028: the value proposition of FFI is a contract layer the
+// user owns at the boundary. A contractless extern is technically valid but
+// almost always a mistake.
+func (l *Linter) lintExternFunctions() {
+	for _, ext := range l.prog.ExternFunctions {
+		if len(ext.Requires) == 0 && len(ext.Ensures) == 0 {
+			l.diag.Warningf(ext.Line, ext.Column,
+				"extern function '%s' has no requires/ensures; FFI declarations should document the boundary contract",
+				ext.Name)
+		}
+	}
 }
 
 // lintFunctions checks all top-level functions.

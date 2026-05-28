@@ -12,17 +12,29 @@ type Program struct {
 
 // Module represents a single Intent source file after lowering.
 type Module struct {
-	Name        string
-	DeclName    string // module declaration name (e.g., "attractor_validation")
-	PackageName string // package name from intent.toml (e.g., "types_pkg"); empty for same-package modules
-	IsEntry     bool
-	Path        string // original file path
-	Functions  []*Function
-	Entities   []*Entity
-	Enums      []*Enum
-	Traits     []*Trait
-	ImplBlocks []*ImplBlock
-	Intents    []*Intent
+	Name            string
+	DeclName        string // module declaration name (e.g., "attractor_validation")
+	PackageName     string // package name from intent.toml (e.g., "types_pkg"); empty for same-package modules
+	IsEntry         bool
+	Path            string // original file path
+	Functions       []*Function
+	ExternFunctions []*ExternFunction
+	Entities        []*Entity
+	Enums           []*Enum
+	Traits          []*Trait
+	ImplBlocks      []*ImplBlock
+	Intents         []*Intent
+}
+
+// ExternFunction represents a Rust FFI / crate-import declaration.
+// See ADR 0028. No body; the call lowers to the named Rust function.
+type ExternFunction struct {
+	Name       string
+	RustPath   string // e.g. "blake3::hash" — first segment is the crate
+	Params     []*Param
+	ReturnType *checker.Type
+	Requires   []*Contract
+	Ensures    []*Contract
 }
 
 // Function represents a function declaration in the IR.

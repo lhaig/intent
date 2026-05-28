@@ -722,6 +722,34 @@ async entry function main() returns Future<Int> {
 	}
 }
 
+// Phase 15 / ADR 0028: extern function calls emit the crate path directly,
+// with no module prefix mangling and no body declaration. requires/ensures
+// asserts surround the call as for normal functions.
+func TestGenerateExternFunctionRustCall(t *testing.T) {
+	src := `module test version "1.0";
+
+extern function blake3_hash(input: String) returns String
+    from "blake3_intent::hash_hex"
+    requires len(input) > 0
+    ensures len(result) == 64;
+
+entry function main() returns Int {
+    let h: String = blake3_hash("hello");
+    return 0;
+}
+`
+	output := generateFromSource(t, "extern_blake3", src)
+
+	// The Rust path is used verbatim at the call site.
+	if !strings.Contains(output, "blake3_intent::hash_hex(") {
+		t.Errorf("expected extern call to use the rust path 'blake3_intent::hash_hex', got:\n%s", output)
+	}
+	// No `fn blake3_hash` declaration should be emitted — the crate provides it.
+	if strings.Contains(output, "fn blake3_hash(") {
+		t.Errorf("extern declaration must not emit a local Rust fn, got:\n%s", output)
+	}
+}
+
 func TestGenerateAsyncWithContracts(t *testing.T) {
 	src := `module test version "1.0";
 async function fetchPositive(x: Int) returns Future<Int>

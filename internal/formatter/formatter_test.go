@@ -781,3 +781,48 @@ entry function main() returns Int {
 		t.Errorf("expected expr stmt, got:\n%s", got)
 	}
 }
+
+// Phase 15 / ADR 0028: extern function declaration formatting.
+func TestFormatExternFunctionDecl(t *testing.T) {
+	src := `module test version "1.0";
+
+extern function   hash(input :String )returns String
+  from "blake3::hash"
+    requires len(input)>0
+   ensures len(result)==64;
+
+entry function main() returns Int { return 0; }
+`
+	got := formatSource(t, src)
+	if !strings.Contains(got, "extern function hash(input: String) returns String") {
+		t.Errorf("expected canonical extern signature, got:\n%s", got)
+	}
+	if !strings.Contains(got, `    from "blake3::hash"`) {
+		t.Errorf("expected indented from clause, got:\n%s", got)
+	}
+	if !strings.Contains(got, "    requires len(input) > 0") {
+		t.Errorf("expected indented requires, got:\n%s", got)
+	}
+	if !strings.Contains(got, ";") {
+		t.Errorf("expected trailing semicolon, got:\n%s", got)
+	}
+}
+
+func TestFormatExternFunctionIdempotent(t *testing.T) {
+	src := `module test version "1.0";
+
+extern function hash(input: String) returns String
+    from "blake3::hash"
+    requires len(input) > 0
+    ensures len(result) == 64;
+
+entry function main() returns Int {
+    return 0;
+}
+`
+	once := formatSource(t, src)
+	twice := formatSource(t, once)
+	if once != twice {
+		t.Errorf("formatter not idempotent on extern:\nfirst:\n%s\nsecond:\n%s", once, twice)
+	}
+}

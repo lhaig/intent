@@ -92,6 +92,10 @@ func (f *formatter) formatProgram(prog *ast.Program) {
 		f.blankLine()
 		f.formatFunctionDecl(fn)
 	}
+	for _, ext := range prog.ExternFunctions {
+		f.blankLine()
+		f.formatExternFunctionDecl(ext)
+	}
 	for _, i := range prog.Intents {
 		f.blankLine()
 		f.formatIntentDecl(i)
@@ -288,6 +292,42 @@ func (f *formatter) formatFunctionDecl(fn *ast.FunctionDecl) {
 		f.decIndent()
 		f.emitLine("}")
 	}
+}
+
+// formatExternFunctionDecl renders an FFI extern declaration.
+// Phase 15 / ADR 0028.
+func (f *formatter) formatExternFunctionDecl(ext *ast.ExternFunctionDecl) {
+	f.emit(f.indentStr())
+	f.emitf("extern function %s(", ext.Name)
+	for i, p := range ext.Params {
+		if i > 0 {
+			f.emit(", ")
+		}
+		f.emitf("%s: %s", p.Name, f.formatTypeRef(p.Type))
+	}
+	f.emitf(") returns %s\n", f.formatTypeRef(ext.ReturnType))
+	f.incIndent()
+	f.emitLinef("from \"%s\"", ext.RustPath)
+	// requires/ensures use the same per-clause emission as a normal function.
+	for i, req := range ext.Requires {
+		// First contract line: extend the previous one's indent; later
+		// contracts each get their own line.
+		_ = i
+		f.emitLinef("requires %s", f.formatExpr(req.Expr))
+	}
+	for _, ens := range ext.Ensures {
+		f.emitLinef("ensures %s", f.formatExpr(ens.Expr))
+	}
+	f.decIndent()
+	// Close with a `;` on the previous line, removing the trailing newline.
+	// emitLinef writes ...\n; we want `...;\n`. Trim and re-emit.
+	out := f.sb.String()
+	if len(out) > 0 && out[len(out)-1] == '\n' {
+		out = out[:len(out)-1]
+	}
+	f.sb.Reset()
+	f.sb.WriteString(out)
+	f.emit(";\n")
 }
 
 func (f *formatter) formatIntentDecl(i *ast.IntentDecl) {

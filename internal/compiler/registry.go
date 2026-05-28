@@ -395,6 +395,17 @@ func (r *ModuleRegistry) PackageDirs() map[string]string {
 	return r.packageDirs
 }
 
+// Manifest returns the entry package's parsed intent.toml, or nil if none.
+func (r *ModuleRegistry) Manifest() *Manifest {
+	return r.manifest
+}
+
+// ProjectRoot returns the directory containing the entry file (and any
+// intent.toml living alongside it).
+func (r *ModuleRegistry) ProjectRoot() string {
+	return r.projectRoot
+}
+
 // HasCrossPackageImports returns true if any discovered module uses package imports.
 func (r *ModuleRegistry) HasCrossPackageImports() bool {
 	return r.hasPackageImports

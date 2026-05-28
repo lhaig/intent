@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/lhaig/intent/internal/ast"
@@ -2961,5 +2962,83 @@ function main() returns Int {
 	}
 	if prog.Imports[2].PackageName != "graph_types.validation" {
 		t.Errorf("import[2] PackageName: expected 'graph_types.validation', got %q", prog.Imports[2].PackageName)
+	}
+}
+
+// Phase 15 / ADR 0028: extern function declarations for Rust FFI imports.
+func TestParseExternFunctionDecl(t *testing.T) {
+	src := `module test version "1.0";
+
+extern function blake3_hash(input: String) returns String
+    from "blake3::hash"
+    requires len(input) > 0
+    ensures len(result) == 64;
+
+entry function main() returns Int {
+    return 0;
+}
+`
+	p := New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("parse errors: %s", p.Diagnostics().Format("test"))
+	}
+
+	if len(prog.ExternFunctions) != 1 {
+		t.Fatalf("expected 1 extern function, got %d", len(prog.ExternFunctions))
+	}
+	ext := prog.ExternFunctions[0]
+	if ext.Name != "blake3_hash" {
+		t.Errorf("Name: expected blake3_hash, got %q", ext.Name)
+	}
+	if ext.RustPath != "blake3::hash" {
+		t.Errorf("RustPath: expected blake3::hash, got %q", ext.RustPath)
+	}
+	if len(ext.Params) != 1 || ext.Params[0].Name != "input" {
+		t.Errorf("Params: expected one param named 'input', got %+v", ext.Params)
+	}
+	if ext.ReturnType == nil || ext.ReturnType.Name != "String" {
+		t.Errorf("ReturnType: expected String, got %+v", ext.ReturnType)
+	}
+	if len(ext.Requires) != 1 {
+		t.Errorf("Requires: expected 1 clause, got %d", len(ext.Requires))
+	}
+	if len(ext.Ensures) != 1 {
+		t.Errorf("Ensures: expected 1 clause, got %d", len(ext.Ensures))
+	}
+}
+
+func TestParseExternFunctionMissingFrom(t *testing.T) {
+	src := `module test version "1.0";
+
+extern function bad(input: String) returns String
+    requires len(input) > 0;
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	p.Parse()
+	if !p.Diagnostics().HasErrors() {
+		t.Error("expected parse error for missing 'from' clause")
+	}
+	if !strings.Contains(p.Diagnostics().Format("test"), "missing 'from") {
+		t.Errorf("expected diagnostic about missing 'from', got: %s", p.Diagnostics().Format("test"))
+	}
+}
+
+func TestParseExternFunctionHasNoBody(t *testing.T) {
+	// An extern function with a body (curly-brace block) should be rejected
+	// because the trailing `;` is what distinguishes extern from regular fn.
+	src := `module test version "1.0";
+
+extern function bad(input: String) returns String
+    from "crate::path" { return input; }
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	p.Parse()
+	if !p.Diagnostics().HasErrors() {
+		t.Error("expected parse error for extern function with a body")
 	}
 }

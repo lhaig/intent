@@ -4312,6 +4312,107 @@ func TestIsFileInPackage_FallbackWithoutPackageDirs(t *testing.T) {
 	}
 }
 
+// Phase 15 / ADR 0028: extern function FFI declarations.
+
+func checkExternSrc(t *testing.T, src string) *diagnostic.Diagnostics {
+	t.Helper()
+	p := parser.New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected parse errors: %s", p.Diagnostics().Format("test"))
+	}
+	return Check(prog)
+}
+
+func TestCheckExternFunctionValid(t *testing.T) {
+	src := `module test version "1.0";
+
+extern function hash(input: String) returns String
+    from "blake3::hash"
+    requires len(input) > 0
+    ensures len(result) == 64;
+
+entry function main() returns Int { return 0; }
+`
+	d := checkExternSrc(t, src)
+	if d.HasErrors() {
+		t.Errorf("expected no errors, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckExternRejectsEntityParam(t *testing.T) {
+	src := `module test version "1.0";
+
+entity Point { field x: Int; field y: Int; constructor() { self.x = 0; self.y = 0; } }
+
+extern function bad(p: Point) returns String
+    from "crate::bad";
+
+entry function main() returns Int { return 0; }
+`
+	d := checkExternSrc(t, src)
+	if !d.HasErrors() {
+		t.Fatal("expected error for entity param")
+	}
+	if !strings.Contains(d.Format("test"), "entity types are not supported") {
+		t.Errorf("expected diagnostic about entity types, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckExternRejectsMapType(t *testing.T) {
+	src := `module test version "1.0";
+
+extern function bad(m: Map<String, Int>) returns String
+    from "crate::bad";
+
+entry function main() returns Int { return 0; }
+`
+	d := checkExternSrc(t, src)
+	if !d.HasErrors() {
+		t.Fatal("expected error for Map param")
+	}
+	if !strings.Contains(d.Format("test"), "Map<K,V> is not supported") {
+		t.Errorf("expected diagnostic about Map, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckExternRejectsBadFromPath(t *testing.T) {
+	src := `module test version "1.0";
+
+extern function bad(x: Int) returns Int
+    from "just_a_name";
+
+entry function main() returns Int { return 0; }
+`
+	d := checkExternSrc(t, src)
+	if !d.HasErrors() {
+		t.Fatal("expected error for missing :: in from path")
+	}
+	if !strings.Contains(d.Format("test"), `must be of the form "crate::path`) {
+		t.Errorf("expected diagnostic about from path shape, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckExternAllowsBridgeableNestedTypes(t *testing.T) {
+	src := `module test version "1.0";
+
+extern function fetch(url: String) returns Result<String, String>
+    from "intent_http::fetch";
+
+extern function chunk_lines(text: String) returns Array<String>
+    from "text_utils::split_lines";
+
+extern function maybe_user(id: Int) returns Option<String>
+    from "users::lookup";
+
+entry function main() returns Int { return 0; }
+`
+	d := checkExternSrc(t, src)
+	if d.HasErrors() {
+		t.Errorf("expected no errors for Result/Array/Option bridge types, got: %s", d.Format("test"))
+	}
+}
+
 func TestIsFileInPackage_NilPackageDirs(t *testing.T) {
 	// nil packageDirs should also use fallback path
 	got := isFileInPackage("/project/mylib/foo.intent", "mylib", nil)

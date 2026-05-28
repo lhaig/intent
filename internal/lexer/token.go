@@ -68,6 +68,7 @@ const (
 	ASYNC
 	AWAIT
 	SPAWN
+	EXTERN
 
 	// Type keywords
 	INT_TYPE
@@ -231,6 +232,8 @@ func (t TokenType) String() string {
 		return "AWAIT"
 	case SPAWN:
 		return "SPAWN"
+	case EXTERN:
+		return "EXTERN"
 	case INT_TYPE:
 		return "INT_TYPE"
 	case FLOAT_TYPE:
@@ -347,6 +350,7 @@ var keywords = map[string]TokenType{
 	"async":       ASYNC,
 	"await":       AWAIT,
 	"spawn":       SPAWN,
+	"extern":      EXTERN,
 	"Int":         INT_TYPE,
 	"Float":       FLOAT_TYPE,
 	"String":      STRING_TYPE,

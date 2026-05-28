@@ -58,6 +58,27 @@ func asyncFunctionNamesInModule(mod *ir.Module) []string {
 	return names
 }
 
+// externFunctionNames returns the names of any extern (FFI) function
+// declarations across the program. Used to reject FFI on non-Rust targets.
+// Phase 15 / ADR 0028.
+func externFunctionNames(prog *ir.Program) []string {
+	var names []string
+	for _, mod := range prog.Modules {
+		for _, ext := range mod.ExternFunctions {
+			names = append(names, ext.Name)
+		}
+	}
+	return names
+}
+
+func externFunctionNamesInModule(mod *ir.Module) []string {
+	var names []string
+	for _, ext := range mod.ExternFunctions {
+		names = append(names, ext.Name)
+	}
+	return names
+}
+
 // getFileExtension returns the file extension for the given target
 func getFileExtension(target string) string {
 	switch target {
@@ -95,6 +116,9 @@ func EmitToTarget(source, target, baseName string) error {
 		if names := asyncFunctionNamesInModule(mod); len(names) > 0 {
 			return fmt.Errorf("async functions are not supported on the wasm target (found: %v); use --target rust or --target js", names)
 		}
+		if names := externFunctionNamesInModule(mod); len(names) > 0 {
+			return fmt.Errorf("extern (Rust FFI) declarations are not supported on the wasm target (found: %v); use --target rust", names)
+		}
 		bbe, err := getBinaryBackend(target)
 		if err != nil {
 			return err
@@ -106,6 +130,13 @@ func EmitToTarget(source, target, baseName string) error {
 		}
 		fmt.Printf("Wrote %s\n", outPath)
 		return nil
+	}
+
+	// Reject extern declarations on the JS target — Rust FFI is Rust-only.
+	if target == "js" {
+		if names := externFunctionNamesInModule(mod); len(names) > 0 {
+			return fmt.Errorf("extern (Rust FFI) declarations are not supported on the js target (found: %v); use --target rust", names)
+		}
 	}
 
 	// Handle text targets (Rust, JS)
@@ -168,6 +199,9 @@ func EmitProjectToTarget(entryPath, target, baseName string) error {
 		if names := asyncFunctionNames(prog); len(names) > 0 {
 			return fmt.Errorf("async functions are not supported on the wasm target (found: %v); use --target rust or --target js", names)
 		}
+		if names := externFunctionNames(prog); len(names) > 0 {
+			return fmt.Errorf("extern (Rust FFI) declarations are not supported on the wasm target (found: %v); use --target rust", names)
+		}
 		bbe, err := getBinaryBackend(target)
 		if err != nil {
 			return err
@@ -179,6 +213,13 @@ func EmitProjectToTarget(entryPath, target, baseName string) error {
 		}
 		fmt.Printf("Wrote %s (multi-file)\n", outPath)
 		return nil
+	}
+
+	// Reject extern declarations on the JS target.
+	if target == "js" {
+		if names := externFunctionNames(prog); len(names) > 0 {
+			return fmt.Errorf("extern (Rust FFI) declarations are not supported on the js target (found: %v); use --target rust", names)
+		}
 	}
 
 	// Handle text targets (Rust, JS)
@@ -249,8 +290,9 @@ func buildWasmFromRust(rustSource, baseName string) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Write Cargo.toml with wasm target
-	cargoToml := buildCargoToml(rustSource, true)
+	// Write Cargo.toml with wasm target. Single-file wasm-via-rust path
+	// does not carry an intent.toml context, so no user rust_dependencies.
+	cargoToml := buildCargoToml(rustSource, true, nil)
 	if err := os.WriteFile(filepath.Join(tmpDir, "Cargo.toml"), []byte(cargoToml), 0644); err != nil {
 		return fmt.Errorf("failed to write Cargo.toml: %w", err)
 	}
