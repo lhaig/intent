@@ -204,20 +204,23 @@ because each feature needs to work across all backends and with the verifier.
 - [x] JS backend: template literal with `${}` interpolation
 - [x] End-to-end compiler test in `compiler_test.go`
 
-### String Standard Library
-- Methods on String: `split(delim)`, `to_lowercase()`, `trim()`, `starts_with(prefix)`, `contains(substr)`, `len()`
-- Maps to Rust String/str methods
-- Driven by Attractor: condition expression parsing, label normalization
+### String Standard Library -- DONE
+- [x] Methods on String: `split(delim)`, `to_lowercase()`, `trim()`, `starts_with(prefix)`, `contains(substr)`, `len()` (ADR 0013)
+- [x] Rust backend maps to `String`/`str` methods
+- [x] JS backend maps to native string methods
+- [x] Drove Attractor condition expression parsing and label normalization
 
-### Map Type
-- `Map<K, V>` with `get(key)`, `set(key, value)`, `contains(key)`, `keys()`, `remove(key)`
-- Maps to Rust `HashMap<K, V>`
-- Driven by Attractor: Context (state passing between pipeline stages), HandlerRegistry
+### Map Type -- DONE
+- [x] `Map<K, V>` with `get(key, default)`, `set(key, value)`, `contains(key)`, `keys()`, `remove(key)` (ADR 0016)
+- [x] Rust backend maps to `HashMap<K, V>`; JS backend uses plain object literals
+- [x] Float/Array/Map key types rejected at type-check time
+- [x] Drove Attractor Context (state passing) and HandlerRegistry
 
 ### Rust FFI / Crate Imports
 - Call Rust crate functions from Intent (Rust backend only)
 - Type-safe bridge declarations with contracts on the boundary
 - Unlocks the Rust ecosystem for Intent programs
+- **Status:** not started; no ADR yet. Last remaining Milestone 7 feature.
 
 ---
 
@@ -251,12 +254,14 @@ The Attractor pipeline orchestration spec (`examples/attractor/`) serves as the 
 
 **Current state:** Phase 1 complete — type model, edge selection, retry policy, graph validation all compile and run. See `examples/attractor/STRATEGY.md` for the full gap analysis and phased plan.
 
-**Next features driven by Attractor (in priority order):**
-1. String standard library (split, lowercase, trim, starts_with) — unlocks condition parsing
-2. Array\<String\> on entity fields — unlocks suggested_next_ids, reachability
-3. Map\<K,V\> type — unlocks Context (the central state-passing mechanism)
-4. Result\<T,E\> and error handling — unlocks retry loop exception handling
-5. Traits/Interfaces — unlocks Handler dispatch
+**Features driven by Attractor (all complete):**
+1. [x] String standard library (split, lowercase, trim, starts_with) — unlocks condition parsing
+2. [x] Array\<String\> on entity fields — unlocks suggested_next_ids, reachability
+3. [x] Map\<K,V\> type — unlocks Context (the central state-passing mechanism)
+4. [x] Result\<T,E\> and error handling — unlocks retry loop exception handling
+5. [x] Traits/Interfaces — unlocks Handler dispatch
+
+The remaining Attractor-driven work is async handler integration (Phase 12 stretch goal, deferred — see `ops/plans/phase-14-phase11-13-gaps.md`).
 
 ---
 
