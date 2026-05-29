@@ -1304,3 +1304,143 @@ entry function main() returns Int {
 		t.Errorf("function call must not use package-name prefix types_pkg_distance_squared, got:\n%s", output)
 	}
 }
+
+// Phase 16 / ADR 0029: in-language testing framework — JS backend tests.
+
+func TestJSGenerateSimpleTest(t *testing.T) {
+	src := `module hello version "1.0";
+
+test "addition works" {
+    let x: Int = 1 + 1;
+    assert(x == 2);
+}
+
+entry function main() returns Int { return 0; }
+`
+	out := generateFromSource(t, "simple-test", src)
+	want := []string{
+		"function __test_addition_works()",
+		`if (!((x === 2))) throw new Error("assertion failed")`,
+		"const __intent_tests = [",
+		`{ name: "addition works", isAsync: false, fn: __test_addition_works }`,
+	}
+	for _, w := range want {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in output:\n%s", w, out)
+		}
+	}
+}
+
+func TestJSGenerateAsyncTest(t *testing.T) {
+	src := `module hello version "1.0";
+
+async function delayed() returns Future<Int> { return 1; }
+
+async test "awaits" {
+    let f: Future<Int> = spawn delayed();
+    let r: Int = await f;
+    assert(r == 1);
+}
+
+entry function main() returns Int { return 0; }
+`
+	out := generateFromSource(t, "async-test", src)
+	if !strings.Contains(out, "async function __test_awaits()") {
+		t.Errorf("expected 'async function __test_awaits()', got:\n%s", out)
+	}
+	if !strings.Contains(out, `isAsync: true`) {
+		t.Errorf("registry entry should mark isAsync true, got:\n%s", out)
+	}
+}
+
+func TestJSGenerateAssertEq(t *testing.T) {
+	src := `module hello version "1.0";
+
+test "eq" {
+    assert_eq(2 + 2, 4);
+}
+
+entry function main() returns Int { return 0; }
+`
+	out := generateFromSource(t, "assert-eq", src)
+	if !strings.Contains(out, "JSON.stringify") && !strings.Contains(out, "__a === __b") {
+		t.Errorf("expected assert_eq emission, got:\n%s", out)
+	}
+}
+
+func TestJSGenerateAssertClose(t *testing.T) {
+	src := `module hello version "1.0";
+
+test "close" {
+    assert_close(1.0, 1.0, 0.001);
+}
+
+entry function main() returns Int { return 0; }
+`
+	out := generateFromSource(t, "assert-close", src)
+	if !strings.Contains(out, "Math.abs") {
+		t.Errorf("expected Math.abs emission, got:\n%s", out)
+	}
+}
+
+func TestJSGenerateAssertPanics(t *testing.T) {
+	src := `module hello version "1.0";
+
+test "panics" {
+    let bomb: Fn() -> Void = || -> Void => assert(false);
+    assert_panics(bomb);
+}
+
+entry function main() returns Int { return 0; }
+`
+	out := generateFromSource(t, "assert-panics", src)
+	if !strings.Contains(out, "try {") || !strings.Contains(out, "__threw") {
+		t.Errorf("expected try/catch panic emission, got:\n%s", out)
+	}
+}
+
+func TestJSGenerateEntityAssertEqUsesEqMethod(t *testing.T) {
+	src := `module hello version "1.0";
+
+entity Point {
+    field x: Int;
+    field y: Int;
+
+    constructor(xi: Int, yi: Int) {
+        self.x = xi;
+        self.y = yi;
+    }
+
+    method eq(other: Point) returns Bool {
+        return self.x == other.x and self.y == other.y;
+    }
+}
+
+test "entity eq" {
+    let p1: Point = Point(1, 2);
+    let p2: Point = Point(1, 2);
+    assert_eq(p1, p2);
+}
+
+entry function main() returns Int { return 0; }
+`
+	out := generateFromSource(t, "entity-eq", src)
+	if !strings.Contains(out, ".eq(") {
+		t.Errorf("expected entity.eq() dispatch, got:\n%s", out)
+	}
+}
+
+func TestJSSanitiseTestName(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"abs returns non-negative", "abs_returns_non_negative"},
+		{"", "unnamed"},
+		{"123 start", "_123_start"},
+		{"!!!", "unnamed"},
+	}
+	for _, tc := range cases {
+		got := sanitiseTestName(tc.in)
+		if got != tc.want {
+			t.Errorf("sanitiseTestName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

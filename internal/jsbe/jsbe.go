@@ -52,6 +52,25 @@ func Generate(mod *ir.Module) string {
 		g.emitLine("")
 	}
 
+	// Phase 16 / ADR 0029: emit per-test functions and a runner-discoverable
+	// registry. The registry is `__intent_tests`: an array of objects with
+	// `name`, `isAsync`, and `fn` (a thunk that runs the test body).
+	for _, t := range mod.Tests {
+		g.generateTest(t)
+		g.emitLine("")
+	}
+	if len(mod.Tests) > 0 {
+		g.emitLine("const __intent_tests = [")
+		g.incIndent()
+		for _, t := range mod.Tests {
+			fnName := "__test_" + sanitiseTestName(t.Name)
+			g.emitLinef("{ name: %q, isAsync: %v, fn: %s },\n", t.Name, t.IsAsync, fnName)
+		}
+		g.decIndent()
+		g.emitLine("];")
+		g.emitLine("")
+	}
+
 	// Call entry function if present
 	if mod.IsEntry {
 		for _, f := range mod.Functions {
@@ -162,6 +181,21 @@ func GenerateAll(prog *ir.Program) string {
 		}
 		for _, f := range mod.Functions {
 			g.generateFunction(f)
+			g.emitLine("")
+		}
+		for _, t := range mod.Tests {
+			g.generateTest(t)
+			g.emitLine("")
+		}
+		if len(mod.Tests) > 0 {
+			g.emitLine("const __intent_tests_" + mod.Name + " = [")
+			g.incIndent()
+			for _, t := range mod.Tests {
+				fnName := "__test_" + sanitiseTestName(t.Name)
+				g.emitLinef("{ name: %q, isAsync: %v, fn: %s },\n", t.Name, t.IsAsync, fnName)
+			}
+			g.decIndent()
+			g.emitLine("];")
 			g.emitLine("")
 		}
 
@@ -327,6 +361,55 @@ func (g *generator) mangledEnumName(name string) string {
 }
 
 // --- Function generation ---
+
+// sanitiseTestName converts a human-readable test name to a JS-legal
+// identifier (matches the Rust backend's rules; see ADR 0029).
+func sanitiseTestName(name string) string {
+	var b strings.Builder
+	prevUnderscore := true
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+			prevUnderscore = false
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r - 'A' + 'a')
+			prevUnderscore = false
+		case r >= '0' && r <= '9':
+			if b.Len() == 0 {
+				b.WriteByte('_')
+			}
+			b.WriteRune(r)
+			prevUnderscore = false
+		default:
+			if !prevUnderscore {
+				b.WriteByte('_')
+				prevUnderscore = true
+			}
+		}
+	}
+	s := strings.TrimRight(b.String(), "_")
+	if s == "" {
+		return "unnamed"
+	}
+	return s
+}
+
+// generateTest emits a JS function for an ir.Test plus a registry entry so
+// the runner can enumerate and invoke tests by name.
+// See ADR 0029 / phase 16 task 16.5.
+func (g *generator) generateTest(t *ir.Test) {
+	fnName := "__test_" + sanitiseTestName(t.Name)
+	if t.IsAsync {
+		g.emitLinef("async function %s() {\n", fnName)
+	} else {
+		g.emitLinef("function %s() {\n", fnName)
+	}
+	g.incIndent()
+	g.generateStmts(t.Body)
+	g.decIndent()
+	g.emitLine("}")
+}
 
 func (g *generator) generateFunction(f *ir.Function) {
 	if f.IsEntry {
@@ -1097,6 +1180,36 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr) string {
 				return fmt.Sprintf("(%s.size)", arg)
 			}
 			return fmt.Sprintf("(%s.length)", arg)
+		}
+	// Phase 16 / ADR 0029: assertion builtins.
+	case "assert":
+		if len(expr.Args) == 1 {
+			cond := g.generateExpr(expr.Args[0])
+			return fmt.Sprintf("(() => { if (!(%s)) throw new Error(\"assertion failed\"); })()", cond)
+		}
+	case "assert_eq":
+		if len(expr.Args) == 2 {
+			actual := g.generateExpr(expr.Args[0])
+			expected := g.generateExpr(expr.Args[1])
+			// Entity equality dispatches to user-defined eq method (ADR 0029).
+			if t := expr.Args[0].ExprType(); t != nil && t.IsEntity {
+				return fmt.Sprintf("(() => { if (!((%s).eq(%s))) throw new Error(\"assertion failed: entity equality\"); })()", actual, expected)
+			}
+			// Use a structural comparison via JSON for arrays / enums / Option / Result.
+			// Primitives compare via ===.
+			return fmt.Sprintf("(() => { const __a = %s; const __b = %s; const __ok = (typeof __a === \"object\" && __a !== null) ? JSON.stringify(__a) === JSON.stringify(__b) : __a === __b; if (!__ok) throw new Error(\"assertion failed: expected \" + JSON.stringify(__b) + \", got \" + JSON.stringify(__a)); })()", actual, expected)
+		}
+	case "assert_close":
+		if len(expr.Args) == 3 {
+			actual := g.generateExpr(expr.Args[0])
+			expected := g.generateExpr(expr.Args[1])
+			epsilon := g.generateExpr(expr.Args[2])
+			return fmt.Sprintf("(() => { if (Math.abs((%s) - (%s)) > (%s)) throw new Error(\"assertion failed: floats not within epsilon\"); })()", actual, expected, epsilon)
+		}
+	case "assert_panics":
+		if len(expr.Args) == 1 {
+			arg := g.generateExpr(expr.Args[0])
+			return fmt.Sprintf("(() => { let __threw = false; try { (%s)(); } catch (e) { __threw = true; } if (!__threw) throw new Error(\"assertion failed: expected panic, none occurred\"); })()", arg)
 		}
 	case "Ok", "Err", "Some":
 		if len(expr.Args) == 1 {
