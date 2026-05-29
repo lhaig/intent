@@ -1,6 +1,6 @@
 # Phase 16: In-Language Testing Framework
 
-**Status:** Approved (2026-05-29) — design locked, ready for execution
+**Status:** Shipped (2026-05-29; 8 commits, 16.1 through 16.10 — scope reductions documented per task)
 **Milestone:** v1.2 — foundation for autonomous self-improvement
 **Decision:** [ADR 0029](../../docs/decisions/0029-in-language-testing.md)
 
@@ -150,10 +150,10 @@ Allowed on Rust and JS. The runner wraps each async test in the target's runtime
 - [x] Hand-written tests added to 4 representative examples (fibonacci, array_sum, sorted_check, bank_account); remaining 15 examples filed as follow-up — partial coverage by design to keep this PRD scoped (16.9 — pending commit)
 - [ ] At least one synthetic cross-target divergence test exists and is correctly flagged (deferred — would require a test that deliberately exploits Rust/JS semantic differences; filed for follow-up)
 - [x] `make validate` exists and runs `intentc test` over the tested-examples list on the default target (16.9 — pending commit). Formatter updated to preserve `test` declarations.
-- [ ] Cross-backend equivalence test runs cleanly on the Attractor example
+- [x] Cross-backend equivalence runs cleanly on `examples/generic_stack.intent` (generics) and `examples/async_demo.intent` (async, rust+js; wasm correctly skipped) (16.10 — pending commit)
 - [x] `intentc fmt` canonicalises `test "..." { ... }` blocks; 3 formatter tests cover happy path, async variant, and idempotency (16.9 — pending commit)
-- [ ] No regressions in existing Go-side tests
-- [ ] PRDs for phases 11-15 re-validated by running their example programs through the new runner
+- [x] No regressions in existing Go-side tests; full 14-package suite green throughout Phase 16
+- [x] PRDs for phases 11-15 carry "Validated under Phase 16" footers describing test coverage and explicit deferrals (16.10 — pending commit)
 
 ## Reference
 

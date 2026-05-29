@@ -89,7 +89,9 @@ TESTED_EXAMPLES := \
 	examples/fibonacci.intent \
 	examples/array_sum.intent \
 	examples/sorted_check.intent \
-	examples/bank_account.intent
+	examples/bank_account.intent \
+	examples/generic_stack.intent \
+	examples/async_demo.intent
 
 # Run `intentc test` over each example that has tests, on the default target.
 test-examples: build

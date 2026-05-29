@@ -19,3 +19,18 @@ async entry function main() returns Int {
     return 0;
 }
 
+async test "delayed_add resolves to the sum" {
+    let f: Future<Int> = spawn delayed_add(3, 4);
+    let r: Int = await f;
+    assert_eq(r, 7);
+}
+
+async test "two spawned futures complete independently" {
+    let f1: Future<Int> = spawn delayed_add(10, 20);
+    let f2: Future<Int> = spawn delayed_add(100, 200);
+    let r1: Int = await f1;
+    let r2: Int = await f2;
+    assert_eq(r1, 30);
+    assert_eq(r2, 300);
+}
+

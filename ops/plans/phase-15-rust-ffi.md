@@ -3,6 +3,7 @@
 **Status:** Shipped (2026-05-28; completes Milestone 7)
 **Milestone:** Milestone 7 — Language Evolution (final feature)
 **Decision:** [ADR 0028](../../docs/decisions/0028-rust-ffi-crate-imports.md)
+**Validated under Phase 16:** FFI tests against `examples/ffi_blake3/` deferred — extern function tests require cargo with the named crate available, which is target-specific (rust only) and beyond the scope of the cross-target runner. The existing manual verification (running the example, observing the 64-char hex digest) remains the validation surface; an automated rust-target-only FFI test is filed as Phase 17 work.
 
 ## Goal
 

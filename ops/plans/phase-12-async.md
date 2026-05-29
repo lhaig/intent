@@ -4,6 +4,7 @@
 **Milestone:** v1.1 — Attractor Integration & Feature Expansion
 **Decision:** [ADR 0026](../../docs/decisions/0026-concurrency-async-design.md) (revised by Phase 14 with source-aware `Future<T>` lowering)
 **Deferred:** Attractor handlers async migration (stretch goal — tracked separately)
+**Validated under Phase 16:** 2 hand-written async tests added to `examples/async_demo.intent` exercise `spawn` + `await` end-to-end on both rust (tokio) and js (native Promises). Both targets agree; WASM correctly rejects async tests with the documented error.
 
 ## Goal
 

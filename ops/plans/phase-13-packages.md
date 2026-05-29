@@ -4,6 +4,7 @@
 **Milestone:** v1.1 — Attractor Integration & Feature Expansion
 **Decision:** [ADR 0027](../../docs/decisions/0027-package-management-design.md)
 **Deferred:** Real package registry / `pkg install` for versioned remote deps
+**Validated under Phase 16:** Tests against multi-package examples (e.g. `examples/packages/app_pkg/main.intent`) deferred — the test runner currently expects single-file or contiguous-multi-file inputs; cross-package test discovery is filed as a Phase 17 candidate. Single-file generics (Phase 11) and async (Phase 12) tests validated, which exercises the same trait/closure/Map machinery that Phase 13's packages composed.
 
 ## Goal
 

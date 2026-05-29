@@ -1223,6 +1223,10 @@ func (l *lowerer) collectInstantiations(prog *ast.Program) {
 			l.scanStmtsForInstantiations(m.Body)
 		}
 	}
+	// Phase 16 / ADR 0029: test bodies can also instantiate generic types.
+	for _, t := range prog.Tests {
+		l.scanStmtsForInstantiations(t.Body)
+	}
 }
 
 func (l *lowerer) scanStmtsForInstantiations(block *ast.Block) {
@@ -1534,6 +1538,12 @@ func (l *lowerer) rewriteMonomorphizedCalls(mod *Module) {
 			l.rewriteContracts(m.Requires)
 			l.rewriteContracts(m.Ensures)
 		}
+	}
+	// Phase 16 / ADR 0029: tests participate in monomorphization too. Without
+	// this their `let x: Stack<Int> = ...` was being emitted as `Stack` (the
+	// bare generic) which then failed to type-check in cargo test.
+	for _, t := range mod.Tests {
+		l.rewriteStmts(t.Body)
 	}
 }
 

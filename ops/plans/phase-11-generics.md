@@ -3,6 +3,7 @@
 **Status:** Shipped (v1.1, 2026-03-25; checklist verified retroactively in Phase 14)
 **Milestone:** v1.1 — Attractor Integration & Feature Expansion
 **Decision:** [ADR 0025](../../docs/decisions/0025-user-defined-generics-design.md)
+**Validated under Phase 16:** 3 hand-written tests added to `examples/generic_stack.intent` cover the empty-stack case, push-increments-count, and `Stack<String>` as a distinct monomorphization. Pass on `--all-targets` (rust + js; wasm skipped). Surfaced a pre-existing bug in the IR monomorphization passes that didn't visit test bodies — fixed in the same commit.
 
 ## Goal
 

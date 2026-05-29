@@ -38,3 +38,25 @@ entry function main() returns Int {
     return 0;
 }
 
+test "new Stack is empty" {
+    let mutable s: Stack<Int> = Stack<Int>();
+    assert(s.is_empty());
+    assert_eq(s.count, 0);
+}
+
+test "push increments count" {
+    let mutable s: Stack<Int> = Stack<Int>();
+    s.push(1);
+    s.push(2);
+    s.push(3);
+    assert_eq(s.count, 3);
+    assert(not s.is_empty());
+}
+
+test "Stack<String> is a distinct monomorphization" {
+    let mutable s: Stack<String> = Stack<String>();
+    s.push("hello");
+    s.push("world");
+    assert_eq(s.count, 2);
+}
+

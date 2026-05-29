@@ -3,6 +3,7 @@
 **Status:** Shipped (2026-05-28; closes audit gaps from Phases 11-13)
 **Milestone:** v1.1 follow-up
 **Touches decisions:** [ADR 0026](../../docs/decisions/0026-concurrency-async-design.md) (async semantics revised — see "Implementation Notes (Phase 14)" section)
+**Validated under Phase 16:** Phase 14's async-on-WASM rejection is exercised by the runner's WASM-skip path on `examples/async_demo.intent`. Phase 14's source-aware `Future<T>` lowering is exercised by the two async tests on rust that succeed end-to-end (cargo + tokio). No new artifacts needed.
 
 ## Goal
 
