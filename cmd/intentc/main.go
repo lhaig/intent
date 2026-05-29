@@ -26,6 +26,7 @@ Usage:
   intentc check <file.intent>                                  Parse and type-check only
   intentc verify <file.intent>                                 Verify contracts using Z3 SMT solver
   intentc test-gen [--emit] <file.intent>                      Generate Rust with property-based contract tests
+  intentc test [--target <t>] [--all-targets] <file.intent>    Run in-language tests on one or more targets
   intentc fmt [--check] <file.intent>                          Format source to canonical style
   intentc lint <file.intent>                                   Run lint checks for style/best practices
   intentc pkg init                                             Create intent.toml from module declarations
@@ -61,6 +62,9 @@ Examples:
   intentc verify hello.intent                   Verify contracts with Z3 (requires z3 on PATH)
   intentc test-gen fibonacci.intent             Generate Rust with contract tests to stdout
   intentc test-gen --emit fibonacci.intent      Write to fibonacci_test.rs
+  intentc test hello.intent                     Run all tests in hello.intent on the rust target
+  intentc test --target js hello.intent         Run tests on the js target (requires node)
+  intentc test --all-targets hello.intent       Run on rust + js + wasm; flag cross-target divergence
   intentc fmt hello.intent                      Format hello.intent in-place
   intentc fmt --check hello.intent              Check if already formatted (exit 1 if not)
   intentc lint hello.intent                     Lint for style/best practice issues
@@ -88,6 +92,8 @@ func main() {
 		handleVerify(os.Args[2:])
 	case "test-gen":
 		handleTestGen(os.Args[2:])
+	case "test":
+		handleTest(os.Args[2:])
 	case "fmt":
 		handleFmt(os.Args[2:])
 	case "lint":
@@ -292,6 +298,56 @@ func handleTestGen(args []string) {
 		fmt.Printf("Wrote %s\n", outPath)
 	} else {
 		fmt.Print(res.RustSource)
+	}
+}
+
+// Phase 16 / ADR 0029: `intentc test` runs in-language tests on one or more
+// targets, reports per-test pass/fail, and (with --all-targets) flags
+// cross-backend divergence. See ops/plans/phase-16-testing-framework.md.
+func handleTest(args []string) {
+	opts := compiler.TestRunOptions{}
+	var filePath string
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "--target":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "Error: --target requires an argument")
+				os.Exit(1)
+			}
+			i++
+			t := args[i]
+			if t != "rust" && t != "js" && t != "wasm" {
+				fmt.Fprintf(os.Stderr, "Error: unknown target: %s (expected rust, js, wasm)\n", t)
+				os.Exit(1)
+			}
+			opts.Targets = append(opts.Targets, t)
+		case "--all-targets":
+			opts.AllTargets = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", arg)
+				os.Exit(1)
+			}
+			filePath = arg
+		}
+	}
+
+	if filePath == "" {
+		fmt.Fprintln(os.Stderr, "Error: no input file specified")
+		os.Exit(1)
+	}
+
+	results, err := compiler.RunTests(filePath, opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Print(compiler.FormatResults(results))
+	if compiler.AnyFailures(results) {
+		os.Exit(1)
 	}
 }
 

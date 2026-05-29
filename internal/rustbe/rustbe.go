@@ -967,6 +967,12 @@ func (g *generator) generateImplBlock(ib *ir.ImplBlock) {
 
 // --- Intent generation ---
 
+// SanitiseTestNameExternal is the exported form of sanitiseTestName for use
+// by other packages (notably internal/compiler/test_runner.go which needs to
+// map declared test names back to the sanitised Rust identifiers in cargo
+// test output).
+func SanitiseTestNameExternal(name string) string { return sanitiseTestName(name) }
+
 // sanitiseTestName converts a human-readable test name to a Rust-legal
 // identifier: lowercase ASCII letters/digits with non-alphanumerics replaced
 // by underscore, runs of underscores collapsed. Empty inputs yield "unnamed".

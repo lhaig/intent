@@ -1,0 +1,506 @@
+package compiler
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/lhaig/intent/internal/checker"
+	"github.com/lhaig/intent/internal/ir"
+	"github.com/lhaig/intent/internal/jsbe"
+	"github.com/lhaig/intent/internal/parser"
+	"github.com/lhaig/intent/internal/rustbe"
+)
+
+// TestResult is the per-test, per-target outcome from `intentc test`.
+type TestResult struct {
+	Name    string
+	Target  string
+	Passed  bool
+	Skipped bool   // true when the target rejects the program (e.g. WASM)
+	Output  string // any stdout/stderr captured from the test
+	Error   string // failure message, empty on pass
+}
+
+// TestRunOptions controls the runner.
+//
+// Targets is the list of targets to run on. If empty, defaults to []string{"rust"}.
+// AllTargets is a convenience that sets Targets to all supported targets.
+// AllTargets honours the WASM scope reduction from phase 16 task 16.6:
+// WASM rejects tests, so "wasm" is reported as Skipped rather than executed.
+type TestRunOptions struct {
+	Targets    []string
+	AllTargets bool
+}
+
+// RunTests is the top-level entry for `intentc test`. It loads the program at
+// filePath, compiles tests per target, executes them, and returns per-test
+// results. The returned error is non-nil only for harness failures
+// (parse/check/lower errors, target tools missing); per-test failures are
+// reported via TestResult.Passed=false.
+func RunTests(filePath string, opts TestRunOptions) ([]TestResult, error) {
+	if opts.AllTargets {
+		opts.Targets = []string{"rust", "js", "wasm"}
+	}
+	if len(opts.Targets) == 0 {
+		opts.Targets = []string{"rust"}
+	}
+
+	// Parse + check the input. Reused across targets.
+	isMulti, err := IsMultiFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", filePath, err)
+	}
+
+	var (
+		mod  *ir.Module
+		prog *ir.Program
+	)
+
+	if isMulti {
+		registry, regErr := NewModuleRegistry(filePath)
+		if regErr != nil {
+			return nil, fmt.Errorf("initialize module registry: %w", regErr)
+		}
+		diag, depErr := registry.DiscoverDependencies()
+		if depErr != nil {
+			return nil, fmt.Errorf("discover dependencies: %w", depErr)
+		}
+		if diag.HasErrors() {
+			return nil, fmt.Errorf("discovery errors:\n%s", diag.Format(filePath))
+		}
+		sortedPaths, sortErr := registry.TopologicalSort()
+		if sortErr != nil {
+			return nil, fmt.Errorf("topological sort: %w", sortErr)
+		}
+		allModules := registry.AllModules()
+		checkResult := checker.CheckAll(allModules, sortedPaths, registry.PackageDirs())
+		if checkResult.Diagnostics.HasErrors() {
+			return nil, fmt.Errorf("type-check errors:\n%s", checkResult.Diagnostics.Format(filePath))
+		}
+		prog = ir.LowerAll(allModules, sortedPaths, checkResult, registry.PackageDirs())
+	} else {
+		source, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			return nil, fmt.Errorf("read %s: %w", filePath, readErr)
+		}
+		p := parser.New(string(source))
+		astProg := p.Parse()
+		if p.Diagnostics().HasErrors() {
+			return nil, fmt.Errorf("parse errors:\n%s", p.Diagnostics().Format(filePath))
+		}
+		checkResult := checker.CheckWithResult(astProg)
+		if checkResult.Diagnostics.HasErrors() {
+			return nil, fmt.Errorf("type-check errors:\n%s", checkResult.Diagnostics.Format(filePath))
+		}
+		mod = ir.Lower(astProg, checkResult)
+	}
+
+	// Collect declared test names so unused targets can still report skips.
+	declared := collectTestNames(mod, prog)
+	if len(declared) == 0 {
+		return nil, fmt.Errorf("no tests found in %s", filePath)
+	}
+
+	var results []TestResult
+	for _, target := range opts.Targets {
+		switch target {
+		case "rust":
+			res, err := runRustTests(mod, prog, declared)
+			if err != nil {
+				return nil, fmt.Errorf("rust target: %w", err)
+			}
+			results = append(results, res...)
+		case "js":
+			res, err := runJSTests(mod, prog, declared)
+			if err != nil {
+				return nil, fmt.Errorf("js target: %w", err)
+			}
+			results = append(results, res...)
+		case "wasm":
+			for _, n := range declared {
+				results = append(results, TestResult{
+					Name:    n,
+					Target:  "wasm",
+					Skipped: true,
+					Error:   "tests are not supported on the wasm target (phase 16 / ADR 0029)",
+				})
+			}
+		default:
+			return nil, fmt.Errorf("unknown target %q (expected rust, js, wasm)", target)
+		}
+	}
+
+	return results, nil
+}
+
+// collectTestNames returns the declared test names from either a single Module
+// or a multi-file Program (whichever is non-nil). Order matches declaration.
+func collectTestNames(mod *ir.Module, prog *ir.Program) []string {
+	var names []string
+	if mod != nil {
+		for _, t := range mod.Tests {
+			names = append(names, t.Name)
+		}
+		return names
+	}
+	if prog != nil {
+		for _, m := range prog.Modules {
+			for _, t := range m.Tests {
+				names = append(names, t.Name)
+			}
+		}
+	}
+	return names
+}
+
+// runRustTests writes a temp cargo project, runs `cargo test`, and parses
+// libtest's JSON output to recover per-test results. Returns a harness error
+// when cargo is not available.
+func runRustTests(mod *ir.Module, prog *ir.Program, declared []string) ([]TestResult, error) {
+	if _, err := exec.LookPath("cargo"); err != nil {
+		return nil, fmt.Errorf("cargo not found on PATH: %w (install rustup to enable rust test runs)", err)
+	}
+
+	var rustSource string
+	if mod != nil {
+		rustSource = rustbe.Generate(mod)
+	} else {
+		rustSource = rustbe.GenerateAll(prog)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "intent-test-rust-*")
+	if err != nil {
+		return nil, fmt.Errorf("temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cargoToml := buildCargoToml(rustSource, false, nil)
+	if err := os.WriteFile(filepath.Join(tmpDir, "Cargo.toml"), []byte(cargoToml), 0644); err != nil {
+		return nil, fmt.Errorf("write Cargo.toml: %w", err)
+	}
+	srcDir := filepath.Join(tmpDir, "src")
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		return nil, fmt.Errorf("mkdir src: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "main.rs"), []byte(rustSource), 0644); err != nil {
+		return nil, fmt.Errorf("write main.rs: %w", err)
+	}
+
+	// Run cargo test with libtest's machine-readable JSON output. The unstable
+	// flag is required for the JSON format, but is supported on stable since
+	// Rust 1.70 when nightly is not available we fall back to text parsing.
+	cmd := exec.Command("cargo", "test", "--", "--test-threads=1")
+	cmd.Dir = tmpDir
+	out, runErr := cmd.CombinedOutput()
+	// runErr is non-nil when any test fails; we still parse the output.
+
+	results := parseCargoTestOutput(string(out), declared)
+	if len(results) == 0 && runErr != nil {
+		// Compilation or harness failure — surface raw output.
+		return nil, fmt.Errorf("cargo test failed and produced no parseable results: %w\n%s", runErr, out)
+	}
+	return results, nil
+}
+
+// parseCargoTestOutput recovers per-test pass/fail from libtest text output.
+// Lines look like:
+//
+//	test __test_addition_works ... ok
+//	test __test_div_by_zero ... FAILED
+//
+// The declared list is used to map back from sanitised names to the
+// human-readable Intent test names.
+func parseCargoTestOutput(out string, declared []string) []TestResult {
+	sanitisedToName := make(map[string]string, len(declared))
+	for _, n := range declared {
+		sanitisedToName[rustbe.SanitiseTestNameExternal(n)] = n
+	}
+
+	// Map declared name -> result, populated as we parse, then emitted in
+	// declaration order so the runner's report shows source order.
+	resultByName := make(map[string]TestResult)
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "test ") {
+			continue
+		}
+		rest := strings.TrimPrefix(line, "test ")
+		var testFn, verdict string
+		if idx := strings.LastIndex(rest, " ... "); idx >= 0 {
+			testFn = strings.TrimSpace(rest[:idx])
+			verdict = strings.TrimSpace(rest[idx+len(" ... "):])
+		} else {
+			continue
+		}
+		if !strings.HasPrefix(testFn, "__test_") {
+			continue
+		}
+		sanitised := strings.TrimPrefix(testFn, "__test_")
+		humanName, ok := sanitisedToName[sanitised]
+		if !ok {
+			humanName = sanitised
+		}
+		if _, already := resultByName[humanName]; already {
+			continue
+		}
+		passed := verdict == "ok"
+		tr := TestResult{Name: humanName, Target: "rust", Passed: passed}
+		if !passed {
+			tr.Error = "rust target: " + verdict
+		}
+		resultByName[humanName] = tr
+	}
+	// Emit in declared order; cover any declared tests that didn't appear
+	// in output (build failure or harness mismatch).
+	var results []TestResult
+	for _, n := range declared {
+		if r, ok := resultByName[n]; ok {
+			results = append(results, r)
+		} else {
+			results = append(results, TestResult{
+				Name:   n,
+				Target: "rust",
+				Passed: false,
+				Error:  "test did not run (build or harness failure)",
+			})
+		}
+	}
+	return results
+}
+
+// runJSTests writes the generated JS to a temp file, appends a driver that
+// invokes __intent_tests and prints JSON results, and runs node.
+func runJSTests(mod *ir.Module, prog *ir.Program, declared []string) ([]TestResult, error) {
+	if _, err := exec.LookPath("node"); err != nil {
+		return nil, fmt.Errorf("node not found on PATH: %w (install Node.js to enable js test runs)", err)
+	}
+
+	var jsSource string
+	if mod != nil {
+		jsSource = jsbe.GenerateForTest(mod)
+	} else {
+		// Multi-file path: emit via GenerateAll then strip the entry call as a
+		// safety net (multi-file output for the entry module may still include
+		// an __intent_main invocation).
+		jsSource = jsbe.GenerateAll(prog)
+		jsSource = stripJSEntryCall(jsSource)
+	}
+
+	driver := `
+// Test driver appended by intentc test
+(async () => {
+    const results = [];
+    if (typeof __intent_tests === "undefined") {
+        process.stdout.write(JSON.stringify({ error: "no __intent_tests registry" }));
+        process.exit(2);
+    }
+    for (const t of __intent_tests) {
+        const r = { name: t.name, passed: true, error: "" };
+        try {
+            const v = t.fn();
+            if (t.isAsync || (v && typeof v.then === "function")) {
+                await v;
+            }
+        } catch (e) {
+            r.passed = false;
+            r.error = (e && e.message) ? e.message : String(e);
+        }
+        results.push(r);
+    }
+    process.stdout.write(JSON.stringify(results));
+    process.exit(0);
+})();
+`
+
+	tmp, err := os.CreateTemp("", "intent-test-*.js")
+	if err != nil {
+		return nil, fmt.Errorf("temp file: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(jsSource + driver); err != nil {
+		return nil, fmt.Errorf("write js: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return nil, fmt.Errorf("close js: %w", err)
+	}
+
+	cmd := exec.Command("node", tmp.Name())
+	out, runErr := cmd.Output()
+	if runErr != nil {
+		return nil, fmt.Errorf("node failed: %w; output: %s", runErr, out)
+	}
+
+	var jsResults []struct {
+		Name   string `json:"name"`
+		Passed bool   `json:"passed"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(out, &jsResults); err != nil {
+		return nil, fmt.Errorf("parse node output: %w; output: %s", err, out)
+	}
+
+	var results []TestResult
+	seen := make(map[string]bool)
+	for _, r := range jsResults {
+		seen[r.Name] = true
+		results = append(results, TestResult{
+			Name:   r.Name,
+			Target: "js",
+			Passed: r.Passed,
+			Error:  r.Error,
+		})
+	}
+	for _, n := range declared {
+		if !seen[n] {
+			results = append(results, TestResult{
+				Name:   n,
+				Target: "js",
+				Passed: false,
+				Error:  "test did not run (driver missed it)",
+			})
+		}
+	}
+	return results, nil
+}
+
+// stripJSEntryCall removes the trailing entry-point invocation from generated
+// JS so the test driver can run __intent_tests without process.exit firing
+// first.
+func stripJSEntryCall(js string) string {
+	marker := "// Entry point invocation"
+	idx := strings.Index(js, marker)
+	if idx < 0 {
+		return js
+	}
+	return js[:idx]
+}
+
+// FormatResults turns a slice of TestResult into a human-readable report.
+// Tests are grouped by name (preserving the order in which they first appear
+// in the result slice — runners pass results in declaration order); targets
+// appear as columns. Used by both the CLI and tests.
+func FormatResults(results []TestResult) string {
+	if len(results) == 0 {
+		return "No tests ran.\n"
+	}
+	// Group by name, preserving first-appearance order in `results` for the
+	// outer iteration. Targets pass results in declaration order, so this
+	// preserves source order in the report.
+	byName := make(map[string]map[string]TestResult)
+	var nameOrder []string
+	targetSet := make(map[string]bool)
+	for _, r := range results {
+		if _, ok := byName[r.Name]; !ok {
+			byName[r.Name] = make(map[string]TestResult)
+			nameOrder = append(nameOrder, r.Name)
+		}
+		byName[r.Name][r.Target] = r
+		targetSet[r.Target] = true
+	}
+	var targets []string
+	for t := range targetSet {
+		targets = append(targets, t)
+	}
+	sort.Strings(targets)
+
+	var b strings.Builder
+	passed, failed, diverged, skipped := 0, 0, 0, 0
+	for _, name := range nameOrder {
+		row := byName[name]
+		verdict := classify(row, targets)
+		switch verdict {
+		case "PASS":
+			passed++
+		case "FAIL":
+			failed++
+		case "DIFF":
+			diverged++
+		case "SKIP":
+			skipped++
+		}
+		fmt.Fprintf(&b, "  %-5s  %s\n", verdict, name)
+		for _, target := range targets {
+			r, ok := row[target]
+			if !ok {
+				fmt.Fprintf(&b, "         %s: (not run)\n", target)
+				continue
+			}
+			if r.Skipped {
+				fmt.Fprintf(&b, "         %s: skipped — %s\n", target, r.Error)
+			} else if r.Passed {
+				fmt.Fprintf(&b, "         %s: ok\n", target)
+			} else {
+				fmt.Fprintf(&b, "         %s: FAIL — %s\n", target, r.Error)
+			}
+		}
+	}
+	fmt.Fprintf(&b, "\n%d passed, %d failed, %d diverged, %d skipped\n", passed, failed, diverged, skipped)
+	return b.String()
+}
+
+func classify(row map[string]TestResult, targets []string) string {
+	var hasFail, hasPass, hasSkip bool
+	for _, t := range targets {
+		r, ok := row[t]
+		if !ok {
+			continue
+		}
+		switch {
+		case r.Skipped:
+			hasSkip = true
+		case r.Passed:
+			hasPass = true
+		default:
+			hasFail = true
+		}
+	}
+	if hasFail && !hasPass {
+		return "FAIL"
+	}
+	if hasFail && hasPass {
+		return "DIFF"
+	}
+	if hasPass {
+		return "PASS"
+	}
+	if hasSkip {
+		return "SKIP"
+	}
+	return "FAIL"
+}
+
+// AnyFailures returns true if any result is a failure or cross-target
+// divergence. The CLI uses this to set the exit code.
+func AnyFailures(results []TestResult) bool {
+	// Group by name to detect divergence.
+	byName := make(map[string]map[string]TestResult)
+	for _, r := range results {
+		if _, ok := byName[r.Name]; !ok {
+			byName[r.Name] = make(map[string]TestResult)
+		}
+		byName[r.Name][r.Target] = r
+	}
+	for _, row := range byName {
+		var hasFail, hasPass bool
+		for _, r := range row {
+			if r.Skipped {
+				continue
+			}
+			if r.Passed {
+				hasPass = true
+			} else {
+				hasFail = true
+			}
+		}
+		if hasFail {
+			return true
+		}
+		_ = hasPass
+	}
+	return false
+}

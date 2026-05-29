@@ -89,6 +89,18 @@ func Generate(mod *ir.Module) string {
 	return g.sb.String()
 }
 
+// GenerateForTest produces JS for `intentc test` consumption: identical to
+// Generate except the trailing `__intent_main()` call is omitted, so the
+// runner can append a test driver that invokes entries from `__intent_tests`.
+// See ADR 0029 / phase 16 task 16.7.
+func GenerateForTest(mod *ir.Module) string {
+	// Build a shallow copy of the module with IsEntry=false on the module to
+	// suppress the entry-call emission, then defer to Generate.
+	modCopy := *mod
+	modCopy.IsEntry = false
+	return Generate(&modCopy)
+}
+
 // GenerateAll produces JavaScript from a multi-file IR Program.
 func GenerateAll(prog *ir.Program) string {
 	if len(prog.Modules) == 0 {
