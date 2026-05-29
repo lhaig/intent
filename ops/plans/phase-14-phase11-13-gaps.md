@@ -1,5 +1,9 @@
 # Phase 14: Phase 11-13 Gaps and Codegen Fixes
 
+**Status:** Shipped (2026-05-28; closes audit gaps from Phases 11-13)
+**Milestone:** v1.1 follow-up
+**Touches decisions:** [ADR 0026](../../docs/decisions/0026-concurrency-async-design.md) (async semantics revised — see "Implementation Notes (Phase 14)" section)
+
 ## Goal
 
 Close the gaps found by a code-vs-PRD audit of Phases 11-13. Phases 11 (generics), 12 (async), and 13 (packages) were implemented in commit `8399b35` but never had their PRD checklists verified. Tests pass because they target compile/type-check stages, not actual runtime, and a several backends emit invalid code that only surfaces when the generated source is compiled or executed.

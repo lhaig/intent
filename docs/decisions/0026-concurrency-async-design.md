@@ -1,8 +1,8 @@
-# ADR 0026: Concurrency and Async -- Design Plan
+# 0026: Concurrency and Async -- Design Plan
 
-## Status
-
-Accepted
+**Date:** 2026-03-20
+**Status:** accepted
+**Phase:** v1.1 (Phase 12; revised in Phase 14)
 
 ## Context
 

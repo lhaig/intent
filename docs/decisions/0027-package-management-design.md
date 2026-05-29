@@ -1,8 +1,8 @@
-# ADR 0027: Package Management -- Design Plan
+# 0027: Package Management -- Design Plan
 
-## Status
-
-Accepted
+**Date:** 2026-03-20
+**Status:** accepted (registry remote-fetch deferred)
+**Phase:** v1.1 (Phase 13)
 
 ## Implementation Notes
 

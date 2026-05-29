@@ -1,8 +1,8 @@
-# ADR 0024: JavaScript Multi-File Codegen Fix
+# 0024: JavaScript Multi-File Codegen Fix
 
-## Status
-
-Accepted
+**Date:** 2026-03-20
+**Status:** accepted
+**Phase:** post-v1.0 (JS backend cross-module fix)
 
 ## Context
 

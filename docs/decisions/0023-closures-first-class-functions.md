@@ -1,8 +1,8 @@
-# ADR 0023: Closures and First-Class Functions
+# 0023: Closures and First-Class Functions
 
-## Status
-
-Accepted
+**Date:** 2026-03-20
+**Status:** accepted
+**Phase:** post-v1.0 (Attractor Phase 10)
 
 ## Context
 

@@ -1,8 +1,8 @@
-# ADR 0025: User-Defined Generics -- Design Plan
+# 0025: User-Defined Generics -- Design Plan
 
-## Status
-
-Accepted
+**Date:** 2026-03-20
+**Status:** accepted
+**Phase:** v1.1 (Phase 11)
 
 ## Context
 

@@ -1,5 +1,9 @@
 # Phase 15: Rust FFI / Crate Imports
 
+**Status:** Shipped (2026-05-28; completes Milestone 7)
+**Milestone:** Milestone 7 — Language Evolution (final feature)
+**Decision:** [ADR 0028](../../docs/decisions/0028-rust-ffi-crate-imports.md)
+
 ## Goal
 
 Implement the `extern function ... from "crate::path"` declaration described in ADR 0028, so Intent programs can call arbitrary safe-Rust crate functions on the Rust target with contract-guarded boundaries.

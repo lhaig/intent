@@ -1,5 +1,10 @@
 # Phase 12: Concurrency and Async
 
+**Status:** Shipped (v1.1, 2026-03-25; Rust/JS targets only — WASM rejects with clear error per Phase 14)
+**Milestone:** v1.1 — Attractor Integration & Feature Expansion
+**Decision:** [ADR 0026](../../docs/decisions/0026-concurrency-async-design.md) (revised by Phase 14 with source-aware `Future<T>` lowering)
+**Deferred:** Attractor handlers async migration (stretch goal — tracked separately)
+
 ## Goal
 
 Add async/await semantics to Intent with `Future<T>` type, `spawn` for concurrent execution, and contract integration. Maps to Rust's tokio runtime and JavaScript's native async/Promise system.

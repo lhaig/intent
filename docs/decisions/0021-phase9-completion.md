@@ -1,8 +1,8 @@
-# ADR 0021: Phase 9 Completion -- Lint Rules, HandlerRegistry, Map Key Rejection, json_path
+# 0021: Phase 9 Completion -- Lint Rules, HandlerRegistry, Map Key Rejection, json_path
 
-## Status
-
-Accepted
+**Date:** 2026-03-20
+**Status:** accepted
+**Phase:** post-v1.0 (Attractor Phase 9)
 
 ## Context
 

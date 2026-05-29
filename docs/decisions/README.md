@@ -47,3 +47,16 @@ What follows from this decision? Trade-offs accepted.
 | 0013 | [String standard library](0013-string-standard-library.md) | 2026-02-20 | accepted |
 | 0014 | [Remove legacy codegen package](0014-remove-legacy-codegen.md) | 2026-02-20 | accepted |
 | 0015 | [Array\<String\> on entity fields](0015-array-string-entity-fields.md) | 2026-02-23 | accepted |
+| 0016 | [Map\<K,V\> type](0016-map-type.md) | 2026-02-23 | accepted |
+| 0017 | [Error handling patterns in Attractor examples](0017-error-handling-attractor.md) | 2026-02-24 | accepted |
+| 0018 | [Trait system (static dispatch)](0018-trait-system.md) | 2026-02-24 | accepted |
+| 0019 | [I/O standard library](0019-io-standard-library.md) | 2026-02-27 | accepted |
+| 0020 | [HTTP, JSON, and event builtins](0020-http-json-builtins.md) | 2026-02-27 | accepted |
+| 0021 | [Phase 9 completion (lint rules, HandlerRegistry, Map key rejection, json_path)](0021-phase9-completion.md) | 2026-03-20 | accepted |
+| 0022 | [Rust codegen mutability analysis](0022-rust-mutability-analysis.md) | 2026-03-20 | accepted |
+| 0023 | [Closures and first-class functions](0023-closures-first-class-functions.md) | 2026-03-20 | accepted |
+| 0024 | [JavaScript multi-file codegen fix](0024-js-multifile-codegen-fix.md) | 2026-03-20 | accepted |
+| 0025 | [User-defined generics design](0025-user-defined-generics-design.md) | 2026-03-20 | accepted |
+| 0026 | [Concurrency and async design](0026-concurrency-async-design.md) | 2026-03-20 | accepted (revised in Phase 14) |
+| 0027 | [Package management design](0027-package-management-design.md) | 2026-03-20 | accepted (registry deferred) |
+| 0028 | [Rust FFI / crate imports](0028-rust-ffi-crate-imports.md) | 2026-05-28 | accepted |

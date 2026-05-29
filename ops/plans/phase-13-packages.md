@@ -1,5 +1,10 @@
 # Phase 13: Package Management
 
+**Status:** Shipped (v1.1, 2026-03-25; local path deps + manifest — remote registry fetch deferred)
+**Milestone:** v1.1 — Attractor Integration & Feature Expansion
+**Decision:** [ADR 0027](../../docs/decisions/0027-package-management-design.md)
+**Deferred:** Real package registry / `pkg install` for versioned remote deps
+
 ## Goal
 
 Enable cross-project code reuse through a package system with `intent.toml` manifests, semver dependency resolution, local path dependencies, and a compiled IR cache.

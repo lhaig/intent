@@ -1,8 +1,8 @@
-# ADR 0017: Error Handling Patterns in Attractor Examples
+# 0017: Error Handling Patterns in Attractor Examples
 
-**Status:** Accepted
 **Date:** 2026-02-24
-**Context:** Phase 5 of the Attractor-in-Intent implementation
+**Status:** accepted
+**Phase:** post-v1.0 (Attractor Phase 5)
 
 ## Context
 

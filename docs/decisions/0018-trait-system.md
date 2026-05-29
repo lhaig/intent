@@ -1,8 +1,8 @@
-# ADR 0018: Trait System (Static Dispatch)
+# 0018: Trait System (Static Dispatch)
 
-**Status:** Accepted
 **Date:** 2026-02-24
-**Context:** Phase 6 of the Attractor-in-Intent implementation
+**Status:** accepted
+**Phase:** post-v1.0 (Attractor Phase 6)
 
 ## Context
 

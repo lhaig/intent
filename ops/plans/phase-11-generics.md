@@ -1,5 +1,9 @@
 # Phase 11: User-Defined Generics
 
+**Status:** Shipped (v1.1, 2026-03-25; checklist verified retroactively in Phase 14)
+**Milestone:** v1.1 — Attractor Integration & Feature Expansion
+**Decision:** [ADR 0025](../../docs/decisions/0025-user-defined-generics-design.md)
+
 ## Goal
 
 Enable user-defined generic entities and functions in Intent, with monomorphization-based compilation across all three backends (Rust, JS, WASM).

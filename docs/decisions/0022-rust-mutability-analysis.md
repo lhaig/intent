@@ -1,8 +1,8 @@
-# ADR 0022: Rust Codegen Mutability Analysis
+# 0022: Rust Codegen Mutability Analysis
 
-## Status
-
-Accepted
+**Date:** 2026-03-20
+**Status:** accepted
+**Phase:** post-v1.0 (Attractor follow-up)
 
 ## Context
 
