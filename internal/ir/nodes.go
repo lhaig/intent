@@ -24,6 +24,7 @@ type Module struct {
 	Traits          []*Trait
 	ImplBlocks      []*ImplBlock
 	Intents         []*Intent
+	Tests           []*Test
 }
 
 // ExternFunction represents a Rust FFI / crate-import declaration.
@@ -35,6 +36,17 @@ type ExternFunction struct {
 	ReturnType *checker.Type
 	Requires   []*Contract
 	Ensures    []*Contract
+}
+
+// Test represents an in-language test declaration in the IR.
+// See ADR 0029 / phase-16. Tests have no parameters, no return type
+// (implicit Void), and their bodies may call any function or method in the
+// module's import graph. Backends emit one runner-callable function per test
+// and a target-specific dispatcher.
+type Test struct {
+	Name    string // human-readable name from the test "..." string literal
+	IsAsync bool
+	Body    []Stmt
 }
 
 // Function represents a function declaration in the IR.

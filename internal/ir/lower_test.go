@@ -594,3 +594,86 @@ func entityNames(mod *Module) []string {
 	}
 	return names
 }
+
+// Phase 16 / ADR 0029: in-language testing framework — IR lowering tests.
+
+func TestLowerTestDecl(t *testing.T) {
+	src := `module test version "1.0";
+
+test "smoke" {
+    let x: Int = 1;
+    assert(x == 1);
+}
+
+entry function main() returns Int { return 0; }
+`
+	mod := parseAndLower(t, src)
+	if len(mod.Tests) != 1 {
+		t.Fatalf("expected 1 test, got %d", len(mod.Tests))
+	}
+	tt := mod.Tests[0]
+	if tt.Name != "smoke" {
+		t.Errorf("expected name 'smoke', got %q", tt.Name)
+	}
+	if tt.IsAsync {
+		t.Error("expected IsAsync=false")
+	}
+	if len(tt.Body) != 2 {
+		t.Errorf("expected 2 body statements (let + assert), got %d", len(tt.Body))
+	}
+}
+
+func TestLowerAsyncTestDecl(t *testing.T) {
+	src := `module test version "1.0";
+
+async function delayed() returns Future<Int> { return 1; }
+
+async test "awaits" {
+    let f: Future<Int> = spawn delayed();
+    let r: Int = await f;
+    assert(r == 1);
+}
+
+entry function main() returns Int { return 0; }
+`
+	mod := parseAndLower(t, src)
+	if len(mod.Tests) != 1 {
+		t.Fatalf("expected 1 test, got %d", len(mod.Tests))
+	}
+	if !mod.Tests[0].IsAsync {
+		t.Error("expected IsAsync=true on async test")
+	}
+}
+
+func TestLowerMultipleTests(t *testing.T) {
+	src := `module test version "1.0";
+
+test "one"   { let x: Int = 1; }
+test "two"   { let y: Int = 2; }
+
+entry function main() returns Int { return 0; }
+`
+	mod := parseAndLower(t, src)
+	if len(mod.Tests) != 2 {
+		t.Fatalf("expected 2 tests, got %d", len(mod.Tests))
+	}
+	if mod.Tests[0].Name != "one" || mod.Tests[1].Name != "two" {
+		t.Errorf("names: got %q, %q", mod.Tests[0].Name, mod.Tests[1].Name)
+	}
+}
+
+func TestLowerEmptyTestBody(t *testing.T) {
+	src := `module test version "1.0";
+
+test "vacuous" {}
+
+entry function main() returns Int { return 0; }
+`
+	mod := parseAndLower(t, src)
+	if len(mod.Tests) != 1 {
+		t.Fatalf("expected 1 test, got %d", len(mod.Tests))
+	}
+	if len(mod.Tests[0].Body) != 0 {
+		t.Errorf("expected empty body, got %d stmts", len(mod.Tests[0].Body))
+	}
+}

@@ -36,6 +36,19 @@ func Validate(mod *Module) []string {
 		errors = append(errors, validateStmts(fn.Body, fmt.Sprintf("function %s", fn.Name))...)
 	}
 
+	// Validate tests (phase 16 / ADR 0029)
+	seenTestNames := make(map[string]bool)
+	for _, t := range mod.Tests {
+		if t.Name == "" {
+			errors = append(errors, "test has empty name")
+		}
+		if seenTestNames[t.Name] {
+			errors = append(errors, fmt.Sprintf("duplicate test name %q", t.Name))
+		}
+		seenTestNames[t.Name] = true
+		errors = append(errors, validateStmts(t.Body, fmt.Sprintf("test %q", t.Name))...)
+	}
+
 	// Validate entities
 	for _, ent := range mod.Entities {
 		errors = append(errors, validateContracts(ent.Invariants, fmt.Sprintf("entity %s invariants", ent.Name))...)

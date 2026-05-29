@@ -535,3 +535,65 @@ func TestValidateAsyncNodesValid(t *testing.T) {
 		t.Errorf("expected no errors for valid async nodes, got: %v", errors)
 	}
 }
+
+// Phase 16 / ADR 0029: in-language testing framework — IR validation tests.
+
+func TestValidateTestEmptyName(t *testing.T) {
+	mod := &Module{
+		Name: "test",
+		Functions: []*Function{
+			{Name: "main", IsEntry: true, ReturnType: checker.TypeInt, Body: []Stmt{&ReturnStmt{Value: &IntLit{Value: 0, Type: checker.TypeInt}}}},
+		},
+		Tests: []*Test{{Name: ""}},
+	}
+	errs := Validate(mod)
+	found := false
+	for _, e := range errs {
+		if e == "test has empty name" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected empty-name error, got: %v", errs)
+	}
+}
+
+func TestValidateTestDuplicateName(t *testing.T) {
+	mod := &Module{
+		Name: "test",
+		Functions: []*Function{
+			{Name: "main", IsEntry: true, ReturnType: checker.TypeInt, Body: []Stmt{&ReturnStmt{Value: &IntLit{Value: 0, Type: checker.TypeInt}}}},
+		},
+		Tests: []*Test{
+			{Name: "dup"},
+			{Name: "dup"},
+		},
+	}
+	errs := Validate(mod)
+	found := false
+	for _, e := range errs {
+		if e == `duplicate test name "dup"` {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected duplicate-name error, got: %v", errs)
+	}
+}
+
+func TestValidateTestsValid(t *testing.T) {
+	mod := &Module{
+		Name: "test",
+		Functions: []*Function{
+			{Name: "main", IsEntry: true, ReturnType: checker.TypeInt, Body: []Stmt{&ReturnStmt{Value: &IntLit{Value: 0, Type: checker.TypeInt}}}},
+		},
+		Tests: []*Test{
+			{Name: "smoke", Body: []Stmt{}},
+			{Name: "another", IsAsync: true, Body: []Stmt{}},
+		},
+	}
+	errs := Validate(mod)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors for valid tests, got: %v", errs)
+	}
+}

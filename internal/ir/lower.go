@@ -91,6 +91,9 @@ func Lower(prog *ast.Program, result *checker.CheckResult) *Module {
 	for _, i := range prog.Intents {
 		mod.Intents = append(mod.Intents, l.lowerIntent(i))
 	}
+	for _, t := range prog.Tests {
+		mod.Tests = append(mod.Tests, l.lowerTest(t))
+	}
 
 	// Second pass: scan for instantiations and collect them
 	l.collectInstantiations(prog)
@@ -214,6 +217,9 @@ func LowerAll(registry map[string]*ast.Program, sortedPaths []string, result *ch
 		for _, i := range p.Intents {
 			mod.Intents = append(mod.Intents, l.lowerIntent(i))
 		}
+		for _, t := range p.Tests {
+			mod.Tests = append(mod.Tests, l.lowerTest(t))
+		}
 
 		// Collect instantiations and monomorphize for this module
 		l.collectInstantiations(p)
@@ -277,6 +283,17 @@ func (l *lowerer) lowerFunction(f *ast.FunctionDecl) *Function {
 	fn.Body = l.lowerBlock(f.Body)
 
 	return fn
+}
+
+func (l *lowerer) lowerTest(t *ast.TestDecl) *Test {
+	test := &Test{
+		Name:    t.Name,
+		IsAsync: t.IsAsync,
+	}
+	if t.Body != nil {
+		test.Body = l.lowerBlock(t.Body)
+	}
+	return test
 }
 
 func (l *lowerer) lowerExternFunction(f *ast.ExternFunctionDecl) *ExternFunction {
