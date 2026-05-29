@@ -60,3 +60,4 @@ What follows from this decision? Trade-offs accepted.
 | 0026 | [Concurrency and async design](0026-concurrency-async-design.md) | 2026-03-20 | accepted (revised in Phase 14) |
 | 0027 | [Package management design](0027-package-management-design.md) | 2026-03-20 | accepted (registry deferred) |
 | 0028 | [Rust FFI / crate imports](0028-rust-ffi-crate-imports.md) | 2026-05-28 | accepted |
+| 0029 | [In-language testing framework](0029-in-language-testing.md) | 2026-05-29 | accepted |

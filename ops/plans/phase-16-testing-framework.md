@@ -1,8 +1,8 @@
 # Phase 16: In-Language Testing Framework
 
-**Status:** Draft — design under discussion; not yet approved for execution
-**Milestone:** v1.2 (proposed) — foundation for autonomous self-improvement
-**Decision:** ADR pending (will be 0029)
+**Status:** Approved (2026-05-29) — design locked, ready for execution
+**Milestone:** v1.2 — foundation for autonomous self-improvement
+**Decision:** [ADR 0029](../../docs/decisions/0029-in-language-testing.md)
 
 ## Goal
 
@@ -42,22 +42,36 @@ Properties:
 
 ### Assertion builtins
 
-Three built-in functions, registered like `print` / `len`:
+Four built-in functions, registered like `print` / `len`:
 
 | Builtin | Signature | Failure message |
 |---|---|---|
 | `assert(cond)` | `Bool -> Void` | `<file>:<line>: assertion failed` |
-| `assert_eq<T>(actual, expected)` | `(T, T) -> Void` where T is comparable | `<file>:<line>: assertion failed: expected <expected>, got <actual>` |
+| `assert_eq<T>(actual, expected)` | `(T, T) -> Void` where T is exactly comparable | `<file>:<line>: assertion failed: expected <expected>, got <actual>` |
+| `assert_close(actual, expected, epsilon)` | `(Float, Float, Float) -> Void` | `<file>:<line>: assertion failed: \|<actual> - <expected>\| > <epsilon>` |
 | `assert_panics(fn)` | `Fn() -> Void -> Void` | `<file>:<line>: assertion failed: expected panic, none occurred` |
 
-Comparable set for `assert_eq`: `Int`, `Float` (with `--epsilon` flag), `Bool`, `String`, `Void`, `Array<T>` where T is comparable, `Option<T>`, `Result<T,E>`. Entity equality is by-field if the entity has no overridden equality; user enums by variant + payload.
+**`assert_eq` comparable set:** `Int`, `Bool`, `String`, `Void`, `Array<T>` where T is comparable, `Option<T>` where T is comparable, `Result<T,E>` where T and E are comparable, user enums (by variant + payload using the same rules), and entities **that declare an explicit `eq` method**:
+
+```intent
+entity Point { ... }
+extend Point {
+    method eq(other: Point) returns Bool { ... }
+}
+```
+
+If an entity is used in `assert_eq` without an `eq` method, type-check emits:
+> `entity 'Point' used in assert_eq but has no eq method; define 'method eq(other: Point) returns Bool' to enable equality checks`
+
+**`assert_eq` on Float is a type-check error.** Floats require `assert_close` with an explicit tolerance — there is no global `--epsilon` flag. The diagnostic is:
+> `assert_eq does not support Float; use assert_close(actual, expected, epsilon) for floating-point comparisons`
 
 Asserts compile to existing contract-failure infrastructure (`assert!()` in Rust, `throw` in JS, `unreachable` trap in WASM).
 
 ### Runner
 
 ```
-intentc test [--target <t>] [--all-targets] [--epsilon <float>] <file.intent>
+intentc test [--target <t>] [--all-targets] <file.intent>
 ```
 
 Modes:
@@ -123,7 +137,9 @@ Allowed on Rust and JS. The runner wraps each async test in the target's runtime
 (All unchecked — this is a Draft. Each will be marked as the corresponding task lands.)
 
 - [ ] `test "name" { ... }` parses and type-checks; rejects parameters and return types with a clear diagnostic
-- [ ] `assert`, `assert_eq`, `assert_panics` builtins type-check, including the generic constraint on `assert_eq`
+- [ ] `assert`, `assert_eq`, `assert_close`, `assert_panics` builtins type-check, including the generic constraint on `assert_eq`
+- [ ] `assert_eq` rejects `Float` arguments at type-check with the documented diagnostic pointing to `assert_close`
+- [ ] `assert_eq` on an entity without an `eq` method rejects at type-check with the documented diagnostic
 - [ ] Rust backend emits `#[test]` functions for tests and `assert!()` / `assert_eq!()` for asserts
 - [ ] JS backend emits one runner-callable function per test and uses `throw` for assertion failures
 - [ ] WASM backend emits one export per test and traps on assertion failure
@@ -272,13 +288,23 @@ Allowed on Rust and JS. The runner wraps each async test in the target's runtime
 - Snapshot testing (Phase 17 candidate)
 - Test-only attributes/decorators beyond `async` (no `@skip`, `@only`, etc. — keep the surface minimal)
 
-## Open Questions
+## Resolved Decisions
 
-1. **Asserts as contracts?** Could reuse the contract verifier so Z3 can statically prove a test must pass. Likely overkill for v1 — defer.
-2. **Float equality.** `--epsilon` flag is the cheap answer. Consider an `assert_close(a, b, eps)` builtin instead so the tolerance is per-call. Decide before 16.2.
-3. **`assert_eq` on entities.** By-field equality requires the IR to know which entity fields participate. Punt: require entities to declare an explicit `eq` method, fail at type-check otherwise.
-4. **Test isolation.** Should mutable module-level state reset between tests? In Intent there's currently no module-level mutable state, so the question is moot — but document the answer ("no isolation; tests share global state if they make any") in the runner.
-5. **WASM async rejection.** Should the rejection live in the checker or the WASM backend? Per Phase 14, it's in `internal/compiler/target.go`. Confirm tests follow the same path.
+Recorded here for traceability. Lifted into ADR 0029 at approval time (2026-05-29).
+
+1. **Float equality:** `assert_close(actual, expected, epsilon)` builtin with explicit per-call tolerance. No global `--epsilon` flag. `assert_eq` rejects `Float` arguments at type-check.
+2. **Entity equality:** explicit `method eq(other: T) returns Bool` is required. `assert_eq` on entities without an `eq` method fails at type-check.
+3. **Cross-target equivalence:** in v1 — `--all-targets` runs each test on rust/js/wasm and fails on divergence. The differentiator is worth the ~1-2 days of extra runner work.
+4. **Asserts as contracts:** deferred. Z3-prove-test-correctness is interesting but out of scope for v1.
+5. **Test isolation:** no automatic isolation. Intent has no module-level mutable state today, so the question is moot. Documented in the runner: tests share global state if they introduce any.
+6. **WASM async rejection:** lives in `internal/compiler/target.go` per Phase 14. Async tests follow the same path.
+
+## Remaining Open Questions
+
+Items deferred to execution time, to be decided when the relevant task is reached:
+
+- **Test name sanitisation.** Map `"abs returns non-negative"` to a Rust/JS/WASM-legal identifier. Plan: lowercase, replace non-alphanumeric with `_`, collapse runs, prefix with `__test_`. Confirm at task 16.4.
+- **Error reporting for cross-target divergence.** Diff format: side-by-side, unified, or both? Confirm at task 16.7.
 
 ## Risks
 
@@ -286,9 +312,6 @@ Allowed on Rust and JS. The runner wraps each async test in the target's runtime
 - **Floating-point comparison is fundamentally lossy across runtimes.** Document this explicitly and provide `assert_close` as the safer default.
 - **testgen migration is destructive** — anyone depending on the Rust-emit output breaks. Mitigation: keep the legacy code path under a deprecation warning for one release cycle, document removal in changelog.
 
-## Discussion Notes
+## Approval Record
 
-Before approving for execution, decide:
-- (a) Adopt this design or revise?
-- (b) Is the cross-target equivalence story compelling enough to fold into the v1 surface, or should it be a follow-up (Phase 17)?
-- (c) Is `assert_close` worth promoting to a v1 builtin?
+- 2026-05-29 — Design reviewed; cross-target equivalence in v1, `assert_close` as v1 builtin, no global `--epsilon`, explicit `eq` method required for entity equality. Lifted into ADR 0029. Ready to begin task 16.1.
