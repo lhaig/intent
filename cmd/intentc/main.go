@@ -243,12 +243,25 @@ func handleCheck(args []string) {
 
 func handleTestGen(args []string) {
 	emitFile := false
+	target := "rust" // legacy default; phase 16 introduces --target intent
 	var filePath string
 
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		switch arg {
 		case "--emit":
 			emitFile = true
+		case "--target":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "Error: --target requires an argument")
+				os.Exit(1)
+			}
+			i++
+			target = args[i]
+			if target != "rust" && target != "intent" {
+				fmt.Fprintf(os.Stderr, "Error: unknown test-gen target: %s (expected rust or intent)\n", target)
+				os.Exit(1)
+			}
 		default:
 			if strings.HasPrefix(arg, "-") {
 				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", arg)
@@ -261,6 +274,48 @@ func handleTestGen(args []string) {
 	if filePath == "" {
 		fmt.Fprintln(os.Stderr, "Error: no input file specified")
 		os.Exit(1)
+	}
+
+	// Phase 16 / ADR 0029: --target intent produces a sibling .intent file
+	// of test blocks consumable by `intentc test`. The legacy --target rust
+	// path remains for entity tests and other cases not yet covered by the
+	// Intent emission.
+	if target == "intent" {
+		source, err := os.ReadFile(filePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
+			os.Exit(1)
+		}
+		// Generated tests live alongside the source file so the relative
+		// import resolves cleanly. The import path is the source basename
+		// (e.g. "fibonacci.intent").
+		srcDir := filepath.Dir(filePath)
+		srcBaseWithExt := filepath.Base(filePath)
+		srcBase := strings.TrimSuffix(srcBaseWithExt, filepath.Ext(srcBaseWithExt))
+
+		// When piping to stdout, omit the import so the user can decide where
+		// the file will live; when writing alongside the source, embed it.
+		importPath := ""
+		if emitFile {
+			importPath = srcBaseWithExt
+		}
+
+		intentSrc, err := compiler.GenerateIntentTests(string(source), importPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+			os.Exit(1)
+		}
+		if emitFile {
+			outPath := filepath.Join(srcDir, srcBase+"_test.intent")
+			if err := os.WriteFile(outPath, []byte(intentSrc), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "Error writing file: %s\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("Wrote %s\n", outPath)
+		} else {
+			fmt.Print(intentSrc)
+		}
+		return
 	}
 
 	// Check if this is a multi-file project

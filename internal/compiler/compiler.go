@@ -420,6 +420,23 @@ func GenerateTests(source string) *Result {
 	return res
 }
 
+// GenerateIntentTests is the phase 16 / ADR 0029 task 16.8 Intent-emission
+// counterpart to GenerateTests. `sourceImport` is the relative path the
+// generated file will use to import the source module so generated tests
+// can call into it (typically the basename of the source file).
+func GenerateIntentTests(source, sourceImport string) (string, error) {
+	p := parser.New(source)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		return "", fmt.Errorf("parse errors:\n%s", p.Diagnostics().Format("input"))
+	}
+	checkResult := checker.CheckWithResult(prog)
+	if checkResult.Diagnostics.HasErrors() {
+		return "", fmt.Errorf("type-check errors:\n%s", checkResult.Diagnostics.Format("input"))
+	}
+	return testgen.GenerateIntent(prog, sourceImport), nil
+}
+
 // GenerateTestsProject runs the multi-file pipeline with test generation.
 func GenerateTestsProject(entryPath string) *Result {
 	res := &Result{}

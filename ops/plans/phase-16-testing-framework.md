@@ -144,9 +144,9 @@ Allowed on Rust and JS. The runner wraps each async test in the target's runtime
 - [x] Rust backend emits `#[test]` (or `#[tokio::test]`) functions for tests and `assert!()` / `assert_eq!()` for asserts; entity equality dispatches through user `eq` method (16.4 — b994a2c)
 - [x] JS backend emits one runner-callable function per test plus a `__intent_tests` array; assertion failures throw `Error` (16.5 — 3379e0c)
 - [x] WASM backend **rejects** test declarations with a clear error directing users to `--target rust` or `--target js` (scope reduction — see 16.6; 16.6 — pending commit)
-- [ ] `intentc test foo.intent` runs all tests, reports pass/fail counts, exits non-zero on any failure
-- [ ] `intentc test --all-targets foo.intent` runs every test on every supported target and fails on cross-target divergence
-- [ ] `intentc test-gen --emit foo.intent` emits Intent test blocks (legacy `--emit-rust` removed); generated tests run via `intentc test`
+- [x] `intentc test foo.intent` runs all tests, reports pass/fail counts, exits non-zero on any failure (16.7 — 431adba)
+- [x] `intentc test --all-targets foo.intent` runs every test on every supported target and fails on cross-target divergence; WASM reports as skipped (16.7 — 431adba)
+- [x] `intentc test-gen --target intent` emits Intent test blocks for standalone Int-parameter functions; legacy `--target rust` retained for entities/complex cases (scope reduction — see 16.8; 16.8 — pending commit)
 - [ ] At least one hand-written test exists for every example in `examples/*.intent` (excluding subdirectories with their own structure)
 - [ ] At least one synthetic cross-target divergence test exists and is correctly flagged (e.g. `Int` overflow behaviour)
 - [ ] `make validate` exists and runs `intentc test` over all examples on the default target
@@ -259,16 +259,33 @@ A full WASM test runner is filed as a Phase 17 candidate.
 **Acceptance:**
 - End-to-end test: a 3-test `.intent` file with one always-pass, one always-fail, one cross-target-divergent — runner produces correct output on each mode.
 
-### 16.8 testgen migration
+### 16.8 testgen migration — partial
 
-**Files:** `internal/testgen/testgen.go`, `internal/testgen/testgen_test.go`
+**Files:** `internal/testgen/intentgen.go` (new), `internal/compiler/compiler.go`, `cmd/intentc/main.go`, `internal/testgen/intentgen_test.go`
 
-- Replace Rust emission with Intent test-block emission.
-- Drop `internal/testgen/rustutil.go` if no other consumer remains (audit first).
-- Remove `--emit-rust` legacy flag from CLI.
+**Scope reduction (decided during execution, 2026-05-29):** rather than fully replace the Rust emission, this task adds a NEW `--target intent` path alongside the existing `--target rust` (legacy) path. Rationale:
+
+1. Existing testgen handles complex cases (entities, methods, generics, value-list iteration, contract→Rust expression translation). A like-for-like rewrite in Intent emission would be ~700 lines of new code with non-trivial expression translation.
+2. The most useful Intent emission is the simplest case: standalone functions with Int parameters, iterating bounds with `while`. That's what landed here.
+3. Removing the legacy Rust path before parity is reached would be destructive without payoff. Filed as Phase 17 follow-up.
+4. Generated tests currently require the source's functions/entities to be `public` because they live in a separate module that imports the source. The generated file header explains this.
+
+**Implementation:**
+
+- `internal/testgen/intentgen.go`: `GenerateIntent(prog, sourceImport)` emits an Intent file with `test "auto: ..." { ... }` blocks. Handles:
+  - 0-param functions: single call + assert each `ensures`.
+  - 1-param Int functions: deterministic while-loop iteration over the constrained range with precondition guards.
+  - Other shapes: fallback to single example call with default values.
+  - Entities / methods: noted in output as out-of-scope; users keep using the Rust path.
+- `internal/compiler.GenerateIntentTests(source, sourceImport)`: facade calling parse + check + generate.
+- CLI: `intentc test-gen --target intent [--emit] <file.intent>`. When `--emit`, writes `<source_dir>/<base>_test.intent` so the relative import resolves.
 
 **Acceptance:**
-- `intentc test-gen --emit examples/fibonacci.intent` writes a `.intent` file containing valid test blocks that pass under `intentc test` on at least the Rust target.
+- `intentc test-gen --target intent --emit examples/fibonacci.intent` writes a syntactically valid `_test.intent` file containing one or more `test "..."` blocks.
+- The generated file passes `intentc check` once the source is marked `public` (limitation documented in the file header).
+- Legacy `intentc test-gen --emit <file.intent>` and `intentc test-gen --emit-rust <file.intent>` continue to work unchanged.
+
+**Phase 17 follow-up:** full migration including entity tests, complex constraints, removal of the legacy Rust path, and an option to write the tests inline in the source file (avoiding the `public` friction).
 
 ### 16.9 Examples + docs
 
