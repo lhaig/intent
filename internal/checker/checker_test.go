@@ -4424,3 +4424,348 @@ func TestIsFileInPackage_NilPackageDirs(t *testing.T) {
 		t.Error("isFileInPackage with nil packageDirs should not match wrong dir")
 	}
 }
+
+// Phase 16 / ADR 0029: in-language testing framework — checker tests.
+
+func TestCheckValidTest(t *testing.T) {
+	src := `module test version "1.0";
+
+function helper(n: Int) returns Int { return n + 1; }
+
+test "uses helper" {
+    let x: Int = helper(5);
+    assert(x == 6);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if d.HasErrors() {
+		t.Errorf("expected no errors, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckTestRejectsReturn(t *testing.T) {
+	src := `module test version "1.0";
+
+test "tries to return" {
+    return;
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if !d.HasErrors() {
+		t.Error("expected error for return inside test body")
+	}
+	if !strings.Contains(d.Format("test"), "'return' is not allowed inside a test body") {
+		t.Errorf("unexpected diagnostic: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAssertNonBool(t *testing.T) {
+	src := `module test version "1.0";
+
+test "assert wrong type" {
+    assert(42);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if !d.HasErrors() {
+		t.Error("expected error for assert with non-Bool arg")
+	}
+	if !strings.Contains(d.Format("test"), "assert() argument must be Bool") {
+		t.Errorf("unexpected diagnostic: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAssertEqMatchingInts(t *testing.T) {
+	src := `module test version "1.0";
+
+test "ints equal" {
+    assert_eq(1 + 1, 2);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if d.HasErrors() {
+		t.Errorf("expected no errors, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAssertEqTypeMismatch(t *testing.T) {
+	src := `module test version "1.0";
+
+test "mismatch" {
+    assert_eq(1, "two");
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if !d.HasErrors() {
+		t.Error("expected error for assert_eq with mismatched types")
+	}
+	if !strings.Contains(d.Format("test"), "assert_eq() type mismatch") {
+		t.Errorf("unexpected diagnostic: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAssertEqRejectsFloat(t *testing.T) {
+	src := `module test version "1.0";
+
+test "floats not allowed" {
+    assert_eq(1.0, 1.0);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if !d.HasErrors() {
+		t.Error("expected error for assert_eq on Float")
+	}
+	if !strings.Contains(d.Format("test"), "assert_eq does not support Float") {
+		t.Errorf("expected Float-rejection diagnostic, got: %s", d.Format("test"))
+	}
+	if !strings.Contains(d.Format("test"), "assert_close") {
+		t.Errorf("expected diagnostic to mention assert_close, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAssertEqRejectsEntityWithoutEq(t *testing.T) {
+	src := `module test version "1.0";
+
+entity Point {
+    field x: Int;
+    field y: Int;
+
+    constructor(x_init: Int, y_init: Int)
+        ensures self.x == x_init
+        ensures self.y == y_init
+    {
+        self.x = x_init;
+        self.y = y_init;
+    }
+}
+
+test "entity without eq" {
+    let p1: Point = Point(1, 2);
+    let p2: Point = Point(1, 2);
+    assert_eq(p1, p2);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if !d.HasErrors() {
+		t.Error("expected error for assert_eq on entity without eq method")
+	}
+	if !strings.Contains(d.Format("test"), "has no eq method") {
+		t.Errorf("expected eq-method diagnostic, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAssertEqEntityWithEq(t *testing.T) {
+	src := `module test version "1.0";
+
+entity Point {
+    field x: Int;
+    field y: Int;
+
+    constructor(x_init: Int, y_init: Int) {
+        self.x = x_init;
+        self.y = y_init;
+    }
+
+    method eq(other: Point) returns Bool {
+        return self.x == other.x and self.y == other.y;
+    }
+}
+
+test "entity with eq" {
+    let p1: Point = Point(1, 2);
+    let p2: Point = Point(1, 2);
+    assert_eq(p1, p2);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if d.HasErrors() {
+		t.Errorf("expected no errors with eq method present, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAssertEqRejectsMap(t *testing.T) {
+	src := `module test version "1.0";
+
+test "map not allowed" {
+    let m1: Map<String, Int> = Map<String, Int>();
+    let m2: Map<String, Int> = Map<String, Int>();
+    assert_eq(m1, m2);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if !d.HasErrors() {
+		t.Error("expected error for assert_eq on Map")
+	}
+	if !strings.Contains(d.Format("test"), "does not support Map") {
+		t.Errorf("expected Map-rejection diagnostic, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAssertCloseFloats(t *testing.T) {
+	src := `module test version "1.0";
+
+test "close floats" {
+    assert_close(3.14, 3.14, 0.001);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if d.HasErrors() {
+		t.Errorf("expected no errors, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAssertCloseWrongType(t *testing.T) {
+	src := `module test version "1.0";
+
+test "close ints rejected" {
+    assert_close(1, 1, 1);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if !d.HasErrors() {
+		t.Error("expected error for assert_close on Int")
+	}
+	if !strings.Contains(d.Format("test"), "assert_close() argument 1") || !strings.Contains(d.Format("test"), "must be Float") {
+		t.Errorf("expected Float-required diagnostic, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAssertCloseWrongArity(t *testing.T) {
+	src := `module test version "1.0";
+
+test "wrong arity" {
+    assert_close(1.0, 1.0);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if !d.HasErrors() {
+		t.Error("expected error for assert_close with 2 args instead of 3")
+	}
+	if !strings.Contains(d.Format("test"), "assert_close() expects 3 arguments") {
+		t.Errorf("expected arity diagnostic, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAsyncTestWithAwait(t *testing.T) {
+	src := `module test version "1.0";
+
+async function delayed(n: Int) returns Future<Int>
+    requires n >= 0
+{
+    return n + 1;
+}
+
+async test "uses await" {
+    let f: Future<Int> = spawn delayed(5);
+    let r: Int = await f;
+    assert(r == 6);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if d.HasErrors() {
+		t.Errorf("expected no errors, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAsyncTestWithoutAwaitWarns(t *testing.T) {
+	src := `module test version "1.0";
+
+async test "no await" {
+    let x: Int = 1;
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if d.HasErrors() {
+		t.Errorf("async-without-await should be a warning, not an error; got: %s", d.Format("test"))
+	}
+	if d.WarningCount() == 0 {
+		t.Error("expected a warning for async test with no await")
+	}
+	if !strings.Contains(d.Format("test"), "declared 'async' but contains no 'await'") {
+		t.Errorf("unexpected warning text: %s", d.Format("test"))
+	}
+}
+
+func TestCheckNonAsyncTestRejectsAwait(t *testing.T) {
+	src := `module test version "1.0";
+
+async function delayed() returns Future<Int> { return 1; }
+
+test "tries to await without async" {
+    let f: Future<Int> = spawn delayed();
+    let r: Int = await f;
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if !d.HasErrors() {
+		t.Error("expected error for await in non-async test")
+	}
+	if !strings.Contains(d.Format("test"), "await can only be used inside async functions") {
+		t.Errorf("expected await-only-in-async diagnostic, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAssertPanicsFnVoid(t *testing.T) {
+	src := `module test version "1.0";
+
+test "panics expected" {
+    let bomb: Fn() -> Void = || -> Void => assert(false);
+    assert_panics(bomb);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if d.HasErrors() {
+		t.Errorf("expected no errors, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAssertPanicsWrongShape(t *testing.T) {
+	src := `module test version "1.0";
+
+test "wrong fn shape" {
+    let f: Fn(Int) -> Int = |x: Int| -> Int => x + 1;
+    assert_panics(f);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if !d.HasErrors() {
+		t.Error("expected error for assert_panics with non-Fn()->Void argument")
+	}
+	if !strings.Contains(d.Format("test"), "assert_panics() argument must be Fn() -> Void") {
+		t.Errorf("expected Fn-shape diagnostic, got: %s", d.Format("test"))
+	}
+}

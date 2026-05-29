@@ -57,7 +57,10 @@ type Checker struct {
 	loopDepth       int
 	currentFunc     *FuncInfo // Track current function for Result/Option variant inference
 	letDeclaredType *Type     // Track type annotation from let statement for variant inference
-	inAsyncFunc     bool      // Track whether we're inside an async function
+	inAsyncFunc     bool      // Track whether we're inside an async function (or async test)
+	inTest          bool      // Track whether we're inside a test body (phase 16)
+	currentTestName string    // Current test name, for diagnostics
+	testSawAwait    bool      // Set by checkAwaitExpr; checked after async test bodies
 
 	// Cross-file (multi-module) context
 	moduleImports map[string]*ModuleSymbols // module alias -> public symbols
@@ -115,6 +118,7 @@ func CheckWithResult(prog *ast.Program) *CheckResult {
 	c.checkFunctions()
 	c.checkEntities()
 	c.checkImplBlockBodies()
+	c.checkTests()
 	c.verifyIntents()
 
 	return &CheckResult{
@@ -465,6 +469,7 @@ func CheckAll(registry map[string]*ast.Program, sortedPaths []string, packageDir
 		c.checkFunctions()
 		c.checkEntities()
 		c.checkImplBlockBodies()
+		c.checkTests()
 		c.verifyIntents()
 
 		// Collect diagnostics with file context
@@ -545,8 +550,17 @@ func mergeModuleSymbols(dst, src *ModuleSymbols) {
 	}
 }
 
-// registerEntities registers all entities in the global scope
+// registerEntities registers all entities in the global scope.
+//
+// Two-pass: first register all entity skeletons (name + empty fields/methods
+// maps) so that subsequent type resolution can see every entity name; then
+// resolve field types and method signatures. This lets methods reference
+// their own enclosing entity type (e.g. `method eq(other: Point) returns
+// Bool` inside `entity Point`) and lets fields hold self-referential
+// generics like `Option<Self>`. Phase 16 / ADR 0029 needs this for the
+// explicit-`eq`-method rule on entity equality.
 func (c *Checker) registerEntities() {
+	// Pass 1: register skeletons.
 	for _, entity := range c.prog.Entities {
 		if _, exists := c.entities[entity.Name]; exists {
 			line, col := entity.Pos()
@@ -563,17 +577,41 @@ func (c *Checker) registerEntities() {
 			HasConstructor: entity.Constructor != nil,
 		}
 
-		// Build type param map for generic entities
+		if len(entity.TypeParams) > 0 {
+			for _, tp := range entity.TypeParams {
+				info.TypeParamNames = append(info.TypeParamNames, tp.Name)
+			}
+		}
+
+		c.entities[entity.Name] = info
+
+		// Register entity in global scope so identifier lookups resolve.
+		c.scope.Define(entity.Name, &Symbol{
+			Name: entity.Name,
+			Type: &Type{Name: entity.Name, IsEntity: true, Entity: info},
+			Kind: SymEntity,
+		})
+	}
+
+	// Pass 2: resolve fields and method signatures now that every entity name
+	// is known.
+	for _, entity := range c.prog.Entities {
+		info, ok := c.entities[entity.Name]
+		if !ok {
+			// Duplicate-name error already reported in pass 1.
+			continue
+		}
+
+		// Build type param map for generic entities.
 		var typeParamMap map[string]bool
 		if len(entity.TypeParams) > 0 {
 			typeParamMap = make(map[string]bool)
 			for _, tp := range entity.TypeParams {
 				typeParamMap[tp.Name] = true
-				info.TypeParamNames = append(info.TypeParamNames, tp.Name)
 			}
 		}
 
-		// Register fields
+		// Resolve fields.
 		for _, field := range entity.Fields {
 			fieldType := ResolveTypeWithParams(field.Type, c.entities, c.enums, typeParamMap)
 			if fieldType == nil {
@@ -585,7 +623,7 @@ func (c *Checker) registerEntities() {
 			info.FieldOrder = append(info.FieldOrder, field.Name)
 		}
 
-		// Register methods
+		// Resolve method signatures.
 		for _, method := range entity.Methods {
 			params := make([]ParamInfo, 0, len(method.Params))
 			for _, p := range method.Params {
@@ -616,15 +654,6 @@ func (c *Checker) registerEntities() {
 				HasEnsures:  len(method.Ensures) > 0,
 			}
 		}
-
-		c.entities[entity.Name] = info
-
-		// Register entity in global scope
-		c.scope.Define(entity.Name, &Symbol{
-			Name: entity.Name,
-			Type: &Type{Name: entity.Name, IsEntity: true, Entity: info},
-			Kind: SymEntity,
-		})
 	}
 }
 
@@ -942,6 +971,46 @@ func (c *Checker) checkFunction(fn *ast.FunctionDecl) {
 	c.inAsyncFunc = oldAsync
 }
 
+// checkTests checks all in-language test declarations (Phase 16 / ADR 0029).
+func (c *Checker) checkTests() {
+	for _, t := range c.prog.Tests {
+		c.checkTest(t)
+	}
+}
+
+// checkTest type-checks a single test declaration. Tests have no parameters
+// and no return type; the body is checked as a Void-returning block. `return`
+// statements are rejected. Async tests track whether an `await` was seen so
+// that declared-async-but-never-awaits emits a warning.
+func (c *Checker) checkTest(t *ast.TestDecl) {
+	testScope := NewScope(c.scope)
+
+	// Track context: tests reject `return` statements; async tests warn if
+	// they never await.
+	oldInTest := c.inTest
+	oldTestName := c.currentTestName
+	oldAsync := c.inAsyncFunc
+	oldSawAwait := c.testSawAwait
+	c.inTest = true
+	c.currentTestName = t.Name
+	c.inAsyncFunc = t.IsAsync
+	c.testSawAwait = false
+
+	if t.Body != nil {
+		c.checkBlock(t.Body, testScope)
+	}
+
+	if t.IsAsync && !c.testSawAwait {
+		c.diag.Warningf(t.Line, t.Column,
+			"test %q declared 'async' but contains no 'await' expression", t.Name)
+	}
+
+	c.inTest = oldInTest
+	c.currentTestName = oldTestName
+	c.inAsyncFunc = oldAsync
+	c.testSawAwait = oldSawAwait
+}
+
 // checkEntities checks all entity constructors and methods
 func (c *Checker) checkEntities() {
 	for _, entity := range c.prog.Entities {
@@ -1235,6 +1304,10 @@ func (c *Checker) checkAssignStmt(stmt *ast.AssignStmt, scope *Scope) {
 
 // checkReturnStmt checks a return statement
 func (c *Checker) checkReturnStmt(stmt *ast.ReturnStmt, scope *Scope) {
+	if c.inTest {
+		line, col := stmt.Pos()
+		c.diag.Errorf(line, col, "'return' is not allowed inside a test body; test %q has implicit Void return", c.currentTestName)
+	}
 	if stmt.Value != nil {
 		c.checkExpression(stmt.Value, scope)
 	}
@@ -1552,6 +1625,74 @@ func (c *Checker) checkCallExpr(expr *ast.CallExpr, scope *Scope) *Type {
 			if !argType.Equal(TypeInt) && !argType.Equal(TypeFloat) &&
 				!argType.Equal(TypeBool) && !argType.Equal(TypeString) {
 				c.diag.Errorf(line, col, "print() cannot print type %s (accepts Int, Float, Bool, String)", argType.Name)
+			}
+		}
+		return TypeVoid
+	}
+
+	// Phase 16 / ADR 0029: in-language test assertion builtins.
+	// assert(cond: Bool) returns Void
+	if expr.Function == "assert" {
+		if len(expr.Args) != 1 {
+			c.diag.Errorf(line, col, "assert() expects 1 argument, got %d", len(expr.Args))
+			return TypeVoid
+		}
+		argType := c.checkExpression(expr.Args[0], scope)
+		if argType != nil && !argType.Equal(TypeBool) {
+			c.diag.Errorf(line, col, "assert() argument must be Bool, got %s", argType.String())
+		}
+		return TypeVoid
+	}
+
+	// assert_eq<T>(actual: T, expected: T) returns Void
+	// T must be in the comparable set. Float is rejected (use assert_close).
+	// Entities require an explicit eq method.
+	if expr.Function == "assert_eq" {
+		if len(expr.Args) != 2 {
+			c.diag.Errorf(line, col, "assert_eq() expects 2 arguments, got %d", len(expr.Args))
+			return TypeVoid
+		}
+		actualType := c.checkExpression(expr.Args[0], scope)
+		expectedType := c.checkExpression(expr.Args[1], scope)
+		if actualType == nil || expectedType == nil {
+			return TypeVoid
+		}
+		if !actualType.Equal(expectedType) {
+			c.diag.Errorf(line, col, "assert_eq() type mismatch: actual is %s, expected is %s", actualType.String(), expectedType.String())
+			return TypeVoid
+		}
+		if reason := assertEqUnsupportedReason(actualType); reason != "" {
+			c.diag.Errorf(line, col, "%s", reason)
+		}
+		return TypeVoid
+	}
+
+	// assert_close(actual: Float, expected: Float, epsilon: Float) returns Void
+	if expr.Function == "assert_close" {
+		if len(expr.Args) != 3 {
+			c.diag.Errorf(line, col, "assert_close() expects 3 arguments, got %d", len(expr.Args))
+			return TypeVoid
+		}
+		for i, arg := range expr.Args {
+			argType := c.checkExpression(arg, scope)
+			if argType != nil && !argType.Equal(TypeFloat) {
+				labels := []string{"actual", "expected", "epsilon"}
+				c.diag.Errorf(line, col, "assert_close() argument %d (%s) must be Float, got %s", i+1, labels[i], argType.String())
+			}
+		}
+		return TypeVoid
+	}
+
+	// assert_panics(fn: Fn() -> Void) returns Void
+	if expr.Function == "assert_panics" {
+		if len(expr.Args) != 1 {
+			c.diag.Errorf(line, col, "assert_panics() expects 1 argument, got %d", len(expr.Args))
+			return TypeVoid
+		}
+		argType := c.checkExpression(expr.Args[0], scope)
+		if argType != nil {
+			if !argType.IsFunction || len(argType.FnParams) != 0 || argType.FnReturn == nil || !argType.FnReturn.Equal(TypeVoid) {
+				c.diag.Errorf(line, col, "assert_panics() argument must be Fn() -> Void, got %s", argType.String())
 			}
 		}
 		return TypeVoid
@@ -2903,10 +3044,11 @@ func (c *Checker) checkLambdaExpr(expr *ast.LambdaExpr, scope *Scope) *Type {
 func (c *Checker) checkAwaitExpr(expr *ast.AwaitExpr, scope *Scope) *Type {
 	line, col := expr.Pos()
 
-	// await is only valid inside async functions
+	// await is only valid inside async functions or async tests
 	if !c.inAsyncFunc {
 		c.diag.Errorf(line, col, "await can only be used inside async functions")
 	}
+	c.testSawAwait = true
 
 	innerType := c.checkExpression(expr.Expr, scope)
 	if innerType == nil {
@@ -2984,4 +3126,54 @@ func (c *Checker) findEnumVariant(enumInfo *EnumInfo, variantName string) *EnumV
 		}
 	}
 	return nil
+}
+
+// assertEqUnsupportedReason returns a non-empty diagnostic message if a type
+// cannot appear in assert_eq, or "" if it can. Comparable set per ADR 0029:
+// Int, Bool, String, Void, Array<T>, Option<T>, Result<T,E>, user enums, and
+// entities that declare a method named `eq`. Float is rejected explicitly.
+// Map, Future, and function types are not comparable.
+func assertEqUnsupportedReason(t *Type) string {
+	if t == nil {
+		return ""
+	}
+	if t.Equal(TypeFloat) {
+		return "assert_eq does not support Float; use assert_close(actual, expected, epsilon) for floating-point comparisons"
+	}
+	if t.IsFunction {
+		return "assert_eq does not support function types"
+	}
+	if t.Name == "Map" {
+		return "assert_eq does not support Map; compare maps via their keys() and get(key, default) instead"
+	}
+	if t.Name == "Future" {
+		return "assert_eq does not support Future; await it first and compare the resolved value"
+	}
+	if t.IsEntity {
+		// Require an explicit eq method on the entity type.
+		if t.Entity == nil || t.Entity.Methods == nil || t.Entity.Methods["eq"] == nil {
+			return "entity '" + t.Name + "' used in assert_eq but has no eq method; define 'method eq(other: " + t.Name + ") returns Bool' to enable equality checks"
+		}
+		// Sanity-check the signature: one parameter of the same entity type, returns Bool.
+		m := t.Entity.Methods["eq"]
+		if m.ReturnType == nil || !m.ReturnType.Equal(TypeBool) {
+			return "entity '" + t.Name + "' has an eq method but it does not return Bool"
+		}
+		if len(m.Params) != 1 {
+			return "entity '" + t.Name + "' eq method must take exactly one parameter (other: " + t.Name + ")"
+		}
+		if m.Params[0].Type == nil || !(m.Params[0].Type.IsEntity && m.Params[0].Type.Name == t.Name) {
+			return "entity '" + t.Name + "' eq method must take a parameter of type " + t.Name
+		}
+		return ""
+	}
+	if t.IsGeneric {
+		// Array<T>, Option<T>, Result<T,E>: each type param must itself be comparable.
+		for _, tp := range t.TypeParams {
+			if r := assertEqUnsupportedReason(tp); r != "" {
+				return "assert_eq on " + t.String() + " is unsupported because " + r
+			}
+		}
+	}
+	return ""
 }
