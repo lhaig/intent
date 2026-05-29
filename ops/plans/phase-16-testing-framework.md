@@ -136,10 +136,10 @@ Allowed on Rust and JS. The runner wraps each async test in the target's runtime
 
 (All unchecked — this is a Draft. Each will be marked as the corresponding task lands.)
 
-- [x] `test "name" { ... }` parses; rejects parameters and `public` modifier with a clear diagnostic (16.1 — 95c545f). Type-check rejection of return types lands in 16.2.
-- [ ] `assert`, `assert_eq`, `assert_close`, `assert_panics` builtins type-check, including the generic constraint on `assert_eq`
-- [ ] `assert_eq` rejects `Float` arguments at type-check with the documented diagnostic pointing to `assert_close`
-- [ ] `assert_eq` on an entity without an `eq` method rejects at type-check with the documented diagnostic
+- [x] `test "name" { ... }` parses (16.1 — 95c545f) and type-checks; rejects parameters, `public` modifier, and `return` statements inside the body with clear diagnostics (16.2 — 5cc27c0).
+- [x] `assert`, `assert_eq`, `assert_close`, `assert_panics` builtins type-check, including the comparable-set constraint on `assert_eq` (16.2 — 5cc27c0)
+- [x] `assert_eq` rejects `Float` arguments at type-check with the documented diagnostic pointing to `assert_close` (16.2 — 5cc27c0)
+- [x] `assert_eq` on an entity without an `eq` method rejects at type-check with the documented diagnostic (16.2 — 5cc27c0; entity registration switched to two-pass to make the entity-self-typed method signature possible)
 - [ ] Rust backend emits `#[test]` functions for tests and `assert!()` / `assert_eq!()` for asserts
 - [ ] JS backend emits one runner-callable function per test and uses `throw` for assertion failures
 - [ ] WASM backend emits one export per test and traps on assertion failure
