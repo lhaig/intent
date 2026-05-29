@@ -136,7 +136,7 @@ Allowed on Rust and JS. The runner wraps each async test in the target's runtime
 
 (All unchecked — this is a Draft. Each will be marked as the corresponding task lands.)
 
-- [ ] `test "name" { ... }` parses and type-checks; rejects parameters and return types with a clear diagnostic
+- [x] `test "name" { ... }` parses; rejects parameters and `public` modifier with a clear diagnostic (16.1 — 95c545f). Type-check rejection of return types lands in 16.2.
 - [ ] `assert`, `assert_eq`, `assert_close`, `assert_panics` builtins type-check, including the generic constraint on `assert_eq`
 - [ ] `assert_eq` rejects `Float` arguments at type-check with the documented diagnostic pointing to `assert_close`
 - [ ] `assert_eq` on an entity without an `eq` method rejects at type-check with the documented diagnostic
