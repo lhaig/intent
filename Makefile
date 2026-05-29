@@ -1,4 +1,4 @@
-.PHONY: build test test-v clean install check-examples lint-examples fmt-check-examples emit-examples test-gen-examples validate
+.PHONY: build test test-v clean install check-examples lint-examples fmt-check-examples emit-examples test-gen-examples test-examples validate
 
 # Flat examples (single-file). Subdirectory examples (attractor, multi_file, packages, ffi_blake3)
 # are exercised via their own entry points.
@@ -83,8 +83,22 @@ test-gen-examples: build
 	./intentc test-gen --emit examples/array_sum.intent
 	./intentc test-gen --emit examples/sorted_check.intent
 
+# Examples that carry at least one in-language test block (phase 16). Add to
+# this list as tests are added to more examples.
+TESTED_EXAMPLES := \
+	examples/fibonacci.intent \
+	examples/array_sum.intent \
+	examples/sorted_check.intent \
+	examples/bank_account.intent
+
+# Run `intentc test` over each example that has tests, on the default target.
+test-examples: build
+	@for f in $(TESTED_EXAMPLES); do \
+		echo "test:  $$f"; \
+		./intentc test $$f || exit 1; \
+	done
+
 # Full mechanical-truth gate. The single command an agent should run before
-# claiming a non-trivial change is done. Phase 16 will add `intentc test`
-# over every example to this target.
-validate: build test check-examples lint-examples fmt-check-examples
+# claiming a non-trivial change is done.
+validate: build test check-examples lint-examples fmt-check-examples test-examples
 	@echo "validate: OK"

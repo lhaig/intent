@@ -49,3 +49,23 @@ intent "Safe withdrawal preserves non-negative balance" {
     verified_by: [BankAccount.invariant, BankAccount.withdraw.requires, BankAccount.deposit.requires, BankAccount.deposit.ensures];
 }
 
+test "deposit increases balance" {
+    let account: BankAccount = BankAccount("Alice", 100);
+    account.deposit(50);
+    assert_eq(account.get_balance(), 150);
+}
+
+test "successful withdraw decreases balance" {
+    let account: BankAccount = BankAccount("Bob", 100);
+    let ok: Bool = account.withdraw(30);
+    assert(ok);
+    assert_eq(account.get_balance(), 70);
+}
+
+test "overdraw is refused and balance preserved" {
+    let account: BankAccount = BankAccount("Carol", 100);
+    let ok: Bool = account.withdraw(500);
+    assert(not ok);
+    assert_eq(account.get_balance(), 100);
+}
+

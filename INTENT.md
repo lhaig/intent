@@ -773,6 +773,47 @@ let result: Int = math.add(3, 4);
 
 The module name is derived from the filename (e.g., `math.intent` -> `math`).
 
+## Tests
+
+Intent has first-class tests. A top-level `test "name" { ... }` declaration carries no parameters and no return type. The body may call any function in the module and asserts using the built-in `assert*` builtins.
+
+```intent
+test "fib(10) is 55" {
+    assert_eq(fib(10), 55);
+}
+
+test "fib is non-negative across the contract range" {
+    let mutable n: Int = 0;
+    while n <= 15 {
+        assert(fib(n) >= 0);
+        n = n + 1;
+    }
+}
+```
+
+`async test "name" { ... }` is allowed on Rust and JS targets; WASM rejects tests entirely.
+
+Tests cannot be `public` (they don't cross module boundaries) and cannot contain `return` statements (the body is implicitly `Void`).
+
+### Assertion builtins
+
+| Builtin                                        | Signature                                   | Behaviour                                                                 |
+|------------------------------------------------|---------------------------------------------|---------------------------------------------------------------------------|
+| `assert(cond)`                                 | `Bool -> Void`                              | Fails the test if `cond` is `false`.                                      |
+| `assert_eq(actual, expected)`                  | `(T, T) -> Void` where T is comparable      | Fails if `actual != expected`. Entities need a `method eq(other: T) returns Bool`. |
+| `assert_close(actual, expected, epsilon)`      | `(Float, Float, Float) -> Void`             | Fails if `\|actual - expected\| > epsilon`. **Use this instead of `assert_eq` for `Float`** — `assert_eq` rejects `Float` at type-check. |
+| `assert_panics(fn)`                            | `Fn() -> Void -> Void`                      | Fails if `fn` does not panic.                                             |
+
+### Running tests
+
+```
+intentc test foo.intent                    # runs on rust target (default)
+intentc test --target js foo.intent        # runs on js target (requires node)
+intentc test --all-targets foo.intent      # runs on rust + js + wasm, flags cross-target divergence
+```
+
+Cross-target divergence (e.g. a test that passes on Rust but fails on JS) is reported as `DIFF` and produces a non-zero exit code.
+
 ## Built-in Functions
 
 | Function        | Signature                    | Description              |

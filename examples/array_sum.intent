@@ -29,3 +29,13 @@ entry function main() returns Int {
     return 0;
 }
 
+test "sum of [10, 20, 30, 40] is 100" {
+    let arr: Array<Int> = [10, 20, 30, 40];
+    assert_eq(sum_array(arr), 100);
+}
+
+test "single-element sum returns the element" {
+    let arr: Array<Int> = [42];
+    assert_eq(sum_array(arr), 42);
+}
+

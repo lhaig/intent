@@ -42,3 +42,18 @@ entry function main() returns Int {
     return 0;
 }
 
+test "ascending array is sorted" {
+    let arr: Array<Int> = [1, 2, 3, 4, 5];
+    assert(check_sorted(arr));
+}
+
+test "shuffled array is not sorted" {
+    let arr: Array<Int> = [5, 3, 1, 4, 2];
+    assert(not check_sorted(arr));
+}
+
+test "single-element array is sorted" {
+    let arr: Array<Int> = [42];
+    assert(check_sorted(arr));
+}
+

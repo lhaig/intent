@@ -28,3 +28,20 @@ entry function main() returns Int {
     return 0;
 }
 
+test "fib(0) is 0 and fib(1) is 1" {
+    assert_eq(fib(0), 0);
+    assert_eq(fib(1), 1);
+}
+
+test "fib(10) is 55" {
+    assert_eq(fib(10), 55);
+}
+
+test "fib is non-negative across the contract range" {
+    let mutable n: Int = 0;
+    while n <= 15 {
+        assert(fib(n) >= 0);
+        n = n + 1;
+    }
+}
+

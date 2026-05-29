@@ -100,9 +100,31 @@ func (f *formatter) formatProgram(prog *ast.Program) {
 		f.blankLine()
 		f.formatIntentDecl(i)
 	}
+	// Phase 16 / ADR 0029: in-language tests.
+	for _, t := range prog.Tests {
+		f.blankLine()
+		f.formatTestDecl(t)
+	}
 
 	// Trailing newline
 	f.blankLine()
+}
+
+// formatTestDecl formats `[async] test "name" { body }` in canonical form.
+func (f *formatter) formatTestDecl(t *ast.TestDecl) {
+	prefix := "test"
+	if t.IsAsync {
+		prefix = "async test"
+	}
+	f.emitLinef("%s %q {", prefix, t.Name)
+	f.incIndent()
+	if t.Body != nil {
+		for _, stmt := range t.Body.Statements {
+			f.formatStmt(stmt)
+		}
+	}
+	f.decIndent()
+	f.emitLine("}")
 }
 
 func (f *formatter) formatModuleDecl(m *ast.ModuleDecl) {

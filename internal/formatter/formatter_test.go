@@ -826,3 +826,54 @@ entry function main() returns Int {
 		t.Errorf("formatter not idempotent on extern:\nfirst:\n%s\nsecond:\n%s", once, twice)
 	}
 }
+
+// Phase 16 / ADR 0029: formatter must preserve test declarations.
+func TestFormatTestDecl(t *testing.T) {
+	src := `module test version "1.0";
+
+test "smoke" {
+    assert(1 == 1);
+}
+
+entry function main() returns Int { return 0; }
+`
+	got := formatSource(t, src)
+	if !strings.Contains(got, `test "smoke" {`) {
+		t.Errorf("expected test \"smoke\" { to survive formatting, got:\n%s", got)
+	}
+	if !strings.Contains(got, "assert(1 == 1);") {
+		t.Errorf("expected assert(1 == 1); in body, got:\n%s", got)
+	}
+}
+
+func TestFormatAsyncTestDecl(t *testing.T) {
+	src := `module test version "1.0";
+
+async test "awaits" {
+    let x: Int = 1;
+}
+
+entry function main() returns Int { return 0; }
+`
+	got := formatSource(t, src)
+	if !strings.Contains(got, `async test "awaits" {`) {
+		t.Errorf("expected async test prefix preserved, got:\n%s", got)
+	}
+}
+
+func TestFormatTestDeclIdempotent(t *testing.T) {
+	src := `module test version "1.0";
+
+test "round trip" {
+    let x: Int = 1;
+    assert(x == 1);
+}
+
+entry function main() returns Int { return 0; }
+`
+	once := formatSource(t, src)
+	twice := formatSource(t, once)
+	if once != twice {
+		t.Errorf("formatter not idempotent on test decl:\nfirst:\n%s\nsecond:\n%s", once, twice)
+	}
+}
