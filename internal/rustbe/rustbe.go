@@ -60,6 +60,10 @@ func Generate(mod *ir.Module) string {
 		g.generateIntent(i)
 		g.emitLine("")
 	}
+	for _, t := range mod.Tests {
+		g.generateTest(t)
+		g.emitLine("")
+	}
 
 	result := g.sb.String()
 	if g.needsHashMap {
@@ -259,6 +263,10 @@ func GenerateAll(prog *ir.Program) string {
 		}
 		for _, f := range mod.Functions {
 			g.generateFunction(f)
+			g.emitLine("")
+		}
+		for _, t := range mod.Tests {
+			g.generateTest(t)
 			g.emitLine("")
 		}
 
@@ -959,6 +967,62 @@ func (g *generator) generateImplBlock(ib *ir.ImplBlock) {
 
 // --- Intent generation ---
 
+// sanitiseTestName converts a human-readable test name to a Rust-legal
+// identifier: lowercase ASCII letters/digits with non-alphanumerics replaced
+// by underscore, runs of underscores collapsed. Empty inputs yield "unnamed".
+func sanitiseTestName(name string) string {
+	var b strings.Builder
+	prevUnderscore := true // suppress leading underscores
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+			prevUnderscore = false
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r - 'A' + 'a')
+			prevUnderscore = false
+		case r >= '0' && r <= '9':
+			if b.Len() == 0 {
+				b.WriteByte('_')
+			}
+			b.WriteRune(r)
+			prevUnderscore = false
+		default:
+			if !prevUnderscore {
+				b.WriteByte('_')
+				prevUnderscore = true
+			}
+		}
+	}
+	// Trim trailing underscore
+	s := b.String()
+	s = strings.TrimRight(s, "_")
+	if s == "" {
+		return "unnamed"
+	}
+	return s
+}
+
+// generateTest emits a Rust #[test] function for an ir.Test. Body statements
+// reuse the standard statement-emission path so the four assertion builtins
+// (assert / assert_eq / assert_close / assert_panics) and any other Intent
+// code in the test work identically to the same code in a function body.
+func (g *generator) generateTest(t *ir.Test) {
+	fnName := "__test_" + sanitiseTestName(t.Name)
+	if t.IsAsync {
+		g.needsTokio = true
+		g.emitLinef("#[tokio::test]\n")
+		g.emitLinef("async fn %s() {\n", fnName)
+	} else {
+		g.emitLinef("#[test]\n")
+		g.emitLinef("fn %s() {\n", fnName)
+	}
+	g.incIndent()
+	g.generateStmts(t.Body)
+	g.decIndent()
+	g.emitLine("}")
+}
+
 func (g *generator) generateIntent(i *ir.Intent) {
 	g.emitLinef("// Intent: %s\n", i.Description)
 	for _, goal := range i.Goals {
@@ -1569,6 +1633,35 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr, arrayRefParams map[st
 		if len(expr.Args) == 1 {
 			arg := g.generateExpr(expr.Args[0], arrayRefParams)
 			return fmt.Sprintf("(%s.len() as i64)", arg)
+		}
+	// Phase 16 / ADR 0029: assertion builtins.
+	case "assert":
+		if len(expr.Args) == 1 {
+			cond := g.generateExpr(expr.Args[0], arrayRefParams)
+			return fmt.Sprintf("assert!(%s, \"assertion failed\")", cond)
+		}
+	case "assert_eq":
+		if len(expr.Args) == 2 {
+			actual := g.cloneIfNeeded(g.generateExpr(expr.Args[0], arrayRefParams), expr.Args[0])
+			expected := g.cloneIfNeeded(g.generateExpr(expr.Args[1], arrayRefParams), expr.Args[1])
+			// Entity equality compiles to a call into the user-defined eq method
+			// so that user semantics determine equality (ADR 0029).
+			if t := expr.Args[0].ExprType(); t != nil && t.IsEntity {
+				return fmt.Sprintf("assert!((%s).eq(&%s), \"assertion failed: entity equality\")", actual, expected)
+			}
+			return fmt.Sprintf("assert_eq!(%s, %s, \"assertion failed\")", actual, expected)
+		}
+	case "assert_close":
+		if len(expr.Args) == 3 {
+			actual := g.generateExpr(expr.Args[0], arrayRefParams)
+			expected := g.generateExpr(expr.Args[1], arrayRefParams)
+			epsilon := g.generateExpr(expr.Args[2], arrayRefParams)
+			return fmt.Sprintf("assert!(((%s) - (%s)).abs() <= (%s), \"assertion failed: floats not within epsilon\")", actual, expected, epsilon)
+		}
+	case "assert_panics":
+		if len(expr.Args) == 1 {
+			arg := g.generateExpr(expr.Args[0], arrayRefParams)
+			return fmt.Sprintf("std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { (%s)(); })).expect_err(\"assertion failed: expected panic, none occurred\")", arg)
 		}
 	case "Ok", "Err", "Some":
 		if len(expr.Args) == 1 {

@@ -1676,6 +1676,9 @@ func (l *lowerer) resolveCallKind(expr *ast.CallExpr) (CallKind, string) {
 		return CallBuiltin, ""
 	case "Ok", "Err", "Some":
 		return CallBuiltin, ""
+	// Phase 16 / ADR 0029: in-language assertion builtins.
+	case "assert", "assert_eq", "assert_close", "assert_panics":
+		return CallBuiltin, ""
 	}
 
 	// Check if it's a variant constructor
