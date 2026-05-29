@@ -1,4 +1,27 @@
-.PHONY: build test clean install check-examples lint-examples test-gen-examples
+.PHONY: build test test-v clean install check-examples lint-examples fmt-check-examples emit-examples test-gen-examples validate
+
+# Flat examples (single-file). Subdirectory examples (attractor, multi_file, packages, ffi_blake3)
+# are exercised via their own entry points.
+FLAT_EXAMPLES := \
+	examples/hello.intent \
+	examples/bank_account.intent \
+	examples/fibonacci.intent \
+	examples/array_sum.intent \
+	examples/sorted_check.intent \
+	examples/enum_basic.intent \
+	examples/shape_area.intent \
+	examples/result_option.intent \
+	examples/try_operator.intent \
+	examples/error_handling.intent \
+	examples/io_demo.intent \
+	examples/js_demo.intent \
+	examples/map_demo.intent \
+	examples/handler_trait.intent \
+	examples/task_queue.intent \
+	examples/verify_example.intent \
+	examples/closure_demo.intent \
+	examples/generic_stack.intent \
+	examples/async_demo.intent
 
 # Build the intentc compiler
 build:
@@ -24,27 +47,44 @@ clean:
 install:
 	go install ./cmd/intentc
 
-# Type-check example programs
+# Type-check every flat example
 check-examples: build
-	./intentc check examples/hello.intent
-	./intentc check examples/bank_account.intent
-	./intentc check examples/fibonacci.intent
+	@for f in $(FLAT_EXAMPLES); do \
+		echo "check: $$f"; \
+		./intentc check $$f || exit 1; \
+	done
 
-# Lint example programs
+# Lint every flat example
 lint-examples: build
-	./intentc lint examples/hello.intent
-	./intentc lint examples/bank_account.intent
-	./intentc lint examples/fibonacci.intent
+	@for f in $(FLAT_EXAMPLES); do \
+		echo "lint:  $$f"; \
+		./intentc lint $$f || exit 1; \
+	done
 
-# Emit Rust from examples (does not require cargo)
+# Format-check every flat example (no rewrites)
+fmt-check-examples: build
+	@for f in $(FLAT_EXAMPLES); do \
+		echo "fmt:   $$f"; \
+		./intentc fmt --check $$f || exit 1; \
+	done
+
+# Emit Rust source from every flat example (does not require cargo)
 emit-examples: build
-	./intentc build --emit-rust examples/hello.intent
-	./intentc build --emit-rust examples/bank_account.intent
-	./intentc build --emit-rust examples/fibonacci.intent
+	@for f in $(FLAT_EXAMPLES); do \
+		echo "emit:  $$f"; \
+		./intentc build --emit $$f || exit 1; \
+	done
 
-# Generate test-augmented Rust for examples
+# Generate property-test-augmented Rust for examples with contracts
+# (kept as-is until Phase 16 migrates test-gen to emit Intent test blocks)
 test-gen-examples: build
 	./intentc test-gen --emit examples/fibonacci.intent
 	./intentc test-gen --emit examples/bank_account.intent
 	./intentc test-gen --emit examples/array_sum.intent
 	./intentc test-gen --emit examples/sorted_check.intent
+
+# Full mechanical-truth gate. The single command an agent should run before
+# claiming a non-trivial change is done. Phase 16 will add `intentc test`
+# over every example to this target.
+validate: build test check-examples lint-examples fmt-check-examples
+	@echo "validate: OK"

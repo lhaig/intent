@@ -227,6 +227,29 @@ because each feature needs to work across all backends and with the verifier.
 
 ---
 
+## v1.2: Self-Improvement Foundations -- IN PROGRESS
+
+**Goal:** Give the project (and the agents working on it) the mechanical-validation surface needed to push Intent forward without per-change human review. See [docs/HARNESS.md](HARNESS.md) for the agent harness contract.
+
+### Phase 16: In-Language Testing Framework -- DRAFT
+- [ ] `test "name" { ... }` blocks parse and type-check
+- [ ] `assert` / `assert_eq` / `assert_panics` builtins
+- [ ] `intentc test` runner on Rust, JS, WASM targets
+- [ ] `intentc test --all-targets` flags cross-backend divergence
+- [ ] `intentc test-gen` migrated to emit Intent test blocks
+- [ ] Every flat example carries at least one hand-written test
+- [ ] `make validate` includes `intentc test` over all examples
+
+Design lives in `ops/plans/phase-16-testing-framework.md` (Draft).
+
+### Package Registry Remote-Fetch -- PROPOSED
+Closes the ADR 0027 deferred item: real versioned remote fetch for `intentc pkg install`. Today the manifest, semver parser, cache, and resolver are in place; only the network-fetch step is stubbed.
+
+### LSP Server Scoping ADR -- PROPOSED
+Milestone 8 starts here. Write an ADR proposing the LSP surface (which features ship in v1, what stays out, what the editor extension model is) before any implementation.
+
+---
+
 ## Milestone 8: Developer Experience
 
 ### LSP Server
