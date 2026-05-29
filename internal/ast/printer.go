@@ -48,6 +48,9 @@ func printNode(sb *strings.Builder, node Node, indent int) {
 		for _, intent := range n.Intents {
 			printNode(sb, intent, indent+1)
 		}
+		for _, test := range n.Tests {
+			printNode(sb, test, indent+1)
+		}
 
 	case *ModuleDecl:
 		sb.WriteString(fmt.Sprintf("%sModule: %s v%s\n", prefix, n.Name, n.Version))
@@ -246,6 +249,16 @@ func printNode(sb *strings.Builder, node Node, indent int) {
 
 	case *VerifiedByRef:
 		sb.WriteString(fmt.Sprintf("%s%s\n", prefix, strings.Join(n.Parts, ".")))
+
+	case *TestDecl:
+		modifier := ""
+		if n.IsAsync {
+			modifier = " (async)"
+		}
+		sb.WriteString(fmt.Sprintf("%sTest: %q%s\n", prefix, n.Name, modifier))
+		if n.Body != nil {
+			printNode(sb, n.Body, indent+1)
+		}
 
 	case *EnumDecl:
 		visibility := ""

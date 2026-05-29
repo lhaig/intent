@@ -3042,3 +3042,225 @@ entry function main() returns Int { return 0; }
 		t.Error("expected parse error for extern function with a body")
 	}
 }
+
+// Phase 16 / ADR 0029: in-language test declarations.
+
+func TestParseTestDecl(t *testing.T) {
+	src := `module test version "1.0";
+
+test "abs of negative is positive" {
+    let x: Int = 5;
+}
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected parse errors: %s", p.Diagnostics().Format("test"))
+	}
+	if len(prog.Tests) != 1 {
+		t.Fatalf("expected 1 test, got %d", len(prog.Tests))
+	}
+	tc := prog.Tests[0]
+	if tc.Name != "abs of negative is positive" {
+		t.Errorf("Name: got %q", tc.Name)
+	}
+	if tc.IsAsync {
+		t.Error("IsAsync should be false")
+	}
+	if tc.Body == nil || len(tc.Body.Statements) != 1 {
+		t.Errorf("expected 1 body statement, got body=%+v", tc.Body)
+	}
+}
+
+func TestParseAsyncTestDecl(t *testing.T) {
+	src := `module test version "1.0";
+
+async test "awaits a thing" {
+    let x: Int = 1;
+}
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected parse errors: %s", p.Diagnostics().Format("test"))
+	}
+	if len(prog.Tests) != 1 {
+		t.Fatalf("expected 1 test, got %d", len(prog.Tests))
+	}
+	if !prog.Tests[0].IsAsync {
+		t.Error("expected IsAsync = true on async test")
+	}
+}
+
+func TestParseMultipleTestDecls(t *testing.T) {
+	src := `module test version "1.0";
+
+test "one" { let x: Int = 1; }
+test "two" { let y: Int = 2; }
+async test "three" { let z: Int = 3; }
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected parse errors: %s", p.Diagnostics().Format("test"))
+	}
+	if len(prog.Tests) != 3 {
+		t.Fatalf("expected 3 tests, got %d", len(prog.Tests))
+	}
+	if prog.Tests[0].Name != "one" || prog.Tests[1].Name != "two" || prog.Tests[2].Name != "three" {
+		t.Errorf("test names wrong: %v", []string{prog.Tests[0].Name, prog.Tests[1].Name, prog.Tests[2].Name})
+	}
+	if prog.Tests[0].IsAsync || prog.Tests[1].IsAsync || !prog.Tests[2].IsAsync {
+		t.Errorf("async flags wrong: %v %v %v", prog.Tests[0].IsAsync, prog.Tests[1].IsAsync, prog.Tests[2].IsAsync)
+	}
+}
+
+func TestParseEmptyTestBody(t *testing.T) {
+	src := `module test version "1.0";
+
+test "vacuously passes" {}
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected parse errors: %s", p.Diagnostics().Format("test"))
+	}
+	if len(prog.Tests) != 1 {
+		t.Fatalf("expected 1 test, got %d", len(prog.Tests))
+	}
+	if prog.Tests[0].Body == nil || len(prog.Tests[0].Body.Statements) != 0 {
+		t.Errorf("expected empty body, got %+v", prog.Tests[0].Body)
+	}
+}
+
+func TestParseTestDeclMissingName(t *testing.T) {
+	src := `module test version "1.0";
+
+test { let x: Int = 1; }
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	p.Parse()
+	if !p.Diagnostics().HasErrors() {
+		t.Error("expected parse error for test without name")
+	}
+}
+
+func TestParseTestDeclEmptyName(t *testing.T) {
+	src := `module test version "1.0";
+
+test "" { let x: Int = 1; }
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	p.Parse()
+	if !p.Diagnostics().HasErrors() {
+		t.Error("expected parse error for empty test name")
+	}
+	if !strings.Contains(p.Diagnostics().Format("test"), "test name cannot be empty") {
+		t.Errorf("expected diagnostic about empty name, got: %s", p.Diagnostics().Format("test"))
+	}
+}
+
+func TestParseTestDeclMissingBody(t *testing.T) {
+	src := `module test version "1.0";
+
+test "no body";
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	p.Parse()
+	if !p.Diagnostics().HasErrors() {
+		t.Error("expected parse error for test without body")
+	}
+}
+
+func TestParsePublicTestRejected(t *testing.T) {
+	src := `module test version "1.0";
+
+public test "not exportable" { let x: Int = 1; }
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	p.Parse()
+	if !p.Diagnostics().HasErrors() {
+		t.Error("expected parse error for 'public test'")
+	}
+	if !strings.Contains(p.Diagnostics().Format("test"), "'public' cannot be applied to test declarations") {
+		t.Errorf("expected diagnostic about public+test, got: %s", p.Diagnostics().Format("test"))
+	}
+}
+
+func TestParseTestCallsModuleFunction(t *testing.T) {
+	src := `module test version "1.0";
+
+function helper(n: Int) returns Int { return n + 1; }
+
+test "helper increments" {
+    let x: Int = helper(5);
+}
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected parse errors: %s", p.Diagnostics().Format("test"))
+	}
+	if len(prog.Tests) != 1 {
+		t.Fatalf("expected 1 test, got %d", len(prog.Tests))
+	}
+	if prog.Tests[0].Body == nil || len(prog.Tests[0].Body.Statements) != 1 {
+		t.Errorf("expected 1 body statement, got %+v", prog.Tests[0].Body)
+	}
+}
+
+func TestParseTestWithParamsRejected(t *testing.T) {
+	// Tests have no parameters. The grammar expects LBRACE immediately after
+	// the test name; an LPAREN here must be a parse error.
+	src := `module test version "1.0";
+
+test "has params" (x: Int) { let y: Int = x; }
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	p.Parse()
+	if !p.Diagnostics().HasErrors() {
+		t.Error("expected parse error for test declaration with parameters")
+	}
+}
+
+func TestParseTestNameAsIdentifierStillWorks(t *testing.T) {
+	// Regression: `test` must remain a valid identifier in non-top-level
+	// positions because it's a contextual keyword (ADR 0029).
+	src := `module test version "1.0";
+
+function helper(test: Int) returns Int { return test + 1; }
+
+entry function main() returns Int {
+    let test: Int = 5;
+    return helper(test);
+}
+`
+	p := New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected parse errors using 'test' as an identifier: %s", p.Diagnostics().Format("test"))
+	}
+	if len(prog.Functions) != 2 {
+		t.Errorf("expected 2 functions, got %d", len(prog.Functions))
+	}
+}

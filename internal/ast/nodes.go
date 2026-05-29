@@ -30,6 +30,7 @@ type Program struct {
 	Traits          []*TraitDecl
 	ImplBlocks      []*ImplBlock
 	Intents         []*IntentDecl
+	Tests           []*TestDecl
 }
 
 func (p *Program) Pos() (int, int) {
@@ -102,6 +103,20 @@ type ExternFunctionDecl struct {
 }
 
 func (f *ExternFunctionDecl) Pos() (int, int) { return f.Line, f.Column }
+
+// TestDecl represents an in-language test declaration.
+// See ADR 0029 / phase-16. Syntax: [async] test "name" { ... statements ... }
+// Tests are top-level declarations, peer of FunctionDecl. They are not callable
+// from source code and do not cross module boundaries.
+type TestDecl struct {
+	Name    string // contents of the STRING_LIT after `test`
+	IsAsync bool
+	Body    *Block
+	Line    int
+	Column  int
+}
+
+func (t *TestDecl) Pos() (int, int) { return t.Line, t.Column }
 
 // Param represents a function parameter
 type Param struct {

@@ -69,6 +69,7 @@ const (
 	AWAIT
 	SPAWN
 	EXTERN
+	TEST
 
 	// Type keywords
 	INT_TYPE
@@ -234,6 +235,11 @@ func (t TokenType) String() string {
 		return "SPAWN"
 	case EXTERN:
 		return "EXTERN"
+	case TEST:
+		// TEST is reserved as a token type for the in-language test framework,
+		// but `test` is lexed as IDENT and matched contextually (like `from`)
+		// to avoid breaking existing identifiers named "test".
+		return "TEST"
 	case INT_TYPE:
 		return "INT_TYPE"
 	case FLOAT_TYPE:

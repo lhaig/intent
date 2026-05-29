@@ -50,9 +50,21 @@ func (p *Parser) Parse() *ast.Program {
 			fn.IsPublic = isPublic
 			prog.Functions = append(prog.Functions, fn)
 		case lexer.ASYNC:
-			fn := p.parseFunctionDecl()
-			fn.IsPublic = isPublic
-			prog.Functions = append(prog.Functions, fn)
+			// `async` can prefix either a function or a test. `test` is a
+			// contextual keyword (lexed as IDENT, see ADR 0029 commentary in
+			// parseTestDecl), so we peek the next token's literal.
+			next := p.peek()
+			if next.Type == lexer.IDENT && next.Literal == "test" {
+				if isPublic {
+					p.diags.Errorf(p.current().Line, p.current().Column,
+						"'public' cannot be applied to test declarations")
+				}
+				prog.Tests = append(prog.Tests, p.parseTestDecl())
+			} else {
+				fn := p.parseFunctionDecl()
+				fn.IsPublic = isPublic
+				prog.Functions = append(prog.Functions, fn)
+			}
 		case lexer.FUNCTION:
 			fn := p.parseFunctionDecl()
 			fn.IsPublic = isPublic
@@ -63,6 +75,24 @@ func (p *Parser) Parse() *ast.Program {
 					"'public' cannot be applied to extern function declarations")
 			}
 			prog.ExternFunctions = append(prog.ExternFunctions, p.parseExternFunctionDecl())
+		case lexer.IDENT:
+			// `test` is a contextual keyword (see parseTestDecl). An IDENT at
+			// top level is otherwise an error.
+			if p.current().Literal == "test" {
+				if isPublic {
+					p.diags.Errorf(p.current().Line, p.current().Column,
+						"'public' cannot be applied to test declarations")
+				}
+				prog.Tests = append(prog.Tests, p.parseTestDecl())
+			} else {
+				p.diags.Errorf(p.current().Line, p.current().Column,
+					"unexpected identifier %q at top level (expected function, entity, enum, trait, impl, intent, extern, or test)", p.current().Literal)
+				startPos := p.pos
+				p.synchronize()
+				if p.pos == startPos {
+					p.advance()
+				}
+			}
 		case lexer.ENTITY:
 			ent := p.parseEntityDecl()
 			ent.IsPublic = isPublic
@@ -93,7 +123,7 @@ func (p *Parser) Parse() *ast.Program {
 					"expected function, entity, enum, or trait after 'public'")
 			} else {
 				p.diags.Errorf(p.current().Line, p.current().Column,
-					"unexpected token %s at top level", p.current().Type)
+					"unexpected token %s at top level (expected function, entity, enum, trait, impl, intent, extern, or test)", p.current().Type)
 			}
 			startPos := p.pos
 			p.synchronize()
@@ -264,6 +294,48 @@ func (p *Parser) parseExternFunctionDecl() *ast.ExternFunctionDecl {
 		Ensures:    ensures,
 		Line:       tok.Line,
 		Column:     tok.Column,
+	}
+}
+
+// parseTestDecl parses an in-language test declaration:
+//
+//	[async] test "name" { stmt* }
+//
+// See ADR 0029 / phase-16. Tests carry no params and no return type. The name
+// is the quoted string literal — it identifies the test in runner output and is
+// sanitised to a target-legal identifier downstream.
+//
+// `test` is a contextual keyword (lexed as IDENT, not TEST) so that existing
+// identifiers named "test" — module names, variable names, function names —
+// continue to parse. The caller is responsible for routing here only when the
+// current IDENT literal is "test".
+func (p *Parser) parseTestDecl() *ast.TestDecl {
+	tok := p.current()
+	isAsync := p.match(lexer.ASYNC)
+
+	testTok := p.expect(lexer.IDENT)
+	if testTok.Literal != "test" {
+		p.diags.Errorf(testTok.Line, testTok.Column,
+			"internal parser error: parseTestDecl called with non-test IDENT %q", testTok.Literal)
+	}
+	nameTok := p.expect(lexer.STRING_LIT)
+	name := nameTok.Literal
+	if len(name) >= 2 && name[0] == '"' && name[len(name)-1] == '"' {
+		name = name[1 : len(name)-1]
+	}
+	if name == "" {
+		p.diags.Errorf(nameTok.Line, nameTok.Column,
+			"test name cannot be empty")
+	}
+
+	body := p.parseBlock()
+
+	return &ast.TestDecl{
+		Name:    name,
+		IsAsync: isAsync,
+		Body:    body,
+		Line:    tok.Line,
+		Column:  tok.Column,
 	}
 }
 

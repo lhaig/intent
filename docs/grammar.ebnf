@@ -31,7 +31,8 @@ top_level_decl = function_decl
                | trait_decl
                | impl_block
                | import_decl
-               | intent_block ;
+               | intent_block
+               | test_decl ;
 
 
 (* -------------------------------------------------------------------------- *)
@@ -99,6 +100,11 @@ extern_function_decl = "extern" , "function" , identifier ,
                        { requires_clause } ,
                        { ensures_clause } ,
                        ";" ;
+
+(* Phase 16 / ADR 0029: in-language test declaration. No params, no return type.
+   Body may call any function in the module/imports, including private ones.
+   Tests cannot be 'public' (they don't cross module boundaries). *)
+test_decl = [ "async" ] , "test" , string_literal , block ;
 
 type_param_list = "<" , type_param , { "," , type_param } , ">" ;
 
