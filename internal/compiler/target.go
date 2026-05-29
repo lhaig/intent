@@ -79,6 +79,29 @@ func externFunctionNamesInModule(mod *ir.Module) []string {
 	return names
 }
 
+// testNames returns the names of any in-language tests across the program.
+// Used to reject test declarations on the wasm target (phase 16 / ADR 0029):
+// WASM has no exception model, no async runtime, and limited surface for an
+// assertion-message channel — implementing a real test runner for WASM is
+// deferred to a future phase. Tests should target rust or js.
+func testNames(prog *ir.Program) []string {
+	var names []string
+	for _, mod := range prog.Modules {
+		for _, t := range mod.Tests {
+			names = append(names, t.Name)
+		}
+	}
+	return names
+}
+
+func testNamesInModule(mod *ir.Module) []string {
+	var names []string
+	for _, t := range mod.Tests {
+		names = append(names, t.Name)
+	}
+	return names
+}
+
 // getFileExtension returns the file extension for the given target
 func getFileExtension(target string) string {
 	switch target {
@@ -118,6 +141,9 @@ func EmitToTarget(source, target, baseName string) error {
 		}
 		if names := externFunctionNamesInModule(mod); len(names) > 0 {
 			return fmt.Errorf("extern (Rust FFI) declarations are not supported on the wasm target (found: %v); use --target rust", names)
+		}
+		if names := testNamesInModule(mod); len(names) > 0 {
+			return fmt.Errorf("test declarations are not supported on the wasm target (found: %v); use --target rust or --target js (phase 16 / ADR 0029)", names)
 		}
 		bbe, err := getBinaryBackend(target)
 		if err != nil {
@@ -201,6 +227,9 @@ func EmitProjectToTarget(entryPath, target, baseName string) error {
 		}
 		if names := externFunctionNames(prog); len(names) > 0 {
 			return fmt.Errorf("extern (Rust FFI) declarations are not supported on the wasm target (found: %v); use --target rust", names)
+		}
+		if names := testNames(prog); len(names) > 0 {
+			return fmt.Errorf("test declarations are not supported on the wasm target (found: %v); use --target rust or --target js (phase 16 / ADR 0029)", names)
 		}
 		bbe, err := getBinaryBackend(target)
 		if err != nil {

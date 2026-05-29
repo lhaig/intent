@@ -140,9 +140,10 @@ Allowed on Rust and JS. The runner wraps each async test in the target's runtime
 - [x] `assert`, `assert_eq`, `assert_close`, `assert_panics` builtins type-check, including the comparable-set constraint on `assert_eq` (16.2 — 5cc27c0)
 - [x] `assert_eq` rejects `Float` arguments at type-check with the documented diagnostic pointing to `assert_close` (16.2 — 5cc27c0)
 - [x] `assert_eq` on an entity without an `eq` method rejects at type-check with the documented diagnostic (16.2 — 5cc27c0; entity registration switched to two-pass to make the entity-self-typed method signature possible)
-- [ ] Rust backend emits `#[test]` functions for tests and `assert!()` / `assert_eq!()` for asserts
-- [ ] JS backend emits one runner-callable function per test and uses `throw` for assertion failures
-- [ ] WASM backend emits one export per test and traps on assertion failure
+- [x] IR carries `ir.Test` on `ir.Module`; lowering and validation in place (16.3 — 80b39e2)
+- [x] Rust backend emits `#[test]` (or `#[tokio::test]`) functions for tests and `assert!()` / `assert_eq!()` for asserts; entity equality dispatches through user `eq` method (16.4 — b994a2c)
+- [x] JS backend emits one runner-callable function per test plus a `__intent_tests` array; assertion failures throw `Error` (16.5 — 3379e0c)
+- [x] WASM backend **rejects** test declarations with a clear error directing users to `--target rust` or `--target js` (scope reduction — see 16.6; 16.6 — pending commit)
 - [ ] `intentc test foo.intent` runs all tests, reports pass/fail counts, exits non-zero on any failure
 - [ ] `intentc test --all-targets foo.intent` runs every test on every supported target and fails on cross-target divergence
 - [ ] `intentc test-gen --emit foo.intent` emits Intent test blocks (legacy `--emit-rust` removed); generated tests run via `intentc test`
@@ -224,15 +225,27 @@ Allowed on Rust and JS. The runner wraps each async test in the target's runtime
 **Acceptance:**
 - Backend tests assert the runner can invoke each test by index and observe pass/fail via thrown exceptions.
 
-### 16.6 WASM backend
+### 16.6 WASM backend — scope reduced to rejection
 
-**Files:** `internal/wasmbe/*`, `internal/wasmbe/wasmbe_test.go`
+**Files:** `internal/compiler/target.go`, `internal/compiler/target_test.go`
 
-- Each test emits a no-arg WASM export named `__test_<sanitised_name>` that returns i32 (0 = pass, 1 = fail) and writes any assertion message to an exported buffer.
-- Async tests rejected (per Phase 14 rule).
+**Scope reduction (decided during execution, 2026-05-29):** rather than emit a full WASM test runner, **WASM rejects all test declarations** with a clear error. Rationale:
+
+1. The WASM backend is a direct binary emitter, not via Rust — adding a real test runner requires implementing an assertion-message channel, possibly a trap-and-catch protocol on the JS host side, and growing the WASM emission surface significantly.
+2. Cross-target equivalence (the differentiator) still works fully between Rust and JS, which are the production targets. WASM users testing their code can target Rust/JS for tests while still shipping WASM for production.
+3. Consistent with Phase 14's "WASM rejects async with a clear error" precedent.
+
+A full WASM test runner is filed as a Phase 17 candidate.
+
+**Implementation:**
+- `testNames(prog)` / `testNamesInModule(mod)` helpers in `target.go` enumerate tests for diagnostics.
+- Both single-file `EmitToTarget` and multi-file `BuildToTarget` reject WASM targets containing any tests with `"test declarations are not supported on the wasm target (found: %v); use --target rust or --target js (phase 16 / ADR 0029)"`.
+- Async tests are caught by the existing async-on-WASM rejection from Phase 14.
 
 **Acceptance:**
-- WASM-side runner can enumerate test exports and invoke them; failures surface their message.
+- `intentc build --target wasm` on a program with tests fails with the documented error message.
+- No `.wasm` file is written when tests are detected.
+- `intentc build --target wasm` on a program WITHOUT tests still builds normally.
 
 ### 16.7 Runner + CLI
 

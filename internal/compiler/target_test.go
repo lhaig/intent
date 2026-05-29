@@ -231,6 +231,42 @@ entry function main() returns Int { return 0; }
 	}
 }
 
+// Phase 16 / ADR 0029: WASM rejects test declarations. The WASM backend lacks
+// the exception/trap model needed for an assertion-message channel, so test
+// support there is deferred to a future phase.
+func TestEmitToTargetWasmRejectsTests(t *testing.T) {
+	source := `module test version "1.0";
+
+test "would be rejected" {
+    let x: Int = 1;
+}
+
+entry function main() returns Int {
+    return 0;
+}
+`
+	baseName := t.TempDir() + "/test_test_wasm"
+
+	err := EmitToTarget(source, "wasm", baseName)
+	if err == nil {
+		t.Fatalf("expected EmitToTarget to reject tests on wasm, got no error")
+	}
+	if !strings.Contains(err.Error(), "test declarations are not supported on the wasm target") {
+		t.Errorf("expected clear test-not-supported error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "would be rejected") {
+		t.Errorf("error should name the offending test, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "use --target rust or --target js") {
+		t.Errorf("error should suggest alternative targets, got: %v", err)
+	}
+
+	// And the wasm file should not have been written.
+	if _, statErr := os.Stat(baseName + ".wasm"); statErr == nil {
+		t.Error("wasm file must not be written when tests are detected")
+	}
+}
+
 func TestGetFileExtension(t *testing.T) {
 	tests := []struct {
 		target   string
