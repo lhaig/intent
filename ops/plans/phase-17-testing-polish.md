@@ -1,6 +1,6 @@
 # Phase 17: Testing Framework Polish
 
-**Status:** Shipped (2026-05-30) — 17.B, 17.C, 17.D, 17.F complete. 17.A / 17.E / 17.G / 17.H deferred to Phase 18 with rationale below.
+**Status:** Shipped (2026-05-30) — 17.B, 17.C, 17.D, 17.F complete. 17.A / 17.E / 17.G / 17.H deferred (future PRD) with rationale below.
 **Milestone:** v1.2 — Self-Improvement Foundations (continues from Phase 16)
 **Decisions:** [ADR 0030](../../docs/decisions/0030-cross-package-test-visibility.md) (visibility for 17.D), [ADR 0031](../../docs/decisions/0031-target-specific-annotation.md) (annotation for 17.B).
 
@@ -14,7 +14,7 @@ Phase 16 shipped a working in-language testing framework with **six documented s
 
 Phase 17 is **not urgent**. Phase 16's framework is operational end-to-end on rust+js, six examples carry tests, `make validate` includes `intentc test`, and agents have a real assertion surface to verify their own work. Phase 17 turns that "operational" into "complete."
 
-Recommendation: revisit when (a) a Phase-16-era friction actively blocks something downstream, or (b) the project has a natural pause point for polish work. Don't break flow on Phase 18+ work to do this.
+Recommendation: revisit when (a) a Phase-16-era friction actively blocks something downstream, or (b) the project has a natural pause point for polish work. Don't break flow on future polish work to do this.
 
 ---
 
@@ -135,7 +135,7 @@ Small, well-scoped, no design questions. Could ship in a single commit.
 
 **State today:** No coverage reporting, no snapshot testing.
 
-These are bigger features that deserve their own PRDs if pursued. Mentioning here only so they don't get forgotten. **Recommend: defer to Phase 18+.**
+These are bigger features that deserve their own PRDs if pursued. Mentioning here only so they don't get forgotten. **Recommend: defer to future PRD.**
 
 ---
 
@@ -145,30 +145,30 @@ These are bigger features that deserve their own PRDs if pursued. Mentioning her
 - [x] **17.C:** every flat example in `examples/*.intent` carries at least one test (19/19). `make validate` runs `intentc test` on every tested example.
 - [x] **17.D:** tests in imported modules and packages auto-discover via the entry file. JS multi-file emission now produces a unified `__intent_tests` registry; JS call sites apply the module's namePrefix when calling local functions. `examples/packages/types_pkg/types.intent` has tests that run via `intentc test examples/packages/app_pkg/main.intent`. ADR 0030 records the visibility decision.
 - [x] **17.F:** `--filter <substring>`, `--list`, `--quiet` flags ship on `intentc test`. CLI handler, runner support, and `FormatList` / `FormatResultsQuiet` helpers all in place.
-- [ ] 17.A — deferred to Phase 18 (full testgen → Intent migration).
-- [ ] 17.E — deferred to Phase 18 (FFI test automation).
-- [ ] 17.G — deferred to Phase 18 if a real user case appears (full WASM test runner).
-- [ ] 17.H — deferred to Phase 18+ (coverage / snapshot).
+- [ ] 17.A — deferred (future PRD) (full testgen → Intent migration).
+- [ ] 17.E — deferred (future PRD) (FFI test automation).
+- [ ] 17.G — deferred (future PRD) if a real user case appears (full WASM test runner).
+- [ ] 17.H — deferred (future PRD)+ (coverage / snapshot).
 
 ## Out of Scope
 
-- Coverage reporting (Phase 18+)
-- Snapshot/golden testing (Phase 18+)
+- Coverage reporting (future PRD)
+- Snapshot/golden testing (future PRD)
 - Test-only entities or visibility tier (no separate `@test` annotation)
 - IDE integration with the test runner (Milestone 8 LSP work)
 - Parallel test execution within a single run
 
 ## Resolved Decisions (2026-05-30)
 
-1. **Legacy Rust testgen path** — Retained for now; removal deferred to Phase 18. Rationale: the Rust path's PRNG-driven stress testing has no Intent-native equivalent. Designing Intent-level stress primitives (a `random()` builtin or seeded iteration) is its own piece of work that should land *before* the Rust path retires. **17.A deferred to Phase 18.**
-2. **Real WASM runner (17.G)** — **Not pursued.** Phase 16's WASM-rejects-tests is documented behaviour, not a bug. The marginal value of "tests literally run inside WASM" is low because the same Intent source compiles to all targets — if Rust tests pass, WASM correctness becomes a property of the WASM backend's lowering, not the user's test. **17.G deferred to Phase 18+ unless a real user case appears.**
+1. **Legacy Rust testgen path** — Retained for now; removal deferred (future PRD). Rationale: the Rust path's PRNG-driven stress testing has no Intent-native equivalent. Designing Intent-level stress primitives (a `random()` builtin or seeded iteration) is its own piece of work that should land *before* the Rust path retires. **17.A deferred (future PRD).**
+2. **Real WASM runner (17.G)** — **Not pursued.** Phase 16's WASM-rejects-tests is documented behaviour, not a bug. The marginal value of "tests literally run inside WASM" is low because the same Intent source compiles to all targets — if Rust tests pass, WASM correctness becomes a property of the WASM backend's lowering, not the user's test. **17.G deferred (future PRD)+ unless a real user case appears.**
 3. **Cross-package test visibility** — Tests are auto-discoverable to the runner across the entire import graph; never exported as callable symbols. No `public test` keyword. See [ADR 0030](../../docs/decisions/0030-cross-package-test-visibility.md).
 4. **Divergence demo vs `@target_specific` annotation** — Both. The annotation is the user-facing surface for legitimate target-specific tests (e.g. JS-only DOM logic, Rust-only FFI checks). The demo is a small artifact in `examples/` proving the runner detects unintentional divergence. See [ADR 0031](../../docs/decisions/0031-target-specific-annotation.md).
-5. **Phase 17 scope** — **17.B + 17.C + 17.D + 17.F.** Sections 17.A, 17.E, 17.G, 17.H deferred to Phase 18.
+5. **Phase 17 scope** — **17.B + 17.C + 17.D + 17.F.** Sections 17.A, 17.E, 17.G, 17.H deferred (future PRD).
 
-## Phase 18 Deferrals
+## Future Deferrals
 
-The following Phase 17 sections are deferred. Each remains a documented future-work item rather than an open obligation:
+The following Phase 17 sections are deferred. Each remains a documented future-work item rather than an open obligation. (Phase 18 itself is the LSP server, per `phase-18-lsp-server.md`; the items below get their own PRDs when prioritized.)
 
 - **17.A** (full testgen migration): blocked on Intent-native stress-testing design. File new PRD when that design is ready.
 - **17.E** (FFI test automation): low audience, requires cargo + named extern crates. Pick up when there's demand.

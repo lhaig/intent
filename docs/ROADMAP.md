@@ -247,7 +247,7 @@ Design lives in `ops/plans/phase-16-testing-framework.md` (Shipped). 10 commits 
 - [x] 17.C: tests for all 19 flat examples
 - [x] 17.D: cross-package test discovery (ADR 0030)
 - [x] 17.F: `--filter`, `--list`, `--quiet` DX flags
-- [ ] 17.A / 17.E / 17.G / 17.H: deferred to Phase 18 with documented rationale
+- [ ] 17.A / 17.E / 17.G / 17.H: deferred (future PRDs) with documented rationale
 
 Design + execution record: `ops/plans/phase-17-testing-polish.md`.
 
