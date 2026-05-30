@@ -231,16 +231,19 @@ because each feature needs to work across all backends and with the verifier.
 
 **Goal:** Give the project (and the agents working on it) the mechanical-validation surface needed to push Intent forward without per-change human review. See [docs/HARNESS.md](HARNESS.md) for the agent harness contract.
 
-### Phase 16: In-Language Testing Framework -- DRAFT
-- [ ] `test "name" { ... }` blocks parse and type-check
-- [ ] `assert` / `assert_eq` / `assert_panics` builtins
-- [ ] `intentc test` runner on Rust, JS, WASM targets
-- [ ] `intentc test --all-targets` flags cross-backend divergence
-- [ ] `intentc test-gen` migrated to emit Intent test blocks
-- [ ] Every flat example carries at least one hand-written test
-- [ ] `make validate` includes `intentc test` over all examples
+### Phase 16: In-Language Testing Framework -- SHIPPED (2026-05-29)
+- [x] `test "name" { ... }` blocks parse and type-check
+- [x] `assert` / `assert_eq` / `assert_close` / `assert_panics` builtins
+- [x] `intentc test` runner on Rust + JS; WASM rejects with clear error
+- [x] `intentc test --all-targets` flags cross-backend divergence (rust + js; wasm skipped)
+- [x] `intentc test-gen --target intent` (partial — see Phase 17 for the rest)
+- [x] 6 of 19 flat examples carry tests; remaining 13 deferred to Phase 17
+- [x] `make validate` includes `intentc test` over tested examples
 
-Design lives in `ops/plans/phase-16-testing-framework.md` (Draft).
+Design lives in `ops/plans/phase-16-testing-framework.md` (Shipped). 10 commits 95c545f..f02bf13.
+
+### Phase 17: Testing Framework Polish -- DRAFT
+Captures the six documented scope reductions from Phase 16 plus DX polish (`--filter`, `--list`, `--quiet`). Independent sections (17.A through 17.G) can ship in any order. Design lives in `ops/plans/phase-17-testing-polish.md`.
 
 ### Package Registry Remote-Fetch -- PROPOSED
 Closes the ADR 0027 deferred item: real versioned remote fetch for `intentc pkg install`. Today the manifest, semver parser, cache, and resolver are in place; only the network-fetch step is stubbed.
