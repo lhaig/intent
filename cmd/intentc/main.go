@@ -26,7 +26,8 @@ Usage:
   intentc check <file.intent>                                  Parse and type-check only
   intentc verify <file.intent>                                 Verify contracts using Z3 SMT solver
   intentc test-gen [--emit] <file.intent>                      Generate Rust with property-based contract tests
-  intentc test [--target <t>] [--all-targets] <file.intent>    Run in-language tests on one or more targets
+  intentc test [--target <t>] [--all-targets] [--filter <s>] [--list] [--quiet] <file.intent>
+                                                               Run in-language tests on one or more targets
   intentc fmt [--check] <file.intent>                          Format source to canonical style
   intentc lint <file.intent>                                   Run lint checks for style/best practices
   intentc pkg init                                             Create intent.toml from module declarations
@@ -380,6 +381,18 @@ func handleTest(args []string) {
 			opts.Targets = append(opts.Targets, t)
 		case "--all-targets":
 			opts.AllTargets = true
+		// Phase 17 / 17.F: DX flags.
+		case "--filter":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "Error: --filter requires a substring argument")
+				os.Exit(1)
+			}
+			i++
+			opts.Filter = args[i]
+		case "--list":
+			opts.List = true
+		case "--quiet":
+			opts.Quiet = true
 		default:
 			if strings.HasPrefix(arg, "-") {
 				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", arg)
@@ -400,8 +413,15 @@ func handleTest(args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Print(compiler.FormatResults(results))
-	if compiler.AnyFailures(results) {
+	switch {
+	case opts.List:
+		fmt.Print(compiler.FormatList(results))
+	case opts.Quiet:
+		fmt.Print(compiler.FormatResultsQuiet(results))
+	default:
+		fmt.Print(compiler.FormatResults(results))
+	}
+	if !opts.List && compiler.AnyFailures(results) {
 		os.Exit(1)
 	}
 }

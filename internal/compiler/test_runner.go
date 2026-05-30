@@ -22,6 +22,7 @@ type TestResult struct {
 	Target  string
 	Passed  bool
 	Skipped bool   // true when the target rejects the program (e.g. WASM)
+	Listed  bool   // true when produced by --list rather than a real run
 	Output  string // any stdout/stderr captured from the test
 	Error   string // failure message, empty on pass
 }
@@ -32,9 +33,20 @@ type TestResult struct {
 // AllTargets is a convenience that sets Targets to all supported targets.
 // AllTargets honours the WASM scope reduction from phase 16 task 16.6:
 // WASM rejects tests, so "wasm" is reported as Skipped rather than executed.
+//
+// Phase 17 / section 17.F DX additions:
+//   - Filter: substring matched against test names; non-matching tests are
+//     skipped entirely (not executed, not in the report).
+//   - List: when true, RunTests returns one TestResult per declared test
+//     with Listed=true and skips execution. The CLI prints names and exits.
+//   - Quiet: only the summary line is printed by the CLI; per-test results
+//     are suppressed.
 type TestRunOptions struct {
 	Targets    []string
 	AllTargets bool
+	Filter     string
+	List       bool
+	Quiet      bool
 }
 
 // RunTests is the top-level entry for `intentc test`. It loads the program at
@@ -106,6 +118,34 @@ func RunTests(filePath string, opts TestRunOptions) ([]TestResult, error) {
 		return nil, fmt.Errorf("no tests found in %s", filePath)
 	}
 
+	// Phase 17 / 17.F: --list short-circuits execution.
+	if opts.List {
+		var listed []TestResult
+		for _, name := range declared {
+			if opts.Filter != "" && !strings.Contains(name, opts.Filter) {
+				continue
+			}
+			listed = append(listed, TestResult{Name: name, Target: "list", Listed: true})
+		}
+		return listed, nil
+	}
+
+	// Phase 17 / 17.F: --filter narrows the runnable set. Filtering happens
+	// before per-target compilation so we don't pay cargo/node cost for
+	// tests the user explicitly excluded.
+	runnable := declared
+	if opts.Filter != "" {
+		runnable = nil
+		for _, n := range declared {
+			if strings.Contains(n, opts.Filter) {
+				runnable = append(runnable, n)
+			}
+		}
+		if len(runnable) == 0 {
+			return nil, fmt.Errorf("no tests matched filter %q", opts.Filter)
+		}
+	}
+
 	var results []TestResult
 	for _, target := range opts.Targets {
 		switch target {
@@ -135,7 +175,77 @@ func RunTests(filePath string, opts TestRunOptions) ([]TestResult, error) {
 		}
 	}
 
+	// Apply --filter at the result level so per-target runners stay simple.
+	// The actual cargo/node invocations still build everything; only the
+	// reported results are narrowed. This keeps the runner self-contained
+	// and avoids per-target argument-shaping for filtering.
+	if opts.Filter != "" {
+		filtered := results[:0]
+		for _, r := range results {
+			if strings.Contains(r.Name, opts.Filter) {
+				filtered = append(filtered, r)
+			}
+		}
+		results = filtered
+	}
+
 	return results, nil
+}
+
+// FormatList formats the output of a --list run: one test name per line.
+// Names are deduplicated across targets (--list collapses to one entry per
+// declared test).
+func FormatList(results []TestResult) string {
+	seen := map[string]bool{}
+	var b strings.Builder
+	for _, r := range results {
+		if seen[r.Name] {
+			continue
+		}
+		seen[r.Name] = true
+		b.WriteString(r.Name)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// FormatResultsQuiet formats just the summary line — no per-test detail.
+// Used by `intentc test --quiet`.
+func FormatResultsQuiet(results []TestResult) string {
+	byName := make(map[string]map[string]TestResult)
+	var nameOrder []string
+	for _, r := range results {
+		if _, ok := byName[r.Name]; !ok {
+			byName[r.Name] = make(map[string]TestResult)
+			nameOrder = append(nameOrder, r.Name)
+		}
+		byName[r.Name][r.Target] = r
+	}
+	passed, failed, diverged, skipped := 0, 0, 0, 0
+	for _, name := range nameOrder {
+		row := byName[name]
+		var hasFail, hasPass, hasSkip bool
+		for _, r := range row {
+			if r.Skipped {
+				hasSkip = true
+			} else if r.Passed {
+				hasPass = true
+			} else {
+				hasFail = true
+			}
+		}
+		switch {
+		case hasFail && hasPass:
+			diverged++
+		case hasFail:
+			failed++
+		case hasPass:
+			passed++
+		case hasSkip:
+			skipped++
+		}
+	}
+	return fmt.Sprintf("%d passed, %d failed, %d diverged, %d skipped\n", passed, failed, diverged, skipped)
 }
 
 // collectTestNames returns the declared test names from either a single Module

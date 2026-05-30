@@ -266,6 +266,120 @@ func TestAnyFailuresDivergence(t *testing.T) {
 	}
 }
 
+// Phase 17 / 17.F: DX flags.
+
+func TestRunTestsListMode(t *testing.T) {
+	src := `module test version "1.0";
+
+test "alpha" { assert(true); }
+test "beta" { assert(true); }
+test "gamma" { assert(true); }
+
+entry function main() returns Int { return 0; }
+`
+	path := writeTempIntent(t, src)
+	results, err := RunTests(path, TestRunOptions{List: true})
+	if err != nil {
+		t.Fatalf("list mode returned error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 listed results, got %d", len(results))
+	}
+	for _, r := range results {
+		if !r.Listed {
+			t.Errorf("expected Listed=true, got %+v", r)
+		}
+	}
+	out := FormatList(results)
+	if !strings.Contains(out, "alpha\n") || !strings.Contains(out, "beta\n") || !strings.Contains(out, "gamma\n") {
+		t.Errorf("expected all three names in FormatList output, got:\n%s", out)
+	}
+}
+
+func TestRunTestsListWithFilter(t *testing.T) {
+	src := `module test version "1.0";
+
+test "alpha" { assert(true); }
+test "beta" { assert(true); }
+test "gamma" { assert(true); }
+
+entry function main() returns Int { return 0; }
+`
+	path := writeTempIntent(t, src)
+	results, err := RunTests(path, TestRunOptions{List: true, Filter: "et"})
+	if err != nil {
+		t.Fatalf("list+filter returned error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result (beta) for filter 'et', got %d", len(results))
+	}
+	if results[0].Name != "beta" {
+		t.Errorf("expected 'beta', got %q", results[0].Name)
+	}
+}
+
+func TestRunTestsFilterNoMatches(t *testing.T) {
+	src := `module test version "1.0";
+
+test "alpha" { assert(true); }
+
+entry function main() returns Int { return 0; }
+`
+	path := writeTempIntent(t, src)
+	_, err := RunTests(path, TestRunOptions{Filter: "nonexistent"})
+	if err == nil {
+		t.Fatal("expected error for filter with no matches")
+	}
+	if !strings.Contains(err.Error(), "no tests matched filter") {
+		t.Errorf("expected 'no tests matched filter' diagnostic, got: %v", err)
+	}
+}
+
+func TestRunTestsFilterScopesResults(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+	src := `module test version "1.0";
+
+test "addition" { assert_eq(2 + 2, 4); }
+test "subtraction" { assert_eq(5 - 3, 2); }
+test "multiplication" { assert_eq(2 * 3, 6); }
+
+entry function main() returns Int { return 0; }
+`
+	path := writeTempIntent(t, src)
+	results, err := RunTests(path, TestRunOptions{Targets: []string{"js"}, Filter: "tract"})
+	if err != nil {
+		t.Fatalf("runner returned error: %v", err)
+	}
+	// Only "subtraction" matches "tract"
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result for filter 'tract', got %d: %+v", len(results), results)
+	}
+	if results[0].Name != "subtraction" {
+		t.Errorf("expected 'subtraction', got %q", results[0].Name)
+	}
+}
+
+func TestFormatResultsQuietShape(t *testing.T) {
+	results := []TestResult{
+		{Name: "a", Target: "rust", Passed: true},
+		{Name: "b", Target: "rust", Passed: false, Error: "x"},
+	}
+	out := FormatResultsQuiet(results)
+	if strings.Contains(out, "PASS") || strings.Contains(out, "FAIL ") {
+		t.Errorf("quiet output should not contain per-test verdicts, got:\n%s", out)
+	}
+	if !strings.Contains(out, "1 passed, 1 failed") {
+		t.Errorf("expected summary line, got:\n%s", out)
+	}
+	// Should be exactly one line.
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 1 {
+		t.Errorf("quiet output should be one line, got %d:\n%s", len(lines), out)
+	}
+}
+
 // writeTempIntent writes src to a temp .intent file and returns the path.
 func writeTempIntent(t *testing.T, src string) string {
 	t.Helper()
