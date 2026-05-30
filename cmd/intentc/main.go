@@ -12,6 +12,7 @@ import (
 	"github.com/lhaig/intent/internal/compiler"
 	"github.com/lhaig/intent/internal/formatter"
 	"github.com/lhaig/intent/internal/linter"
+	"github.com/lhaig/intent/internal/lsp"
 	"github.com/lhaig/intent/internal/parser"
 	"github.com/lhaig/intent/internal/verify"
 )
@@ -36,6 +37,7 @@ Usage:
   intentc pkg remove <name>                                    Remove dependency from manifest
   intentc pkg install                                          Resolve and cache all dependencies
   intentc pkg list                                             Show dependency tree
+  intentc lsp                                                  Start the LSP server on stdio (ADR 0032)
 
 Options:
   --target <target>   Target platform: rust (default), js, wasm
@@ -101,6 +103,8 @@ func main() {
 		handleLint(os.Args[2:])
 	case "pkg":
 		handlePkg(os.Args[2:])
+	case "lsp":
+		handleLsp(os.Args[2:])
 	case "help", "--help", "-h":
 		fmt.Print(usage)
 	default:
@@ -602,6 +606,23 @@ const pkgUsage = `Usage:
   intentc pkg install                  Resolve and cache all dependencies
   intentc pkg list                     Show dependency tree
 `
+
+// handleLsp starts the Intent LSP server on stdio. Phase 18 / ADR 0032.
+// Takes no positional args; reads JSON-RPC framed messages from stdin and
+// writes responses + notifications to stdout. Editor extensions spawn this
+// as the language server.
+func handleLsp(args []string) {
+	if len(args) > 0 {
+		fmt.Fprintf(os.Stderr, "Unknown argument to 'lsp': %s\n", args[0])
+		fmt.Fprintln(os.Stderr, "Usage: intentc lsp")
+		os.Exit(1)
+	}
+	srv := lsp.NewServer(os.Stdin, os.Stdout)
+	if err := srv.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "lsp: %s\n", err)
+		os.Exit(1)
+	}
+}
 
 func handlePkg(args []string) {
 	if len(args) == 0 {
