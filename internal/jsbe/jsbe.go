@@ -214,6 +214,20 @@ func GenerateAll(prog *ir.Program) string {
 		sb.WriteString(g.sb.String())
 	}
 
+	// Phase 17 / ADR 0030: emit a unified __intent_tests array concatenating
+	// every per-module registry so the runner driver can find tests from
+	// imported modules in addition to the entry module.
+	var moduleTestRegistries []string
+	for _, mod := range prog.Modules {
+		if len(mod.Tests) > 0 {
+			moduleTestRegistries = append(moduleTestRegistries, "__intent_tests_"+mod.Name)
+		}
+	}
+	if len(moduleTestRegistries) > 0 {
+		sb.WriteString("\n// Phase 17: cross-module test registry (ADR 0030)\n")
+		sb.WriteString("const __intent_tests = [].concat(" + strings.Join(moduleTestRegistries, ", ") + ");\n")
+	}
+
 	// Call entry function if present
 	for _, mod := range prog.Modules {
 		if mod.IsEntry {
@@ -1173,7 +1187,19 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr) string {
 		for i, arg := range expr.Args {
 			args[i] = g.generateExpr(arg)
 		}
-		return fmt.Sprintf("%s(%s)", expr.Function, strings.Join(args, ", "))
+		// Phase 17 / ADR 0030: in multi-file emission, the current module's
+		// own functions are emitted with a namePrefix on their definitions.
+		// Bare-name calls within that module need the same prefix so the call
+		// site resolves to the defined symbol. Without this, tests in
+		// non-entry modules calling local functions emit "fn is not defined"
+		// at runtime.
+		fnName := expr.Function
+		if g.namePrefix != "" {
+			if _, isLocal := g.functions[expr.Function]; isLocal {
+				fnName = g.namePrefix + expr.Function
+			}
+		}
+		return fmt.Sprintf("%s(%s)", fnName, strings.Join(args, ", "))
 	}
 }
 

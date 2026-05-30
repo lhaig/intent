@@ -361,6 +361,63 @@ entry function main() returns Int { return 0; }
 	}
 }
 
+// Phase 17 / 17.D + ADR 0030: cross-package test discovery.
+//
+// Tests defined in modules imported by the entry file should be discovered
+// and run alongside the entry's own tests.
+func TestRunTestsCrossModuleDiscovery(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+	dir := t.TempDir()
+	// lib.intent defines a public function and a test for it.
+	lib := `module lib version "1.0";
+
+public function triple(n: Int) returns Int
+    ensures result == n * 3
+{
+    return n + n + n;
+}
+
+test "triple of 4 is 12" {
+    assert_eq(triple(4), 12);
+}
+`
+	// main.intent imports lib and adds its own test.
+	main := `module main version "1.0";
+
+import "lib.intent";
+
+entry function main() returns Int { return 0; }
+
+test "main module local test" { assert(true); }
+`
+	if err := os.WriteFile(filepath.Join(dir, "lib.intent"), []byte(lib), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.intent"), []byte(main), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := RunTests(filepath.Join(dir, "main.intent"), TestRunOptions{Targets: []string{"js"}})
+	if err != nil {
+		t.Fatalf("runner returned error: %v", err)
+	}
+	names := map[string]bool{}
+	for _, r := range results {
+		names[r.Name] = true
+		if !r.Passed {
+			t.Errorf("expected %q to pass, got %+v", r.Name, r)
+		}
+	}
+	if !names["triple of 4 is 12"] {
+		t.Errorf("expected to discover test from lib.intent; got names: %v", names)
+	}
+	if !names["main module local test"] {
+		t.Errorf("expected to discover entry-file test; got names: %v", names)
+	}
+}
+
 func TestFormatResultsQuietShape(t *testing.T) {
 	results := []TestResult{
 		{Name: "a", Target: "rust", Passed: true},
