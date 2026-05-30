@@ -129,6 +129,11 @@ func (s *Server) dispatch(msg *rpcMessage) {
 			return
 		}
 		s.handleHover(msg.ID, msg.Params)
+	case "textDocument/definition":
+		if !isRequest {
+			return
+		}
+		s.handleDefinition(msg.ID, msg.Params)
 	default:
 		if isRequest {
 			s.t.writeError(msg.ID, errMethodNotFound, fmt.Sprintf("method not found: %s", msg.Method))
