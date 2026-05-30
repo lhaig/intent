@@ -822,6 +822,19 @@ Cross-target divergence (e.g. a test that passes on Rust but fails on JS) is rep
 | `len(arr)`      | Array<T> -> Int              | Array length             |
 | `arr.push(val)` | (mutable Array<T>, T) -> Void| Append to array          |
 
+## Editor support
+
+`intentc lsp` starts a stdio LSP 3.17 server. The VS Code extension under `editors/vscode/` activates on `.intent` files and spawns the server. Build it with `cd editors/vscode && npm install && npm run package`, then install via `code --install-extension intent-vscode-<version>.vsix`. The extension assumes `intentc` is on `PATH`; override with the `intent.binaryPath` setting.
+
+Other editors (Neovim, Helix, Emacs, JetBrains) can wire `intentc lsp` into their LSP clients directly; the protocol is plain LSP 3.17 over stdio.
+
+V1 surfaces (see [ADR 0032](docs/decisions/0032-lsp-v1-surface.md)):
+- Diagnostics — parser, checker, lint, Z3 verification (verification runs on save, async)
+- Hover — signature + full requires/ensures + entity fields/invariants
+- Go-to-definition — same-file and same-package
+
+Out of scope for v1 (filed as v1.1 follow-ups): completion, find-references, rename, code actions, refactorings, formatting via LSP, semantic tokens, inlay hints, cross-package go-to-definition.
+
 ## Operators
 
 ### Arithmetic (Int or Float, both operands same type)

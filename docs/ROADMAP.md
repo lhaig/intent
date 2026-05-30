@@ -252,7 +252,17 @@ Design lives in `ops/plans/phase-16-testing-framework.md` (Shipped). 10 commits 
 Design + execution record: `ops/plans/phase-17-testing-polish.md`.
 
 ### LSP Server Scoping ADR -- DONE (2026-05-30)
-Scoped in [ADR 0032](decisions/0032-lsp-v1-surface.md). v1 ships the MVP triple — diagnostics (parser, checker, lint, verification status), hover (type + signature + contracts + verification summary), and go-to-definition (same-file + same-package). VS Code first-party extension plus an `intentc lsp` stdio subcommand for other editors. Completion, find-references, rename, code actions, refactorings, formatting-via-LSP, and incremental re-check are deferred to v1.1+. Implementation PRD is the Milestone 8 entry point.
+Scoped in [ADR 0032](decisions/0032-lsp-v1-surface.md).
+
+### Phase 18: LSP Server v1 -- SHIPPED (2026-05-30)
+Implemented in commits 0a4ca14..4999b06.
+- `intentc lsp` subcommand starts the stdio LSP 3.17 server
+- Diagnostics: parser, checker, lint (debounced ~150ms), Z3 verification (async on save)
+- Hover: signature + full requires/ensures + entity fields/invariants
+- Go-to-definition: same-file + same-package via the workspace cache
+- VS Code extension under `editors/vscode/` (.vsix builds via `npm run package`)
+- End-to-end smoke test in `internal/lsp/e2e_test.go`
+- Out of scope for v1: completion, find-references, rename, code actions, refactorings, formatting via LSP, semantic tokens, inlay hints, document/workspace symbols, signature help, incremental re-check, multi-root workspaces, Marketplace publishing, cross-package go-to-definition
 
 ### Phase 17.B Annotation Implementation -- DONE (2026-05-30)
 Shipped per ADR 0031 in commit 4dacd6c. Lexer/parser/AST/checker/IR/runner all carry the `@target_specific("rust", ...)` annotation through; new `SkipAnnotation` classification keeps annotation skips distinct from the WASM-rejection skip. `examples/target_specific_demo.intent` demonstrates all four cases.
@@ -264,13 +274,13 @@ Closes the ADR 0027 deferred item. Manifest, semver, cache, and resolver are in 
 
 ## Milestone 8: Developer Experience
 
-### LSP Server
-Scope locked in [ADR 0032](decisions/0032-lsp-v1-surface.md). v1 surface:
+### LSP Server -- v1 SHIPPED (2026-05-30)
+Scoped in [ADR 0032](decisions/0032-lsp-v1-surface.md); implemented as Phase 18 (commits 0a4ca14..4999b06). v1 surface in production:
 - Diagnostics (parser, checker, lint warnings, Z3 verification status)
-- Hover (resolved types, function signatures, full contracts, verification summary)
-- Go-to-definition (same-file + same-package; cross-package deferred to v1.1)
+- Hover (resolved types, function signatures, full contracts)
+- Go-to-definition (same-file + same-package)
 - `intentc lsp` stdio subcommand; first-party VS Code extension (`editors/vscode/`)
-- Out of scope for v1: completion, find-references, rename, code actions, refactorings, formatting-via-LSP, incremental re-check, semantic tokens, inlay hints, document/workspace symbols
+- Out of scope (v1.1 follow-ups): completion, find-references, rename, code actions, refactorings, formatting-via-LSP, incremental re-check, semantic tokens, inlay hints, document/workspace symbols, cross-package go-to-definition, Marketplace publishing
 
 ### REPL / Playground
 - Interactive expression evaluation with contract checking

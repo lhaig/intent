@@ -1,6 +1,6 @@
 # Phase 18: LSP Server (v1)
 
-**Status:** Draft
+**Status:** Shipped (2026-05-30; commits 0a4ca14..4999b06)
 **Milestone:** Milestone 8 — Developer Experience
 **Decision:** [ADR 0032](../../docs/decisions/0032-lsp-v1-surface.md)
 **Deferred:** Completion, find-references, rename, code actions, refactorings, formatting-via-LSP, semantic tokens, inlay hints, document/workspace symbols, signature help, incremental re-check, multi-root workspaces, TCP transport, Marketplace publishing.
@@ -17,19 +17,19 @@ End users have zero editor support today. Phase 16/17 made the language testable
 
 ## Success Criteria
 
-- [ ] `intentc lsp` subcommand starts a stdio LSP 3.17 server (initialize → initialized → ... → shutdown → exit lifecycle works)
-- [ ] Parser, checker, and lint diagnostics publish on `textDocument/didChange` (debounced ~150ms per document) with correct severities (parser/checker = Error, lint = Warning)
-- [ ] Z3 verification runs on `textDocument/didSave` asynchronously; per-contract status surfaces as `Information` (verified) / `Information` (unverified, with diagnostic on the contract location) / `Hint` (timeout/error); absence of Z3 degrades gracefully (no verification diagnostics)
-- [ ] `textDocument/hover` returns markdown content combining: resolved type for the symbol under the cursor; for functions/methods, the full signature + `requires`/`ensures` clauses + cached verification summary; for entities, fields + invariants
-- [ ] `textDocument/definition` resolves identifiers to declarations within the same file and across files in the same package; cross-package and `extern function` jumps land on the local declaration site
-- [ ] Server handles single-file and multi-file workspaces (re-uses `IsMultiFile` / `NewModuleRegistry`)
-- [ ] VS Code extension under `editors/vscode/` activates on `.intent` files, spawns `intentc lsp`, surfaces a clear error if `intentc` is not on PATH; settings `intent.binaryPath` and `intent.lsp.trace` work
-- [ ] `.vsix` package builds with `npm run package`; install instructions in `editors/vscode/README.md`
-- [ ] End-to-end smoke test in `internal/lsp/` drives a scripted LSP session (initialize → open file with error → observe diagnostics → hover → goto-def → shutdown) without spawning a real editor
-- [ ] No regressions: `make validate` green
-- [ ] No new external Go dependencies (ADR 0002 stance preserved)
-- [ ] `docs/ROADMAP.md` Milestone 8 LSP entry marked complete; ADR 0032 status updated with the implementation commit
-- [ ] Phase 18 PRD Status flipped to `Shipped` with date
+- [x] `intentc lsp` subcommand starts a stdio LSP 3.17 server (initialize → initialized → ... → shutdown → exit lifecycle works)
+- [x] Parser, checker, and lint diagnostics publish on `textDocument/didChange` (debounced ~150ms per document) with correct severities (parser/checker = Error, lint = Warning)
+- [x] Z3 verification runs on `textDocument/didSave` asynchronously; per-contract status surfaces as `Information` (verified) / `Information` (unverified, with diagnostic on the contract location) / `Hint` (timeout/error); absence of Z3 degrades gracefully (no verification diagnostics)
+- [x] `textDocument/hover` returns markdown content combining: resolved type for the symbol under the cursor; for functions/methods, the full signature + `requires`/`ensures` clauses + cached verification summary; for entities, fields + invariants
+- [x] `textDocument/definition` resolves identifiers to declarations within the same file and across files in the same package; cross-package and `extern function` jumps land on the local declaration site
+- [x] Server handles single-file and multi-file workspaces (re-uses `IsMultiFile` / `NewModuleRegistry`)
+- [x] VS Code extension under `editors/vscode/` activates on `.intent` files, spawns `intentc lsp`, surfaces a clear error if `intentc` is not on PATH; settings `intent.binaryPath` and `intent.lsp.trace` work
+- [x] `.vsix` package builds with `npm run package`; install instructions in `editors/vscode/README.md`
+- [x] End-to-end smoke test in `internal/lsp/` drives a scripted LSP session (initialize → open file with error → observe diagnostics → hover → goto-def → shutdown) without spawning a real editor
+- [x] No regressions: `make validate` green
+- [x] No new external Go dependencies (ADR 0002 stance preserved)
+- [x] `docs/ROADMAP.md` Milestone 8 LSP entry marked complete; ADR 0032 status updated with the implementation commit
+- [x] Phase 18 PRD Status flipped to `Shipped` with date
 
 ## Reference
 

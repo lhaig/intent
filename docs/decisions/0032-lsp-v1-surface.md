@@ -1,7 +1,7 @@
 # 0032: LSP v1 Surface
 
 **Date:** 2026-05-30
-**Status:** accepted (design); implementation pending Milestone 8
+**Status:** accepted; implemented in 0a4ca14..4999b06 (Phase 18)
 **Phase:** Milestone 8 (Developer Experience)
 
 ## Context
