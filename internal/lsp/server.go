@@ -19,9 +19,10 @@ import (
 // shutdown must return -32600 (InvalidRequest). We implement these strictly
 // so well-behaved clients see clean errors.
 type Server struct {
-	t         *transport
-	docs      *documentStore
-	debouncer *debouncer
+	t          *transport
+	docs       *documentStore
+	debouncer  *debouncer
+	workspaces *workspaceManager
 
 	mu          sync.Mutex
 	initialized bool
@@ -32,9 +33,10 @@ type Server struct {
 // NewServer constructs a Server bound to the given reader/writer pair.
 func NewServer(in io.Reader, out io.Writer) *Server {
 	return &Server{
-		t:         newTransport(in, out),
-		docs:      newDocumentStore(),
-		debouncer: newDebouncer(diagnosticsDebounce),
+		t:          newTransport(in, out),
+		docs:       newDocumentStore(),
+		debouncer:  newDebouncer(diagnosticsDebounce),
+		workspaces: newWorkspaceManager(),
 	}
 }
 
