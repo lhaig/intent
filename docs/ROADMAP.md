@@ -251,11 +251,14 @@ Design lives in `ops/plans/phase-16-testing-framework.md` (Shipped). 10 commits 
 
 Design + execution record: `ops/plans/phase-17-testing-polish.md`.
 
-### Package Registry Remote-Fetch -- PROPOSED
-Closes the ADR 0027 deferred item: real versioned remote fetch for `intentc pkg install`. Today the manifest, semver parser, cache, and resolver are in place; only the network-fetch step is stubbed.
+### LSP Server Scoping ADR -- NEXT
+Milestone 8 starts here. Write an ADR proposing the LSP surface (which features ship in v1, what stays out, what the editor extension model is) before any implementation. Highest leverage next move: end users currently have zero editor support.
 
-### LSP Server Scoping ADR -- PROPOSED
-Milestone 8 starts here. Write an ADR proposing the LSP surface (which features ship in v1, what stays out, what the editor extension model is) before any implementation.
+### Phase 17.B Annotation Implementation -- PROPOSED
+Implement the `@target_specific("rust", "js", ...)` annotation per ADR 0031. Design is fully specified; implementation is mechanical from the ADR. Touches lexer, parser, AST, checker, IR, runner.
+
+### Package Registry Remote-Fetch -- DEFERRED (no user demand)
+Closes the ADR 0027 deferred item. Manifest, semver, cache, and resolver are in place; only the network-fetch step is stubbed. **Deferred until there are real users publishing Intent packages.** No point building a registry no one is going to push to.
 
 ---
 
