@@ -1,8 +1,8 @@
 # Phase 17: Testing Framework Polish
 
-**Status:** Draft — scope under discussion; nothing committed yet. Pick which sections (17.A → 17.G) to include before promoting to Approved.
+**Status:** Approved (2026-05-30) — scope reduced to 17.B + 17.C + 17.D + 17.F. Other sections explicitly deferred to Phase 18 with rationale below.
 **Milestone:** v1.2 — Self-Improvement Foundations (continues from Phase 16)
-**Decision:** ADR pending; some items may need their own decision records.
+**Decisions:** [ADR 0030](../../docs/decisions/0030-cross-package-test-visibility.md) (visibility for 17.D), [ADR 0031](../../docs/decisions/0031-target-specific-annotation.md) (annotation for 17.B).
 
 ## Goal
 
@@ -159,14 +159,23 @@ Marked here per section, to be promoted to commitments at Approval time. Each se
 - IDE integration with the test runner (Milestone 8 LSP work)
 - Parallel test execution within a single run
 
-## Open Questions to Resolve Before Approval
+## Resolved Decisions (2026-05-30)
 
-1. **Keep the legacy Rust testgen path?** If yes for stress/fuzz testing, 17.A keeps both; if no, 17.A drops it cleanly.
-2. **Pursue 17.G (real WASM runner) at all?** Cost is meaningful and value is unclear.
-3. **Cross-package test visibility model** — ADR-worthy, blocks 17.D.
-4. **Does the cross-target divergence demo (17.B) project the wrong message?** Maybe `@target_specific` annotation is the better v1 surface.
-5. **Phase 17 scope** — ship all sections together, or pick a subset and defer the rest?
+1. **Legacy Rust testgen path** — Retained for now; removal deferred to Phase 18. Rationale: the Rust path's PRNG-driven stress testing has no Intent-native equivalent. Designing Intent-level stress primitives (a `random()` builtin or seeded iteration) is its own piece of work that should land *before* the Rust path retires. **17.A deferred to Phase 18.**
+2. **Real WASM runner (17.G)** — **Not pursued.** Phase 16's WASM-rejects-tests is documented behaviour, not a bug. The marginal value of "tests literally run inside WASM" is low because the same Intent source compiles to all targets — if Rust tests pass, WASM correctness becomes a property of the WASM backend's lowering, not the user's test. **17.G deferred to Phase 18+ unless a real user case appears.**
+3. **Cross-package test visibility** — Tests are auto-discoverable to the runner across the entire import graph; never exported as callable symbols. No `public test` keyword. See [ADR 0030](../../docs/decisions/0030-cross-package-test-visibility.md).
+4. **Divergence demo vs `@target_specific` annotation** — Both. The annotation is the user-facing surface for legitimate target-specific tests (e.g. JS-only DOM logic, Rust-only FFI checks). The demo is a small artifact in `examples/` proving the runner detects unintentional divergence. See [ADR 0031](../../docs/decisions/0031-target-specific-annotation.md).
+5. **Phase 17 scope** — **17.B + 17.C + 17.D + 17.F.** Sections 17.A, 17.E, 17.G, 17.H deferred to Phase 18.
+
+## Phase 18 Deferrals
+
+The following Phase 17 sections are deferred. Each remains a documented future-work item rather than an open obligation:
+
+- **17.A** (full testgen migration): blocked on Intent-native stress-testing design. File new PRD when that design is ready.
+- **17.E** (FFI test automation): low audience, requires cargo + named extern crates. Pick up when there's demand.
+- **17.G** (WASM runner): cost/value unclear. Pick up only if a user case surfaces.
+- **17.H** (coverage / snapshot): each warrants its own PRD; file when prioritised.
 
 ## Approval Record
 
-(empty — this is a Draft)
+- 2026-05-30 — Scope locked to 17.B + 17.C + 17.D + 17.F. ADRs 0030 and 0031 written and approved. Execution proceeding.
