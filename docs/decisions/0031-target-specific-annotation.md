@@ -1,8 +1,8 @@
 # 0031: `@target_specific` Annotation for Tests
 
 **Date:** 2026-05-30
-**Status:** accepted (design); implementation deferred to Phase 18
-**Phase:** v1.2 (Phase 17 design; Phase 18 implementation)
+**Status:** accepted; implemented in 4dacd6c
+**Phase:** v1.2 (Phase 17)
 
 ## Context
 

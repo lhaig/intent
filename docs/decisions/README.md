@@ -62,5 +62,5 @@ What follows from this decision? Trade-offs accepted.
 | 0028 | [Rust FFI / crate imports](0028-rust-ffi-crate-imports.md) | 2026-05-28 | accepted |
 | 0029 | [In-language testing framework](0029-in-language-testing.md) | 2026-05-29 | accepted |
 | 0030 | [Cross-package test visibility](0030-cross-package-test-visibility.md) | 2026-05-30 | accepted |
-| 0031 | [`@target_specific` annotation for tests](0031-target-specific-annotation.md) | 2026-05-30 | accepted |
+| 0031 | [`@target_specific` annotation for tests](0031-target-specific-annotation.md) | 2026-05-30 | accepted; implemented in 4dacd6c |
 | 0032 | [LSP v1 surface](0032-lsp-v1-surface.md) | 2026-05-30 | accepted |

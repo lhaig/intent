@@ -1,6 +1,6 @@
 # Phase 17: Testing Framework Polish
 
-**Status:** Shipped (2026-05-30) — 17.C, 17.D, 17.F complete; 17.B partial (demo shipped, `@target_specific` annotation design accepted in ADR 0031, implementation deferred to Phase 18). 17.A / 17.E / 17.G / 17.H deferred to Phase 18 with rationale below.
+**Status:** Shipped (2026-05-30) — 17.B, 17.C, 17.D, 17.F complete. 17.A / 17.E / 17.G / 17.H deferred to Phase 18 with rationale below.
 **Milestone:** v1.2 — Self-Improvement Foundations (continues from Phase 16)
 **Decisions:** [ADR 0030](../../docs/decisions/0030-cross-package-test-visibility.md) (visibility for 17.D), [ADR 0031](../../docs/decisions/0031-target-specific-annotation.md) (annotation for 17.B).
 
@@ -141,7 +141,7 @@ These are bigger features that deserve their own PRDs if pursued. Mentioning her
 
 ## Success Criteria
 
-- [x] **17.B (partial — demo shipped, annotation deferred to Phase 18):** `examples/divergence_demo.intent` demonstrates a real Rust-vs-JS divergence (large Int multiplication: Rust panics, JS produces a lossy Number). `intentc test --all-targets` correctly flags it as `DIFF` and exits non-zero. The `@target_specific(...)` annotation (ADR 0031) is designed and accepted but implementation deferred to Phase 18 to fit context budget.
+- [x] **17.B:** `examples/divergence_demo.intent` demonstrates a real Rust-vs-JS divergence (large Int multiplication: Rust panics, JS produces a lossy Number). `intentc test --all-targets` correctly flags it as `DIFF` and exits non-zero. The `@target_specific(...)` annotation (ADR 0031) is implemented end-to-end (lexer AT token, parser annotation prefix, AST/IR carry-through, checker target validation + wasm warning + duplicate rejection, runner with `SkipAnnotation` kind distinct from WASM-rejection skip). `examples/target_specific_demo.intent` exercises all four cases (unannotated, rust-only, js-only, rust-or-js). Commit 4dacd6c.
 - [x] **17.C:** every flat example in `examples/*.intent` carries at least one test (19/19). `make validate` runs `intentc test` on every tested example.
 - [x] **17.D:** tests in imported modules and packages auto-discover via the entry file. JS multi-file emission now produces a unified `__intent_tests` registry; JS call sites apply the module's namePrefix when calling local functions. `examples/packages/types_pkg/types.intent` has tests that run via `intentc test examples/packages/app_pkg/main.intent`. ADR 0030 records the visibility decision.
 - [x] **17.F:** `--filter <substring>`, `--list`, `--quiet` flags ship on `intentc test`. CLI handler, runner support, and `FormatList` / `FormatResultsQuiet` helpers all in place.
@@ -178,4 +178,5 @@ The following Phase 17 sections are deferred. Each remains a documented future-w
 ## Approval Record
 
 - 2026-05-30 — Scope locked to 17.B + 17.C + 17.D + 17.F. ADRs 0030 and 0031 written and approved. Execution proceeding.
-- 2026-05-30 — Shipped. 17.C, 17.D, 17.F fully implemented; 17.B partial (demo shipped, annotation deferred). Commits 582c570 (17.F), 5c36404 (17.C), 1f9e554 (17.D), and the final demo + docs commit. 17.A / 17.E / 17.G / 17.H remain deferred per the scope decision.
+- 2026-05-30 — Shipped. 17.C, 17.D, 17.F fully implemented; 17.B partial (demo shipped, annotation deferred). Commits 582c570 (17.F), 5c36404 (17.C), 1f9e554 (17.D), 3c22710 (divergence demo).
+- 2026-05-30 — 17.B closed out. `@target_specific` annotation implemented per ADR 0031 in commit 4dacd6c. 17.A / 17.E / 17.G / 17.H remain deferred per the scope decision.

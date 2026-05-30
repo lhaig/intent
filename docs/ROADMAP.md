@@ -243,10 +243,10 @@ because each feature needs to work across all backends and with the verifier.
 Design lives in `ops/plans/phase-16-testing-framework.md` (Shipped). 10 commits 95c545f..f02bf13.
 
 ### Phase 17: Testing Framework Polish -- SHIPPED (2026-05-30)
+- [x] 17.B: divergence demo + `@target_specific` annotation (ADR 0031) — full pipeline (lexer/parser/AST/checker/IR/runner) with `SkipAnnotation` distinct from WASM-rejection skip
 - [x] 17.C: tests for all 19 flat examples
 - [x] 17.D: cross-package test discovery (ADR 0030)
 - [x] 17.F: `--filter`, `--list`, `--quiet` DX flags
-- [~] 17.B partial: divergence demo shipped; `@target_specific` annotation (ADR 0031) designed but implementation deferred to Phase 18
 - [ ] 17.A / 17.E / 17.G / 17.H: deferred to Phase 18 with documented rationale
 
 Design + execution record: `ops/plans/phase-17-testing-polish.md`.
@@ -254,8 +254,8 @@ Design + execution record: `ops/plans/phase-17-testing-polish.md`.
 ### LSP Server Scoping ADR -- DONE (2026-05-30)
 Scoped in [ADR 0032](decisions/0032-lsp-v1-surface.md). v1 ships the MVP triple — diagnostics (parser, checker, lint, verification status), hover (type + signature + contracts + verification summary), and go-to-definition (same-file + same-package). VS Code first-party extension plus an `intentc lsp` stdio subcommand for other editors. Completion, find-references, rename, code actions, refactorings, formatting-via-LSP, and incremental re-check are deferred to v1.1+. Implementation PRD is the Milestone 8 entry point.
 
-### Phase 17.B Annotation Implementation -- PROPOSED
-Implement the `@target_specific("rust", "js", ...)` annotation per ADR 0031. Design is fully specified; implementation is mechanical from the ADR. Touches lexer, parser, AST, checker, IR, runner.
+### Phase 17.B Annotation Implementation -- DONE (2026-05-30)
+Shipped per ADR 0031 in commit 4dacd6c. Lexer/parser/AST/checker/IR/runner all carry the `@target_specific("rust", ...)` annotation through; new `SkipAnnotation` classification keeps annotation skips distinct from the WASM-rejection skip. `examples/target_specific_demo.intent` demonstrates all four cases.
 
 ### Package Registry Remote-Fetch -- DEFERRED (no user demand)
 Closes the ADR 0027 deferred item. Manifest, semver, cache, and resolver are in place; only the network-fetch step is stubbed. **Deferred until there are real users publishing Intent packages.** No point building a registry no one is going to push to.
