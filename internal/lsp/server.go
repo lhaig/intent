@@ -134,6 +134,11 @@ func (s *Server) dispatch(msg *rpcMessage) {
 			return
 		}
 		s.handleDefinition(msg.ID, msg.Params)
+	case "textDocument/formatting":
+		if !isRequest {
+			return
+		}
+		s.handleFormatting(msg.ID, msg.Params)
 	default:
 		if isRequest {
 			s.t.writeError(msg.ID, errMethodNotFound, fmt.Sprintf("method not found: %s", msg.Method))
@@ -216,8 +221,12 @@ func (s *Server) handleInitialize(id json.RawMessage, params json.RawMessage) {
 				Change:    SyncFull,
 				Save:      &SaveOptions{IncludeText: false},
 			},
-			HoverProvider:      true,
-			DefinitionProvider: true,
+			HoverProvider:              true,
+			DefinitionProvider:         true,
+			DocumentFormattingProvider: true,
+			DocumentSymbolProvider:     true,
+			SignatureHelpProvider:      &SignatureHelpOptions{TriggerCharacters: []string{"(", ","}},
+			CompletionProvider:         &CompletionOptions{TriggerCharacters: nil, ResolveProvider: false},
 		},
 		ServerInfo: &ServerInfo{
 			Name:    "intentc-lsp",

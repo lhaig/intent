@@ -75,9 +75,22 @@ type ServerInfo struct {
 }
 
 type ServerCapabilities struct {
-	TextDocumentSync   *TextDocumentSyncOptions `json:"textDocumentSync,omitempty"`
-	HoverProvider      bool                     `json:"hoverProvider,omitempty"`
-	DefinitionProvider bool                     `json:"definitionProvider,omitempty"`
+	TextDocumentSync           *TextDocumentSyncOptions `json:"textDocumentSync,omitempty"`
+	HoverProvider              bool                     `json:"hoverProvider,omitempty"`
+	DefinitionProvider         bool                     `json:"definitionProvider,omitempty"`
+	DocumentFormattingProvider bool                     `json:"documentFormattingProvider,omitempty"`
+	DocumentSymbolProvider     bool                     `json:"documentSymbolProvider,omitempty"`
+	SignatureHelpProvider      *SignatureHelpOptions    `json:"signatureHelpProvider,omitempty"`
+	CompletionProvider         *CompletionOptions       `json:"completionProvider,omitempty"`
+}
+
+type SignatureHelpOptions struct {
+	TriggerCharacters []string `json:"triggerCharacters,omitempty"`
+}
+
+type CompletionOptions struct {
+	TriggerCharacters []string `json:"triggerCharacters,omitempty"`
+	ResolveProvider   bool     `json:"resolveProvider,omitempty"`
 }
 
 type TextDocumentSyncOptions struct {
