@@ -1,0 +1,77 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Intent",
+  "scopeName": "source.intent",
+  "fileTypes": ["intent"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#annotations" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#constants" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.intent", "match": "//.*$" },
+        { "name": "comment.block.intent", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.intent",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        { "name": "constant.character.escape.intent", "match": "\\\\." },
+        {
+          "name": "meta.interpolation.intent",
+          "begin": "\\{",
+          "end": "\\}"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.float.intent", "match": "\\b[0-9]+\\.[0-9]+\\b" },
+        { "name": "constant.numeric.integer.intent", "match": "\\b[0-9]+\\b" }
+      ]
+    },
+    "annotations": {
+      "patterns": [
+        { "name": "storage.modifier.annotation.intent", "match": "@[a-zA-Z_][a-zA-Z_0-9]*" }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.intent",
+          "match": "\\b(if|else|while|for|in|break|continue|return|match|forall|exists|implies|and|or|not|await|spawn)\\b"
+        },
+        {
+          "name": "keyword.declaration.intent",
+          "match": "\\b(module|version|function|entry|returns|requires|ensures|entity|field|invariant|constructor|method|intent|goal|constraint|guarantee|verified_by|let|mutable|enum|trait|impl|for|import|public|async|extern|from|test|decreases|old|result)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.intent",
+          "match": "\\b(Int|Float|String|Bool|Void|Array|Map|Result|Option|Future|Fn)\\b"
+        },
+        {
+          "name": "support.type.user.intent",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        { "name": "constant.language.boolean.intent", "match": "\\b(true|false)\\b" },
+        { "name": "variable.language.self.intent", "match": "\\bself\\b" }
+      ]
+    }
+  }
+}
