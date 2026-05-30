@@ -18,7 +18,8 @@ import (
 // shutdown must return -32600 (InvalidRequest). We implement these strictly
 // so well-behaved clients see clean errors.
 type Server struct {
-	t *transport
+	t    *transport
+	docs *documentStore
 
 	mu          sync.Mutex
 	initialized bool
@@ -28,7 +29,10 @@ type Server struct {
 
 // NewServer constructs a Server bound to the given reader/writer pair.
 func NewServer(in io.Reader, out io.Writer) *Server {
-	return &Server{t: newTransport(in, out)}
+	return &Server{
+		t:    newTransport(in, out),
+		docs: newDocumentStore(),
+	}
 }
 
 // Run reads messages until EOF or shutdown+exit. Returns nil on clean exit,
@@ -100,12 +104,60 @@ func (s *Server) dispatch(msg *rpcMessage) {
 
 	// Post-initialize, pre-shutdown handlers. Filled in by later 18.x tasks.
 	switch msg.Method {
+	case "textDocument/didOpen":
+		s.handleDidOpen(msg.Params)
+	case "textDocument/didChange":
+		s.handleDidChange(msg.Params)
+	case "textDocument/didSave":
+		s.handleDidSave(msg.Params)
+	case "textDocument/didClose":
+		s.handleDidClose(msg.Params)
 	default:
 		if isRequest {
 			s.t.writeError(msg.ID, errMethodNotFound, fmt.Sprintf("method not found: %s", msg.Method))
 		}
 		// Unknown notifications are silently ignored per JSON-RPC convention.
 	}
+}
+
+func (s *Server) handleDidOpen(params json.RawMessage) {
+	var p DidOpenTextDocumentParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return
+	}
+	s.docs.open(p.TextDocument.URI, p.TextDocument.Version, p.TextDocument.Text)
+}
+
+func (s *Server) handleDidChange(params json.RawMessage) {
+	var p DidChangeTextDocumentParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return
+	}
+	// Full sync: each notification carries the entire document text in the
+	// last content change. Spec says the array may carry multiple entries
+	// for incremental sync; for Full we expect exactly one.
+	if len(p.ContentChanges) == 0 {
+		return
+	}
+	text := p.ContentChanges[len(p.ContentChanges)-1].Text
+	s.docs.update(p.TextDocument.URI, p.TextDocument.Version, text)
+}
+
+func (s *Server) handleDidSave(params json.RawMessage) {
+	var p DidSaveTextDocumentParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return
+	}
+	// 18.4 will hook Z3 verification here. For 18.2 we just acknowledge.
+	_ = p
+}
+
+func (s *Server) handleDidClose(params json.RawMessage) {
+	var p DidCloseTextDocumentParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return
+	}
+	s.docs.close(p.TextDocument.URI)
 }
 
 func (s *Server) handleInitialize(id json.RawMessage, params json.RawMessage) {
