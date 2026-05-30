@@ -40,19 +40,37 @@ func (s *Server) handleDefinition(id json.RawMessage, params json.RawMessage) {
 	ownPath := uriToPath(p.TextDocument.URI)
 	ws := s.workspaces.workspaceForURI(p.TextDocument.URI)
 	siblings := ws.siblingModules(ownPath)
+	scope := newScopeResolver(prog, ownPath)
 
-	hit := resolveAcrossWorkspace(prog, ownPath, name, siblings)
-	if hit == nil {
+	res := resolveAtPosition(prog, scope, text, ownPath, name, line, col, siblings)
+	loc, ok := resolutionToLocation(res)
+	if !ok {
 		s.t.writeResponse(id, nil)
 		return
 	}
-
-	loc := Location{
-		URI: pathToURI(hit.Path),
-		Range: Range{
-			Start: lineColToPosition(hit.Line, hit.Column),
-			End:   lineColToPosition(hit.Line, hit.Column+len(hit.Name)),
-		},
-	}
 	s.t.writeResponse(id, loc)
+}
+
+// resolutionToLocation turns either a top-level decl hit or a local
+// binding into the Location that goto-def sends back.
+func resolutionToLocation(res resolution) (Location, bool) {
+	if res.decl != nil {
+		return Location{
+			URI: pathToURI(res.decl.Path),
+			Range: Range{
+				Start: lineColToPosition(res.decl.Line, res.decl.Column),
+				End:   lineColToPosition(res.decl.Line, res.decl.Column+len(res.decl.Name)),
+			},
+		}, true
+	}
+	if res.local != nil {
+		return Location{
+			URI: pathToURI(res.local.Path),
+			Range: Range{
+				Start: lineColToPosition(res.local.Line, res.local.Column),
+				End:   lineColToPosition(res.local.Line, res.local.Column+len(res.local.Name)),
+			},
+		}, true
+	}
+	return Location{}, false
 }

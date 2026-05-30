@@ -46,9 +46,10 @@ func (s *Server) handleHover(id json.RawMessage, params json.RawMessage) {
 	ownPath := uriToPath(p.TextDocument.URI)
 	ws := s.workspaces.workspaceForURI(p.TextDocument.URI)
 	siblings := ws.siblingModules(ownPath)
+	scope := newScopeResolver(prog, ownPath)
 
-	hit := resolveAcrossWorkspace(prog, ownPath, name, siblings)
-	if hit == nil {
+	res := resolveAtPosition(prog, scope, text, ownPath, name, line, col, siblings)
+	if res.decl == nil && res.local == nil {
 		s.t.writeResponse(id, nil)
 		return
 	}
@@ -56,9 +57,70 @@ func (s *Server) handleHover(id json.RawMessage, params json.RawMessage) {
 	s.t.writeResponse(id, Hover{
 		Contents: MarkupContent{
 			Kind:  "markdown",
-			Value: renderHover(hit),
+			Value: renderHoverResolution(res),
 		},
 	})
+}
+
+// renderHoverResolution dispatches to the existing top-level renderer
+// or to a local-binding renderer depending on which resolution arm hit.
+func renderHoverResolution(res resolution) string {
+	if res.decl != nil {
+		return renderHover(res.decl)
+	}
+	if res.local != nil {
+		return renderLocalHover(res.local)
+	}
+	return ""
+}
+
+func renderLocalHover(l *localRef) string {
+	var b strings.Builder
+	b.WriteString("```intent\n")
+	switch l.Kind {
+	case localLet:
+		b.WriteString("let ")
+		if l.Let.Mutable {
+			b.WriteString("mutable ")
+		}
+		b.WriteString(l.Name)
+		b.WriteString(": ")
+		writeTypeRef(&b, l.Let.Type)
+	case localParam:
+		b.WriteString(l.Name)
+		b.WriteString(": ")
+		writeTypeRef(&b, l.Param.Type)
+	case localSelf:
+		b.WriteString("self: ")
+		if l.Entity != nil {
+			b.WriteString(l.Entity.Name)
+		} else {
+			b.WriteString("?")
+		}
+	case localField:
+		b.WriteString("field ")
+		b.WriteString(l.Name)
+		b.WriteString(": ")
+		writeTypeRef(&b, l.Field.Type)
+		fmt.Fprintf(&b, "\n// on entity %s", l.Entity.Name)
+	case localMethod:
+		fmt.Fprintf(&b, "method %s(", l.Name)
+		writeParams(&b, l.Method.Params)
+		b.WriteString(") returns ")
+		writeTypeRef(&b, l.Method.ReturnType)
+		fmt.Fprintf(&b, "\n// on entity %s", l.Entity.Name)
+	}
+	b.WriteString("\n```")
+
+	// Method contracts: surface requires/ensures the same way we do for
+	// top-level functions.
+	if l.Kind == localMethod && l.Method != nil {
+		if len(l.Method.Requires)+len(l.Method.Ensures) > 0 {
+			b.WriteString("\n\n")
+			writeContractBlock(&b, l.Method.Requires, l.Method.Ensures)
+		}
+	}
+	return b.String()
 }
 
 // renderHover formats a declHit as markdown. The structure for each kind:
