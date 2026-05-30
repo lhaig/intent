@@ -66,7 +66,8 @@ These are the commands that determine whether a change is actually done. Do not 
 | `make test` | After any change touching the compiler pipeline |
 | `make check-examples` | After parser, checker, or IR changes |
 | `make lint-examples` | After linter changes or new lint rule |
-| `make validate` (planned for Phase 16) | Before committing any non-trivial change |
+| `make validate` | Before committing any non-trivial change. Includes `gofmt-check` matching the CI Format Check job exactly. |
+| `make gofmt-check` | Standalone gofmt verification — pre-flight before `git push` if you skipped `make validate`. |
 | `./intentc check <file.intent>` | When debugging a specific example |
 | `./intentc verify <file.intent>` | When changes might affect Z3 contract verification |
 | `./intentc fmt --check <file.intent>` | After grammar or formatter changes |

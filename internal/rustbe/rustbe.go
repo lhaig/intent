@@ -343,11 +343,11 @@ type generator struct {
 	structPrefix    string
 	isEntryFile     bool
 	moduleManglings map[string]string
-	typeOrigins     map[string]string       // entity/enum name -> defining module's struct prefix
+	typeOrigins     map[string]string             // entity/enum name -> defining module's struct prefix
 	allFunctions    map[string]*ir.Function       // all functions across all modules (for cross-module ref lookups)
 	allEntities     map[string]*ir.Entity         // all entities across all modules (for cross-module constructor lookups)
 	allExterns      map[string]*ir.ExternFunction // all extern (FFI) functions across all modules
-	mutatedVars     map[string]bool         // variables assigned to in current function body
+	mutatedVars     map[string]bool               // variables assigned to in current function body
 }
 
 func (g *generator) emit(s string) {
@@ -1579,7 +1579,7 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[strin
 				argStr := g.generateExpr(arg, arrayRefParams)
 				if i < len(ext.Params) && ext.Params[i].Type != nil {
 					tn := ext.Params[i].Type.Name
-					if (tn == "Array" || tn == "Map") {
+					if tn == "Array" || tn == "Map" {
 						if _, ok := arg.(*ir.VarRef); ok {
 							argStr = "&" + argStr
 						}

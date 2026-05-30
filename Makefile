@@ -1,4 +1,4 @@
-.PHONY: build test test-v clean install check-examples lint-examples fmt-check-examples emit-examples test-gen-examples test-examples validate
+.PHONY: build test test-v clean install check-examples lint-examples fmt-check-examples emit-examples test-gen-examples test-examples gofmt-check validate
 
 # Flat examples (single-file). Subdirectory examples (attractor, multi_file, packages, ffi_blake3)
 # are exercised via their own entry points.
@@ -113,7 +113,17 @@ test-examples: build
 		./intentc test $$f || exit 1; \
 	done
 
+# Verify Go source is gofmt-clean. Matches the CI Format Check job exactly
+# so a green local validate predicts a green CI run.
+gofmt-check:
+	@unformatted=$$(gofmt -l .); \
+	if [ -n "$$unformatted" ]; then \
+		echo "gofmt: the following files are not formatted:"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+
 # Full mechanical-truth gate. The single command an agent should run before
 # claiming a non-trivial change is done.
-validate: build test check-examples lint-examples fmt-check-examples test-examples
+validate: gofmt-check build test check-examples lint-examples fmt-check-examples test-examples
 	@echo "validate: OK"
