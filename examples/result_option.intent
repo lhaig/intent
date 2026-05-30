@@ -37,3 +37,41 @@ entry function main() returns Int {
     return 0;
 }
 
+test "safe_divide returns Ok for valid divisor" {
+    let r: Result<Int, String> = safe_divide(10, 2);
+    let v: Int = match r {
+        Ok(x) => x,
+        Err(_) => -1,
+    };
+    assert_eq(v, 5);
+}
+
+test "safe_divide returns Err for zero divisor" {
+    let r: Result<Int, String> = safe_divide(10, 0);
+    let is_err: Bool = match r {
+        Ok(_) => false,
+        Err(_) => true,
+    };
+    assert(is_err);
+}
+
+test "get_element returns Some for in-bounds index" {
+    let nums: Array<Int> = [10, 20, 30];
+    let o: Option<Int> = get_element(nums, 1);
+    let v: Int = match o {
+        Some(x) => x,
+        None => -1,
+    };
+    assert_eq(v, 20);
+}
+
+test "get_element returns None for out-of-bounds index" {
+    let nums: Array<Int> = [10, 20, 30];
+    let o: Option<Int> = get_element(nums, 99);
+    let is_none: Bool = match o {
+        Some(_) => false,
+        None => true,
+    };
+    assert(is_none);
+}
+

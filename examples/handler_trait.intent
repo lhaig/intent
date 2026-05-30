@@ -55,3 +55,15 @@ entry function main() returns Int {
     return 0;
 }
 
+test "StartHandler.execute adds code to context value" {
+    let ctx: Context = Context(10);
+    let mutable h: StartHandler = StartHandler(5);
+    assert_eq(h.execute(ctx), 15);
+}
+
+test "StopHandler.execute multiplies offset by context value" {
+    let ctx: Context = Context(4);
+    let mutable h: StopHandler = StopHandler(3);
+    assert_eq(h.execute(ctx), 12);
+}
+

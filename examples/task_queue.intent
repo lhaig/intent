@@ -236,3 +236,25 @@ intent "Worker completion count is monotonic" {
     verified_by: [Worker.invariant, Worker.finish_job.ensures];
 }
 
+test "new Job is pending and reports its id and priority" {
+    let j: Job = Job(1, 5);
+    assert(j.is_pending());
+    assert_eq(j.get_id(), 1);
+    assert_eq(j.get_priority(), 5);
+}
+
+test "new Worker is idle and has zero completions" {
+    let w: Worker = Worker(7);
+    assert(w.is_idle());
+    assert_eq(w.get_id(), 7);
+    assert_eq(w.get_completed_count(), 0);
+}
+
+test "finish_job increments completed_count by 1" {
+    let mutable w: Worker = Worker(1);
+    w.start_job(100);
+    w.finish_job();
+    assert_eq(w.get_completed_count(), 1);
+    assert(w.is_idle());
+}
+

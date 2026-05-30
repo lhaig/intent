@@ -39,3 +39,24 @@ entry function main() returns Int {
     return 0;
 }
 
+test "rectangle area is width * height" {
+    let r: Shape = Rectangle(3.0, 4.0);
+    assert_close(area(r), 12.0, 0.0001);
+}
+
+test "circle area is pi * r * r" {
+    let c: Shape = Circle(2.0);
+    assert_close(area(c), 12.56636, 0.001);
+}
+
+test "point area is zero" {
+    let p: Shape = Point;
+    assert_close(area(p), 0.0, 0.0001);
+}
+
+test "describe codes the variant" {
+    assert_eq(describe(Circle(1.0)), 1);
+    assert_eq(describe(Rectangle(1.0, 2.0)), 2);
+    assert_eq(describe(Point), 0);
+}
+

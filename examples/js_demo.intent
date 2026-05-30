@@ -47,3 +47,16 @@ entry function main() returns Int {
     return 0;
 }
 
+test "Counter increments and reads back" {
+    let mutable c: Counter = Counter(0);
+    c.increment();
+    c.increment();
+    c.increment();
+    assert_eq(c.get(), 3);
+}
+
+test "add satisfies its contract" {
+    assert_eq(add(5, 3), 8);
+    assert_eq(add(1, 1), 2);
+}
+

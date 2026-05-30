@@ -18,3 +18,13 @@ entry function main() returns Int {
     return 0;
 }
 
+test "apply invokes a 1-arg closure" {
+    let double: Fn(Int) -> Int = |x: Int| -> Int => x * 2;
+    assert_eq(apply(5, double), 10);
+}
+
+test "apply_to_pair invokes a 2-arg closure" {
+    let add: Fn(Int, Int) -> Int = |a: Int, b: Int| -> Int => a + b;
+    assert_eq(apply_to_pair(3, 7, add), 10);
+}
+

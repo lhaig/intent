@@ -49,3 +49,25 @@ entry function main() returns Int {
     return 0;
 }
 
+test "Map set/get round-trips" {
+    let mutable scores: Map<String, Int> = [];
+    scores.set("alice", 100);
+    scores.set("bob", 85);
+    assert_eq(scores.get("alice", 0), 100);
+    assert_eq(scores.get("bob", 0), 85);
+}
+
+test "Map.get returns default for missing key" {
+    let mutable scores: Map<String, Int> = [];
+    scores.set("alice", 100);
+    assert_eq(scores.get("dave", -1), -1);
+}
+
+test "Config wraps a Map and retrieves entries" {
+    let mutable cfg_map: Map<String, String> = [];
+    cfg_map.set("timeout", "30");
+    let cfg: Config = Config(cfg_map);
+    assert_eq(cfg.get_setting("timeout", "default"), "30");
+    assert_eq(cfg.get_setting("missing", "fallback"), "fallback");
+}
+

@@ -43,3 +43,20 @@ entry function main() returns Int {
     return z;
 }
 
+test "abs of negative is positive" {
+    assert_eq(abs(-5), 5);
+    assert_eq(abs(0), 0);
+    assert_eq(abs(5), 5);
+}
+
+test "max returns the larger argument" {
+    assert_eq(max(3, 7), 7);
+    assert_eq(max(10, 4), 10);
+    assert_eq(max(2, 2), 2);
+}
+
+test "increment adds one" {
+    assert_eq(increment(0), 1);
+    assert_eq(increment(99), 100);
+}
+

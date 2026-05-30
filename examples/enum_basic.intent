@@ -37,3 +37,23 @@ entry function main() returns Int {
     return 0;
 }
 
+test "match on unit enum variant" {
+    let s: Status = getStatus();
+    let n: Int = match s {
+        Pending => 0,
+        Running => 1,
+        Complete => 2,
+    };
+    assert_eq(n, 1);
+}
+
+test "match on data-carrying enum variant" {
+    let c: Shape = makeCircle(5.0);
+    let kind: Int = match c {
+        Circle(_) => 0,
+        Rectangle(_, _) => 1,
+        Point => 2,
+    };
+    assert_eq(kind, 0);
+}
+

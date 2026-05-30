@@ -121,3 +121,26 @@ entry function main() returns Int {
     return 0;
 }
 
+test "parse_int recognises 42" {
+    let r: Result<Int, String> = parse_int("42");
+    let v: Int = match r {
+        Ok(x) => x,
+        Err(_) => -1,
+    };
+    assert_eq(v, 42);
+}
+
+test "parse_int rejects junk" {
+    let r: Result<Int, String> = parse_int("not a number");
+    assert(r.is_err());
+}
+
+test "add_parsed sums two parses" {
+    let r: Result<Int, String> = add_parsed("42", "100");
+    let v: Int = match r {
+        Ok(x) => x,
+        Err(_) => -1,
+    };
+    assert_eq(v, 142);
+}
+

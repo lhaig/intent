@@ -91,7 +91,20 @@ TESTED_EXAMPLES := \
 	examples/sorted_check.intent \
 	examples/bank_account.intent \
 	examples/generic_stack.intent \
-	examples/async_demo.intent
+	examples/async_demo.intent \
+	examples/hello.intent \
+	examples/enum_basic.intent \
+	examples/shape_area.intent \
+	examples/result_option.intent \
+	examples/try_operator.intent \
+	examples/error_handling.intent \
+	examples/closure_demo.intent \
+	examples/verify_example.intent \
+	examples/map_demo.intent \
+	examples/handler_trait.intent \
+	examples/task_queue.intent \
+	examples/io_demo.intent \
+	examples/js_demo.intent
 
 # Run `intentc test` over each example that has tests, on the default target.
 test-examples: build
