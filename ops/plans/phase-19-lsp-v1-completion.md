@@ -1,6 +1,6 @@
 # Phase 19: LSP v1 Completion
 
-**Status:** Draft
+**Status:** Shipped (2026-05-30; commits 888f80b..257ccfe)
 **Milestone:** Milestone 8 — Developer Experience (Phase 18 follow-on)
 **Decision:** [ADR 0032](../../docs/decisions/0032-lsp-v1-surface.md) (revised in this phase to expand the v1 surface)
 
@@ -33,20 +33,20 @@ Phase 18 shipped end-to-end; commits and ADR status are locked in. Reopening the
 
 ## Success Criteria
 
-- [ ] `internal/lsp/scope.go` walks AST with a scope stack so hover/goto-def/completion can resolve locals, parameters, and method receivers
-- [ ] Hover works on: function calls (already), method calls, field access, let-bound locals, function parameters, `self` inside methods, entity/enum/trait references in type positions, top-level decls (already)
-- [ ] Go-to-definition works on: function calls (already), method calls, field access, let-bound locals, function parameters, top-level decls (already)
-- [ ] `textDocument/documentSymbol` returns a tree: top-level functions/entities/enums/traits/tests, with entity methods nested under their entity
-- [ ] `textDocument/formatting` runs the `internal/formatter` package and returns a single `TextEdit` replacing the whole document
-- [ ] `textDocument/signatureHelp` returns parameter info when the cursor is inside a function or method call's argument list; active-parameter index tracks which arg is being typed
-- [ ] `textDocument/completion` returns identifier suggestions: top-level decl names + in-scope locals/params + Intent keywords/built-in type names. No member completion (deferred)
-- [ ] VS Code extension activates the new capabilities (auto-discovered from server caps; no extension code change needed)
-- [ ] End-to-end smoke test extended to drive every new method
-- [ ] ADR 0032 revised with a dated "Revised: scope expanded" section listing the additions
-- [ ] `docs/ROADMAP.md` Milestone 8 entry mirrors the expanded surface
-- [ ] `INTENT.md` "Editor support" section updated
-- [ ] `make validate` green
-- [ ] No regressions in any Phase 18 test
+- [x] `internal/lsp/scope.go` walks AST with a scope stack so hover/goto-def/completion can resolve locals, parameters, and method receivers
+- [x] Hover works on: function calls (already), method calls, field access, let-bound locals, function parameters, `self` inside methods, entity/enum/trait references in type positions, top-level decls (already)
+- [x] Go-to-definition works on: function calls (already), method calls, field access, let-bound locals, function parameters, top-level decls (already)
+- [x] `textDocument/documentSymbol` returns a tree: top-level functions/entities/enums/traits/tests, with entity methods nested under their entity
+- [x] `textDocument/formatting` runs the `internal/formatter` package and returns a single `TextEdit` replacing the whole document
+- [x] `textDocument/signatureHelp` returns parameter info when the cursor is inside a function or method call's argument list; active-parameter index tracks which arg is being typed
+- [x] `textDocument/completion` returns identifier suggestions: top-level decl names + in-scope locals/params + Intent keywords/built-in type names. No member completion (deferred)
+- [x] VS Code extension activates the new capabilities (auto-discovered from server caps; no extension code change needed)
+- [x] End-to-end smoke test extended to drive every new method
+- [x] ADR 0032 revised with a dated "Revised: scope expanded" section listing the additions
+- [x] `docs/ROADMAP.md` Milestone 8 entry mirrors the expanded surface
+- [x] `INTENT.md` "Editor support" section updated
+- [x] `make validate` green
+- [x] No regressions in any Phase 18 test
 
 ## Reference
 

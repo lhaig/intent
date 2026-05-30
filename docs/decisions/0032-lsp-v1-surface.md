@@ -1,7 +1,7 @@
 # 0032: LSP v1 Surface
 
 **Date:** 2026-05-30
-**Status:** accepted; implemented in 0a4ca14..4999b06 (Phase 18)
+**Status:** accepted; revised 2026-05-30 (Phase 19 scope expansion); Phase 18 commits 0a4ca14..4999b06, Phase 19 commits 888f80b..257ccfe
 **Phase:** Milestone 8 (Developer Experience)
 
 ## Context
@@ -156,3 +156,27 @@ Milestone 8 in the roadmap (`docs/ROADMAP.md`) is gated on this ADR. The downstr
 - A PRD-per-deferred-feature when each is prioritised: completion, find-references, rename, code actions, formatting-via-LSP.
 - A `protocol.md` reference documenting which LSP requests/notifications the server handles, for users wiring it into non-VS Code editors.
 - An end-to-end smoke test: spawn `intentc lsp`, open a file, edit it, observe diagnostics arrive — pre-commit hook for the LSP package once it lands.
+
+## Revised — 2026-05-30 (Phase 19)
+
+Phase 18 shipped the MVP triple (diagnostics, hover, goto-def) but limited each to a narrow surface — hover and goto-def only resolved top-level declaration names, the outline view was empty, "Format Document" returned "no formatter available," and there was no completion or signature help. Use-testing showed those deferrals made the LSP feel half-built in real code. Phase 19 expands v1 (commits 888f80b..257ccfe).
+
+**Now in v1:**
+
+- **Hover and goto-def** resolve locals, parameters, `self` inside methods/constructors, entity fields, and entity methods, in addition to the Phase 18 top-level decls. Member access like `account.deposit()` and `self.balance` works for single-step receivers.
+- **`textDocument/documentSymbol`** returns the outline tree — top-level functions / entities (with field+constructor+method children) / enums (with variants) / traits (with method signatures) / tests / extern functions.
+- **`textDocument/formatting`** runs `internal/formatter` and returns a single TextEdit replacing the document. Idempotent files produce no edits; unparseable files produce no edits (parse-error diagnostics already cover that case).
+- **`textDocument/signatureHelp`** returns parameter info for the enclosing call. Handles bare functions, extern functions, and single-step method calls (`receiver.method`). Active parameter index tracks comma count.
+- **`textDocument/completion`** returns identifier suggestions: in-scope locals/params + own program's top-level decls + sibling modules' decls + Intent keywords + built-in type names.
+
+**Still out of v1, deferred:**
+
+- Member completion (`.field` / `.method` after `.`) — needs cursor-context receiver-type resolution; lands in v1.2 with chained-receiver hover/goto-def.
+- Find references, rename, code actions, refactorings — each requires its own design pass.
+- Cross-package go-to-definition — same-package only stays in v1.
+- Semantic tokens, inlay hints — polish, not capability.
+- Marketplace publishing — distribution; v1.1.
+- Per-contract Z3 source positions — verify diagnostics still anchor at (1,1); threading positions through `internal/verify` is its own piece.
+- Incremental text sync, multi-byte UTF-16, multi-root workspaces, TCP transport, `didChangeWatchedFiles` — unchanged from the original deferred list.
+
+**Implementation note:** the scope walker in `internal/lsp/scope.go` uses "find enclosing function/method body, then check params + lets before the cursor" rather than a full scope-stack walker. Trade-off documented in the file: lets inside inner blocks remain visible everywhere later in the function, not just within their block. Covers the common case (locals declared at function top, used throughout); v1.1 can tighten this when a real example exposes the limitation.

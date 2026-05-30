@@ -262,7 +262,16 @@ Implemented in commits 0a4ca14..4999b06.
 - Go-to-definition: same-file + same-package via the workspace cache
 - VS Code extension under `editors/vscode/` (.vsix builds via `npm run package`)
 - End-to-end smoke test in `internal/lsp/e2e_test.go`
-- Out of scope for v1: completion, find-references, rename, code actions, refactorings, formatting via LSP, semantic tokens, inlay hints, document/workspace symbols, signature help, incremental re-check, multi-root workspaces, Marketplace publishing, cross-package go-to-definition
+
+### Phase 19: LSP v1 Completion -- SHIPPED (2026-05-30)
+Implemented in commits 888f80b..257ccfe. ADR 0032 revised in-place. Adds the "feels half-built" gaps from Phase 18:
+- Scope walker: hover/goto-def resolve locals, params, `self`, fields, methods (single-step receiver)
+- `textDocument/documentSymbol` for the outline view
+- `textDocument/formatting` runs `internal/formatter`
+- `textDocument/signatureHelp` with active-parameter tracking
+- `textDocument/completion` for identifiers (locals + top-level + sibling modules + keywords + built-in types)
+- Member completion (.field/.method) deferred to v1.2
+- Find-references, rename, code actions, refactorings, semantic tokens, inlay hints, cross-package goto-def, Marketplace publishing — still v1.1+
 
 ### Phase 17.B Annotation Implementation -- DONE (2026-05-30)
 Shipped per ADR 0031 in commit 4dacd6c. Lexer/parser/AST/checker/IR/runner all carry the `@target_specific("rust", ...)` annotation through; new `SkipAnnotation` classification keeps annotation skips distinct from the WASM-rejection skip. `examples/target_specific_demo.intent` demonstrates all four cases.
@@ -275,12 +284,15 @@ Closes the ADR 0027 deferred item. Manifest, semver, cache, and resolver are in 
 ## Milestone 8: Developer Experience
 
 ### LSP Server -- v1 SHIPPED (2026-05-30)
-Scoped in [ADR 0032](decisions/0032-lsp-v1-surface.md); implemented as Phase 18 (commits 0a4ca14..4999b06). v1 surface in production:
+Scoped in [ADR 0032](decisions/0032-lsp-v1-surface.md) (revised in Phase 19); implemented as Phase 18 + Phase 19. v1 surface in production:
 - Diagnostics (parser, checker, lint warnings, Z3 verification status)
-- Hover (resolved types, function signatures, full contracts)
-- Go-to-definition (same-file + same-package)
+- Hover and goto-def (top-level decls, locals, params, self, fields, methods)
+- Document symbols (outline view)
+- Formatting (`textDocument/formatting` via `intentc fmt`)
+- Signature help (active-parameter tracking)
+- Identifier completion (locals + top-level + sibling-package decls + keywords + types)
 - `intentc lsp` stdio subcommand; first-party VS Code extension (`editors/vscode/`)
-- Out of scope (v1.1 follow-ups): completion, find-references, rename, code actions, refactorings, formatting-via-LSP, incremental re-check, semantic tokens, inlay hints, document/workspace symbols, cross-package go-to-definition, Marketplace publishing
+- Out of scope (v1.1+): member completion (.field/.method), find-references, rename, code actions, refactorings, semantic tokens, inlay hints, cross-package go-to-definition, Marketplace publishing, incremental sync, multi-byte UTF-16, per-contract Z3 source positions
 
 ### REPL / Playground
 - Interactive expression evaluation with contract checking

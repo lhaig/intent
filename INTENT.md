@@ -828,12 +828,16 @@ Cross-target divergence (e.g. a test that passes on Rust but fails on JS) is rep
 
 Other editors (Neovim, Helix, Emacs, JetBrains) can wire `intentc lsp` into their LSP clients directly; the protocol is plain LSP 3.17 over stdio.
 
-V1 surfaces (see [ADR 0032](docs/decisions/0032-lsp-v1-surface.md)):
+V1 surfaces (see [ADR 0032](docs/decisions/0032-lsp-v1-surface.md), revised in Phase 19):
 - Diagnostics — parser, checker, lint, Z3 verification (verification runs on save, async)
-- Hover — signature + full requires/ensures + entity fields/invariants
-- Go-to-definition — same-file and same-package
+- Hover — signature + contracts on top-level decls; type info on locals, params, `self`, fields, and methods
+- Go-to-definition — same-file and same-package, including locals, params, methods, fields
+- Document symbols — outline view (top-level decls + entity members + enum variants)
+- Formatting — runs `intentc fmt` via `textDocument/formatting`
+- Signature help — parameter info inside function and single-step method calls
+- Completion — identifier suggestions (locals + top-level decls + sibling-package decls + keywords + built-in types)
 
-Out of scope for v1 (filed as v1.1 follow-ups): completion, find-references, rename, code actions, refactorings, formatting via LSP, semantic tokens, inlay hints, cross-package go-to-definition.
+Out of scope for v1 (filed as v1.1+ follow-ups): member completion (`.field`/`.method` after `.`), find-references, rename, code actions, refactorings, semantic tokens, inlay hints, cross-package go-to-definition, Marketplace publishing.
 
 ## Operators
 

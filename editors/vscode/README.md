@@ -4,8 +4,12 @@ Language support for the Intent contract-based programming language. Provides:
 
 - Syntax highlighting for `.intent` files (keywords, types, annotations, strings, comments)
 - Live diagnostics from the Intent compiler (parser, checker, lint, Z3 verification)
-- Hover (types, signatures, contracts)
-- Go-to-definition (same-file and same-package)
+- Hover on top-level decls, locals, params, `self`, fields, and methods (signature + contracts + type info)
+- Go-to-definition: same-file and same-package, including locals/params/methods/fields
+- Document symbols (outline view) with entity members and enum variants nested under their parents
+- Format Document via `intentc fmt`
+- Signature help with active-parameter tracking
+- Identifier completion (in-scope locals + top-level decls + sibling-package decls + keywords + built-in types)
 
 Powered by the `intentc lsp` server (see [ADR 0032](../../docs/decisions/0032-lsp-v1-surface.md)).
 
@@ -40,11 +44,11 @@ Marketplace publishing is planned for v1.1; for v1 install from a locally-built 
 The extension can't locate the compiler. Install it, or set `intent.binaryPath` to its location.
 
 **Hover or go-to-definition does nothing**
-Place the cursor directly on an identifier (function call, entity name, etc.). V1 doesn't resolve methods, locals, or cross-package symbols — see the [LSP PRD](../../ops/plans/phase-18-lsp-server.md) for the v1 surface.
+Place the cursor directly on an identifier (function call, entity name, local, parameter, field, method, etc.). V1 resolves single-step receivers (`account.deposit()`, `self.balance`) but not chains (`a.b.c.foo()`). Cross-package go-to-definition lands a v1.1.
 
 **Verification diagnostics absent**
 Install `z3` and ensure it's on `PATH`. Save the file to trigger verification (Z3 only runs on save).
 
 ## V1 scope
 
-See ADR 0032. Out of scope for v1: completion, find-references, rename, code actions, refactorings, formatting via LSP, semantic tokens, inlay hints, document/workspace symbols, signature help.
+See [ADR 0032](../../docs/decisions/0032-lsp-v1-surface.md) (revised in Phase 19). Out of scope for v1: member completion (`.field`/`.method` after `.`), find-references, rename, code actions, refactorings, semantic tokens, inlay hints, cross-package go-to-definition, Marketplace publishing, multi-root workspaces.
