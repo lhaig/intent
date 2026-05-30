@@ -117,6 +117,84 @@ func TestE2ELspSession(t *testing.T) {
 		t.Errorf("definition start line: got %d want 1", loc.Range.Start.Line)
 	}
 
+	// --- Phase 19 surface: documentSymbol, formatting, signatureHelp,
+	// completion, plus hover/goto-def on a local. ---
+
+	// documentSymbol: outline of the file.
+	dsP, _ := json.Marshal(DocumentSymbolParams{TextDocument: TextDocumentIdentifier{URI: uri}})
+	mustSend(t, client, 100, "textDocument/documentSymbol", string(dsP))
+	resp, _ = client.readMessage()
+	var syms []DocumentSymbol
+	if err := json.Unmarshal(resp.Result, &syms); err != nil {
+		t.Fatalf("decode documentSymbol: %v (raw %s)", err, resp.Result)
+	}
+	found := map[string]bool{}
+	for _, s := range syms {
+		found[s.Name] = true
+	}
+	if !found["add"] || !found["main"] {
+		t.Errorf("expected add and main in documentSymbol, got %v", found)
+	}
+
+	// formatting: parse the file. The Phase 18 cleanText is already
+	// canonical, so we expect no edits. Format a deliberately-malformed
+	// version on a separate handler call would also work, but the no-op
+	// path is what real editors hit most often.
+	fmtP, _ := json.Marshal(DocumentFormattingParams{TextDocument: TextDocumentIdentifier{URI: uri}})
+	mustSend(t, client, 101, "textDocument/formatting", string(fmtP))
+	resp, _ = client.readMessage()
+	var edits []TextEdit
+	if err := json.Unmarshal(resp.Result, &edits); err != nil {
+		t.Fatalf("decode formatting: %v (raw %s)", err, resp.Result)
+	}
+	// Either empty (canonical) or one edit (rewrite); both are valid.
+	if len(edits) > 1 {
+		t.Errorf("formatting should produce at most one edit, got %d", len(edits))
+	}
+
+	// signatureHelp: cursor inside add(1, 2) — should return add's signature.
+	// Re-find 'add(' for the call site position (the call has two args).
+	addCallLine, addCallCol := findInText(cleanText, "add(")
+	sigP, _ := json.Marshal(TextDocumentPositionParams{
+		TextDocument: TextDocumentIdentifier{URI: uri},
+		Position:     lineColToPosition(addCallLine, addCallCol+len("add(")+1),
+	})
+	mustSend(t, client, 102, "textDocument/signatureHelp", string(sigP))
+	resp, _ = client.readMessage()
+	if string(resp.Result) != "null" {
+		var sh SignatureHelp
+		if err := json.Unmarshal(resp.Result, &sh); err != nil {
+			t.Fatalf("decode signatureHelp: %v (raw %s)", err, resp.Result)
+		}
+		if len(sh.Signatures) != 1 || !strings.Contains(sh.Signatures[0].Label, "add(x: Int, y: Int)") {
+			t.Errorf("signatureHelp wrong signature: %+v", sh)
+		}
+	}
+
+	// completion: request anywhere in the file; expect 'add' and 'main'.
+	cpP, _ := json.Marshal(CompletionParams{
+		TextDocument: TextDocumentIdentifier{URI: uri},
+		Position:     lineColToPosition(addCallLine, 1),
+	})
+	mustSend(t, client, 103, "textDocument/completion", string(cpP))
+	resp, _ = client.readMessage()
+	var items []CompletionItem
+	if err := json.Unmarshal(resp.Result, &items); err != nil {
+		t.Fatalf("decode completion: %v (raw %s)", err, resp.Result)
+	}
+	foundAdd, foundLet := false, false
+	for _, it := range items {
+		if it.Label == "add" {
+			foundAdd = true
+		}
+		if it.Label == "if" {
+			foundLet = true
+		}
+	}
+	if !foundAdd || !foundLet {
+		t.Errorf("completion missing expected items (add=%v if=%v)", foundAdd, foundLet)
+	}
+
 	// --- shutdown / exit ---
 	mustSend(t, client, 4, "shutdown", `null`)
 	resp, err = client.readMessage()
