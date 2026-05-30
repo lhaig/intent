@@ -182,6 +182,79 @@ type Diagnostic struct {
 	Message  string             `json:"message"`
 }
 
+// SymbolKind per LSP spec — only the values v1 emits are listed.
+type SymbolKind int
+
+const (
+	SymbolFile        SymbolKind = 1
+	SymbolModule      SymbolKind = 2
+	SymbolNamespace   SymbolKind = 3
+	SymbolPackage     SymbolKind = 4
+	SymbolClass       SymbolKind = 5
+	SymbolMethod      SymbolKind = 6
+	SymbolProperty    SymbolKind = 7
+	SymbolField       SymbolKind = 8
+	SymbolConstructor SymbolKind = 9
+	SymbolEnum        SymbolKind = 10
+	SymbolInterface   SymbolKind = 11
+	SymbolFunction    SymbolKind = 12
+	SymbolVariable    SymbolKind = 13
+	SymbolEnumMember  SymbolKind = 22
+	SymbolStruct      SymbolKind = 23
+)
+
+// DocumentSymbol is the LSP outline-tree entry for textDocument/documentSymbol.
+type DocumentSymbol struct {
+	Name           string           `json:"name"`
+	Detail         string           `json:"detail,omitempty"`
+	Kind           SymbolKind       `json:"kind"`
+	Range          Range            `json:"range"`
+	SelectionRange Range            `json:"selectionRange"`
+	Children       []DocumentSymbol `json:"children,omitempty"`
+}
+
+// SignatureHelp is the response for textDocument/signatureHelp.
+type SignatureHelp struct {
+	Signatures      []SignatureInformation `json:"signatures"`
+	ActiveSignature int                    `json:"activeSignature"`
+	ActiveParameter int                    `json:"activeParameter"`
+}
+
+type SignatureInformation struct {
+	Label      string                 `json:"label"`
+	Parameters []ParameterInformation `json:"parameters,omitempty"`
+}
+
+type ParameterInformation struct {
+	Label string `json:"label"`
+}
+
+// CompletionItem is a single completion suggestion.
+type CompletionItem struct {
+	Label  string             `json:"label"`
+	Kind   CompletionItemKind `json:"kind,omitempty"`
+	Detail string             `json:"detail,omitempty"`
+}
+
+type CompletionItemKind int
+
+const (
+	CompletionText        CompletionItemKind = 1
+	CompletionMethod      CompletionItemKind = 2
+	CompletionFunction    CompletionItemKind = 3
+	CompletionConstructor CompletionItemKind = 4
+	CompletionField       CompletionItemKind = 5
+	CompletionVariable    CompletionItemKind = 6
+	CompletionClass       CompletionItemKind = 7
+	CompletionInterface   CompletionItemKind = 8
+	CompletionModule      CompletionItemKind = 9
+	CompletionProperty    CompletionItemKind = 10
+	CompletionEnum        CompletionItemKind = 13
+	CompletionKeyword     CompletionItemKind = 14
+	CompletionStruct      CompletionItemKind = 22
+	CompletionTypeParam   CompletionItemKind = 25
+)
+
 // Hover response (markdown).
 type Hover struct {
 	Contents MarkupContent `json:"contents"`
