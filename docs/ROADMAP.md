@@ -251,8 +251,8 @@ Design lives in `ops/plans/phase-16-testing-framework.md` (Shipped). 10 commits 
 
 Design + execution record: `ops/plans/phase-17-testing-polish.md`.
 
-### LSP Server Scoping ADR -- NEXT
-Milestone 8 starts here. Write an ADR proposing the LSP surface (which features ship in v1, what stays out, what the editor extension model is) before any implementation. Highest leverage next move: end users currently have zero editor support.
+### LSP Server Scoping ADR -- DONE (2026-05-30)
+Scoped in [ADR 0032](decisions/0032-lsp-v1-surface.md). v1 ships the MVP triple — diagnostics (parser, checker, lint, verification status), hover (type + signature + contracts + verification summary), and go-to-definition (same-file + same-package). VS Code first-party extension plus an `intentc lsp` stdio subcommand for other editors. Completion, find-references, rename, code actions, refactorings, formatting-via-LSP, and incremental re-check are deferred to v1.1+. Implementation PRD is the Milestone 8 entry point.
 
 ### Phase 17.B Annotation Implementation -- PROPOSED
 Implement the `@target_specific("rust", "js", ...)` annotation per ADR 0031. Design is fully specified; implementation is mechanical from the ADR. Touches lexer, parser, AST, checker, IR, runner.
@@ -265,10 +265,12 @@ Closes the ADR 0027 deferred item. Manifest, semver, cache, and resolver are in 
 ## Milestone 8: Developer Experience
 
 ### LSP Server
-- Diagnostics (parse errors, type errors, lint warnings)
-- Go-to-definition for functions, entities, methods, fields
-- Hover information (types, contracts, verification status)
-- Editor integration (VS Code extension)
+Scope locked in [ADR 0032](decisions/0032-lsp-v1-surface.md). v1 surface:
+- Diagnostics (parser, checker, lint warnings, Z3 verification status)
+- Hover (resolved types, function signatures, full contracts, verification summary)
+- Go-to-definition (same-file + same-package; cross-package deferred to v1.1)
+- `intentc lsp` stdio subcommand; first-party VS Code extension (`editors/vscode/`)
+- Out of scope for v1: completion, find-references, rename, code actions, refactorings, formatting-via-LSP, incremental re-check, semantic tokens, inlay hints, document/workspace symbols
 
 ### REPL / Playground
 - Interactive expression evaluation with contract checking
