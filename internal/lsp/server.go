@@ -124,6 +124,11 @@ func (s *Server) dispatch(msg *rpcMessage) {
 		s.handleDidSave(msg.Params)
 	case "textDocument/didClose":
 		s.handleDidClose(msg.Params)
+	case "textDocument/hover":
+		if !isRequest {
+			return
+		}
+		s.handleHover(msg.ID, msg.Params)
 	default:
 		if isRequest {
 			s.t.writeError(msg.ID, errMethodNotFound, fmt.Sprintf("method not found: %s", msg.Method))
