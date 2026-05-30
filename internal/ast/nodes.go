@@ -105,18 +105,32 @@ type ExternFunctionDecl struct {
 func (f *ExternFunctionDecl) Pos() (int, int) { return f.Line, f.Column }
 
 // TestDecl represents an in-language test declaration.
-// See ADR 0029 / phase-16. Syntax: [async] test "name" { ... statements ... }
+// See ADR 0029 / phase-16. Syntax: { annotation } [async] test "name" { ... statements ... }
 // Tests are top-level declarations, peer of FunctionDecl. They are not callable
 // from source code and do not cross module boundaries.
+// Annotations (ADR 0031): @target_specific("rust", ...) before `test`.
 type TestDecl struct {
-	Name    string // contents of the STRING_LIT after `test`
-	IsAsync bool
-	Body    *Block
-	Line    int
-	Column  int
+	Name        string // contents of the STRING_LIT after `test`
+	IsAsync     bool
+	Annotations []*TestAnnotation // ADR 0031: prefix annotations like @target_specific("rust")
+	Body        *Block
+	Line        int
+	Column      int
 }
 
 func (t *TestDecl) Pos() (int, int) { return t.Line, t.Column }
+
+// TestAnnotation represents a single @name("arg", ...) annotation on a test
+// declaration. Only `target_specific` is recognised in v1 (ADR 0031); the parser
+// rejects other names. Args are string-literal contents (quotes stripped).
+type TestAnnotation struct {
+	Name   string
+	Args   []string
+	Line   int
+	Column int
+}
+
+func (a *TestAnnotation) Pos() (int, int) { return a.Line, a.Column }
 
 // Param represents a function parameter
 type Param struct {

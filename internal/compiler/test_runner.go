@@ -17,15 +17,31 @@ import (
 )
 
 // TestResult is the per-test, per-target outcome from `intentc test`.
+//
+// Skipped is true when the test did not execute on this target. Two skip
+// reasons exist; SkipKind disambiguates them. The CLI report uses Error as
+// the user-facing reason text.
 type TestResult struct {
-	Name    string
-	Target  string
-	Passed  bool
-	Skipped bool   // true when the target rejects the program (e.g. WASM)
-	Listed  bool   // true when produced by --list rather than a real run
-	Output  string // any stdout/stderr captured from the test
-	Error   string // failure message, empty on pass
+	Name     string
+	Target   string
+	Passed   bool
+	Skipped  bool     // true when the test did not execute on this target
+	SkipKind SkipKind // why the test was skipped (only meaningful when Skipped=true)
+	Listed   bool     // true when produced by --list rather than a real run
+	Output   string   // any stdout/stderr captured from the test
+	Error    string   // failure message (or skip reason text), empty on plain pass
 }
+
+// SkipKind classifies why a test was skipped on a target. ADR 0031 distinguishes
+// the WASM-rejection skip (target-level limitation; phase 16 task 16.6) from
+// the @target_specific annotation skip (user opt-out for a specific target).
+type SkipKind int
+
+const (
+	SkipNone       SkipKind = iota // not skipped
+	SkipWASMReject                 // target rejects all tests (wasm)
+	SkipAnnotation                 // @target_specific excludes this target
+)
 
 // TestRunOptions controls the runner.
 //
@@ -112,10 +128,16 @@ func RunTests(filePath string, opts TestRunOptions) ([]TestResult, error) {
 		mod = ir.Lower(astProg, checkResult)
 	}
 
-	// Collect declared test names so unused targets can still report skips.
-	declared := collectTestNames(mod, prog)
-	if len(declared) == 0 {
+	// Collect declared tests (with annotations) so per-target filtering can
+	// happen below. Names are extracted in declaration order for stable
+	// reporting.
+	declaredTests := collectTests(mod, prog)
+	if len(declaredTests) == 0 {
 		return nil, fmt.Errorf("no tests found in %s", filePath)
+	}
+	declared := make([]string, 0, len(declaredTests))
+	for _, t := range declaredTests {
+		declared = append(declared, t.Name)
 	}
 
 	// Phase 17 / 17.F: --list short-circuits execution.
@@ -146,28 +168,57 @@ func RunTests(filePath string, opts TestRunOptions) ([]TestResult, error) {
 		}
 	}
 
+	// ADR 0031: in multi-target mode (--all-targets or explicit multi-target),
+	// tests excluded by @target_specific show up as SKIP rows so the user can
+	// see they were intentionally omitted. In single-target mode the user has
+	// explicitly chosen one target; excluded tests are silently dropped.
+	multiTarget := len(opts.Targets) > 1
+
 	var results []TestResult
 	for _, target := range opts.Targets {
 		switch target {
-		case "rust":
-			res, err := runRustTests(mod, prog, declared)
-			if err != nil {
-				return nil, fmt.Errorf("rust target: %w", err)
+		case "rust", "js":
+			runnableTests, annotationSkipped := partitionTestsForTarget(declaredTests, target)
+			runnableNames := namesOf(runnableTests)
+			filteredMod, filteredProg := filterForTarget(mod, prog, target)
+			var (
+				res []TestResult
+				err error
+			)
+			if len(runnableNames) > 0 {
+				if target == "rust" {
+					res, err = runRustTests(filteredMod, filteredProg, runnableNames)
+				} else {
+					res, err = runJSTests(filteredMod, filteredProg, runnableNames)
+				}
+				if err != nil {
+					return nil, fmt.Errorf("%s target: %w", target, err)
+				}
 			}
 			results = append(results, res...)
-		case "js":
-			res, err := runJSTests(mod, prog, declared)
-			if err != nil {
-				return nil, fmt.Errorf("js target: %w", err)
+			if multiTarget {
+				for _, t := range annotationSkipped {
+					results = append(results, TestResult{
+						Name:     t.Name,
+						Target:   target,
+						Skipped:  true,
+						SkipKind: SkipAnnotation,
+						Error:    annotationSkipReason(t, target),
+					})
+				}
 			}
-			results = append(results, res...)
 		case "wasm":
-			for _, n := range declared {
+			// Phase 16 task 16.6: WASM rejects all test declarations as a
+			// target-level limitation. The annotation surface (ADR 0031) does
+			// not change that — a @target_specific("rust") test is still
+			// reported as a wasm-rejection skip on the wasm row.
+			for _, t := range declaredTests {
 				results = append(results, TestResult{
-					Name:    n,
-					Target:  "wasm",
-					Skipped: true,
-					Error:   "tests are not supported on the wasm target (phase 16 / ADR 0029)",
+					Name:     t.Name,
+					Target:   "wasm",
+					Skipped:  true,
+					SkipKind: SkipWASMReject,
+					Error:    "tests are not supported on the wasm target (phase 16 / ADR 0029)",
 				})
 			}
 		default:
@@ -248,24 +299,84 @@ func FormatResultsQuiet(results []TestResult) string {
 	return fmt.Sprintf("%d passed, %d failed, %d diverged, %d skipped\n", passed, failed, diverged, skipped)
 }
 
-// collectTestNames returns the declared test names from either a single Module
-// or a multi-file Program (whichever is non-nil). Order matches declaration.
-func collectTestNames(mod *ir.Module, prog *ir.Program) []string {
-	var names []string
+// collectTests returns the declared tests (with annotations) from either a
+// single Module or a multi-file Program (whichever is non-nil). Order matches
+// declaration. Used by RunTests so per-target filtering (ADR 0031) can see
+// annotations without re-parsing.
+func collectTests(mod *ir.Module, prog *ir.Program) []*ir.Test {
+	var tests []*ir.Test
 	if mod != nil {
-		for _, t := range mod.Tests {
-			names = append(names, t.Name)
-		}
-		return names
+		return append(tests, mod.Tests...)
 	}
 	if prog != nil {
 		for _, m := range prog.Modules {
-			for _, t := range m.Tests {
-				names = append(names, t.Name)
-			}
+			tests = append(tests, m.Tests...)
 		}
 	}
-	return names
+	return tests
+}
+
+// partitionTestsForTarget splits declared tests into those that should run on
+// the given target and those that are excluded by an @target_specific
+// annotation (ADR 0031). The relative order of each subset is preserved.
+func partitionTestsForTarget(tests []*ir.Test, target string) (runnable []*ir.Test, skipped []*ir.Test) {
+	for _, t := range tests {
+		if t.RunsOnTarget(target) {
+			runnable = append(runnable, t)
+		} else {
+			skipped = append(skipped, t)
+		}
+	}
+	return
+}
+
+func namesOf(tests []*ir.Test) []string {
+	out := make([]string, len(tests))
+	for i, t := range tests {
+		out[i] = t.Name
+	}
+	return out
+}
+
+// filterForTarget returns shallow copies of mod and prog where each module's
+// Tests slice contains only tests that run on the given target. Exactly one of
+// mod/prog is non-nil at call time, mirroring the convention in RunTests.
+func filterForTarget(mod *ir.Module, prog *ir.Program, target string) (*ir.Module, *ir.Program) {
+	if mod != nil {
+		return filterModuleForTarget(mod, target), nil
+	}
+	if prog != nil {
+		out := &ir.Program{Modules: make([]*ir.Module, len(prog.Modules))}
+		for i, m := range prog.Modules {
+			out.Modules[i] = filterModuleForTarget(m, target)
+		}
+		return nil, out
+	}
+	return nil, nil
+}
+
+func filterModuleForTarget(mod *ir.Module, target string) *ir.Module {
+	cp := *mod
+	cp.Tests = cp.Tests[:0:0]
+	for _, t := range mod.Tests {
+		if t.RunsOnTarget(target) {
+			cp.Tests = append(cp.Tests, t)
+		}
+	}
+	return &cp
+}
+
+// annotationSkipReason formats the user-facing reason string for an
+// annotation-driven skip. The format matches ADR 0031's example:
+//
+//	@target_specific("rust", "js") — skipped on wasm
+func annotationSkipReason(t *ir.Test, target string) string {
+	targets := t.TargetSpecificTargets()
+	quoted := make([]string, len(targets))
+	for i, a := range targets {
+		quoted[i] = fmt.Sprintf("%q", a)
+	}
+	return fmt.Sprintf("@target_specific(%s) — skipped on %s", strings.Join(quoted, ", "), target)
 }
 
 // runRustTests writes a temp cargo project, runs `cargo test`, and parses

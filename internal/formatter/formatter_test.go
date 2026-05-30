@@ -877,3 +877,29 @@ entry function main() returns Int { return 0; }
 		t.Errorf("formatter not idempotent on test decl:\nfirst:\n%s\nsecond:\n%s", once, twice)
 	}
 }
+
+// ADR 0031: formatter must preserve @target_specific annotations and emit them
+// on their own line before the test header.
+func TestFormatAnnotatedTest(t *testing.T) {
+	src := `module test version "1.0";
+
+@target_specific("rust", "js")
+test "annotated" {
+    let x: Int = 1;
+}
+
+entry function main() returns Int { return 0; }
+`
+	got := formatSource(t, src)
+	if !strings.Contains(got, `@target_specific("rust", "js")`) {
+		t.Errorf("expected annotation preserved, got:\n%s", got)
+	}
+	if !strings.Contains(got, `test "annotated" {`) {
+		t.Errorf("expected test header preserved, got:\n%s", got)
+	}
+	// Idempotency
+	twice := formatSource(t, got)
+	if got != twice {
+		t.Errorf("formatter not idempotent on annotated test:\nfirst:\n%s\nsecond:\n%s", got, twice)
+	}
+}

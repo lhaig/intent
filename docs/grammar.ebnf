@@ -103,8 +103,13 @@ extern_function_decl = "extern" , "function" , identifier ,
 
 (* Phase 16 / ADR 0029: in-language test declaration. No params, no return type.
    Body may call any function in the module/imports, including private ones.
-   Tests cannot be 'public' (they don't cross module boundaries). *)
-test_decl = [ "async" ] , "test" , string_literal , block ;
+   Tests cannot be 'public' (they don't cross module boundaries).
+   ADR 0031: @target_specific("rust", ...) annotations may prefix the test. *)
+test_decl = { test_annotation } , [ "async" ] , "test" , string_literal , block ;
+
+test_annotation = "@" , identifier , "(" , string_literal , { "," , string_literal } , ")" ;
+(* In v1, only @target_specific(...) is recognised. Other names are rejected
+   at parse time. Args are string literals naming targets: "rust", "js", "wasm". *)
 
 type_param_list = "<" , type_param , { "," , type_param } , ">" ;
 

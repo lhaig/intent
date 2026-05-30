@@ -111,7 +111,23 @@ func (f *formatter) formatProgram(prog *ast.Program) {
 }
 
 // formatTestDecl formats `[async] test "name" { body }` in canonical form.
+// ADR 0031: annotations like @target_specific("rust", "js") are emitted on
+// their own line before the test header, one annotation per line.
 func (f *formatter) formatTestDecl(t *ast.TestDecl) {
+	for _, ann := range t.Annotations {
+		var b strings.Builder
+		b.WriteByte('@')
+		b.WriteString(ann.Name)
+		b.WriteByte('(')
+		for i, a := range ann.Args {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(fmt.Sprintf("%q", a))
+		}
+		b.WriteByte(')')
+		f.emitLine(b.String())
+	}
 	prefix := "test"
 	if t.IsAsync {
 		prefix = "async test"

@@ -506,7 +506,6 @@ func TestNextToken_IllegalCharacters(t *testing.T) {
 		input    string
 		expected byte
 	}{
-		{"@", '@'},
 		{"#", '#'},
 		{"$", '$'},
 		{"&", '&'},
@@ -523,6 +522,22 @@ func TestNextToken_IllegalCharacters(t *testing.T) {
 				t.Errorf("expected literal %q, got %q", string(tt.expected), tok.Literal)
 			}
 		})
+	}
+}
+
+func TestNextToken_AtToken(t *testing.T) {
+	// ADR 0031: `@` is a real token for test annotations.
+	l := New("@target_specific")
+	tok := l.NextToken()
+	if tok.Type != AT {
+		t.Errorf("expected AT, got %q", tok.Type)
+	}
+	if tok.Literal != "@" {
+		t.Errorf("expected literal %q, got %q", "@", tok.Literal)
+	}
+	tok = l.NextToken()
+	if tok.Type != IDENT || tok.Literal != "target_specific" {
+		t.Errorf("expected IDENT(target_specific) after @, got %q(%q)", tok.Type, tok.Literal)
 	}
 }
 

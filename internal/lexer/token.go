@@ -106,6 +106,7 @@ const (
 	DOTDOT    // ..
 	QUESTION  // ?
 	PIPE      // |
+	AT        // @ (ADR 0031: test annotation prefix)
 )
 
 // Token represents a lexical token
@@ -300,6 +301,8 @@ func (t TokenType) String() string {
 		return "QUESTION"
 	case PIPE:
 		return "PIPE"
+	case AT:
+		return "AT"
 	default:
 		return fmt.Sprintf("TokenType(%d)", t)
 	}

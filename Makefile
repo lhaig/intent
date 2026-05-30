@@ -21,7 +21,8 @@ FLAT_EXAMPLES := \
 	examples/verify_example.intent \
 	examples/closure_demo.intent \
 	examples/generic_stack.intent \
-	examples/async_demo.intent
+	examples/async_demo.intent \
+	examples/target_specific_demo.intent
 
 # Build the intentc compiler
 build:
@@ -104,7 +105,8 @@ TESTED_EXAMPLES := \
 	examples/handler_trait.intent \
 	examples/task_queue.intent \
 	examples/io_demo.intent \
-	examples/js_demo.intent
+	examples/js_demo.intent \
+	examples/target_specific_demo.intent
 
 # Run `intentc test` over each example that has tests, on the default target.
 test-examples: build

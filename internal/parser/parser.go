@@ -44,8 +44,24 @@ func (p *Parser) Parse() *ast.Program {
 			isPublic = true
 		}
 
+		// ADR 0031: test annotations like `@target_specific("rust")` are
+		// allowed before [async] test. They cannot appear before any other
+		// top-level declaration (validated in parseTestAnnotations by what
+		// follows the last annotation).
+		var annotations []*ast.TestAnnotation
+		if p.check(lexer.AT) {
+			if isPublic {
+				p.diags.Errorf(p.current().Line, p.current().Column,
+					"'public' cannot be applied to test declarations")
+			}
+			annotations = p.parseTestAnnotations()
+		}
+
 		switch p.current().Type {
 		case lexer.ENTRY:
+			if len(annotations) > 0 {
+				p.rejectAnnotationsOnNonTest(annotations, "function")
+			}
 			fn := p.parseFunctionDecl()
 			fn.IsPublic = isPublic
 			prog.Functions = append(prog.Functions, fn)
@@ -59,13 +75,21 @@ func (p *Parser) Parse() *ast.Program {
 					p.diags.Errorf(p.current().Line, p.current().Column,
 						"'public' cannot be applied to test declarations")
 				}
-				prog.Tests = append(prog.Tests, p.parseTestDecl())
+				td := p.parseTestDecl()
+				td.Annotations = annotations
+				prog.Tests = append(prog.Tests, td)
 			} else {
+				if len(annotations) > 0 {
+					p.rejectAnnotationsOnNonTest(annotations, "function")
+				}
 				fn := p.parseFunctionDecl()
 				fn.IsPublic = isPublic
 				prog.Functions = append(prog.Functions, fn)
 			}
 		case lexer.FUNCTION:
+			if len(annotations) > 0 {
+				p.rejectAnnotationsOnNonTest(annotations, "function")
+			}
 			fn := p.parseFunctionDecl()
 			fn.IsPublic = isPublic
 			prog.Functions = append(prog.Functions, fn)
@@ -73,6 +97,9 @@ func (p *Parser) Parse() *ast.Program {
 			if isPublic {
 				p.diags.Errorf(p.current().Line, p.current().Column,
 					"'public' cannot be applied to extern function declarations")
+			}
+			if len(annotations) > 0 {
+				p.rejectAnnotationsOnNonTest(annotations, "extern function")
 			}
 			prog.ExternFunctions = append(prog.ExternFunctions, p.parseExternFunctionDecl())
 		case lexer.IDENT:
@@ -83,8 +110,13 @@ func (p *Parser) Parse() *ast.Program {
 					p.diags.Errorf(p.current().Line, p.current().Column,
 						"'public' cannot be applied to test declarations")
 				}
-				prog.Tests = append(prog.Tests, p.parseTestDecl())
+				td := p.parseTestDecl()
+				td.Annotations = annotations
+				prog.Tests = append(prog.Tests, td)
 			} else {
+				if len(annotations) > 0 {
+					p.rejectAnnotationsOnNonTest(annotations, "identifier "+p.current().Literal)
+				}
 				p.diags.Errorf(p.current().Line, p.current().Column,
 					"unexpected identifier %q at top level (expected function, entity, enum, trait, impl, intent, extern, or test)", p.current().Literal)
 				startPos := p.pos
@@ -94,14 +126,23 @@ func (p *Parser) Parse() *ast.Program {
 				}
 			}
 		case lexer.ENTITY:
+			if len(annotations) > 0 {
+				p.rejectAnnotationsOnNonTest(annotations, "entity")
+			}
 			ent := p.parseEntityDecl()
 			ent.IsPublic = isPublic
 			prog.Entities = append(prog.Entities, ent)
 		case lexer.ENUM:
+			if len(annotations) > 0 {
+				p.rejectAnnotationsOnNonTest(annotations, "enum")
+			}
 			enum := p.parseEnumDecl()
 			enum.IsPublic = isPublic
 			prog.Enums = append(prog.Enums, enum)
 		case lexer.TRAIT:
+			if len(annotations) > 0 {
+				p.rejectAnnotationsOnNonTest(annotations, "trait")
+			}
 			trait := p.parseTraitDecl()
 			trait.IsPublic = isPublic
 			prog.Traits = append(prog.Traits, trait)
@@ -110,14 +151,23 @@ func (p *Parser) Parse() *ast.Program {
 				p.diags.Errorf(p.current().Line, p.current().Column,
 					"'public' cannot be applied to impl blocks")
 			}
+			if len(annotations) > 0 {
+				p.rejectAnnotationsOnNonTest(annotations, "impl block")
+			}
 			prog.ImplBlocks = append(prog.ImplBlocks, p.parseImplBlock())
 		case lexer.INTENT:
 			if isPublic {
 				p.diags.Errorf(p.current().Line, p.current().Column,
 					"'public' cannot be applied to intent declarations")
 			}
+			if len(annotations) > 0 {
+				p.rejectAnnotationsOnNonTest(annotations, "intent")
+			}
 			prog.Intents = append(prog.Intents, p.parseIntentDecl())
 		default:
+			if len(annotations) > 0 {
+				p.rejectAnnotationsOnNonTest(annotations, p.current().Type.String())
+			}
 			if isPublic {
 				p.diags.Errorf(p.current().Line, p.current().Column,
 					"expected function, entity, enum, or trait after 'public'")
@@ -294,6 +344,56 @@ func (p *Parser) parseExternFunctionDecl() *ast.ExternFunctionDecl {
 		Ensures:    ensures,
 		Line:       tok.Line,
 		Column:     tok.Column,
+	}
+}
+
+// parseTestAnnotations parses one or more `@name("arg", ...)` annotations that
+// precede a test declaration. See ADR 0031.
+//
+// In v1 only `@target_specific(...)` is recognised. Other annotation names are
+// rejected here at parse time, with the annotation still consumed so that
+// recovery routes us to the following `test` keyword rather than the `@`.
+func (p *Parser) parseTestAnnotations() []*ast.TestAnnotation {
+	var annotations []*ast.TestAnnotation
+	for p.check(lexer.AT) {
+		atTok := p.advance()
+		nameTok := p.expect(lexer.IDENT)
+		ann := &ast.TestAnnotation{
+			Name:   nameTok.Literal,
+			Line:   atTok.Line,
+			Column: atTok.Column,
+		}
+		p.expect(lexer.LPAREN)
+		if p.check(lexer.RPAREN) {
+			p.diags.Errorf(atTok.Line, atTok.Column,
+				"@%s requires at least one target argument", nameTok.Literal)
+		} else {
+			for {
+				argTok := p.expect(lexer.STRING_LIT)
+				ann.Args = append(ann.Args, stripQuotes(argTok.Literal))
+				if !p.match(lexer.COMMA) {
+					break
+				}
+			}
+		}
+		p.expect(lexer.RPAREN)
+
+		if nameTok.Literal != "target_specific" {
+			p.diags.Errorf(atTok.Line, atTok.Column,
+				"unknown test annotation '@%s'; supported: @target_specific", nameTok.Literal)
+		}
+		annotations = append(annotations, ann)
+	}
+	return annotations
+}
+
+// rejectAnnotationsOnNonTest emits a parser diagnostic for each annotation that
+// was attached to a non-test declaration. Annotations only apply to tests in v1
+// (ADR 0031).
+func (p *Parser) rejectAnnotationsOnNonTest(annotations []*ast.TestAnnotation, decl string) {
+	for _, ann := range annotations {
+		p.diags.Errorf(ann.Line, ann.Column,
+			"@%s is only valid on test declarations (found on %s)", ann.Name, decl)
 	}
 }
 

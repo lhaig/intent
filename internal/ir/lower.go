@@ -290,6 +290,12 @@ func (l *lowerer) lowerTest(t *ast.TestDecl) *Test {
 		Name:    t.Name,
 		IsAsync: t.IsAsync,
 	}
+	for _, ann := range t.Annotations {
+		test.Annotations = append(test.Annotations, &TestAnnotation{
+			Name: ann.Name,
+			Args: append([]string(nil), ann.Args...),
+		})
+	}
 	if t.Body != nil {
 		test.Body = l.lowerBlock(t.Body)
 	}

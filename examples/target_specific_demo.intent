@@ -1,0 +1,27 @@
+module target_specific_demo version "1.0";
+
+entry function main() returns Int {
+    return 0;
+}
+
+test "addition agrees across targets" {
+    assert_eq(2 + 2, 4);
+}
+
+@target_specific("rust")
+test "rust-only test" {
+    let n: Int = 10;
+    assert(n > 0);
+}
+
+@target_specific("js")
+test "js-only test" {
+    let n: Int = 5;
+    assert(n == 5);
+}
+
+@target_specific("rust", "js")
+test "rust or js test" {
+    assert(1 + 1 == 2);
+}
+

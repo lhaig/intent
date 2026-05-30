@@ -43,10 +43,56 @@ type ExternFunction struct {
 // (implicit Void), and their bodies may call any function or method in the
 // module's import graph. Backends emit one runner-callable function per test
 // and a target-specific dispatcher.
+//
+// ADR 0031: Annotations carries through from the AST so the runner can filter
+// tests by target without re-parsing source.
 type Test struct {
-	Name    string // human-readable name from the test "..." string literal
-	IsAsync bool
-	Body    []Stmt
+	Name        string // human-readable name from the test "..." string literal
+	IsAsync     bool
+	Annotations []*TestAnnotation
+	Body        []Stmt
+}
+
+// TestAnnotation is the IR-level mirror of ast.TestAnnotation. See ADR 0031.
+type TestAnnotation struct {
+	Name string
+	Args []string
+}
+
+// TargetSpecificTargets returns the union of target arguments across all
+// @target_specific annotations on this test, in declaration order. Returns nil
+// if the test has no @target_specific annotation (i.e. runs on every target).
+func (t *Test) TargetSpecificTargets() []string {
+	var targets []string
+	seen := map[string]bool{}
+	for _, ann := range t.Annotations {
+		if ann.Name != "target_specific" {
+			continue
+		}
+		for _, a := range ann.Args {
+			if !seen[a] {
+				seen[a] = true
+				targets = append(targets, a)
+			}
+		}
+	}
+	return targets
+}
+
+// RunsOnTarget returns true if this test should execute on the given target.
+// Tests without @target_specific run on every target. Tests with the
+// annotation run only on the listed targets.
+func (t *Test) RunsOnTarget(target string) bool {
+	targets := t.TargetSpecificTargets()
+	if len(targets) == 0 {
+		return true
+	}
+	for _, a := range targets {
+		if a == target {
+			return true
+		}
+	}
+	return false
 }
 
 // Function represents a function declaration in the IR.

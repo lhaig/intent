@@ -645,6 +645,57 @@ entry function main() returns Int { return 0; }
 	}
 }
 
+// ADR 0031: lowering preserves @target_specific annotations.
+func TestLowerAnnotatedTest(t *testing.T) {
+	src := `module test version "1.0";
+
+@target_specific("rust", "js")
+test "annotated" { let x: Int = 1; }
+
+entry function main() returns Int { return 0; }
+`
+	mod := parseAndLower(t, src)
+	if len(mod.Tests) != 1 {
+		t.Fatalf("expected 1 test, got %d", len(mod.Tests))
+	}
+	tt := mod.Tests[0]
+	if len(tt.Annotations) != 1 {
+		t.Fatalf("expected 1 annotation, got %d", len(tt.Annotations))
+	}
+	if tt.Annotations[0].Name != "target_specific" {
+		t.Errorf("annotation name: got %q", tt.Annotations[0].Name)
+	}
+	if got := tt.TargetSpecificTargets(); len(got) != 2 || got[0] != "rust" || got[1] != "js" {
+		t.Errorf("TargetSpecificTargets: got %v want [rust js]", got)
+	}
+	if !tt.RunsOnTarget("rust") {
+		t.Error("expected RunsOnTarget(rust) true")
+	}
+	if tt.RunsOnTarget("wasm") {
+		t.Error("expected RunsOnTarget(wasm) false")
+	}
+}
+
+func TestLowerUnannotatedTestRunsEverywhere(t *testing.T) {
+	src := `module test version "1.0";
+
+test "everywhere" { let x: Int = 1; }
+
+entry function main() returns Int { return 0; }
+`
+	mod := parseAndLower(t, src)
+	tt := mod.Tests[0]
+	if len(tt.Annotations) != 0 {
+		t.Errorf("expected no annotations, got %d", len(tt.Annotations))
+	}
+	if got := tt.TargetSpecificTargets(); got != nil {
+		t.Errorf("expected nil targets, got %v", got)
+	}
+	if !tt.RunsOnTarget("rust") || !tt.RunsOnTarget("js") || !tt.RunsOnTarget("wasm") {
+		t.Error("unannotated tests should run on every target")
+	}
+}
+
 func TestLowerMultipleTests(t *testing.T) {
 	src := `module test version "1.0";
 

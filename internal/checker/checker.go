@@ -982,7 +982,13 @@ func (c *Checker) checkTests() {
 // and no return type; the body is checked as a Void-returning block. `return`
 // statements are rejected. Async tests track whether an `await` was seen so
 // that declared-async-but-never-awaits emits a warning.
+//
+// ADR 0031: @target_specific annotations are validated here — target strings
+// must be in {rust, js, wasm}; duplicate annotations are rejected; a wasm
+// target warns because WASM rejects test declarations entirely (16.6).
 func (c *Checker) checkTest(t *ast.TestDecl) {
+	c.checkTestAnnotations(t)
+
 	testScope := NewScope(c.scope)
 
 	// Track context: tests reject `return` statements; async tests warn if
@@ -1009,6 +1015,39 @@ func (c *Checker) checkTest(t *ast.TestDecl) {
 	c.currentTestName = oldTestName
 	c.inAsyncFunc = oldAsync
 	c.testSawAwait = oldSawAwait
+}
+
+// checkTestAnnotations validates ADR 0031 @target_specific annotations on a
+// test declaration. Parse-time errors (unknown annotation name, empty args,
+// annotation on non-test) are already reported by the parser; this enforces
+// the semantic constraints.
+func (c *Checker) checkTestAnnotations(t *ast.TestDecl) {
+	seen := make(map[string]bool)
+	for _, ann := range t.Annotations {
+		if ann.Name != "target_specific" {
+			// Unknown names are reported at parse time; skip here.
+			continue
+		}
+		if seen[ann.Name] {
+			c.diag.Errorf(ann.Line, ann.Column,
+				"duplicate @%s annotation on test %q", ann.Name, t.Name)
+			continue
+		}
+		seen[ann.Name] = true
+		for _, target := range ann.Args {
+			switch target {
+			case "rust", "js", "wasm":
+				// recognised target
+			default:
+				c.diag.Errorf(ann.Line, ann.Column,
+					"@target_specific: %q is not a recognised target (expected: rust, js, wasm)", target)
+			}
+			if target == "wasm" {
+				c.diag.Warningf(ann.Line, ann.Column,
+					"@target_specific(\"wasm\") will never run; WASM rejects all test declarations (phase 16 task 16.6)")
+			}
+		}
+	}
 }
 
 // checkEntities checks all entity constructors and methods

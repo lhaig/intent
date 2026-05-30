@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lhaig/intent/internal/ir"
 )
 
 // Phase 16 / ADR 0029 task 16.7: `intentc test` runner.
@@ -446,4 +448,143 @@ func writeTempIntent(t *testing.T, src string) string {
 		t.Fatalf("write temp intent: %v", err)
 	}
 	return path
+}
+
+// ADR 0031: @target_specific annotation filtering.
+
+func TestRunTestsAnnotationSilentSkipSingleTarget(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+	// `--target js` of a test marked @target_specific("rust") — silently
+	// excluded from the report. The other test still runs.
+	src := `module test version "1.0";
+
+@target_specific("rust")
+test "rust only" { assert(1 == 1); }
+
+test "everywhere" { assert(1 == 1); }
+
+entry function main() returns Int { return 0; }
+`
+	path := writeTempIntent(t, src)
+	results, err := RunTests(path, TestRunOptions{Targets: []string{"js"}})
+	if err != nil {
+		t.Fatalf("runner returned harness error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result (silent skip in single-target mode), got %d: %+v", len(results), results)
+	}
+	if results[0].Name != "everywhere" {
+		t.Errorf("expected unannotated test to run, got %+v", results[0])
+	}
+}
+
+func TestRunTestsAnnotationSkipAllTargets(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skip("cargo not available")
+	}
+	// In --all-targets mode the annotation-excluded target reports SKIP with
+	// the annotation as the reason.
+	src := `module test version "1.0";
+
+@target_specific("rust")
+test "rust only" { assert(1 == 1); }
+
+entry function main() returns Int { return 0; }
+`
+	path := writeTempIntent(t, src)
+	results, err := RunTests(path, TestRunOptions{AllTargets: true})
+	if err != nil {
+		t.Fatalf("runner returned harness error: %v", err)
+	}
+	byTarget := map[string]TestResult{}
+	for _, r := range results {
+		byTarget[r.Target] = r
+	}
+	if r := byTarget["rust"]; !r.Passed {
+		t.Errorf("rust row should pass, got %+v", r)
+	}
+	jsRow := byTarget["js"]
+	if !jsRow.Skipped || jsRow.SkipKind != SkipAnnotation {
+		t.Errorf("js row should be annotation-skipped, got %+v", jsRow)
+	}
+	if !strings.Contains(jsRow.Error, "@target_specific") {
+		t.Errorf("js skip reason should mention annotation, got %q", jsRow.Error)
+	}
+	wasmRow := byTarget["wasm"]
+	if !wasmRow.Skipped || wasmRow.SkipKind != SkipWASMReject {
+		t.Errorf("wasm row should be WASM-rejection skipped, got %+v", wasmRow)
+	}
+	if AnyFailures(results) {
+		t.Error("annotation skips must not cause AnyFailures to return true")
+	}
+}
+
+func TestRunTestsAnnotationOverallVerdictIsPass(t *testing.T) {
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skip("cargo not available")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+	src := `module test version "1.0";
+
+@target_specific("rust")
+test "rust only" { assert(1 == 1); }
+
+entry function main() returns Int { return 0; }
+`
+	path := writeTempIntent(t, src)
+	results, err := RunTests(path, TestRunOptions{AllTargets: true})
+	if err != nil {
+		t.Fatalf("runner returned harness error: %v", err)
+	}
+	out := FormatResults(results)
+	// Per the classify() rules: hasPass + hasSkip → PASS overall verdict.
+	if !strings.Contains(out, "PASS") {
+		t.Errorf("expected overall PASS verdict, got:\n%s", out)
+	}
+	if !strings.Contains(out, "@target_specific") {
+		t.Errorf("expected js skip line to surface the annotation, got:\n%s", out)
+	}
+}
+
+// Filter helpers are exercised without invoking any target toolchain.
+func TestPartitionTestsForTarget(t *testing.T) {
+	makeTest := func(name string, annArgs []string) *ir.Test {
+		tt := &ir.Test{Name: name}
+		if annArgs != nil {
+			tt.Annotations = []*ir.TestAnnotation{{Name: "target_specific", Args: annArgs}}
+		}
+		return tt
+	}
+	tests := []*ir.Test{
+		makeTest("plain", nil),
+		makeTest("rust only", []string{"rust"}),
+		makeTest("js only", []string{"js"}),
+		makeTest("rust+js", []string{"rust", "js"}),
+	}
+	runnable, skipped := partitionTestsForTarget(tests, "js")
+	if names := namesOf(runnable); len(names) != 3 || names[0] != "plain" || names[1] != "js only" || names[2] != "rust+js" {
+		t.Errorf("runnable for js: got %v, want [plain, js only, rust+js]", names)
+	}
+	if names := namesOf(skipped); len(names) != 1 || names[0] != "rust only" {
+		t.Errorf("skipped for js: got %v, want [rust only]", names)
+	}
+}
+
+func TestAnnotationSkipReasonFormat(t *testing.T) {
+	tt := &ir.Test{
+		Name:        "x",
+		Annotations: []*ir.TestAnnotation{{Name: "target_specific", Args: []string{"rust", "js"}}},
+	}
+	got := annotationSkipReason(tt, "wasm")
+	want := `@target_specific("rust", "js") — skipped on wasm`
+	if got != want {
+		t.Errorf("annotationSkipReason: got %q want %q", got, want)
+	}
 }

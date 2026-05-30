@@ -256,6 +256,9 @@ func printNode(sb *strings.Builder, node Node, indent int) {
 			modifier = " (async)"
 		}
 		sb.WriteString(fmt.Sprintf("%sTest: %q%s\n", prefix, n.Name, modifier))
+		for _, ann := range n.Annotations {
+			sb.WriteString(fmt.Sprintf("%s  @%s(%s)\n", prefix, ann.Name, strings.Join(quoteAll(ann.Args), ", ")))
+		}
 		if n.Body != nil {
 			printNode(sb, n.Body, indent+1)
 		}
@@ -554,4 +557,12 @@ func tokenTypeToString(tt lexer.TokenType) string {
 	default:
 		return fmt.Sprintf("token(%d)", tt)
 	}
+}
+
+func quoteAll(args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = fmt.Sprintf("%q", a)
+	}
+	return out
 }

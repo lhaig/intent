@@ -4769,3 +4769,82 @@ entry function main() returns Int { return 0; }
 		t.Errorf("expected Fn-shape diagnostic, got: %s", d.Format("test"))
 	}
 }
+
+// ADR 0031: @target_specific annotation validation.
+
+func TestCheckAnnotationValidTargets(t *testing.T) {
+	src := `module test version "1.0";
+
+@target_specific("rust", "js")
+test "annotated" {
+    assert(true);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if d.HasErrors() {
+		t.Errorf("expected no errors, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAnnotationUnknownTargetRejected(t *testing.T) {
+	src := `module test version "1.0";
+
+@target_specific("nodejs")
+test "wrong target" {
+    assert(true);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if !d.HasErrors() {
+		t.Error("expected error for unrecognised target name")
+	}
+	if !strings.Contains(d.Format("test"), "is not a recognised target") {
+		t.Errorf("expected unrecognised-target diagnostic, got: %s", d.Format("test"))
+	}
+}
+
+func TestCheckAnnotationWasmWarns(t *testing.T) {
+	src := `module test version "1.0";
+
+@target_specific("wasm")
+test "wasm only (will never run)" {
+    assert(true);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if d.HasErrors() {
+		t.Errorf("wasm target should warn, not error; got: %s", d.Format("test"))
+	}
+	if d.WarningCount() == 0 {
+		t.Error("expected a warning for @target_specific(\"wasm\")")
+	}
+	if !strings.Contains(d.Format("test"), "WASM rejects all test declarations") {
+		t.Errorf("unexpected warning text: %s", d.Format("test"))
+	}
+}
+
+func TestCheckDuplicateAnnotationRejected(t *testing.T) {
+	src := `module test version "1.0";
+
+@target_specific("rust")
+@target_specific("js")
+test "two annotations" {
+    assert(true);
+}
+
+entry function main() returns Int { return 0; }
+`
+	d := parseAndCheck(t, src)
+	if !d.HasErrors() {
+		t.Error("expected error for duplicate @target_specific")
+	}
+	if !strings.Contains(d.Format("test"), "duplicate @target_specific") {
+		t.Errorf("expected duplicate-annotation diagnostic, got: %s", d.Format("test"))
+	}
+}

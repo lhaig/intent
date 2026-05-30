@@ -3243,6 +3243,135 @@ entry function main() returns Int { return 0; }
 	}
 }
 
+// ADR 0031: @target_specific annotation tests.
+
+func TestParseAnnotatedTestSingleTarget(t *testing.T) {
+	src := `module test version "1.0";
+
+@target_specific("rust")
+test "rust-only behaviour" { let x: Int = 1; }
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected parse errors: %s", p.Diagnostics().Format("test"))
+	}
+	if len(prog.Tests) != 1 {
+		t.Fatalf("expected 1 test, got %d", len(prog.Tests))
+	}
+	td := prog.Tests[0]
+	if len(td.Annotations) != 1 {
+		t.Fatalf("expected 1 annotation, got %d", len(td.Annotations))
+	}
+	a := td.Annotations[0]
+	if a.Name != "target_specific" {
+		t.Errorf("annotation name: got %q want target_specific", a.Name)
+	}
+	if len(a.Args) != 1 || a.Args[0] != "rust" {
+		t.Errorf("args: got %v want [rust]", a.Args)
+	}
+}
+
+func TestParseAnnotatedTestMultipleTargets(t *testing.T) {
+	src := `module test version "1.0";
+
+@target_specific("rust", "js")
+test "runs on rust or js" { let x: Int = 1; }
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected parse errors: %s", p.Diagnostics().Format("test"))
+	}
+	td := prog.Tests[0]
+	if len(td.Annotations) != 1 || len(td.Annotations[0].Args) != 2 {
+		t.Fatalf("expected 1 annotation with 2 args, got %+v", td.Annotations)
+	}
+	if td.Annotations[0].Args[0] != "rust" || td.Annotations[0].Args[1] != "js" {
+		t.Errorf("args wrong: %v", td.Annotations[0].Args)
+	}
+}
+
+func TestParseAnnotatedAsyncTest(t *testing.T) {
+	src := `module test version "1.0";
+
+@target_specific("js")
+async test "js-only async" { let x: Int = 1; }
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected parse errors: %s", p.Diagnostics().Format("test"))
+	}
+	td := prog.Tests[0]
+	if !td.IsAsync {
+		t.Error("expected IsAsync true")
+	}
+	if len(td.Annotations) != 1 {
+		t.Fatalf("expected 1 annotation, got %d", len(td.Annotations))
+	}
+}
+
+func TestParseAnnotationUnknownName(t *testing.T) {
+	src := `module test version "1.0";
+
+@flaky("rust")
+test "name" { let x: Int = 1; }
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	p.Parse()
+	if !p.Diagnostics().HasErrors() {
+		t.Error("expected error for unknown annotation")
+	}
+	if !strings.Contains(p.Diagnostics().Format("test"), "unknown test annotation '@flaky'") {
+		t.Errorf("expected unknown-annotation diagnostic, got: %s", p.Diagnostics().Format("test"))
+	}
+}
+
+func TestParseAnnotationEmptyArgs(t *testing.T) {
+	src := `module test version "1.0";
+
+@target_specific()
+test "no targets" { let x: Int = 1; }
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	p.Parse()
+	if !p.Diagnostics().HasErrors() {
+		t.Error("expected error for empty annotation args")
+	}
+	if !strings.Contains(p.Diagnostics().Format("test"), "requires at least one target argument") {
+		t.Errorf("expected empty-args diagnostic, got: %s", p.Diagnostics().Format("test"))
+	}
+}
+
+func TestParseAnnotationOnFunctionRejected(t *testing.T) {
+	src := `module test version "1.0";
+
+@target_specific("rust")
+function foo() returns Int { return 0; }
+
+entry function main() returns Int { return 0; }
+`
+	p := New(src)
+	p.Parse()
+	if !p.Diagnostics().HasErrors() {
+		t.Error("expected error for annotation on function")
+	}
+	if !strings.Contains(p.Diagnostics().Format("test"), "is only valid on test declarations") {
+		t.Errorf("expected non-test diagnostic, got: %s", p.Diagnostics().Format("test"))
+	}
+}
+
 func TestParseTestNameAsIdentifierStillWorks(t *testing.T) {
 	// Regression: `test` must remain a valid identifier in non-top-level
 	// positions because it's a contextual keyword (ADR 0029).
