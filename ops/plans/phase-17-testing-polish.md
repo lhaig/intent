@@ -1,6 +1,6 @@
 # Phase 17: Testing Framework Polish
 
-**Status:** Approved (2026-05-30) — scope reduced to 17.B + 17.C + 17.D + 17.F. Other sections explicitly deferred to Phase 18 with rationale below.
+**Status:** Shipped (2026-05-30) — 17.C, 17.D, 17.F complete; 17.B partial (demo shipped, `@target_specific` annotation design accepted in ADR 0031, implementation deferred to Phase 18). 17.A / 17.E / 17.G / 17.H deferred to Phase 18 with rationale below.
 **Milestone:** v1.2 — Self-Improvement Foundations (continues from Phase 16)
 **Decisions:** [ADR 0030](../../docs/decisions/0030-cross-package-test-visibility.md) (visibility for 17.D), [ADR 0031](../../docs/decisions/0031-target-specific-annotation.md) (annotation for 17.B).
 
@@ -139,17 +139,16 @@ These are bigger features that deserve their own PRDs if pursued. Mentioning her
 
 ---
 
-## Success Criteria (Draft)
+## Success Criteria
 
-Marked here per section, to be promoted to commitments at Approval time. Each section can ship independently.
-
-- [ ] 17.A: testgen `--target intent` emits tests for entities, methods, and multi-param functions; `--inline` writes into source; legacy Rust path either removed or repurposed as a documented stress-test mode.
-- [ ] 17.B: at least one example demonstrates cross-target divergence detection; `--all-targets` correctly flags it.
-- [ ] 17.C: every flat example in `examples/*.intent` either carries a test or is explicitly documented as not requiring one.
-- [ ] 17.D: tests in imported packages are discovered and run with the entry file; cross-package name collisions are disambiguated; new ADR records the visibility decision.
-- [ ] 17.E: `examples/ffi_blake3/` has at least one automated test that passes when cargo + the blake3_intent crate are available.
-- [ ] 17.F: `--filter`, `--list`, `--quiet` flags ship on `intentc test`.
-- [ ] 17.G: WASM rejection remains the documented behaviour OR a real WASM runner ships (with explicit justification for the investment).
+- [x] **17.B (partial — demo shipped, annotation deferred to Phase 18):** `examples/divergence_demo.intent` demonstrates a real Rust-vs-JS divergence (large Int multiplication: Rust panics, JS produces a lossy Number). `intentc test --all-targets` correctly flags it as `DIFF` and exits non-zero. The `@target_specific(...)` annotation (ADR 0031) is designed and accepted but implementation deferred to Phase 18 to fit context budget.
+- [x] **17.C:** every flat example in `examples/*.intent` carries at least one test (19/19). `make validate` runs `intentc test` on every tested example.
+- [x] **17.D:** tests in imported modules and packages auto-discover via the entry file. JS multi-file emission now produces a unified `__intent_tests` registry; JS call sites apply the module's namePrefix when calling local functions. `examples/packages/types_pkg/types.intent` has tests that run via `intentc test examples/packages/app_pkg/main.intent`. ADR 0030 records the visibility decision.
+- [x] **17.F:** `--filter <substring>`, `--list`, `--quiet` flags ship on `intentc test`. CLI handler, runner support, and `FormatList` / `FormatResultsQuiet` helpers all in place.
+- [ ] 17.A — deferred to Phase 18 (full testgen → Intent migration).
+- [ ] 17.E — deferred to Phase 18 (FFI test automation).
+- [ ] 17.G — deferred to Phase 18 if a real user case appears (full WASM test runner).
+- [ ] 17.H — deferred to Phase 18+ (coverage / snapshot).
 
 ## Out of Scope
 
@@ -179,3 +178,4 @@ The following Phase 17 sections are deferred. Each remains a documented future-w
 ## Approval Record
 
 - 2026-05-30 — Scope locked to 17.B + 17.C + 17.D + 17.F. ADRs 0030 and 0031 written and approved. Execution proceeding.
+- 2026-05-30 — Shipped. 17.C, 17.D, 17.F fully implemented; 17.B partial (demo shipped, annotation deferred). Commits 582c570 (17.F), 5c36404 (17.C), 1f9e554 (17.D), and the final demo + docs commit. 17.A / 17.E / 17.G / 17.H remain deferred per the scope decision.

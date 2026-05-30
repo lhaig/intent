@@ -1,0 +1,15 @@
+module divergence_demo version "1.0";
+
+entry function main() returns Int {
+    return 0;
+}
+
+test "huge int multiplication panics on rust, lossy on js" {
+    let mutable n: Int = 1152921504606846976;
+    n = n * 2;
+    n = n * 2;
+    n = n * 2;
+    n = n * 2;
+    assert(n > 0);
+}
+

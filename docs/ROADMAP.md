@@ -242,8 +242,14 @@ because each feature needs to work across all backends and with the verifier.
 
 Design lives in `ops/plans/phase-16-testing-framework.md` (Shipped). 10 commits 95c545f..f02bf13.
 
-### Phase 17: Testing Framework Polish -- DRAFT
-Captures the six documented scope reductions from Phase 16 plus DX polish (`--filter`, `--list`, `--quiet`). Independent sections (17.A through 17.G) can ship in any order. Design lives in `ops/plans/phase-17-testing-polish.md`.
+### Phase 17: Testing Framework Polish -- SHIPPED (2026-05-30)
+- [x] 17.C: tests for all 19 flat examples
+- [x] 17.D: cross-package test discovery (ADR 0030)
+- [x] 17.F: `--filter`, `--list`, `--quiet` DX flags
+- [~] 17.B partial: divergence demo shipped; `@target_specific` annotation (ADR 0031) designed but implementation deferred to Phase 18
+- [ ] 17.A / 17.E / 17.G / 17.H: deferred to Phase 18 with documented rationale
+
+Design + execution record: `ops/plans/phase-17-testing-polish.md`.
 
 ### Package Registry Remote-Fetch -- PROPOSED
 Closes the ADR 0027 deferred item: real versioned remote fetch for `intentc pkg install`. Today the manifest, semver parser, cache, and resolver are in place; only the network-fetch step is stubbed.
