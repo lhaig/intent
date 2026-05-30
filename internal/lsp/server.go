@@ -149,6 +149,11 @@ func (s *Server) dispatch(msg *rpcMessage) {
 			return
 		}
 		s.handleSignatureHelp(msg.ID, msg.Params)
+	case "textDocument/completion":
+		if !isRequest {
+			return
+		}
+		s.handleCompletion(msg.ID, msg.Params)
 	default:
 		if isRequest {
 			s.t.writeError(msg.ID, errMethodNotFound, fmt.Sprintf("method not found: %s", msg.Method))
