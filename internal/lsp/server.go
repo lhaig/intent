@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 )
 
 // Server is the LSP 3.17 server for Intent. It speaks JSON-RPC over a
@@ -18,8 +19,9 @@ import (
 // shutdown must return -32600 (InvalidRequest). We implement these strictly
 // so well-behaved clients see clean errors.
 type Server struct {
-	t    *transport
-	docs *documentStore
+	t         *transport
+	docs      *documentStore
+	debouncer *debouncer
 
 	mu          sync.Mutex
 	initialized bool
@@ -30,9 +32,17 @@ type Server struct {
 // NewServer constructs a Server bound to the given reader/writer pair.
 func NewServer(in io.Reader, out io.Writer) *Server {
 	return &Server{
-		t:    newTransport(in, out),
-		docs: newDocumentStore(),
+		t:         newTransport(in, out),
+		docs:      newDocumentStore(),
+		debouncer: newDebouncer(diagnosticsDebounce),
 	}
+}
+
+// SetDiagnosticsDebounce overrides the per-document analysis debounce
+// duration. Tests pass 0 to make analysis synchronous and assertions
+// deterministic; production stays on the default ~150ms.
+func (s *Server) SetDiagnosticsDebounce(d time.Duration) {
+	s.debouncer = newDebouncer(d)
 }
 
 // Run reads messages until EOF or shutdown+exit. Returns nil on clean exit,
@@ -126,6 +136,10 @@ func (s *Server) handleDidOpen(params json.RawMessage) {
 		return
 	}
 	s.docs.open(p.TextDocument.URI, p.TextDocument.Version, p.TextDocument.Text)
+	// Surface diagnostics immediately on open — debounced for consistency,
+	// though there's no preceding edit to wait for.
+	uri := p.TextDocument.URI
+	s.debouncer.trigger(uri, func() { s.analyzeAndPublish(uri) })
 }
 
 func (s *Server) handleDidChange(params json.RawMessage) {
@@ -141,6 +155,8 @@ func (s *Server) handleDidChange(params json.RawMessage) {
 	}
 	text := p.ContentChanges[len(p.ContentChanges)-1].Text
 	s.docs.update(p.TextDocument.URI, p.TextDocument.Version, text)
+	uri := p.TextDocument.URI
+	s.debouncer.trigger(uri, func() { s.analyzeAndPublish(uri) })
 }
 
 func (s *Server) handleDidSave(params json.RawMessage) {
@@ -148,7 +164,7 @@ func (s *Server) handleDidSave(params json.RawMessage) {
 	if err := json.Unmarshal(params, &p); err != nil {
 		return
 	}
-	// 18.4 will hook Z3 verification here. For 18.2 we just acknowledge.
+	// 18.4 will hook Z3 verification here. For 18.3 we just acknowledge.
 	_ = p
 }
 
@@ -157,6 +173,12 @@ func (s *Server) handleDidClose(params json.RawMessage) {
 	if err := json.Unmarshal(params, &p); err != nil {
 		return
 	}
+	// Cancel any pending analysis and clear diagnostics on the client side.
+	s.debouncer.cancel(p.TextDocument.URI)
+	_ = s.t.writeNotification("textDocument/publishDiagnostics", PublishDiagnosticsParams{
+		URI:         p.TextDocument.URI,
+		Diagnostics: []Diagnostic{},
+	})
 	s.docs.close(p.TextDocument.URI)
 }
 
