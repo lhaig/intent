@@ -20,6 +20,19 @@ type Document struct {
 	// lazily by buildLineOffsets when position conversion needs it.
 	lineOffsets []int
 
+	// Diagnostic sources are tracked separately so the verify goroutine
+	// (18.4) and the synchronous parse/check/lint pass (18.3) can publish
+	// independently. publishUnion sends the merged list. Per-URI publish
+	// in LSP replaces all diagnostics for the document, so we must merge
+	// before sending.
+	analyzeDiags []Diagnostic
+	verifyDiags  []Diagnostic
+
+	// saveSeq is bumped on each didSave. The async verifier captures it
+	// before launch and discards results if a newer save has bumped it
+	// before they arrive — ADR 0032 §18.4's cancellation contract.
+	saveSeq uint64
+
 	mu sync.Mutex
 }
 
@@ -84,6 +97,49 @@ func (d *Document) snapshotText() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.Text
+}
+
+// setAnalyzeDiags stores the latest parser/checker/lint diagnostics. Called
+// after each debounced re-analysis. Returns the union of analyze + verify
+// diagnostics so the caller can publish in one notification.
+func (d *Document) setAnalyzeDiags(diags []Diagnostic) []Diagnostic {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.analyzeDiags = diags
+	return appendCopy(d.analyzeDiags, d.verifyDiags)
+}
+
+// setVerifyDiags stores the latest Z3 verification diagnostics. Returns the
+// union for publication.
+func (d *Document) setVerifyDiags(diags []Diagnostic) []Diagnostic {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.verifyDiags = diags
+	return appendCopy(d.analyzeDiags, d.verifyDiags)
+}
+
+// bumpSaveSeq increments and returns the document's save sequence. The
+// async verifier captures the returned value before launching and only
+// publishes if d.saveSeq matches when results arrive.
+func (d *Document) bumpSaveSeq() uint64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.saveSeq++
+	return d.saveSeq
+}
+
+// currentSaveSeq returns d.saveSeq without modifying it.
+func (d *Document) currentSaveSeq() uint64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.saveSeq
+}
+
+func appendCopy(a, b []Diagnostic) []Diagnostic {
+	out := make([]Diagnostic, 0, len(a)+len(b))
+	out = append(out, a...)
+	out = append(out, b...)
+	return out
 }
 
 // buildLineOffsets computes byte offsets of line starts in the document

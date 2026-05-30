@@ -60,9 +60,9 @@ func (d *debouncer) cancel(uri DocumentURI) {
 }
 
 // analyzeAndPublish parses, type-checks, and lints the document's current
-// text, then publishes the union of diagnostics over LSP. Always publishes
-// (including the empty set) so the editor clears stale markers when a file
-// becomes clean.
+// text, then publishes the union of analyze + verify diagnostics over LSP.
+// Always publishes (including the empty set) so the editor clears stale
+// markers when a file becomes clean.
 func (s *Server) analyzeAndPublish(uri DocumentURI) {
 	doc, ok := s.docs.get(uri)
 	if !ok {
@@ -70,10 +70,11 @@ func (s *Server) analyzeAndPublish(uri DocumentURI) {
 	}
 	text := doc.snapshotText()
 
-	lspDiags := analyzeText(text)
+	analyzeDiags := analyzeText(text)
+	union := doc.setAnalyzeDiags(analyzeDiags)
 	_ = s.t.writeNotification("textDocument/publishDiagnostics", PublishDiagnosticsParams{
 		URI:         uri,
-		Diagnostics: lspDiags,
+		Diagnostics: union,
 	})
 }
 

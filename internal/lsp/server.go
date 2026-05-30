@@ -176,8 +176,9 @@ func (s *Server) handleDidSave(params json.RawMessage) {
 	if err := json.Unmarshal(params, &p); err != nil {
 		return
 	}
-	// 18.4 will hook Z3 verification here. For 18.3 we just acknowledge.
-	_ = p
+	// 18.4: kick off Z3 verification asynchronously. The goroutine drops
+	// results if a newer save lands first (sequence check inside).
+	s.runVerifyAsync(p.TextDocument.URI)
 }
 
 func (s *Server) handleDidClose(params json.RawMessage) {
