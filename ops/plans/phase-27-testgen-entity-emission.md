@@ -1,6 +1,6 @@
 # Phase 27: `--target intent` Entity / Method Auto-Test Emission
 
-**Status:** In Progress
+**Status:** Shipped (2026-05-31; commits 1e5e2f5..HEAD)
 **Milestone:** v1.2 — Self-Improvement Foundations (Phase 17.A.1 prerequisite for legacy Rust-testgen retirement)
 **Decision:** [ADR 0036](../../docs/decisions/0036-testgen-entity-method-emission.md)
 
@@ -12,21 +12,21 @@ This closes Phase 17.A.1 — one of the two blockers (the other is 17.A.2 multi-
 
 ## Success Criteria
 
-- [ ] `intentc test-gen --target intent examples/bank_account.intent` emits one auto-test per method on `BankAccount` instead of the current TODO stub
-- [ ] Generated tests use `let mutable a: Entity = Entity(...);` to enable mutating-method calls
-- [ ] `old(<expr>)` references in method `ensures` are captured via `let __old_<i>: T = <expr>;` before the method call
-- [ ] `self.x` references in method `ensures` are rewritten to `a.x` in the emitted assertion
-- [ ] `result` references rewrite to `__r` for non-Void methods
-- [ ] Methods with no `requires` / `ensures` are skipped (no signal in emitting a test)
-- [ ] Entities without a constructor are skipped with a TODO comment
-- [ ] Generic entities are skipped with a TODO comment
-- [ ] When default args may violate a constructor / method `requires`, a header comment surfaces the trade
-- [ ] Existing standalone-function emission is unaffected
-- [ ] Generated tests parse and type-check (i.e., `intentc check` on the output file succeeds)
-- [ ] Where possible, generated tests actually pass when run (i.e., `intentc test` on the output passes for examples whose defaults satisfy `requires`)
-- [ ] New unit tests cover: entity with constructor + invariant, method with `old()` in ensures, method with `result` reference, method with no contracts (skipped), generic entity (skipped), constructor-less entity (skipped)
-- [ ] `make validate` green
-- [ ] No regression in existing `intentgen_test.go` tests
+- [x] `intentc test-gen --target intent examples/bank_account.intent` emits one auto-test per method on `BankAccount` instead of the current TODO stub
+- [x] Generated tests use `let mutable a: Entity = Entity(...);` to enable mutating-method calls
+- [x] `old(<expr>)` references in method `ensures` are captured via `let __old_<i>: T = <expr>;` before the method call
+- [x] `self.x` references in method `ensures` are rewritten to `a.x` in the emitted assertion
+- [x] `result` references rewrite to `__r` for non-Void methods
+- [x] Methods with no `requires` / `ensures` are skipped (no signal in emitting a test)
+- [x] Entities without a constructor are skipped with a TODO comment
+- [x] Generic entities are skipped with a TODO comment
+- [x] When default args may violate a constructor / method `requires`, a header comment surfaces the trade
+- [x] Existing standalone-function emission is unaffected
+- [x] Generated tests parse and type-check (i.e., `intentc check` on the output file succeeds)
+- [x] Where possible, generated tests actually pass when run (i.e., `intentc test` on the output passes for examples whose defaults satisfy `requires`)
+- [x] New unit tests cover: entity with constructor + invariant, method with `old()` in ensures, method with `result` reference, method with no contracts (skipped), generic entity (skipped), constructor-less entity (skipped)
+- [x] `make validate` green
+- [x] No regression in existing `intentgen_test.go` tests
 
 ## Reference
 

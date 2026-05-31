@@ -263,6 +263,9 @@ Implemented in commits 0a4ca14..4999b06.
 - VS Code extension under `editors/vscode/` (.vsix builds via `npm run package`)
 - End-to-end smoke test in `internal/lsp/e2e_test.go`
 
+### Phase 27: testgen `--target intent` Entity/Method Emission -- SHIPPED (2026-05-31)
+Implemented in commit 1e5e2f5..HEAD per [ADR 0036](decisions/0036-testgen-entity-method-emission.md). `intentc test-gen --target intent` now emits one auto-test per (entity, method) pair carrying contract clauses. Each test constructs the entity with default-valued args, binds method params as named locals so the ensures-clause references resolve, captures `old(<self.x>)` sub-expressions into `let __old_<i>` locals before the call, and asserts each ensures with `self → a`, `old(...) → __old_<i>`, `result → __r` substitutions. Generic entities and constructor-less entities get a one-line skip comment instead of silently disappearing from the output. Closes Phase 17.A.1 (one of two prerequisites for retiring the legacy Rust testgen path; 17.A.2 multi-param iteration for free functions still pending). ADR 0036 cites precedent from Dafny, JML, Pex, QuickCheck/Hypothesis, AutoTest (Eiffel).
+
 ### Phase 26: LSP textDocument/references (Find References) -- SHIPPED (2026-05-31)
 Implemented in commit 1c94d3d..HEAD per [ADR 0035](decisions/0035-lsp-find-references.md). Adds the `textDocument/references` LSP method covering top-level decls (function, entity, enum, trait, test, extern) plus locals/params/`self`. Locals are scope-bound to their enclosing function frame; top-level references walk every AST in the workspace (including cross-package, free from Phase 25's plumbing). `includeDeclaration` honoured per LSP spec. Method/field references and same-name disambiguation across modules are documented v1 limitations — deferred to future PRDs. ADR 0035 cites precedent from rust-analyzer, gopls, tsserver, pyright, metals.
 
