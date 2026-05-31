@@ -134,6 +134,11 @@ func (s *Server) dispatch(msg *rpcMessage) {
 			return
 		}
 		s.handleDefinition(msg.ID, msg.Params)
+	case "textDocument/references":
+		if !isRequest {
+			return
+		}
+		s.handleReferences(msg.ID, msg.Params)
 	case "textDocument/formatting":
 		if !isRequest {
 			return
@@ -243,6 +248,7 @@ func (s *Server) handleInitialize(id json.RawMessage, params json.RawMessage) {
 			},
 			HoverProvider:              true,
 			DefinitionProvider:         true,
+			ReferencesProvider:         true,
 			DocumentFormattingProvider: true,
 			DocumentSymbolProvider:     true,
 			SignatureHelpProvider:      &SignatureHelpOptions{TriggerCharacters: []string{"(", ","}},

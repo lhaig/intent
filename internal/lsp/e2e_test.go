@@ -257,6 +257,24 @@ func TestE2ELspSession(t *testing.T) {
 		t.Error("top-level decls leaked into member completion")
 	}
 
+	// Phase 26: textDocument/references — find call sites of `add` from
+	// the cleanText document. Two uses are expected: the call inside main()
+	// (we're not counting the declaration unless includeDeclaration:true).
+	refP, _ := json.Marshal(ReferenceParams{
+		TextDocument: TextDocumentIdentifier{URI: uri},
+		Position:     lineColToPosition(addLine, addCol+1),
+		Context:      ReferenceContext{IncludeDeclaration: true},
+	})
+	mustSend(t, client, 105, "textDocument/references", string(refP))
+	resp, _ = client.readMessage()
+	var refLocs []Location
+	if err := json.Unmarshal(resp.Result, &refLocs); err != nil {
+		t.Fatalf("decode references: %v (%s)", err, resp.Result)
+	}
+	if len(refLocs) < 2 {
+		t.Errorf("expected >= 2 references for `add` (decl + at least one call), got %d", len(refLocs))
+	}
+
 	// --- shutdown / exit ---
 	mustSend(t, client, 4, "shutdown", `null`)
 	resp, err = client.readMessage()

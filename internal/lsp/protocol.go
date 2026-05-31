@@ -78,11 +78,25 @@ type ServerCapabilities struct {
 	TextDocumentSync           *TextDocumentSyncOptions `json:"textDocumentSync,omitempty"`
 	HoverProvider              bool                     `json:"hoverProvider,omitempty"`
 	DefinitionProvider         bool                     `json:"definitionProvider,omitempty"`
+	ReferencesProvider         bool                     `json:"referencesProvider,omitempty"`
 	DocumentFormattingProvider bool                     `json:"documentFormattingProvider,omitempty"`
 	DocumentSymbolProvider     bool                     `json:"documentSymbolProvider,omitempty"`
 	SignatureHelpProvider      *SignatureHelpOptions    `json:"signatureHelpProvider,omitempty"`
 	CompletionProvider         *CompletionOptions       `json:"completionProvider,omitempty"`
 	SemanticTokensProvider     *SemanticTokensOptions   `json:"semanticTokensProvider,omitempty"`
+}
+
+// ReferenceContext is the per-request context block for
+// textDocument/references (LSP 3.17 §textDocument_references). Phase 26 /
+// ADR 0035.
+type ReferenceContext struct {
+	IncludeDeclaration bool `json:"includeDeclaration"`
+}
+
+type ReferenceParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	Context      ReferenceContext       `json:"context"`
 }
 
 type SignatureHelpOptions struct {
