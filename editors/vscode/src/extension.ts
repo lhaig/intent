@@ -8,7 +8,7 @@ import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
-  TransportKind,
+  StreamInfo,
 } from "vscode-languageclient/node";
 
 let client: LanguageClient | undefined;
@@ -33,21 +33,45 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   logChannel.appendLine(`Resolved intentc: ${binary}`);
-  const versionOK = probeVersion(binary, logChannel);
-  if (!versionOK) {
+  if (!probeVersion(binary, logChannel)) {
     vscode.window.showErrorMessage(
       "Intent: 'intentc' did not respond to --version. See the 'Intent (Extension)' output panel."
     );
     return;
   }
+  if (!probeLspSubcommand(binary, logChannel)) {
+    vscode.window.showErrorMessage(
+      "Intent: this 'intentc' binary does not support the 'lsp' subcommand — it's from an older build. " +
+        "Rebuild with `make install` from /Users/lance.haig/dev/ai/exp/intent. " +
+        "See the 'Intent (Extension)' output panel for details."
+    );
+    return;
+  }
 
-  const serverOptions: ServerOptions = {
-    run: { command: binary, args: ["lsp"], transport: TransportKind.stdio },
-    debug: { command: binary, args: ["lsp"], transport: TransportKind.stdio },
-  };
+  // Spawn the server ourselves so we can capture stderr. vscode-languageclient
+  // doesn't surface child-process stderr cleanly by default; routing it
+  // through our own log channel makes server crashes visible.
+  const serverOptions: ServerOptions = () =>
+    new Promise<StreamInfo>((resolve, reject) => {
+      const child = cp.spawn(binary, ["lsp"], {
+        env: { ...process.env, PATH: process.env.PATH },
+      });
 
-  // outputChannel is the LSP client's own log (server stderr + protocol
-  // trace). VS Code surfaces it as "Intent" in the Output dropdown.
+      child.on("error", (err) => {
+        logChannel?.appendLine(`spawn error: ${err.stack || err}`);
+        reject(err);
+      });
+      child.on("exit", (code, signal) => {
+        logChannel?.appendLine(`server exited: code=${code} signal=${signal}`);
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        logChannel?.appendLine(`server stderr: ${chunk.toString("utf8").trimEnd()}`);
+      });
+
+      logChannel?.appendLine(`spawned intentc lsp (pid=${child.pid})`);
+      resolve({ reader: child.stdout, writer: child.stdin });
+    });
+
   const clientLog = vscode.window.createOutputChannel("Intent");
   context.subscriptions.push(clientLog);
 
@@ -57,14 +81,14 @@ export function activate(context: vscode.ExtensionContext): void {
       fileEvents: vscode.workspace.createFileSystemWatcher("**/*.intent"),
     },
     outputChannel: clientLog,
-    revealOutputChannelOn: 4, // RevealOutputChannelOn.Never — manual reveal only
+    revealOutputChannelOn: 4,
   };
 
   client = new LanguageClient("intent", "Intent", serverOptions, clientOptions);
   client.start().then(
     () => logChannel?.appendLine("Language client started successfully."),
     (err) => {
-      logChannel?.appendLine(`Language client failed to start: ${err}`);
+      logChannel?.appendLine(`Language client failed to start: ${err.stack || err}`);
       vscode.window.showErrorMessage(`Intent: language server failed to start (${err}).`);
     }
   );
@@ -75,11 +99,6 @@ export function deactivate(): Thenable<void> | undefined {
   return client?.stop();
 }
 
-// resolveBinary finds the intentc executable. Priority:
-//   1. The explicit 'intent.binaryPath' setting.
-//   2. A login shell's `which intentc` (sees full PATH from .zshrc/.bash_profile).
-//   3. Common install locations: $GOPATH/bin, ~/go/bin, /usr/local/bin.
-// Returns null only when every path fails.
 function resolveBinary(explicit: string, log: vscode.OutputChannel): string | null {
   if (explicit) {
     log.appendLine(`Trying explicit path: ${explicit}`);
@@ -90,10 +109,6 @@ function resolveBinary(explicit: string, log: vscode.OutputChannel): string | nu
     return null;
   }
 
-  // Login-shell PATH lookup. macOS GUI apps inherit a stripped PATH; the
-  // user's real PATH lives in their shell rc files. Sourcing them via a
-  // login shell ('bash -lc' / 'zsh -lc') gives us the same view they
-  // get in Terminal.
   const shell = process.env.SHELL || "/bin/bash";
   log.appendLine(`Trying login-shell PATH lookup via ${shell}`);
   try {
@@ -111,7 +126,6 @@ function resolveBinary(explicit: string, log: vscode.OutputChannel): string | nu
     log.appendLine(`  login shell lookup failed: ${e}`);
   }
 
-  // Common install locations.
   const home = os.homedir();
   const candidates = [
     process.env.GOPATH ? path.join(process.env.GOPATH, "bin", "intentc") : null,
@@ -132,8 +146,6 @@ function resolveBinary(explicit: string, log: vscode.OutputChannel): string | nu
   return null;
 }
 
-// probeVersion runs `intentc --version` to confirm the binary is
-// executable and not a stub. Logs the output for diagnostic value.
 function probeVersion(binary: string, log: vscode.OutputChannel): boolean {
   try {
     const out = cp.execFileSync(binary, ["--version"], { encoding: "utf8", timeout: 5000 });
@@ -141,6 +153,24 @@ function probeVersion(binary: string, log: vscode.OutputChannel): boolean {
     return true;
   } catch (e) {
     log.appendLine(`intentc --version failed: ${e}`);
+    return false;
+  }
+}
+
+// probeLspSubcommand checks that the binary actually has `lsp` in its help.
+// Catches the case where an older intentc is on PATH that responds to
+// --version but exits immediately on `lsp` (no such subcommand).
+function probeLspSubcommand(binary: string, log: vscode.OutputChannel): boolean {
+  try {
+    const out = cp.execFileSync(binary, ["help"], { encoding: "utf8", timeout: 5000 });
+    if (out.includes("intentc lsp")) {
+      log.appendLine("Binary supports 'intentc lsp' subcommand.");
+      return true;
+    }
+    log.appendLine(`Binary's help output does not mention 'lsp': ${out.slice(0, 200)}...`);
+    return false;
+  } catch (e) {
+    log.appendLine(`'intentc help' failed: ${e}`);
     return false;
   }
 }
