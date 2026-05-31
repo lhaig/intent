@@ -32,6 +32,18 @@
         "path": "./syntaxes/intent.tmLanguage.json"
       }
     ],
+    "commands": [
+      {
+        "command": "intent.restartServer",
+        "title": "Intent: Restart Server",
+        "category": "Intent"
+      },
+      {
+        "command": "intent.showOutput",
+        "title": "Intent: Show Output",
+        "category": "Intent"
+      }
+    ],
     "configuration": {
       "type": "object",
       "title": "Intent",
