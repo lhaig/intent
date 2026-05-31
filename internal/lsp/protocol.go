@@ -82,6 +82,7 @@ type ServerCapabilities struct {
 	DocumentSymbolProvider     bool                     `json:"documentSymbolProvider,omitempty"`
 	SignatureHelpProvider      *SignatureHelpOptions    `json:"signatureHelpProvider,omitempty"`
 	CompletionProvider         *CompletionOptions       `json:"completionProvider,omitempty"`
+	SemanticTokensProvider     *SemanticTokensOptions   `json:"semanticTokensProvider,omitempty"`
 }
 
 type SignatureHelpOptions struct {
@@ -234,6 +235,30 @@ type CompletionItem struct {
 	Label  string             `json:"label"`
 	Kind   CompletionItemKind `json:"kind,omitempty"`
 	Detail string             `json:"detail,omitempty"`
+}
+
+// SemanticTokensLegend names the token types and modifiers the server
+// emits. The client decodes tokens by indexing into TokenTypes /
+// TokenModifiers, so order is part of the wire contract — adding a new
+// type appends to TokenTypes; renaming or reordering would break
+// already-running clients.
+type SemanticTokensLegend struct {
+	TokenTypes     []string `json:"tokenTypes"`
+	TokenModifiers []string `json:"tokenModifiers"`
+}
+
+type SemanticTokensOptions struct {
+	Legend SemanticTokensLegend `json:"legend"`
+	Range  bool                 `json:"range,omitempty"`
+	Full   bool                 `json:"full,omitempty"`
+}
+
+type SemanticTokensParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+type SemanticTokens struct {
+	Data []uint32 `json:"data"`
 }
 
 type CompletionItemKind int

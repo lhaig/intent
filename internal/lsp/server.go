@@ -154,6 +154,11 @@ func (s *Server) dispatch(msg *rpcMessage) {
 			return
 		}
 		s.handleCompletion(msg.ID, msg.Params)
+	case "textDocument/semanticTokens/full":
+		if !isRequest {
+			return
+		}
+		s.handleSemanticTokensFull(msg.ID, msg.Params)
 	default:
 		if isRequest {
 			s.t.writeError(msg.ID, errMethodNotFound, fmt.Sprintf("method not found: %s", msg.Method))
@@ -242,6 +247,7 @@ func (s *Server) handleInitialize(id json.RawMessage, params json.RawMessage) {
 			DocumentSymbolProvider:     true,
 			SignatureHelpProvider:      &SignatureHelpOptions{TriggerCharacters: []string{"(", ","}},
 			CompletionProvider:         &CompletionOptions{TriggerCharacters: nil, ResolveProvider: false},
+			SemanticTokensProvider:     &SemanticTokensOptions{Legend: semanticTokensLegend(), Full: true},
 		},
 		ServerInfo: &ServerInfo{
 			Name:    "intentc-lsp",
