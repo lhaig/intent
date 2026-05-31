@@ -1,6 +1,6 @@
 # Phase 22: `--strip-contracts` Flag
 
-**Status:** In Progress
+**Status:** Shipped (2026-05-31; commits f8e4473..HEAD)
 **Milestone:** v1.2 — Self-Improvement Foundations
 **Decision:** [ADR 0033](../../docs/decisions/0033-release-flag-strip-policy.md) (revised: dropped `--release`, kept only `--strip-contracts`)
 

@@ -129,7 +129,10 @@ intent "Safe withdrawal preserves non-negative balance" {
 ## CLI Commands
 
 ```
-intentc build [--target rust|js|wasm] [--emit] <file>           Compile to binary or source
+intentc build [--target rust|js|wasm] [--emit]
+              [--strip-contracts] <file>                          Compile to binary or source
+                                                                  (--strip-contracts drops contracts;
+                                                                   see ADR 0033)
 intentc check <file.intent>                                      Parse and type-check only
 intentc verify <file.intent>                                     Verify contracts with Z3 SMT solver
 intentc fmt [--check] <file.intent>                              Format source code

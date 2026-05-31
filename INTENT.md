@@ -842,6 +842,26 @@ In `--all-targets` mode the runner emits `SKIP` rows for excluded targets with t
 | `len(arr)`      | Array<T> -> Int              | Array length             |
 | `arr.push(val)` | (mutable Array<T>, T) -> Void| Append to array          |
 
+## Release builds
+
+`intentc build --strip-contracts <file.intent>` drops runtime contract checks from the emitted output (Phase 22 / [ADR 0033](docs/decisions/0033-release-flag-strip-policy.md)).
+
+- **Rust target:** every contract `assert!(...)` becomes `debug_assert!(...)`. `intentc build` already passes `--release` to cargo, and cargo's release profile sets `debug_assertions = false`, so the calls compile out entirely. Binary size drops; hot-path overhead goes to zero on the contract layer.
+- **JS target:** the `if (!(cond)) throw new Error("Precondition/Postcondition/Invariant failed: ...")` lines are omitted from emitted source.
+- **WASM target:** flag is accepted but has no effect today (WASM backend doesn't emit contract checks).
+
+User-written assertion builtins in test bodies (`assert(...)`, `assert_eq(...)`, `assert_close(...)`, `assert_panics(...)`) are **not** affected by `--strip-contracts` — they're the runtime assertion API (ADR 0029), not contracts.
+
+When `--strip-contracts` is set, `intentc` prints a one-line warning to stderr:
+
+```
+warning: --strip-contracts removes runtime contract checks; run 'intentc verify' to confirm safety properties.
+```
+
+The safe pattern: run `intentc verify` over a release codebase before shipping with `--strip-contracts`. Verification confirms the contracts that would have asserted at runtime are statically proven; once that pass is clean, stripping is sound. Without verification, stripping trades runtime safety for performance — make the trade deliberately.
+
+A future ADR will scope verification-aware stripping (`--strip-contracts=verified`) that only drops Z3-proven contracts, leaving unproven ones as a runtime net.
+
 ## Editor support
 
 `intentc lsp` starts a stdio LSP 3.17 server. The VS Code extension under `editors/vscode/` activates on `.intent` files and spawns the server. Build it with `cd editors/vscode && npm install && npm run package`, then install via `code --install-extension intent-vscode-<version>.vsix`. The extension assumes `intentc` is on `PATH`; override with the `intent.binaryPath` setting.
