@@ -10,6 +10,7 @@ Language support for the Intent contract-based programming language. Provides:
 - Format Document via `intentc fmt`
 - Signature help with active-parameter tracking
 - Identifier completion (in-scope locals + top-level decls + sibling-package decls + keywords + built-in types)
+- Member completion after `receiver.` — entity's fields (`CompletionField`) and methods (`CompletionMethod`); `self` resolved in methods and constructors; `.` is a completion trigger character
 
 Powered by the `intentc lsp` server (see [ADR 0032](../../docs/decisions/0032-lsp-v1-surface.md)).
 
@@ -60,4 +61,4 @@ Install `z3` and ensure it's on `PATH`. Save the file to trigger verification (Z
 
 ## V1 scope
 
-See [ADR 0032](../../docs/decisions/0032-lsp-v1-surface.md) (revised in Phase 19). Out of scope for v1: member completion (`.field`/`.method` after `.`), find-references, rename, code actions, refactorings, semantic tokens, inlay hints, cross-package go-to-definition, Marketplace publishing, multi-root workspaces.
+See [ADR 0032](../../docs/decisions/0032-lsp-v1-surface.md) (revised through Phase 21). Out of scope for v1: chained member access (`a.b.c`), find-references, rename, code actions, refactorings, inlay hints, cross-package go-to-definition, Marketplace publishing, multi-root workspaces.

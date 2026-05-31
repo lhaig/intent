@@ -63,4 +63,4 @@ What follows from this decision? Trade-offs accepted.
 | 0029 | [In-language testing framework](0029-in-language-testing.md) | 2026-05-29 | accepted |
 | 0030 | [Cross-package test visibility](0030-cross-package-test-visibility.md) | 2026-05-30 | accepted |
 | 0031 | [`@target_specific` annotation for tests](0031-target-specific-annotation.md) | 2026-05-30 | accepted; implemented in 4dacd6c |
-| 0032 | [LSP v1 surface](0032-lsp-v1-surface.md) | 2026-05-30 | accepted; revised twice (Phase 19 + Phase 20); P18 0a4ca14..4999b06, P19 888f80b..257ccfe, P20 addd43b..757abfe |
+| 0032 | [LSP v1 surface](0032-lsp-v1-surface.md) | 2026-05-30 | accepted; revised three times (Phase 19, Phase 20, Phase 21); P18 0a4ca14..4999b06, P19 888f80b..257ccfe, P20 addd43b..757abfe, P21 7c44883..HEAD |

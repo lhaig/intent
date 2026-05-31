@@ -198,7 +198,7 @@ Add capability `completionProvider: { triggerCharacters: [], resolveProvider: fa
 - Semantic tokens (richer-than-tmLanguage highlighting)
 - Inlay hints (type / parameter inlays)
 - Cross-package go-to-definition (v1.1)
-- Member completion (`.field` / `.method`) (v1.2 — needs cursor receiver-type resolution)
+- Member completion (`.field` / `.method`) (v1.2 — followed up in Phase 21; landed once it became clear `receiverBeforeMember` / `resolveMemberOnReceiver` already covered the resolution work)
 - Marketplace publishing (v1.1)
 - Per-contract Z3 diagnostic positions (anchors at (1,1) today; threading positions through verify is a separate v1.1 piece)
 - Incremental text sync (Full sync stays in v1)

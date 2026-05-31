@@ -1,6 +1,6 @@
 # Phase 21: LSP Member Completion
 
-**Status:** In Progress
+**Status:** Shipped (2026-05-31; commits 7c44883..HEAD)
 **Milestone:** Milestone 8 — Developer Experience (Phase 19/20 follow-on)
 **Decision:** [ADR 0032](../../docs/decisions/0032-lsp-v1-surface.md) (revised in this phase to include member completion)
 
@@ -21,18 +21,18 @@ Concretely, after Phase 21:
 ## Success Criteria
 
 - [x] PRD scoped against existing infrastructure (no separate scope walker work)
-- [ ] `completion.go` detects member-completion context using a small variant of `receiverBeforeMember`
-- [ ] Receiver resolves through scope (`self`, locals, params); fields and methods of the entity become `CompletionField` / `CompletionMethod` items with type detail / signature
-- [ ] Unresolvable receivers return an empty list (no false positives)
-- [ ] `.` advertised in `CompletionOptions.TriggerCharacters`; existing identifier completion unaffected when the cursor is not in member position
-- [ ] Tests cover: member completion after a local-typed receiver; after `self` in a method; after `self` in a constructor; unresolvable receiver returns empty; identifier completion at column 1 still includes top-level decls (regression)
-- [ ] E2E test extended to drive a member completion request
-- [ ] ADR 0032 gets a `## Revised — 2026-05-31 (Phase 21)` section noting member completion shipped
-- [ ] `docs/ROADMAP.md` Phase 19 line updated to reflect that the v1.2 follow-on landed; new Phase 21 entry added
-- [ ] `INTENT.md` editor-support note no longer caveats member completion as missing
-- [ ] `editors/vscode/README.md` feature list mentions member completion
-- [ ] `make validate` green
-- [ ] No regressions in any Phase 19 / 20 test
+- [x] `completion.go` detects member-completion context using a small variant of `receiverBeforeMember`
+- [x] Receiver resolves through scope (`self`, locals, params); fields and methods of the entity become `CompletionField` / `CompletionMethod` items with type detail / signature
+- [x] Unresolvable receivers return an empty list (no false positives)
+- [x] `.` advertised in `CompletionOptions.TriggerCharacters`; existing identifier completion unaffected when the cursor is not in member position
+- [x] Tests cover: member completion after a local-typed receiver; after `self` in a method; after `self` in a constructor; unresolvable receiver returns empty; identifier completion at column 1 still includes top-level decls (regression)
+- [x] E2E test extended to drive a member completion request
+- [x] ADR 0032 gets a `## Revised — 2026-05-31 (Phase 21)` section noting member completion shipped
+- [x] `docs/ROADMAP.md` Phase 19 line updated to reflect that the v1.2 follow-on landed; new Phase 21 entry added
+- [x] `INTENT.md` editor-support note no longer caveats member completion as missing
+- [x] `editors/vscode/README.md` feature list mentions member completion
+- [x] `make validate` green
+- [x] No regressions in any Phase 19 / 20 test
 
 ## Reference
 

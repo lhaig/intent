@@ -1,7 +1,7 @@
 # 0032: LSP v1 Surface
 
 **Date:** 2026-05-30
-**Status:** accepted; revised twice (Phase 19, Phase 20); Phase 18 commits 0a4ca14..4999b06, Phase 19 commits 888f80b..257ccfe, Phase 20 commits addd43b..757abfe
+**Status:** accepted; revised three times (Phase 19, Phase 20, Phase 21); Phase 18 commits 0a4ca14..4999b06, Phase 19 commits 888f80b..257ccfe, Phase 20 commits addd43b..757abfe, Phase 21 commits 7c44883..HEAD
 **Phase:** Milestone 8 (Developer Experience)
 
 ## Context
@@ -193,3 +193,16 @@ Phase 20 adds polish + semantic tokens to v1. After Phase 19 the LSP was functio
 - **Marketplace metadata**: CHANGELOG.md, 128×128 placeholder icon, gallery banner color, keywords. Publishing is now blocked only on credentials (publisher account, PAT) and a branded icon — engineering side is publish-ready.
 
 **Still out of v1, deferred to v1.1+:** member completion (`.field`/`.method` after `.`), find-references, rename, code actions, refactorings, cross-package goto-def, Marketplace publish (credentials), incremental semantic tokens (`/delta` and `/range`), per-contract Z3 source positions, multi-byte UTF-16, multi-root workspaces.
+
+## Revised — 2026-05-31 (Phase 21)
+
+Phase 21 closes the only outstanding v1.1 capability gap: member completion. Phase 19 had deferred it under the assumption that "cursor receiver-type resolution" was a separate piece of work; in practice that infrastructure already shipped in Phase 19's `internal/lsp/symbol.go` (`receiverBeforeMember`, `resolveMemberOnReceiver`) so hover and goto-def could resolve `expr.field` / `expr.method`. Phase 21 reuses it.
+
+**Now in v1:**
+
+- **`textDocument/completion` in member position** — when the cursor follows `<receiver>.` (optionally with a partial member identifier already typed), the response is the receiver entity's fields + methods only. `CompletionField` items carry the declared type as detail; `CompletionMethod` items carry a `(<params>) -> <return>` signature.
+- **`.` advertised as a completion trigger character** — LSP clients fire `textDocument/completion` the instant the user types the dot, without waiting for a word-start character.
+- Receivers resolved through scope: typed locals (`let x: Entity`), typed parameters, and `self` inside methods and constructors. Impl-block methods on the entity are included alongside the entity's own methods.
+- Unresolvable receivers (untyped, non-entity type, chained access, call-result chains) return an empty list rather than the full identifier set — surfacing keywords after `.` is worse noise than nothing.
+
+**Still out of v1, deferred (unchanged):** find-references, rename, code actions, refactorings, cross-package goto-def, Marketplace publish (credentials), incremental semantic tokens, per-contract Z3 source positions, multi-byte UTF-16, multi-root workspaces, and now also chained member access (`a.b.c`) and trait-method completion on `dyn`/generic receivers (both need richer expression typing than the LSP carries today).

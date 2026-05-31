@@ -263,6 +263,9 @@ Implemented in commits 0a4ca14..4999b06.
 - VS Code extension under `editors/vscode/` (.vsix builds via `npm run package`)
 - End-to-end smoke test in `internal/lsp/e2e_test.go`
 
+### Phase 21: LSP Member Completion -- SHIPPED (2026-05-31)
+Implemented in commits 7c44883..HEAD. Closes the last v1.1 LSP capability gap: typing `receiver.` returns the entity's fields + methods (with `CompletionField` / `CompletionMethod` kinds) instead of the full identifier list. `.` is now a completion trigger character so the popover fires on the dot. Receivers resolve through `self` in methods/constructors and typed locals/params; chained access and call-result chains remain out of scope (single-step receiver typing only). Phase 19 had deferred this on the assumption new infrastructure was needed; in practice Phase 19's `receiverBeforeMember` + `resolveMemberOnReceiver` were already enough, so Phase 21 is a small, self-contained follow-on. ADR 0032 revised again.
+
 ### Phase 20: LSP Polish + Production-Ready Extension -- SHIPPED (2026-05-31)
 Implemented in commits addd43b..757abfe. ADR 0032 revised again. Closes the polish gap before Marketplace:
 - Tier-1 TextMate grammar (function defs/calls, methods, fields, built-ins, string interpolation)
@@ -279,7 +282,7 @@ Implemented in commits 888f80b..257ccfe. ADR 0032 revised in-place. Adds the "fe
 - `textDocument/formatting` runs `internal/formatter`
 - `textDocument/signatureHelp` with active-parameter tracking
 - `textDocument/completion` for identifiers (locals + top-level + sibling modules + keywords + built-in types)
-- Member completion (.field/.method) deferred to v1.2
+- Member completion (.field/.method) deferred to v1.2 (landed in Phase 21)
 - Find-references, rename, code actions, refactorings, semantic tokens, inlay hints, cross-package goto-def, Marketplace publishing — still v1.1+
 
 ### Phase 17.B Annotation Implementation -- DONE (2026-05-30)
