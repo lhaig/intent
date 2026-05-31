@@ -66,3 +66,4 @@ What follows from this decision? Trade-offs accepted.
 | 0032 | [LSP v1 surface](0032-lsp-v1-surface.md) | 2026-05-30 | accepted; revised four times (Phase 19, Phase 20, Phase 21, Phase 25); P18 0a4ca14..4999b06, P19 888f80b..257ccfe, P20 addd43b..757abfe, P21 7c44883..HEAD, P25 test-only |
 | 0033 | [`--strip-contracts` flag and contract strip policy](0033-release-flag-strip-policy.md) | 2026-05-31 | accepted; revised same day (dropped redundant `--release` flag); PRD pending |
 | 0034 | [Per-contract source positions in verify results](0034-per-contract-source-positions.md) | 2026-05-31 | accepted (PRD pending) |
+| 0035 | [LSP textDocument/references scope and semantics](0035-lsp-find-references.md) | 2026-05-31 | accepted (PRD pending) |
