@@ -9,6 +9,20 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Programming Languages"],
+  "keywords": [
+    "intent",
+    "intentc",
+    "contract",
+    "verification",
+    "z3",
+    "programming-language",
+    "lsp"
+  ],
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#255a6e",
+    "theme": "dark"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/lhaig/intent.git",

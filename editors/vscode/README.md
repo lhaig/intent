@@ -24,12 +24,21 @@ For verification diagnostics (the Z3-backed ones), `z3` must also be on `PATH`. 
 ```bash
 cd editors/vscode
 npm install
-npm run compile
-npm run package      # produces intent-vscode-<version>.vsix
-code --install-extension intent-vscode-<version>.vsix
+npm run package      # esbuild + vsce → intent-vscode-<version>.vsix (~90 KB)
+code --install-extension intent-vscode-<version>.vsix --force
 ```
 
-Marketplace publishing is planned for v1.1; for v1 install from a locally-built `.vsix`.
+The `.vsix` is a single-file esbuild bundle (no `node_modules` tree).
+
+## Marketplace publishing (todo)
+
+Before `vsce publish` will work this extension needs:
+
+1. A Microsoft publisher account at <https://marketplace.visualstudio.com/manage>. The `publisher` field in `package.json` (currently `intent-lang`) must match.
+2. A Personal Access Token with "Marketplace > Acquire and manage" scope (`vsce login <publisher>`).
+3. A branded icon to replace `icon.png` (currently a placeholder).
+
+Once those are in place, publishing is `vsce publish` from this directory.
 
 ## Settings
 
