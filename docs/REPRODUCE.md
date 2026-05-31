@@ -78,6 +78,50 @@ Add these one at a time, testing after each:
 
 **Prompt 5a:** Add Z3 SMT solver integration. Translate contracts to SMT-LIB format. Add `intentc verify` command that reports per-contract verification status.
 
+### Phase 6: Language evolution
+
+After the POC, the language grew a real type system, concurrency story, and package model. Tackle these in order -- each prompt assumes the previous is working.
+
+**Prompt 6a - Traits:**
+> Add a trait system with static dispatch. Parse `trait` declarations with method signatures (no default bodies in v1), `impl Trait for Type` blocks, and trait bounds on generic parameters. Monomorphize away trait dispatch at codegen. See ADR 0018.
+
+**Prompt 6b - User-defined generics:**
+> Extend entities and functions to take type parameters: `entity Stack<T>`, `function identity<T>(x: T) returns T`. Monomorphize all generic uses during IR lowering so each backend sees only concrete types. See ADR 0025.
+
+**Prompt 6c - Strings and Map stdlib:**
+> Add the string method set (`len`, `is_empty`, `contains`, `starts_with`, `ends_with`, `to_upper`, `to_lower`, `trim`, `split`, `replace`, `index_of`) and string interpolation. Add `Map<K, V>` with compile-time validation that keys are not Float, Array, or Map. See ADRs 0013 and 0016.
+
+**Prompt 6d - I/O, HTTP, JSON:**
+> Add file I/O (`read_file`, `write_file`), environment access (`env_get`, `env_set`), an HTTP client (`http_get`, `http_post`), and JSON parsing (`json_parse`, `json_get`, `json_path`). Add an event/timer runtime sufficient for async test cases. See ADRs 0019 and 0020.
+
+**Prompt 6e - Async/await:**
+> Add `async function`, `await` expressions, `spawn`, and `Future<T>`. The Rust backend lowers async to tokio; the JS backend lowers to native promises. The WASM backend rejects async at codegen. See ADR 0026.
+
+**Prompt 6f - Packages:**
+> Add `intent.toml` manifests with `[package]` and `[dependencies]` tables. Implement `intentc pkg init|add|remove|install|list`. Support local path dependencies; defer remote registry. See ADR 0027.
+
+**Prompt 6g - Rust FFI:**
+> Add `extern function NAME(params) returns T from "crate::path" [requires ...] [ensures ...];` -- no body, mandatory trailing semicolon. Restrict bridged types to Int, Float, Bool, String, Void, Array<T>, Result<T,E>, Option<T>; reject entity, user enum, Map, Future, Fn, and trait types. Add `[rust_dependencies]` to `intent.toml` and forward it into the generated Cargo.toml. JS and WASM backends must reject extern at codegen. See ADR 0028.
+
+### Phase 7: In-language testing
+
+**Prompt 7a - Test blocks and assert builtins:**
+> Add `test "name" { ... }` and `async test "name" { ... }` as top-level declarations. Tests take no parameters, have no return type, and `return` inside a test body is a checker error. Add four builtins available inside tests: `assert(cond)`, `assert_eq(a, b)`, `assert_close(a, b, eps)`, `assert_panics(closure)`. See ADR 0029.
+
+**Prompt 7b - Test runner:**
+> Add `intentc test`. The runner discovers tests across the import graph (cross-package, but tests themselves are not exported). Add `--target`, `--all-targets`, `--filter <pattern>`, `--list`, and `--quiet` flags. In `--all-targets` mode, report cross-target divergence (pass on one backend, fail on another) distinctly from plain failures. See ADRs 0029 and 0030.
+
+**Prompt 7c - Target-specific annotations:**
+> Add `@target_specific("rust", "js", ...)` as an annotation on test declarations. Accept `"rust"`, `"js"`, and `"wasm"` as arguments; warn on `"wasm"` because the WASM backend rejects tests anyway. In single-target runs, excluded tests are silently filtered. In multi-target runs, they are reported as `SKIP` rows with reason `target_specific`. Only `@target_specific` is recognized in v1 -- unknown annotation names are parse errors. See ADR 0031.
+
+### Phase 8: Editor support
+
+**Prompt 8a - LSP server:**
+> Add `intentc lsp` as a subcommand that runs an LSP 3.17 server on stdio. Reuse the existing lexer, parser, checker, linter, and Z3 verification so editor feedback matches the CLI exactly. Implement: diagnostics, hover (full contract bodies on top-level decls; types on locals, parameters, `self`, fields, methods), go-to-definition (same-file and same-package), document outline, formatting (driven by `intentc fmt`), signature help with active-parameter tracking, identifier completion, and semantic tokens. See ADR 0032.
+
+**Prompt 8b - VS Code extension:**
+> Add a VS Code extension under `editors/vscode/` that launches `intentc lsp`, registers `.intent` files, bundles with esbuild, and exposes a status bar entry plus a `Restart Server` command.
+
 ### Validation
 
 After each phase, run:

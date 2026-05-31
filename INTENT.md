@@ -814,6 +814,26 @@ intentc test --all-targets foo.intent      # runs on rust + js + wasm, flags cro
 
 Cross-target divergence (e.g. a test that passes on Rust but fails on JS) is reported as `DIFF` and produces a non-zero exit code.
 
+Additional runner flags: `--filter <substring>` (only run tests whose name contains substring), `--list` (print declared test names without running), `--quiet` (summary line only).
+
+### Target-specific tests
+
+Some tests are legitimately target-specific — a Rust-only FFI check, a JS-only DOM test, behaviour that differs between targets by design. Prefix the test with `@target_specific("rust", "js", ...)` so the runner skips it on excluded targets instead of flagging cross-target divergence:
+
+```intent
+@target_specific("rust")
+test "FFI hash matches known value" {
+    assert_eq(blake3_hash_hex("hello"), "ea8f163...");
+}
+
+@target_specific("rust", "js")
+test "runs everywhere except wasm" {
+    assert(1 + 1 == 2);
+}
+```
+
+In `--all-targets` mode the runner emits `SKIP` rows for excluded targets with the annotation as the reason. In single-target mode (e.g. `--target js`), excluded tests are silently filtered out. `@target_specific("wasm")` is accepted but warned — WASM rejects all test declarations. See ADR 0031.
+
 ## Built-in Functions
 
 | Function        | Signature                    | Description              |

@@ -22,6 +22,10 @@
 13. [Rust Mapping](#13-rust-mapping)
 14. [Complete Example](#14-complete-example)
 15. [Package Management](#15-package-management)
+16. [Test Declarations and Annotations](#16-test-declarations-and-annotations)
+17. [Extern Functions (Rust FFI)](#17-extern-functions-rust-ffi)
+18. [In-Language Testing](#18-in-language-testing)
+19. [Editor Support](#19-editor-support)
 
 ---
 
@@ -1738,6 +1742,254 @@ There is no `src/` subdirectory convention. This keeps the structure simple and 
 ### 15.9 Known Limitations
 
 **Cross-package code generation is not yet fully supported.** Dependency discovery, manifest resolution, and type checking work across package boundaries, but the code generation backends (Rust, JS, WASM) do not yet handle cross-package name mangling or linking. Only single-package builds produce fully correct output. Building a project with cross-package imports emits a compiler warning.
+
+---
+
+## 16. Test Declarations and Annotations
+
+### 16.1 Overview
+
+Intent supports a small set of annotations that attach to specific declarations and influence semantic checking or runtime behavior. In v1, exactly one annotation is recognized: `@target_specific(...)`, which restricts a test declaration to a subset of compilation targets. See Section 18 for the full `test` declaration grammar; this section documents the annotation surface itself.
+
+Only `@target_specific` is recognized in v1. Any other annotation name is a parse error -- the compiler does not silently accept unknown annotations. This conservative posture leaves room for future annotations without committing to an open extension point.
+
+### 16.2 Syntax
+
+```
+TestDecl  := [Annotation] ["async"] "test" StringLiteral Block
+Annotation := "@target_specific" "(" StringLiteral { "," StringLiteral } ")"
+```
+
+The annotation appears on its own line immediately before the `test` keyword:
+
+```intent
+@target_specific("rust")
+test "uses Rust FFI" {
+    let n: Int = native_double(21);
+    assert_eq(n, 42);
+}
+```
+
+Multiple targets may be listed:
+
+```intent
+@target_specific("rust", "js")
+test "skipped on wasm" {
+    // ...
+}
+```
+
+### 16.3 Valid Arguments
+
+The annotation accepts the literal strings `"rust"`, `"js"`, and `"wasm"`. Any other string is a type-check error.
+
+- `"rust"` and `"js"` are honored at runtime: the test executes only when `intentc test` is targeting one of the listed backends.
+- `"wasm"` is accepted by the parser and checker but produces a warning: the WebAssembly backend rejects test declarations during codegen, so `@target_specific("wasm")` cannot meaningfully execute. The warning encourages authors to remove the redundant argument.
+
+### 16.4 Semantics
+
+The runner consults the annotation when scheduling tests:
+
+- **Single-target mode** (`intentc test --target rust` or no `--all-targets` flag): tests whose annotation excludes the current target are silently filtered out of the run.
+- **Multi-target mode** (`intentc test --all-targets`): excluded tests are reported as `SKIP` rows with the reason `target_specific`, so divergence is visible without polluting the failure count.
+
+Annotations are confined to `test` declarations. Attaching `@target_specific` to a function, entity, or other declaration form is a parse error.
+
+### 16.5 References
+
+- ADR 0031 -- target-specific test annotations (Phase 17).
+- See Section 18 for the broader test-declaration grammar.
+
+---
+
+## 17. Extern Functions (Rust FFI)
+
+### 17.1 Overview
+
+Extern function declarations bridge Intent into the surrounding Rust crate ecosystem. An `extern function` has no Intent body; it names a Rust function (by fully qualified path) that the Rust backend will call at runtime. This lets Intent code depend on hand-written Rust modules or third-party crates without giving up Intent's contract surface.
+
+Extern declarations are a **Rust-only** feature. The JavaScript and WebAssembly backends reject any program containing `extern function` at codegen time with a target-specific diagnostic.
+
+### 17.2 Syntax
+
+```
+ExternDecl := "extern" "function" Identifier "(" [Params] ")" "returns" Type
+              [ContractList]
+              "from" StringLiteral ";"
+```
+
+The trailing semicolon is mandatory. There is no body.
+
+```intent
+extern function native_sqrt(x: Float) returns Float
+    requires x >= 0.0
+    ensures result >= 0.0
+    from "crate::math::sqrt";
+
+extern function native_lookup(key: String) returns Option<String>
+    from "regex_cache::lookup";
+```
+
+Contracts (`requires` / `ensures`) compile to Intent-side runtime checks that wrap the foreign call -- the Rust function is invoked between the precondition and postcondition assertions, exactly as for a regular Intent function.
+
+### 17.3 Bridged Type Set
+
+Only a fixed set of types may appear in extern parameter or return positions. The Rust backend knows how to marshal these types across the FFI boundary:
+
+| Type            | Notes                                       |
+|-----------------|---------------------------------------------|
+| `Int`           | maps to `i64`                               |
+| `Float`         | maps to `f64`                               |
+| `Bool`          | maps to `bool`                              |
+| `String`        | maps to Rust `String`                       |
+| `Void`          | return position only                        |
+| `Array<T>`      | `T` must itself be bridgeable               |
+| `Result<T, E>`  | both type arguments must be bridgeable      |
+| `Option<T>`     | `T` must be bridgeable                      |
+
+The following types are **rejected** in extern signatures:
+
+- User-defined `entity` and `enum` types.
+- `Map<K, V>` (the runtime representation is not stable across the boundary).
+- `Future<T>` (async functions cannot be `extern`).
+- `Fn(...) -> T` (closures and lambdas).
+- Trait types.
+
+Generic extern functions are not supported in v1.
+
+### 17.4 Project Configuration
+
+Extern callers typically need additional Rust crates pulled into the generated Cargo project. The `intent.toml` manifest accepts a `[rust_dependencies]` table that is forwarded verbatim into the generated `Cargo.toml`:
+
+```toml
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[rust_dependencies]
+regex = "1.10"
+serde_json = { version = "1", features = ["preserve_order"] }
+```
+
+The Rust backend writes these entries into the `[dependencies]` table of the synthesized `Cargo.toml` before invoking `cargo build`. Non-Rust backends ignore the table.
+
+### 17.5 Target Restrictions
+
+- **Rust** -- extern declarations compile to direct calls against the named path.
+- **JavaScript** -- codegen rejects any program containing an extern declaration. The diagnostic names the offending function.
+- **WebAssembly** -- codegen rejects extern declarations with the same message.
+
+If you need cross-target portability, gate extern callers behind a wrapper that the Rust target uses but other targets stub out at the source level.
+
+### 17.6 References
+
+- ADR 0028 -- Rust FFI via `extern function` (Phase 15).
+
+---
+
+## 18. In-Language Testing
+
+### 18.1 Overview
+
+Intent files may declare top-level `test` blocks that are collected and run by `intentc test`. Tests are first-class declarations: they live alongside functions and entities, are type-checked under the same rules, and may exercise contracts, traits, async code, and FFI.
+
+### 18.2 Syntax
+
+```
+TestDecl     := [Annotation] ["async"] "test" StringLiteral Block
+```
+
+Two example shapes:
+
+```intent
+test "addition is commutative" {
+    assert_eq(2 + 3, 3 + 2);
+}
+
+async test "fetches a value" {
+    let body: String = await fetch_body("https://example.test/data");
+    assert(body.len() > 0);
+}
+```
+
+A test declaration takes **no parameters** and has **no return type**. Both forms are parse errors. The body is a regular block; statements inside it follow the usual rules with one exception: a `return` statement inside a test body is a checker error, because a test has no meaningful return value.
+
+The test name is the string literal that follows `test`. Names are used by the runner for filtering, reporting, and skip messages; duplicate names within a single file produce a warning.
+
+### 18.3 Assert Builtins
+
+Four builtins are available inside test bodies. They are ordinary call expressions and may also appear outside tests, but they are intended for assertions:
+
+| Builtin                         | Behavior                                                        |
+|---------------------------------|-----------------------------------------------------------------|
+| `assert(condition)`             | fails the test if `condition` is `false`                        |
+| `assert_eq(a, b)`               | fails if `a != b`; both arguments must have the same type       |
+| `assert_close(a, b, epsilon)`   | float comparison; fails if `abs(a - b) > epsilon`               |
+| `assert_panics(closure)`        | fails if the supplied `Fn() -> Void` closure does not panic     |
+
+On failure, each builtin emits a structured diagnostic that the runner formats into the test report.
+
+### 18.4 Discovery and Visibility
+
+Tests are top-level declarations, but they are **not exported across package boundaries**. A test in package `A` is invisible to package `B` even if `B` imports `A`. Tests cannot be called from non-test code; they exist solely for the runner.
+
+`intentc test` performs **cross-package discovery within a project**: starting from the entry package, it walks the import graph and collects all test declarations from every package transitively reachable, then runs them as a single suite. This means a downstream package's `intentc test` covers all tests from its dependencies, surfacing breakage from updated libraries immediately.
+
+### 18.5 Runner Flags
+
+- `--target <name>` runs tests for a single backend (defaults to `rust`).
+- `--all-targets` runs every supported backend and reports cross-target divergence.
+- `--filter <pattern>` selects tests whose name matches the substring.
+- `--list` prints discovered tests without executing them.
+- `--quiet` suppresses passing output.
+
+In `--all-targets` mode, the runner cross-references results: a test that passes on Rust but fails on JS is reported as a **divergence**, not a failure, with both transcripts attached.
+
+### 18.6 Target Annotations
+
+Tests may be scoped to a subset of targets with `@target_specific(...)`. See Section 16. In summary:
+
+- Single-target runs silently skip excluded tests.
+- Multi-target runs report excluded tests as `SKIP` rows with reason `target_specific`.
+
+### 18.7 References
+
+- ADR 0029 -- in-language `test` declarations and assert builtins (Phase 16).
+- ADR 0030 -- cross-package test discovery (Phase 17).
+- ADR 0031 -- `@target_specific` annotation (Phase 17).
+
+---
+
+## 19. Editor Support
+
+Intent ships an editor toolchain alongside the compiler. The integration point is a Language Server Protocol implementation embedded in `intentc`; editor plugins are thin clients around it.
+
+### 19.1 Language Server
+
+```
+intentc lsp
+```
+
+Launches an LSP 3.17 server on stdio. The server reuses the compiler's lexer, parser, checker, linter, and Z3 verification path, so editor feedback matches command-line `intentc check`, `intentc lint`, and `intentc verify` exactly.
+
+The v1 surface is:
+
+- **Diagnostics** -- parser, checker, linter, and Z3 verification results streamed as `textDocument/publishDiagnostics`.
+- **Hover** -- full contract bodies on top-level declarations; types on locals, parameters, `self`, fields, and methods.
+- **Go to definition** -- same-file and same-package navigation for identifiers, fields, methods, and imports.
+- **Document outline** -- `textDocument/documentSymbol` for declarations and nested members.
+- **Formatting** -- `textDocument/formatting` driven by the same code path as `intentc fmt`.
+- **Signature help** -- `textDocument/signatureHelp` with active-parameter tracking during call expressions.
+- **Completion** -- identifier completion across the current scope and imports.
+- **Semantic tokens** -- `textDocument/semanticTokens/full` with token types `function`, `method`, `parameter`, `variable`, `property`, `class`, `enum`, `enumMember`, `interface`, `decorator`, and modifiers `declaration`, `async`, `defaultLibrary`.
+
+### 19.2 VS Code Extension
+
+A reference client lives at `editors/vscode/`. It bundles via esbuild, registers `.intent` files, launches `intentc lsp`, and exposes a status bar entry plus a `Restart Server` command. The extension is the canonical example for porting Intent support to other LSP-capable editors.
+
+### 19.3 References
+
+- ADR 0032 -- LSP server architecture (Phases 18-20).
 
 ---
 

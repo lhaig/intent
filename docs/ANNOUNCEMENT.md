@@ -1,5 +1,7 @@
 # What if programming languages were designed for AI, not humans?
 
+*Updated 2026-05-31. The "Where it is now" section reflects the current state; the original post is otherwise intact.*
+
 A few weeks ago I saw a post on social media -- someone asking whether it was time to create a programming language designed for consumption by code assistants. Not for humans to write, but for AI to generate and humans to verify.
 
 I couldn't stop thinking about it.
@@ -53,11 +55,17 @@ The `verified_by` references are compiler-checked. If `BankAccount.deposit.ensur
 
 ## Where it is now
 
-I built a working compiler in Go that produces native binaries via Rust. You can write programs with loops, arrays, enums, pattern matching, error handling (Result/Option with try operator), quantifier contracts (forall/exists), and multi-file modules with visibility control.
+A lot has happened since the first version of this post. The compiler is still Go, still zero external dependencies, and still produces native binaries via Rust. But the "proof of concept" framing no longer fits -- most of the limitations I called out have been addressed:
 
-It's a proof of concept -- enough to test whether the idea has legs, not something you'd use in production. The biggest limitation is that contracts are only runtime-checked (assertions). The roadmap has Z3 SMT solver integration to *prove* contracts at compile time, which is where this would become genuinely more powerful than existing approaches. Today it's closer to "Rust with mandatory asserts" than it is to formal verification.
+- **Compile-time verification works.** `intentc verify` translates contracts to SMT-LIB and proves them with Z3. Contracts are no longer only runtime assertions; the harder ones get proved before the program runs.
+- **Generics on user-defined types.** You can write `entity Stack<T>` and `function identity<T>(x: T) returns T`. The compiler monomorphizes them, so generated code stays simple and fast.
+- **A real standard library.** Strings with interpolation and a usable method set, `Map<K, V>`, file and environment I/O, an HTTP client, JSON parsing, an event/async runtime. Enough to write small services, not just toy programs.
+- **Editor support.** `intentc lsp` is a Language Server Protocol server on stdio with diagnostics, hover (including full contract bodies), go-to-definition, document outline, formatting, signature help, completion, and semantic tokens. There's a VS Code extension at `editors/vscode/` that wraps it. So even if the intended *author* is an AI, the *auditor* now has the tooling.
+- **In-language tests with cross-target divergence detection.** `test "name" { ... }` is a real declaration. `intentc test --all-targets` runs the suite against Rust, JavaScript, and WebAssembly and flags tests that pass on one backend but fail on another. That's been the most useful tool in practice for keeping the multi-target story honest.
+- **Rust FFI.** `extern function name(...) returns T from "crate::path";` lets Intent code reach into the Cargo ecosystem with full contracts wrapping the foreign call. So when the standard library doesn't have what you need, you don't have to add it to Intent first.
+- **Multi-target output.** Rust (native), JavaScript (Node and browser), and WebAssembly all share the same IR, so you write Intent once and pick the backend at build time.
 
-There's also no generics on user-defined types, no standard library, and no editor support. Though that last one matters less when the intended author is an AI, not a human in VS Code.
+What's still missing: a public package registry, generic type bounds, optimization-level toggles for stripping contract checks in release builds, and any kind of incremental compilation. The shape of the language feels settled; the remaining work is ecosystem and tooling.
 
 ## Open questions
 
@@ -66,7 +74,7 @@ I'm sharing this because I think the question is more interesting than my partic
 - **Is "audit the contracts" actually faster than "audit the code"?** My experience says yes, but I'm biased. I'd like to see others try it.
 - **What's the right level of contract detail?** Too little and you're back to trusting the implementation. Too much and auditing contracts is as hard as auditing code.
 - **Should the AI also generate the intent blocks, or should those come from the human?** Right now the AI does everything. But maybe the human should write the intent blocks (goals and constraints in English) and the AI fills in the contracts and implementation.
-- **How far can runtime assertions take you before you need static verification?** I was surprised how useful they were during development -- postcondition failures caught real bugs immediately. But for production use, you'd want compile-time proofs.
+- ~~**How far can runtime assertions take you before you need static verification?**~~ *Answered: Z3-backed `intentc verify` shipped. Runtime assertions were useful in development, but the static proofs are what made me trust the contracts.*
 
 The code is open source. I'd genuinely like to hear what others think about the approach, the design tradeoffs, and whether this direction is worth exploring further.
 
