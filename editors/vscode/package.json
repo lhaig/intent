@@ -51,13 +51,18 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
-    "package": "vsce package --no-yarn"
+    "typecheck": "tsc -p ./ --noEmit",
+    "compile": "node esbuild.js",
+    "compile:dev": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "vscode:prepublish": "node esbuild.js --production",
+    "package": "node esbuild.js --production && vsce package --no-yarn"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^2.24.0",
+    "esbuild": "^0.21.0",
     "typescript": "^5.3.0"
   },
   "dependencies": {

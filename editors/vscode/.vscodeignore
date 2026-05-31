@@ -4,10 +4,6 @@ src/**
 **/*.map
 **/*.ts
 .gitignore
+node_modules/**
 tsconfig.json
-node_modules/.bin/**
-node_modules/.cache/**
-node_modules/@types/**
-node_modules/typescript/**
-node_modules/@vscode/vsce/**
-node_modules/@vscode/vsce-sign**/**
+esbuild.js
