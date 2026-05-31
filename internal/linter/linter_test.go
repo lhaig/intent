@@ -105,6 +105,21 @@ function add(a: Int, b: Int) returns Int {
 	}
 }
 
+func TestEntryFunctionExemptFromMissingContracts(t *testing.T) {
+	// Entry functions are program entry points (main). They don't have
+	// meaningful pre/postconditions; the missing-contracts rule shouldn't
+	// fire on them. Every Intent program has one — flagging main forces
+	// users to add cargo-cult `ensures true` just to silence the lint.
+	source := `module test version "1.0.0";
+entry function main() returns Int {
+    return 0;
+}`
+	warnings := parseAndLint(t, source)
+	if containsWarning(warnings, "no requires or ensures") {
+		t.Errorf("entry function main should be exempt from missing-contracts warning, got: %v", warnings)
+	}
+}
+
 func TestFunctionWithContractsNoWarning(t *testing.T) {
 	source := `module test version "1.0.0";
 function add(a: Int, b: Int) returns Int
@@ -394,9 +409,10 @@ entry function main() returns Int {
 }
 `
 	warnings := parseAndLint(t, source)
-	// main should trigger missing contracts warning
-	if !containsWarning(warnings, "no requires or ensures") {
-		t.Errorf("Expected missing contracts warning for main, got: %v", warnings)
+	// `entry function main` is exempt from the missing-contracts rule;
+	// program entry points don't have meaningful pre/postconditions.
+	if containsWarning(warnings, "no requires or ensures") {
+		t.Errorf("entry function main should not trigger missing-contracts warning, got: %v", warnings)
 	}
 }
 

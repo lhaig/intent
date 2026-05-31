@@ -51,7 +51,14 @@ func (l *Linter) lintExternFunctions() {
 func (l *Linter) lintFunctions() {
 	for _, fn := range l.prog.Functions {
 		l.checkEmptyFunctionBody(fn.Name, fn.Body, fn.Line, fn.Column)
-		l.checkMissingContracts(fn.Name, fn.Requires, fn.Ensures, fn.Line, fn.Column)
+		// Entry functions are program entry points (main); they have no
+		// meaningful preconditions and their postcondition is "the program
+		// did the work it advertised in intent blocks." Exempting them
+		// stops every Intent program from carrying an empty
+		// `requires true ensures true` on main just to silence this lint.
+		if !fn.IsEntry {
+			l.checkMissingContracts(fn.Name, fn.Requires, fn.Ensures, fn.Line, fn.Column)
+		}
 		l.checkFunctionNaming(fn.Name, fn.Line, fn.Column)
 		l.checkUnusedTypeParams(fn.Name, fn.TypeParams, fn.Params, fn.ReturnType)
 
