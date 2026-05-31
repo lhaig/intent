@@ -176,7 +176,7 @@ Phase 18 shipped the MVP triple (diagnostics, hover, goto-def) but limited each 
 - Cross-package go-to-definition — same-package only stays in v1.
 - Semantic tokens, inlay hints — polish, not capability.
 - Marketplace publishing — distribution; v1.1.
-- Per-contract Z3 source positions — verify diagnostics still anchor at (1,1); threading positions through `internal/verify` is its own piece.
+- Per-contract Z3 source positions — verify diagnostics still anchor at (1,1); threading positions through `internal/verify` is its own piece. (Landed in Phase 24 / ADR 0034.)
 - Incremental text sync, multi-byte UTF-16, multi-root workspaces, TCP transport, `didChangeWatchedFiles` — unchanged from the original deferred list.
 
 **Implementation note:** the scope walker in `internal/lsp/scope.go` uses "find enclosing function/method body, then check params + lets before the cursor" rather than a full scope-stack walker. Trade-off documented in the file: lets inside inner blocks remain visible everywhere later in the function, not just within their block. Covers the common case (locals declared at function top, used throughout); v1.1 can tighten this when a real example exposes the limitation.
@@ -192,7 +192,7 @@ Phase 20 adds polish + semantic tokens to v1. After Phase 19 the LSP was functio
 - **VS Code extension polish**: esbuild bundling (.vsix is 90 KB single-file vs the previous 300 KB tree), status bar item showing server state (running / starting / stopped / error), `Intent: Restart Server` and `Intent: Show Output` commands.
 - **Marketplace metadata**: CHANGELOG.md, 128×128 placeholder icon, gallery banner color, keywords. Publishing is now blocked only on credentials (publisher account, PAT) and a branded icon — engineering side is publish-ready.
 
-**Still out of v1, deferred to v1.1+:** member completion (`.field`/`.method` after `.`), find-references, rename, code actions, refactorings, cross-package goto-def, Marketplace publish (credentials), incremental semantic tokens (`/delta` and `/range`), per-contract Z3 source positions, multi-byte UTF-16, multi-root workspaces.
+**Still out of v1, deferred to v1.1+:** member completion (`.field`/`.method` after `.`), find-references, rename, code actions, refactorings, cross-package goto-def, Marketplace publish (credentials), incremental semantic tokens (`/delta` and `/range`), multi-byte UTF-16, multi-root workspaces.
 
 ## Revised — 2026-05-31 (Phase 21)
 
@@ -205,4 +205,4 @@ Phase 21 closes the only outstanding v1.1 capability gap: member completion. Pha
 - Receivers resolved through scope: typed locals (`let x: Entity`), typed parameters, and `self` inside methods and constructors. Impl-block methods on the entity are included alongside the entity's own methods.
 - Unresolvable receivers (untyped, non-entity type, chained access, call-result chains) return an empty list rather than the full identifier set — surfacing keywords after `.` is worse noise than nothing.
 
-**Still out of v1, deferred (unchanged):** find-references, rename, code actions, refactorings, cross-package goto-def, Marketplace publish (credentials), incremental semantic tokens, per-contract Z3 source positions, multi-byte UTF-16, multi-root workspaces, and now also chained member access (`a.b.c`) and trait-method completion on `dyn`/generic receivers (both need richer expression typing than the LSP carries today).
+**Still out of v1, deferred (unchanged):** find-references, rename, code actions, refactorings, cross-package goto-def, Marketplace publish (credentials), incremental semantic tokens, multi-byte UTF-16, multi-root workspaces, and now also chained member access (`a.b.c`) and trait-method completion on `dyn`/generic receivers (both need richer expression typing than the LSP carries today).

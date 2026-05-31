@@ -1,6 +1,6 @@
 # Phase 24: Per-Contract Source Positions in Verify Diagnostics
 
-**Status:** In Progress
+**Status:** Shipped (2026-05-31; commits c778e40..HEAD)
 **Milestone:** v1.2 — Self-Improvement Foundations (LSP UX polish)
 **Decision:** [ADR 0034](../../docs/decisions/0034-per-contract-source-positions.md)
 
@@ -12,16 +12,16 @@ Today every verify diagnostic in VS Code draws the squiggly under the module dec
 
 ## Success Criteria
 
-- [ ] `ir.Contract` and `ir.DecreasesClause` carry `Line int` / `Column int` fields populated from the AST
-- [ ] `verify.VerifyResult` carries `Line int` / `Column int` fields populated from the IR contract during Z3 verification
-- [ ] Loop-invariant and decreases checks carry the loop's invariant / decreases clause position
-- [ ] Toolchain-error rows (z3-not-found, translation errors with no clause origin) leave `Line = 0, Column = 0` and the LSP falls back to anchoring at the file start with a "no source position" framing
-- [ ] `internal/lsp/verify.go` `verifyResultsToDiagnostics` converts 1-indexed parser positions to 0-indexed LSP positions and emits a 1-character range
-- [ ] New tests cover: requires/ensures positions populated on functions; invariant positions populated on entities; loop-invariant positions populated; toolchain-error rows safely default
-- [ ] LSP integration: a failing-`ensures` example produces a diagnostic at the `ensures` keyword, not at (1,1)
-- [ ] All existing verify / LSP tests pass
-- [ ] `make validate` green
-- [ ] No regression in `intentc verify`'s console output (positions don't surface there this phase — that's a separate UX call)
+- [x] `ir.Contract` and `ir.DecreasesClause` carry `Line int` / `Column int` fields populated from the AST
+- [x] `verify.VerifyResult` carries `Line int` / `Column int` fields populated from the IR contract during Z3 verification
+- [x] Loop-invariant and decreases checks carry the loop's invariant / decreases clause position
+- [x] Toolchain-error rows (z3-not-found, translation errors with no clause origin) leave `Line = 0, Column = 0` and the LSP falls back to anchoring at the file start with a "no source position" framing
+- [x] `internal/lsp/verify.go` `verifyResultsToDiagnostics` converts 1-indexed parser positions to 0-indexed LSP positions and emits a 1-character range
+- [x] New tests cover: requires/ensures positions populated on functions; invariant positions populated on entities; loop-invariant positions populated; toolchain-error rows safely default
+- [x] LSP integration: a failing-`ensures` example produces a diagnostic at the `ensures` keyword, not at (1,1)
+- [x] All existing verify / LSP tests pass
+- [x] `make validate` green
+- [x] No regression in `intentc verify`'s console output (positions don't surface there this phase — that's a separate UX call)
 
 ## Reference
 
