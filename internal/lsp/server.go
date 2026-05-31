@@ -246,7 +246,7 @@ func (s *Server) handleInitialize(id json.RawMessage, params json.RawMessage) {
 			DocumentFormattingProvider: true,
 			DocumentSymbolProvider:     true,
 			SignatureHelpProvider:      &SignatureHelpOptions{TriggerCharacters: []string{"(", ","}},
-			CompletionProvider:         &CompletionOptions{TriggerCharacters: nil, ResolveProvider: false},
+			CompletionProvider:         &CompletionOptions{TriggerCharacters: []string{"."}, ResolveProvider: false},
 			SemanticTokensProvider:     &SemanticTokensOptions{Legend: semanticTokensLegend(), Full: true},
 		},
 		ServerInfo: &ServerInfo{

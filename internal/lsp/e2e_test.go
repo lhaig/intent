@@ -195,6 +195,68 @@ func TestE2ELspSession(t *testing.T) {
 		t.Errorf("completion missing expected items (add=%v if=%v)", foundAdd, foundLet)
 	}
 
+	// Phase 21: member completion. Capability assertion + an end-to-end
+	// member-position request.
+	if initResult.Capabilities.CompletionProvider == nil {
+		t.Fatal("completionProvider missing from initialize response")
+	}
+	foundDot := false
+	for _, ch := range initResult.Capabilities.CompletionProvider.TriggerCharacters {
+		if ch == "." {
+			foundDot = true
+		}
+	}
+	if !foundDot {
+		t.Errorf("completionProvider.triggerCharacters missing '.', got %v", initResult.Capabilities.CompletionProvider.TriggerCharacters)
+	}
+
+	// Open a separate file containing an entity and an `acc.` position.
+	memberURI := DocumentURI("file:///tmp/e2e_member.intent")
+	memberText := "module e2e_m version \"1.0\";\n" +
+		"entity Account {\n" +
+		"    field balance: Int;\n" +
+		"    method peek() returns Int { return self.balance; }\n" +
+		"}\n" +
+		"entry function main() returns Int {\n" +
+		"    let acc: Account = Account();\n" +
+		"    acc.\n" +
+		"    return 0;\n" +
+		"}\n"
+	openMP, _ := json.Marshal(DidOpenTextDocumentParams{
+		TextDocument: TextDocumentItem{URI: memberURI, LanguageID: "intent", Version: 1, Text: memberText},
+	})
+	mustSendNotification(t, client, "textDocument/didOpen", string(openMP))
+	mustReadPublishDiagnostics(t, client) // drain — parser will complain about `acc.` but that's fine for the completion test.
+
+	// Cursor immediately after the dot on the `acc.` line.
+	dotLine, dotCol := findInText(memberText, "acc.")
+	mcpP, _ := json.Marshal(CompletionParams{
+		TextDocument: TextDocumentIdentifier{URI: memberURI},
+		Position:     lineColToPosition(dotLine, dotCol+len("acc.")),
+	})
+	mustSend(t, client, 104, "textDocument/completion", string(mcpP))
+	resp, _ = client.readMessage()
+	var memberItems []CompletionItem
+	if err := json.Unmarshal(resp.Result, &memberItems); err != nil {
+		t.Fatalf("decode member completion: %v (raw %s)", err, resp.Result)
+	}
+	memberLabels := map[string]CompletionItemKind{}
+	for _, it := range memberItems {
+		memberLabels[it.Label] = it.Kind
+	}
+	if memberLabels["balance"] != CompletionField {
+		t.Errorf("expected balance as Field in member completion, got %v (%d items)", memberLabels["balance"], len(memberItems))
+	}
+	if memberLabels["peek"] != CompletionMethod {
+		t.Errorf("expected peek as Method in member completion, got %v", memberLabels["peek"])
+	}
+	if _, has := memberLabels["if"]; has {
+		t.Error("keywords leaked into member completion")
+	}
+	if _, has := memberLabels["main"]; has {
+		t.Error("top-level decls leaked into member completion")
+	}
+
 	// --- shutdown / exit ---
 	mustSend(t, client, 4, "shutdown", `null`)
 	resp, err = client.readMessage()
