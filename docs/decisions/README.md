@@ -67,3 +67,4 @@ What follows from this decision? Trade-offs accepted.
 | 0033 | [`--strip-contracts` flag and contract strip policy](0033-release-flag-strip-policy.md) | 2026-05-31 | accepted; revised same day (dropped redundant `--release` flag); PRD pending |
 | 0034 | [Per-contract source positions in verify results](0034-per-contract-source-positions.md) | 2026-05-31 | accepted (PRD pending) |
 | 0035 | [LSP textDocument/references scope and semantics](0035-lsp-find-references.md) | 2026-05-31 | accepted (PRD pending) |
+| 0036 | [Entity and method auto-test emission for `--target intent`](0036-testgen-entity-method-emission.md) | 2026-05-31 | accepted (PRD pending) |
