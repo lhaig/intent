@@ -1,7 +1,7 @@
 # 0032: LSP v1 Surface
 
 **Date:** 2026-05-30
-**Status:** accepted; revised 2026-05-30 (Phase 19 scope expansion); Phase 18 commits 0a4ca14..4999b06, Phase 19 commits 888f80b..257ccfe
+**Status:** accepted; revised twice (Phase 19, Phase 20); Phase 18 commits 0a4ca14..4999b06, Phase 19 commits 888f80b..257ccfe, Phase 20 commits addd43b..757abfe
 **Phase:** Milestone 8 (Developer Experience)
 
 ## Context
@@ -180,3 +180,16 @@ Phase 18 shipped the MVP triple (diagnostics, hover, goto-def) but limited each 
 - Incremental text sync, multi-byte UTF-16, multi-root workspaces, TCP transport, `didChangeWatchedFiles` — unchanged from the original deferred list.
 
 **Implementation note:** the scope walker in `internal/lsp/scope.go` uses "find enclosing function/method body, then check params + lets before the cursor" rather than a full scope-stack walker. Trade-off documented in the file: lets inside inner blocks remain visible everywhere later in the function, not just within their block. Covers the common case (locals declared at function top, used throughout); v1.1 can tighten this when a real example exposes the limitation.
+
+## Revised — 2026-05-31 (Phase 20)
+
+Phase 20 adds polish + semantic tokens to v1. After Phase 19 the LSP was functionally complete but the editor experience was rough — function calls didn't render distinctly from variables (TextMate regexes can't tell), there was no outline integration, no format command, no way to see if the server was alive, and the `.vsix` shipped a raw npm tree. Phase 20 closes those gaps (commits addd43b..757abfe).
+
+**Now in v1:**
+
+- **Semantic tokens** (`textDocument/semanticTokens/full`) — server walks the AST and emits per-identifier kind: function, method, parameter, variable, property, class, enum, enumMember, interface, decorator. Modifiers: declaration, async, defaultLibrary. Built-ins (`print`, `len`, `assert*`, `Ok`, `Err`, `Some`, `None`, etc.) carry the defaultLibrary modifier. Themes pick up the kinds and color accordingly.
+- **Tier-1 TextMate grammar** — function definitions/calls, method calls, field access, built-in functions, string interpolation. Acts as the offline fallback (when LSP isn't connected) and the bedrock that semantic tokens layer on top of.
+- **VS Code extension polish**: esbuild bundling (.vsix is 90 KB single-file vs the previous 300 KB tree), status bar item showing server state (running / starting / stopped / error), `Intent: Restart Server` and `Intent: Show Output` commands.
+- **Marketplace metadata**: CHANGELOG.md, 128×128 placeholder icon, gallery banner color, keywords. Publishing is now blocked only on credentials (publisher account, PAT) and a branded icon — engineering side is publish-ready.
+
+**Still out of v1, deferred to v1.1+:** member completion (`.field`/`.method` after `.`), find-references, rename, code actions, refactorings, cross-package goto-def, Marketplace publish (credentials), incremental semantic tokens (`/delta` and `/range`), per-contract Z3 source positions, multi-byte UTF-16, multi-root workspaces.

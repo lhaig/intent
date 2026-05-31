@@ -1,6 +1,6 @@
 # Phase 20: LSP Polish + Production-Ready Extension
 
-**Status:** Draft
+**Status:** Shipped (2026-05-31; commits addd43b..757abfe)
 **Milestone:** Milestone 8 — Developer Experience (Phase 19 follow-on)
 **Decision:** [ADR 0032](../../docs/decisions/0032-lsp-v1-surface.md) (revised again in this phase to include semantic tokens)
 
@@ -18,20 +18,20 @@ Out of scope: the actual marketplace publish (separate PRD when the user has a p
 
 ## Success Criteria
 
-- [ ] TextMate grammar highlights: function definitions, function calls, method calls, field access, built-in functions (`print`/`len`/`assert`/`Ok`/`Err`/`Some`/`None`), string interpolation expression bodies
-- [ ] `textDocument/semanticTokens/full` capability advertised and implemented
-- [ ] Server emits tokens for: functions, methods, parameters, locals, entity names, enum variants, trait names, fields, annotations, async modifier, default-library modifier on built-ins
-- [ ] VS Code extension picks up semantic tokens automatically (vscode-languageclient handles the negotiation)
-- [ ] Extension bundles with esbuild — `.vsix` is single-file `extension.js`, ~50KB or less
-- [ ] Status bar item shows "Intent ✓" when server is up, "Intent ⚠" when down
-- [ ] "Intent: Restart Server" command appears in Command Palette
-- [ ] `editors/vscode/CHANGELOG.md` documents 0.1.0
-- [ ] `editors/vscode/icon.png` exists (128×128 placeholder — user replaces with branded version)
-- [ ] `package.json` carries marketplace metadata: galleryBanner color, keywords
-- [ ] All Phase 18/19 LSP tests still pass; new tests cover the semantic-tokens walker
-- [ ] ADR 0032 revised again to include semantic tokens in v1 surface
-- [ ] ROADMAP + INTENT.md reflect new state
-- [ ] Phase 20 PRD status flipped to `Shipped`
+- [x] TextMate grammar highlights: function definitions, function calls, method calls, field access, built-in functions (`print`/`len`/`assert`/`Ok`/`Err`/`Some`/`None`), string interpolation expression bodies
+- [x] `textDocument/semanticTokens/full` capability advertised and implemented
+- [x] Server emits tokens for: functions, methods, parameters, locals, entity names, enum variants, trait names, fields, annotations, async modifier, default-library modifier on built-ins
+- [x] VS Code extension picks up semantic tokens automatically (vscode-languageclient handles the negotiation)
+- [x] Extension bundles with esbuild — `.vsix` is single-file `extension.js`, ~50KB or less
+- [x] Status bar item shows "Intent ✓" when server is up, "Intent ⚠" when down
+- [x] "Intent: Restart Server" command appears in Command Palette
+- [x] `editors/vscode/CHANGELOG.md` documents 0.1.0
+- [x] `editors/vscode/icon.png` exists (128×128 placeholder — user replaces with branded version)
+- [x] `package.json` carries marketplace metadata: galleryBanner color, keywords
+- [x] All Phase 18/19 LSP tests still pass; new tests cover the semantic-tokens walker
+- [x] ADR 0032 revised again to include semantic tokens in v1 surface
+- [x] ROADMAP + INTENT.md reflect new state
+- [x] Phase 20 PRD status flipped to `Shipped`
 
 ## Tasks
 

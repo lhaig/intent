@@ -263,6 +263,15 @@ Implemented in commits 0a4ca14..4999b06.
 - VS Code extension under `editors/vscode/` (.vsix builds via `npm run package`)
 - End-to-end smoke test in `internal/lsp/e2e_test.go`
 
+### Phase 20: LSP Polish + Production-Ready Extension -- SHIPPED (2026-05-31)
+Implemented in commits addd43b..757abfe. ADR 0032 revised again. Closes the polish gap before Marketplace:
+- Tier-1 TextMate grammar (function defs/calls, methods, fields, built-ins, string interpolation)
+- Semantic tokens (`textDocument/semanticTokens/full`) — type-aware highlighting that beats TextMate's regex limits
+- esbuild bundling (.vsix is 90 KB single-file vs the previous 300 KB tree)
+- Status bar item + `Intent: Restart Server` / `Intent: Show Output` commands
+- Marketplace metadata: CHANGELOG, placeholder icon, gallery banner, keywords
+- Publishing blocked only on credentials (publisher account, PAT) + branded icon — engineering side publish-ready
+
 ### Phase 19: LSP v1 Completion -- SHIPPED (2026-05-30)
 Implemented in commits 888f80b..257ccfe. ADR 0032 revised in-place. Adds the "feels half-built" gaps from Phase 18:
 - Scope walker: hover/goto-def resolve locals, params, `self`, fields, methods (single-step receiver)
