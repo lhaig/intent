@@ -8,9 +8,18 @@
     { "include": "#strings" },
     { "include": "#numbers" },
     { "include": "#annotations" },
+    { "include": "#function-defs" },
+    { "include": "#entity-defs" },
+    { "include": "#enum-defs" },
+    { "include": "#trait-defs" },
+    { "include": "#test-defs" },
     { "include": "#keywords" },
     { "include": "#types" },
-    { "include": "#constants" }
+    { "include": "#constants" },
+    { "include": "#builtin-calls" },
+    { "include": "#method-calls" },
+    { "include": "#function-calls" },
+    { "include": "#field-access" }
   ],
   "repository": {
     "comments": {
@@ -28,7 +37,23 @@
         {
           "name": "meta.interpolation.intent",
           "begin": "\\{",
-          "end": "\\}"
+          "end": "\\}",
+          "beginCaptures": {
+            "0": { "name": "punctuation.section.interpolation.begin.intent" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.section.interpolation.end.intent" }
+          },
+          "patterns": [
+            { "include": "#keywords" },
+            { "include": "#numbers" },
+            { "include": "#constants" },
+            { "include": "#builtin-calls" },
+            { "include": "#method-calls" },
+            { "include": "#function-calls" },
+            { "include": "#field-access" },
+            { "name": "variable.other.intent", "match": "[a-zA-Z_][a-zA-Z_0-9]*" }
+          ]
         }
       ]
     },
@@ -40,7 +65,93 @@
     },
     "annotations": {
       "patterns": [
-        { "name": "storage.modifier.annotation.intent", "match": "@[a-zA-Z_][a-zA-Z_0-9]*" }
+        {
+          "match": "(@)([a-zA-Z_][a-zA-Z_0-9]*)",
+          "captures": {
+            "1": { "name": "punctuation.definition.annotation.intent" },
+            "2": { "name": "storage.modifier.annotation.intent" }
+          }
+        }
+      ]
+    },
+    "function-defs": {
+      "patterns": [
+        {
+          "comment": "function declaration: [public] [async] [entry] function NAME",
+          "match": "\\b(public\\s+)?(async\\s+)?(entry\\s+)?(function)\\s+([a-zA-Z_][a-zA-Z_0-9]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.public.intent" },
+            "2": { "name": "storage.modifier.async.intent" },
+            "3": { "name": "storage.modifier.entry.intent" },
+            "4": { "name": "keyword.declaration.function.intent" },
+            "5": { "name": "entity.name.function.intent" }
+          }
+        },
+        {
+          "comment": "extern function declaration",
+          "match": "\\b(extern)\\s+(function)\\s+([a-zA-Z_][a-zA-Z_0-9]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.extern.intent" },
+            "2": { "name": "keyword.declaration.function.intent" },
+            "3": { "name": "entity.name.function.intent" }
+          }
+        },
+        {
+          "comment": "method declaration: method NAME",
+          "match": "\\b(method)\\s+([a-zA-Z_][a-zA-Z_0-9]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.method.intent" },
+            "2": { "name": "entity.name.function.method.intent" }
+          }
+        }
+      ]
+    },
+    "entity-defs": {
+      "patterns": [
+        {
+          "match": "\\b(public\\s+)?(entity)\\s+([A-Z][a-zA-Z_0-9]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.public.intent" },
+            "2": { "name": "keyword.declaration.entity.intent" },
+            "3": { "name": "entity.name.class.intent" }
+          }
+        }
+      ]
+    },
+    "enum-defs": {
+      "patterns": [
+        {
+          "match": "\\b(public\\s+)?(enum)\\s+([A-Z][a-zA-Z_0-9]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.public.intent" },
+            "2": { "name": "keyword.declaration.enum.intent" },
+            "3": { "name": "entity.name.enum.intent" }
+          }
+        }
+      ]
+    },
+    "trait-defs": {
+      "patterns": [
+        {
+          "match": "\\b(public\\s+)?(trait)\\s+([A-Z][a-zA-Z_0-9]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.public.intent" },
+            "2": { "name": "keyword.declaration.trait.intent" },
+            "3": { "name": "entity.name.interface.intent" }
+          }
+        }
+      ]
+    },
+    "test-defs": {
+      "patterns": [
+        {
+          "match": "\\b(async\\s+)?(test)\\s+(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "storage.modifier.async.intent" },
+            "2": { "name": "keyword.declaration.test.intent" },
+            "3": { "name": "string.quoted.double.intent" }
+          }
+        }
       ]
     },
     "keywords": {
@@ -50,8 +161,12 @@
           "match": "\\b(if|else|while|for|in|break|continue|return|match|forall|exists|implies|and|or|not|await|spawn)\\b"
         },
         {
+          "name": "keyword.other.contract.intent",
+          "match": "\\b(requires|ensures|invariant|decreases|old|result)\\b"
+        },
+        {
           "name": "keyword.declaration.intent",
-          "match": "\\b(module|version|function|entry|returns|requires|ensures|entity|field|invariant|constructor|method|intent|goal|constraint|guarantee|verified_by|let|mutable|enum|trait|impl|for|import|public|async|extern|from|test|decreases|old|result)\\b"
+          "match": "\\b(module|version|returns|field|constructor|intent|goal|constraint|guarantee|verified_by|let|mutable|impl|import|from)\\b"
         }
       ]
     },
@@ -71,6 +186,52 @@
       "patterns": [
         { "name": "constant.language.boolean.intent", "match": "\\b(true|false)\\b" },
         { "name": "variable.language.self.intent", "match": "\\bself\\b" }
+      ]
+    },
+    "builtin-calls": {
+      "patterns": [
+        {
+          "comment": "built-in functions — distinct from user code so themes can colour them as default-library",
+          "match": "\\b(print|len|assert|assert_eq|assert_close|assert_panics|await_all|await_any|timeout|sleep|Ok|Err|Some|None)(?=\\s*\\()",
+          "captures": {
+            "1": { "name": "support.function.builtin.intent" }
+          }
+        }
+      ]
+    },
+    "method-calls": {
+      "patterns": [
+        {
+          "comment": "method calls: .NAME(",
+          "match": "(\\.)([a-zA-Z_][a-zA-Z_0-9]*)(?=\\s*\\()",
+          "captures": {
+            "1": { "name": "punctuation.accessor.intent" },
+            "2": { "name": "entity.name.function.method.intent" }
+          }
+        }
+      ]
+    },
+    "function-calls": {
+      "patterns": [
+        {
+          "comment": "function calls: NAME( — only when NAME isn't a keyword/type (handled by earlier patterns)",
+          "match": "\\b([a-zA-Z_][a-zA-Z_0-9]*)(?=\\s*\\()",
+          "captures": {
+            "1": { "name": "entity.name.function.intent" }
+          }
+        }
+      ]
+    },
+    "field-access": {
+      "patterns": [
+        {
+          "comment": "field access: .NAME (not followed by paren)",
+          "match": "(\\.)([a-zA-Z_][a-zA-Z_0-9]*)\\b",
+          "captures": {
+            "1": { "name": "punctuation.accessor.intent" },
+            "2": { "name": "variable.other.property.intent" }
+          }
+        }
       ]
     }
   }
