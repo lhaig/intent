@@ -49,8 +49,9 @@ func GenerateIntent(prog *ast.Program, sourceImport string) string {
 		sb.WriteString("// error about an unknown function, add `public` in front of the\n")
 		sb.WriteString("// `function`/`entity` keyword in the source file.\n//\n")
 	}
-	sb.WriteString("// Phase 16 scope: standalone functions with contracts only.\n")
-	sb.WriteString("// Entities, methods, and complex parameter types are TODO.\n\n")
+	sb.WriteString("// Phase 16 + Phase 27 scope: standalone functions and entity methods\n")
+	sb.WriteString("// with contracts. Multi-param iteration for free functions, generic\n")
+	sb.WriteString("// entities, and constructor-less entities are still TODO.\n\n")
 
 	emitted := 0
 	for _, f := range prog.Functions {
@@ -68,13 +69,11 @@ func GenerateIntent(prog *ast.Program, sourceImport string) string {
 		}
 	}
 
-	// Phase 16 scope cut: entities/methods deferred to follow-up. Note in
-	// output so users know.
-	if hasEntityWithContracts(prog) {
-		sb.WriteString("// Entity / method auto-tests are not emitted by --target intent yet.\n")
-		sb.WriteString("// Use `intentc test-gen` (Rust emission) for entity tests, or write\n")
-		sb.WriteString("// hand-written tests against the entity constructor and methods.\n\n")
-	}
+	// Phase 27 / ADR 0036: emit one auto-test per (entity, method) where the
+	// method carries at least one contract clause. Skip generic entities,
+	// constructor-less entities, and contract-less methods.
+	entityEmitted := emitEntityTests(&sb, prog)
+	emitted += entityEmitted
 
 	if emitted == 0 {
 		sb.WriteString("// No contract-bearing standalone functions found to auto-test.\n")
@@ -85,23 +84,6 @@ func GenerateIntent(prog *ast.Program, sourceImport string) string {
 	// of `intentc build`).
 	sb.WriteString("entry function main() returns Int { return 0; }\n")
 	return sb.String()
-}
-
-func hasEntityWithContracts(prog *ast.Program) bool {
-	for _, e := range prog.Entities {
-		if len(e.Invariants) > 0 {
-			return true
-		}
-		if e.Constructor != nil && (len(e.Constructor.Requires) > 0 || len(e.Constructor.Ensures) > 0) {
-			return true
-		}
-		for _, m := range e.Methods {
-			if len(m.Requires) > 0 || len(m.Ensures) > 0 {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // generateIntentTestForFunction emits an Intent test block for a single
@@ -272,4 +254,393 @@ func defaultArgFor(p *ast.Param) string {
 	default:
 		return "/* TODO: provide a value */"
 	}
+}
+
+// --- Phase 27 / ADR 0036: entity and method auto-test emission. ---
+
+// emitEntityTests walks the program's entities and emits one auto-test
+// per (entity, method) pair where the method has at least one contract
+// clause. Returns the number of tests emitted.
+//
+// Skipped:
+//   - Generic entities (TypeParams non-empty) — testgen can't pick a
+//     concrete instantiation without more design work.
+//   - Constructor-less entities — no way to auto-construct.
+//   - Methods with no `requires` and no `ensures` — nothing to assert.
+//
+// Each skip emits a one-line `// auto-test: <Entity> skipped (<reason>)`
+// comment so users can see why coverage is missing.
+func emitEntityTests(sb *strings.Builder, prog *ast.Program) int {
+	emitted := 0
+	for _, ent := range prog.Entities {
+		if len(ent.TypeParams) > 0 {
+			fmt.Fprintf(sb, "// auto-test: %s skipped (generic entities not yet supported)\n\n", ent.Name)
+			continue
+		}
+		if ent.Constructor == nil {
+			fmt.Fprintf(sb, "// auto-test: %s skipped (no constructor; cannot auto-construct)\n\n", ent.Name)
+			continue
+		}
+		anyContractMethod := false
+		for _, m := range ent.Methods {
+			if len(m.Requires)+len(m.Ensures) > 0 {
+				anyContractMethod = true
+				break
+			}
+		}
+		if !anyContractMethod {
+			// Constructor-only entities (or entities whose every method
+			// is contract-less) get a skip note so users see the gap.
+			// Constructor-only auto-tests are a future enhancement;
+			// ADR 0036 §O6 scopes the v1 emission to per-method tests.
+			fmt.Fprintf(sb, "// auto-test: %s skipped (no contract-bearing methods; constructor-only entity tests are a future enhancement)\n\n", ent.Name)
+			continue
+		}
+		for _, m := range ent.Methods {
+			if len(m.Requires)+len(m.Ensures) == 0 {
+				continue
+			}
+			sb.WriteString(generateIntentTestForMethod(ent, m))
+			sb.WriteString("\n")
+			emitted++
+		}
+	}
+	return emitted
+}
+
+// generateIntentTestForMethod emits a single test block exercising one
+// (entity, method) pair. Strategy is fixed: construct the entity with
+// default-value args, capture any `old(...)` expressions in the method's
+// `ensures` into `let __old_<i>` bindings, call the method, and assert
+// each ensures clause with `self`/`old(...)`/`result` rewritten.
+func generateIntentTestForMethod(ent *ast.EntityDecl, m *ast.MethodDecl) string {
+	var sb strings.Builder
+	testName := fmt.Sprintf("auto: %s.%s contracts", ent.Name, m.Name)
+	sb.WriteString(fmt.Sprintf("test %q {\n", testName))
+
+	// Header comment when default args may violate a precondition.
+	if (ent.Constructor != nil && len(ent.Constructor.Requires) > 0) || len(m.Requires) > 0 {
+		sb.WriteString("    // note: default args may not satisfy constructor / method requires;\n")
+		sb.WriteString("    // if this test panics on a precondition, hand-write the call site.\n")
+	}
+
+	// Construct the entity.
+	ctorArgs := defaultArgsForParams(ent.Constructor.Params)
+	sb.WriteString(fmt.Sprintf("    let mutable a: %s = %s(%s);\n", ent.Name, ent.Name, ctorArgs))
+
+	// Bind method params as named locals so the contracts' references
+	// resolve in the test scope. Without this, an `ensures self.balance ==
+	// old(self.balance) + amount` wouldn't have `amount` defined when the
+	// assertion runs.
+	for _, p := range m.Params {
+		sb.WriteString(fmt.Sprintf("    let %s: %s = %s;\n", p.Name, typeRefToIntent(p.Type), defaultArgFor(p)))
+	}
+
+	// Capture old() expressions before the method call.
+	oldRefs := collectOldRefs(m.Ensures)
+	for i, expr := range oldRefs {
+		rewritten := rewriteSelfToBinding(expr, "a")
+		capturedType := inferOldType(ent, expr)
+		sb.WriteString(fmt.Sprintf("    let __old_%d: %s = %s;\n", i, capturedType, rewritten))
+	}
+
+	// Call the method. Pass the named param locals so the call site
+	// matches what the ensures clauses reference.
+	hasResult := m.ReturnType != nil && m.ReturnType.Name != "Void"
+	callArgs := paramNamesCSV(m.Params)
+	needsResultCapture := hasResult && ensuresReferenceResult(m.Ensures)
+	if needsResultCapture {
+		fmt.Fprintf(&sb, "    let __r: %s = a.%s(%s);\n",
+			typeRefToIntent(m.ReturnType), m.Name, callArgs)
+	} else {
+		fmt.Fprintf(&sb, "    a.%s(%s);\n", m.Name, callArgs)
+	}
+
+	// Assert each ensures clause with rewrites.
+	for _, ens := range m.Ensures {
+		rewritten := rewriteEnsuresForEntity(ens.RawText, oldRefs, needsResultCapture)
+		sb.WriteString(fmt.Sprintf("    assert(%s);\n", rewritten))
+	}
+
+	sb.WriteString("}\n")
+	return sb.String()
+}
+
+// paramNamesCSV returns the comma-joined parameter names of a method
+// or constructor. Used at the call site after the test body has bound
+// each param to a default-valued local.
+func paramNamesCSV(params []*ast.Param) string {
+	names := make([]string, len(params))
+	for i, p := range params {
+		names[i] = p.Name
+	}
+	return strings.Join(names, ", ")
+}
+
+// ensuresReferenceResult reports whether any of the ensures clauses
+// references the `result` keyword. Used to skip the `__r` capture when
+// no ensures depends on it (avoids unused-variable warnings).
+func ensuresReferenceResult(ensures []*ast.ContractClause) bool {
+	for _, ens := range ensures {
+		// `result` is a reserved word, so any standalone-token occurrence
+		// in the RawText is a real reference.
+		if containsToken(ens.RawText, "result") {
+			return true
+		}
+	}
+	return false
+}
+
+func containsToken(s, target string) bool {
+	for i := 0; i+len(target) <= len(s); i++ {
+		if s[i:i+len(target)] != target {
+			continue
+		}
+		leftOK := i == 0 || !isIdentRune(s[i-1])
+		rightIdx := i + len(target)
+		rightOK := rightIdx >= len(s) || !isIdentRune(s[rightIdx])
+		if leftOK && rightOK {
+			return true
+		}
+	}
+	return false
+}
+
+// collectOldRefs scans a slice of `ensures` clauses for `old(<expr>)`
+// substrings, returns the unique inner expressions in source order. The
+// returned slice's index `i` maps to the `__old_<i>` capture name used
+// by the rewriter.
+func collectOldRefs(ensures []*ast.ContractClause) []string {
+	var refs []string
+	seen := map[string]bool{}
+	for _, ens := range ensures {
+		for _, e := range findOldExprs(ens.RawText) {
+			if seen[e] {
+				continue
+			}
+			seen[e] = true
+			refs = append(refs, e)
+		}
+	}
+	return refs
+}
+
+// findOldExprs returns the unique inner expressions of every `old(...)`
+// occurrence in the input. Walks character-by-character tracking paren
+// depth so nested parens inside the old() expression are handled.
+//
+// The parser's RawText is built by space-joining tokens (see
+// `parser.extractRawText`), so `old(self.balance)` arrives here as
+// `old ( self . balance )`. We tolerate optional whitespace between
+// `old` and the open paren.
+func findOldExprs(s string) []string {
+	var out []string
+	for i := 0; i < len(s); {
+		idx := indexAt(s, "old", i)
+		if idx < 0 {
+			break
+		}
+		// Token boundary on the left.
+		if idx > 0 && isIdentRune(s[idx-1]) {
+			i = idx + 3
+			continue
+		}
+		// Skip whitespace after `old` and look for `(`.
+		j := idx + 3
+		for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
+			j++
+		}
+		if j >= len(s) || s[j] != '(' {
+			i = idx + 3
+			continue
+		}
+		// Walk inner expression with paren-depth tracking.
+		start := j + 1
+		depth := 1
+		k := start
+		for ; k < len(s) && depth > 0; k++ {
+			switch s[k] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+			}
+		}
+		if depth != 0 {
+			break // unbalanced; bail
+		}
+		// k is one past the closing ')'. The inner expression is
+		// s[start:k-1]. Trim leading/trailing whitespace from the
+		// token-joined form.
+		out = append(out, strings.TrimSpace(s[start:k-1]))
+		i = k
+	}
+	return out
+}
+
+func indexAt(s, sub string, from int) int {
+	if from >= len(s) {
+		return -1
+	}
+	rel := strings.Index(s[from:], sub)
+	if rel < 0 {
+		return -1
+	}
+	return from + rel
+}
+
+func isIdentRune(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+}
+
+// rewriteSelfToBinding replaces `self.<x>` and standalone `self` with
+// the binding name. Used both for captured old() expressions and for
+// ensures-clause rewrites.
+func rewriteSelfToBinding(s, binding string) string {
+	out := s
+	// Replace `self.` with `<binding>.`.
+	out = strings.ReplaceAll(out, "self.", binding+".")
+	// Replace standalone `self` (token-bounded) with `<binding>`.
+	out = replaceTokenBoundary(out, "self", binding)
+	return out
+}
+
+// replaceTokenBoundary replaces every occurrence of `target` in `s`
+// with `repl`, but only when `target` appears as a standalone token
+// (preceded and followed by non-identifier bytes).
+func replaceTokenBoundary(s, target, repl string) string {
+	if target == "" {
+		return s
+	}
+	var out strings.Builder
+	i := 0
+	for i < len(s) {
+		idx := indexAt(s, target, i)
+		if idx < 0 {
+			out.WriteString(s[i:])
+			break
+		}
+		out.WriteString(s[i:idx])
+		// Check left + right boundaries.
+		leftOK := idx == 0 || !isIdentRune(s[idx-1])
+		rightIdx := idx + len(target)
+		rightOK := rightIdx >= len(s) || !isIdentRune(s[rightIdx])
+		if leftOK && rightOK {
+			out.WriteString(repl)
+		} else {
+			out.WriteString(target)
+		}
+		i = rightIdx
+	}
+	return out.String()
+}
+
+// inferOldType returns the declared type of the field referenced by
+// `expr` if expr is of the form `self.<fieldName>` or `<binding>.<fieldName>`.
+// Falls back to "Int" with no comment (the caller can document the
+// limitation in surrounding text if needed).
+func inferOldType(ent *ast.EntityDecl, expr string) string {
+	// Strip leading whitespace.
+	e := strings.TrimSpace(expr)
+	const selfDot = "self."
+	if strings.HasPrefix(e, selfDot) {
+		name := strings.TrimSpace(e[len(selfDot):])
+		// If the rest is a bare identifier (no further `.` or operators),
+		// look it up. Otherwise fall back.
+		if isBareIdent(name) {
+			for _, f := range ent.Fields {
+				if f.Name == name {
+					return typeRefToIntent(f.Type)
+				}
+			}
+		}
+	}
+	return "Int"
+}
+
+func isBareIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if !isIdentRune(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// rewriteEnsuresForEntity rewrites a method's ensures-clause text into
+// an assertable expression in the test body. Substitutions:
+//
+//   - `old(<expr>)` → `__old_<i>` (per the order in `oldRefs`)
+//   - `self.x` / `self` → `a.x` / `a`
+//   - `result` → `__r` (only when the method has a non-Void return)
+//
+// The parser's RawText uses space-joined tokens, so we match the
+// `old (...)` form (with optional whitespace) rather than `old(...)`.
+func rewriteEnsuresForEntity(text string, oldRefs []string, hasResult bool) string {
+	out := text
+	for i, expr := range oldRefs {
+		out = replaceOldExpr(out, expr, fmt.Sprintf("__old_%d", i))
+	}
+	out = rewriteSelfToBinding(out, "a")
+	if hasResult {
+		out = replaceTokenBoundary(out, "result", "__r")
+	}
+	return out
+}
+
+// replaceOldExpr replaces every occurrence of `old(<expr>)` (allowing
+// whitespace around the parens) with `repl`. The inner expression is
+// matched as the same trimmed form `collectOldRefs` produced.
+func replaceOldExpr(s, expr, repl string) string {
+	var out strings.Builder
+	i := 0
+	for i < len(s) {
+		idx := indexAt(s, "old", i)
+		if idx < 0 {
+			out.WriteString(s[i:])
+			break
+		}
+		if idx > 0 && isIdentRune(s[idx-1]) {
+			out.WriteString(s[i : idx+3])
+			i = idx + 3
+			continue
+		}
+		j := idx + 3
+		for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
+			j++
+		}
+		if j >= len(s) || s[j] != '(' {
+			out.WriteString(s[i : idx+3])
+			i = idx + 3
+			continue
+		}
+		start := j + 1
+		depth := 1
+		k := start
+		for ; k < len(s) && depth > 0; k++ {
+			switch s[k] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+			}
+		}
+		if depth != 0 {
+			out.WriteString(s[i:])
+			break
+		}
+		inner := strings.TrimSpace(s[start : k-1])
+		out.WriteString(s[i:idx])
+		if inner == expr {
+			out.WriteString(repl)
+		} else {
+			// Not the expression we're rewriting; emit original old(...).
+			out.WriteString(s[idx:k])
+		}
+		i = k
+	}
+	return out.String()
 }
