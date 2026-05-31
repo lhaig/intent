@@ -158,15 +158,28 @@ type OldCapture struct {
 }
 
 // Contract represents a requires/ensures/invariant clause.
+//
+// Line / Column are 1-indexed source positions copied from the AST
+// (ADR 0034). They point at the clause keyword (`requires` / `ensures` /
+// `invariant`) and are consumed by the LSP to anchor verify diagnostics
+// on the failing clause rather than the start of the file. A zero value
+// for Line means "no source position" — used for synthetic clauses
+// added by the IR (currently none, but reserved).
 type Contract struct {
 	Expr    Expr
 	RawText string // original source text for error messages
+	Line    int
+	Column  int
 }
 
-// DecreasesClause represents a termination metric.
+// DecreasesClause represents a termination metric. Line / Column carry
+// the position of the `decreases` keyword for editor diagnostics on
+// failing termination checks (ADR 0034).
 type DecreasesClause struct {
 	Expr    Expr
 	RawText string
+	Line    int
+	Column  int
 }
 
 // Enum represents an enum declaration.

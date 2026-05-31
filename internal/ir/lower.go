@@ -340,6 +340,8 @@ func (l *lowerer) lowerEntity(e *ast.EntityDecl) *Entity {
 		ent.Invariants = append(ent.Invariants, &Contract{
 			Expr:    l.lowerExpr(inv.Expr),
 			RawText: inv.RawText,
+			Line:    inv.Line,
+			Column:  inv.Column,
 		})
 	}
 
@@ -499,6 +501,8 @@ func (l *lowerer) lowerContract(c *ast.ContractClause) *Contract {
 	return &Contract{
 		Expr:    l.lowerExpr(c.Expr),
 		RawText: c.RawText,
+		Line:    c.Line,
+		Column:  c.Column,
 	}
 }
 
@@ -507,6 +511,8 @@ func (l *lowerer) lowerContractWithOld(c *ast.ContractClause) *Contract {
 	return &Contract{
 		Expr:    l.lowerExprWithOld(c.Expr),
 		RawText: c.RawText,
+		Line:    c.Line,
+		Column:  c.Column,
 	}
 }
 
@@ -795,6 +801,8 @@ func (l *lowerer) lowerWhileStmt(stmt *ast.WhileStmt) *WhileStmt {
 		w.Decreases = &DecreasesClause{
 			Expr:    l.lowerExpr(stmt.Decreases.Expr),
 			RawText: stmt.Decreases.RawText,
+			Line:    stmt.Decreases.Line,
+			Column:  stmt.Decreases.Column,
 		}
 	}
 
@@ -1416,6 +1424,8 @@ func (l *lowerer) monomorphizeEntity(decl *ast.EntityDecl, typeArgs []*checker.T
 		ent.Invariants = append(ent.Invariants, &Contract{
 			Expr:    l.lowerExpr(inv.Expr),
 			RawText: inv.RawText,
+			Line:    inv.Line,
+			Column:  inv.Column,
 		})
 	}
 

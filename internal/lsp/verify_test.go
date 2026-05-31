@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os/exec"
 	"testing"
+
+	"github.com/lhaig/intent/internal/verify"
 )
 
 // Phase 18 task 18.4: Z3 verification diagnostics on save.
@@ -119,8 +121,59 @@ func TestVerifyAsyncEndToEnd(t *testing.T) {
 		notif := mustReadPublishDiagnostics(t, client)
 		for _, d := range notif.Diagnostics {
 			if d.Source == "verify" {
+				// Phase 24 / ADR 0034: the diagnostic must anchor on the
+				// failing `ensures` clause, not at file-start. The
+				// `ensures result > 1000` line in the source above is the
+				// 3rd line (0-indexed: 2), so we expect d.Range.Start.Line
+				// to be >= 2 (the ensures keyword is somewhere on or after
+				// line 3 in the 1-indexed source).
+				if d.Range.Start.Line == 0 && d.Range.Start.Character == 0 {
+					t.Errorf("verify diagnostic anchored at file-start (0,0); expected the failing ensures clause: %+v", d.Range)
+				}
 				return // success
 			}
 		}
+	}
+}
+
+// Phase 24 / ADR 0034: verifyResultsToDiagnostics anchors on the clause's
+// source position rather than file-start.
+
+func TestVerifyResultsToDiagnosticsRangeFromPosition(t *testing.T) {
+	results := []*verify.VerifyResult{
+		{
+			Status:       "unverified",
+			ContractKind: "ensures",
+			FunctionName: "abs",
+			Message:      "counterexample found",
+			Line:         5,
+			Column:       9,
+		},
+		{
+			// Toolchain-style row with no source position.
+			Status:       "error",
+			ContractKind: "invariant",
+			Message:      "translation failed",
+			Line:         0,
+			Column:       0,
+		},
+	}
+	diags := verifyResultsToDiagnostics(results)
+	if len(diags) != 2 {
+		t.Fatalf("expected 2 diagnostics, got %d", len(diags))
+	}
+	// With position: parser is 1-indexed, LSP is 0-indexed → (4, 8) start.
+	if diags[0].Range.Start.Line != 4 || diags[0].Range.Start.Character != 8 {
+		t.Errorf("positioned diagnostic: got start (%d,%d), want (4,8)",
+			diags[0].Range.Start.Line, diags[0].Range.Start.Character)
+	}
+	if diags[0].Range.End.Line != 4 || diags[0].Range.End.Character != 9 {
+		t.Errorf("positioned diagnostic: got end (%d,%d), want (4,9)",
+			diags[0].Range.End.Line, diags[0].Range.End.Character)
+	}
+	// Without position: fall back to file-start.
+	if diags[1].Range.Start.Line != 0 || diags[1].Range.Start.Character != 0 {
+		t.Errorf("unpositioned diagnostic: got start (%d,%d), want (0,0)",
+			diags[1].Range.Start.Line, diags[1].Range.Start.Character)
 	}
 }

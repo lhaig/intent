@@ -11,7 +11,14 @@ import (
 	"github.com/lhaig/intent/internal/ir"
 )
 
-// VerifyResult holds the result of verifying a single contract
+// VerifyResult holds the result of verifying a single contract.
+//
+// Line / Column (ADR 0034) carry 1-indexed source positions copied
+// from the IR contract clause. They point at the clause keyword
+// (`requires` / `ensures` / `invariant` / loop `invariant` / `decreases`)
+// so the LSP can anchor verify diagnostics on the failing clause.
+// A zero value for Line means the row has no natural source position
+// (e.g., the "z3 not found on PATH" toolchain-error row).
 type VerifyResult struct {
 	FunctionName string
 	EntityName   string // non-empty for entity contracts (methods, constructors, invariants)
@@ -21,6 +28,8 @@ type VerifyResult struct {
 	Status       string // "verified", "unverified", "error", "timeout"
 	Message      string
 	SMTOutput    string // raw SMT-LIB for debugging
+	Line         int    // 1-indexed source line of the clause keyword; 0 = no position
+	Column       int    // 1-indexed source column
 }
 
 // QualifiedName returns the fully qualified contract name (e.g., "BankAccount.withdraw.requires")
@@ -96,6 +105,8 @@ func verifyFunctionWithZ3(fn *ir.Function, z3Path string) []*VerifyResult {
 		result.ContractText = req.RawText
 		result.IsEnsures = false
 		result.SMTOutput = smtLib
+		result.Line = req.Line
+		result.Column = req.Column
 		results = append(results, result)
 	}
 
@@ -108,6 +119,8 @@ func verifyFunctionWithZ3(fn *ir.Function, z3Path string) []*VerifyResult {
 		result.ContractText = ens.RawText
 		result.IsEnsures = true
 		result.SMTOutput = smtLib
+		result.Line = ens.Line
+		result.Column = ens.Column
 		results = append(results, result)
 	}
 
@@ -122,6 +135,8 @@ func verifyFunctionWithZ3(fn *ir.Function, z3Path string) []*VerifyResult {
 			result.ContractText = inv.RawText
 			result.IsEnsures = true
 			result.SMTOutput = smtLib
+			result.Line = inv.Line
+			result.Column = inv.Column
 			results = append(results, result)
 		}
 	}
@@ -219,6 +234,8 @@ func verifyEntityWithZ3(ent *ir.Entity, z3Path string) []*VerifyResult {
 		result.ContractText = inv.RawText
 		result.IsEnsures = true
 		result.SMTOutput = smtLib
+		result.Line = inv.Line
+		result.Column = inv.Column
 		results = append(results, result)
 	}
 
@@ -234,6 +251,8 @@ func verifyEntityWithZ3(ent *ir.Entity, z3Path string) []*VerifyResult {
 			result.ContractText = req.RawText
 			result.IsEnsures = false
 			result.SMTOutput = smtLib
+			result.Line = req.Line
+			result.Column = req.Column
 			results = append(results, result)
 		}
 		for _, ens := range ctor.Ensures {
@@ -245,6 +264,8 @@ func verifyEntityWithZ3(ent *ir.Entity, z3Path string) []*VerifyResult {
 			result.ContractText = ens.RawText
 			result.IsEnsures = true
 			result.SMTOutput = smtLib
+			result.Line = ens.Line
+			result.Column = ens.Column
 			results = append(results, result)
 		}
 	}
@@ -262,6 +283,8 @@ func verifyEntityWithZ3(ent *ir.Entity, z3Path string) []*VerifyResult {
 				result.ContractText = inv.RawText
 				result.IsEnsures = true
 				result.SMTOutput = smtLib
+				result.Line = inv.Line
+				result.Column = inv.Column
 				results = append(results, result)
 			}
 		}
@@ -278,6 +301,8 @@ func verifyEntityWithZ3(ent *ir.Entity, z3Path string) []*VerifyResult {
 			result.ContractText = req.RawText
 			result.IsEnsures = false
 			result.SMTOutput = smtLib
+			result.Line = req.Line
+			result.Column = req.Column
 			results = append(results, result)
 		}
 		for _, ens := range m.Ensures {
@@ -289,6 +314,8 @@ func verifyEntityWithZ3(ent *ir.Entity, z3Path string) []*VerifyResult {
 			result.ContractText = ens.RawText
 			result.IsEnsures = true
 			result.SMTOutput = smtLib
+			result.Line = ens.Line
+			result.Column = ens.Column
 			results = append(results, result)
 		}
 
@@ -304,6 +331,8 @@ func verifyEntityWithZ3(ent *ir.Entity, z3Path string) []*VerifyResult {
 				result.ContractText = inv.RawText
 				result.IsEnsures = true
 				result.SMTOutput = smtLib
+				result.Line = inv.Line
+				result.Column = inv.Column
 				results = append(results, result)
 			}
 		}

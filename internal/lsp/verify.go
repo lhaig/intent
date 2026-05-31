@@ -98,11 +98,24 @@ func verifyResultsToDiagnostics(results []*verify.VerifyResult) []Diagnostic {
 		default:
 			sev = SeverityInformation
 		}
-		out = append(out, Diagnostic{
-			Range: Range{
+		// ADR 0034: anchor the diagnostic on the failing clause. The
+		// parser records 1-indexed positions; LSP is 0-indexed.
+		// Toolchain-error rows (no clause origin) leave Line=0 and fall
+		// back to the file-start anchor.
+		var rng Range
+		if r.Line > 0 {
+			rng = Range{
+				Start: Position{Line: r.Line - 1, Character: r.Column - 1},
+				End:   Position{Line: r.Line - 1, Character: r.Column},
+			}
+		} else {
+			rng = Range{
 				Start: Position{Line: 0, Character: 0},
 				End:   Position{Line: 0, Character: 1},
-			},
+			}
+		}
+		out = append(out, Diagnostic{
+			Range:    rng,
 			Severity: sev,
 			Source:   "verify",
 			Message:  fmt.Sprintf("%s: %s — %s", r.Status, r.QualifiedName(), r.Message),

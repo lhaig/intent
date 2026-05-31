@@ -757,3 +757,68 @@ func TestVerifyWithRequires(t *testing.T) {
 		t.Errorf("Expected results for both requires and ensures")
 	}
 }
+
+// Phase 24 / ADR 0034: VerifyResult carries the source position copied
+// from the IR contract so the LSP can anchor diagnostics on the failing
+// clause rather than at the start of the file.
+
+func TestVerifyResultCarriesContractPosition(t *testing.T) {
+	if _, err := exec.LookPath("z3"); err != nil {
+		t.Skip("z3 not found on PATH, skipping integration test")
+	}
+
+	// Build a function with an `ensures` carrying a non-trivial position.
+	// The verifier's job here is only to copy Line/Column from the IR
+	// contract to the VerifyResult — the Z3 outcome is irrelevant.
+	fn := &ir.Function{
+		Name: "f",
+		Params: []*ir.Param{
+			{Name: "x", Type: checker.TypeInt},
+		},
+		ReturnType: checker.TypeInt,
+		Requires: []*ir.Contract{
+			{
+				Expr:    &ir.BoolLit{Value: true, Type: checker.TypeBool},
+				RawText: "true",
+				Line:    7,
+				Column:  5,
+			},
+		},
+		Ensures: []*ir.Contract{
+			{
+				Expr: &ir.BinaryExpr{
+					Left:  &ir.ResultRef{Type: checker.TypeInt},
+					Op:    lexer.EQ,
+					Right: &ir.VarRef{Name: "x", Type: checker.TypeInt},
+					Type:  checker.TypeBool,
+				},
+				RawText: "result == x",
+				Line:    8,
+				Column:  5,
+			},
+		},
+	}
+
+	results := VerifyFunction(fn)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results (requires + ensures), got %d", len(results))
+	}
+	var req, ens *VerifyResult
+	for _, r := range results {
+		switch r.ContractKind {
+		case "requires":
+			req = r
+		case "ensures":
+			ens = r
+		}
+	}
+	if req == nil || ens == nil {
+		t.Fatalf("missing requires or ensures result: %+v", results)
+	}
+	if req.Line != 7 || req.Column != 5 {
+		t.Errorf("requires position: got (%d,%d), want (7,5)", req.Line, req.Column)
+	}
+	if ens.Line != 8 || ens.Column != 5 {
+		t.Errorf("ensures position: got (%d,%d), want (8,5)", ens.Line, ens.Column)
+	}
+}
