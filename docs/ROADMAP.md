@@ -263,6 +263,9 @@ Implemented in commits 0a4ca14..4999b06.
 - VS Code extension under `editors/vscode/` (.vsix builds via `npm run package`)
 - End-to-end smoke test in `internal/lsp/e2e_test.go`
 
+### Phase 25: Cross-Package Goto-Def (test-only) -- SHIPPED (2026-05-31)
+Regression test `TestDefinitionCrossPackage` confirmed cross-package goto-definition already works in the LSP — the deferred claim from Phase 19/20 was a planning artefact. `workspace.siblingModules()` already returns every module discovered by `ModuleRegistry.AllModules()` (which walks `intent.toml`'s `[dependencies]` transitively); `resolveAcrossWorkspace` iterates them without gating on package boundary. Phase 25 added the test that locks the behaviour in and corrected the stale deferred-list claim in ADR 0032 (4th revision). No resolver code changed.
+
 ### Phase 24: Per-Contract Verify Source Positions -- SHIPPED (2026-05-31)
 Implemented in commit c778e40..HEAD. Closes ADR 0032's "Z3 anchors at (1,1)" deferred item via [ADR 0034](decisions/0034-per-contract-source-positions.md). The AST already carried 1-indexed `Line` / `Column` on `ContractClause` and `DecreaseClause` from the parser; lowering threaded those through new fields on `ir.Contract` and `ir.DecreasesClause`; the verifier copies them into `verify.VerifyResult.Line` / `.Column`; and the LSP's `verifyResultsToDiagnostics` builds an LSP `Range` from the position (1-indexed parser → 0-indexed LSP). Toolchain-error rows with no source position (z3-not-found, translation errors) leave Line=0 and fall back to file-start anchoring. Console output of `intentc verify` is unchanged this phase; CLI `file:line:col:` prefixes are a separate future ADR. Precedent surveyed in ADR 0034 from Dafny, SPARK Ada, F*, Lean, Coq, Liquid Haskell, Eiffel, C# Code Contracts.
 
@@ -289,7 +292,7 @@ Implemented in commits 888f80b..257ccfe. ADR 0032 revised in-place. Adds the "fe
 - `textDocument/signatureHelp` with active-parameter tracking
 - `textDocument/completion` for identifiers (locals + top-level + sibling modules + keywords + built-in types)
 - Member completion (.field/.method) deferred to v1.2 (landed in Phase 21)
-- Find-references, rename, code actions, refactorings, semantic tokens, inlay hints, cross-package goto-def, Marketplace publishing — still v1.1+
+- Find-references, rename, code actions, refactorings, semantic tokens, inlay hints, Marketplace publishing — still v1.1+
 
 ### Phase 17.B Annotation Implementation -- DONE (2026-05-30)
 Shipped per ADR 0031 in commit 4dacd6c. Lexer/parser/AST/checker/IR/runner all carry the `@target_specific("rust", ...)` annotation through; new `SkipAnnotation` classification keeps annotation skips distinct from the WASM-rejection skip. `examples/target_specific_demo.intent` demonstrates all four cases.
@@ -310,7 +313,7 @@ Scoped in [ADR 0032](decisions/0032-lsp-v1-surface.md) (revised in Phase 19); im
 - Signature help (active-parameter tracking)
 - Identifier completion (locals + top-level + sibling-package decls + keywords + types)
 - `intentc lsp` stdio subcommand; first-party VS Code extension (`editors/vscode/`)
-- Out of scope (v1.1+): member completion (.field/.method), find-references, rename, code actions, refactorings, semantic tokens, inlay hints, cross-package go-to-definition, Marketplace publishing, incremental sync, multi-byte UTF-16, per-contract Z3 source positions
+- Out of scope (v1.1+): member completion (.field/.method), find-references, rename, code actions, refactorings, semantic tokens, inlay hints, Marketplace publishing, incremental sync, multi-byte UTF-16, per-contract Z3 source positions
 
 ### REPL / Playground
 - Interactive expression evaluation with contract checking

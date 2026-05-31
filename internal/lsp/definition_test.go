@@ -145,3 +145,87 @@ func TestDefinitionCrossFileSamePackage(t *testing.T) {
 		t.Errorf("expected URI to point at lib.intent, got %q", loc.URI)
 	}
 }
+
+// Phase 25: cross-package goto-def. App's main.intent imports types_pkg
+// via the manifest dependency; goto-def on `Point` should jump to the
+// entity declaration in the types_pkg directory, not return null.
+func TestDefinitionCrossPackage(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app_pkg")
+	typesDir := filepath.Join(root, "types_pkg")
+	for _, d := range []string{appDir, typesDir} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "intent.toml"),
+		[]byte("[package]\nname=\"app_pkg\"\nversion=\"0.1.0\"\n\n[dependencies]\ntypes_pkg = { path = \"../types_pkg\" }\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(typesDir, "intent.toml"),
+		[]byte("[package]\nname=\"types_pkg\"\nversion=\"0.1.0\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	typesSrc := "module types_pkg version \"1.0\";\n" +
+		"public entity Point { field x: Float; field y: Float; }\n"
+	if err := os.WriteFile(filepath.Join(typesDir, "types.intent"), []byte(typesSrc), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mainSrc := "module main version \"1.0\";\n" +
+		"import types_pkg;\n" +
+		"entry function main() returns Int {\n" +
+		"    let p: Point = types_pkg.Point(0.0, 0.0);\n" +
+		"    return 0;\n" +
+		"}\n"
+	mainPath := filepath.Join(appDir, "main.intent")
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	client, closeFn, srv := newTestServerWithHandle(t)
+	defer closeFn()
+	srv.SetDiagnosticsDebounce(0)
+
+	mustSend(t, client, 1, "initialize", `{}`)
+	if _, err := client.readMessage(); err != nil {
+		t.Fatal(err)
+	}
+	uri := pathToURI(mainPath)
+	openP, _ := json.Marshal(DidOpenTextDocumentParams{
+		TextDocument: TextDocumentItem{URI: uri, LanguageID: "intent", Version: 1, Text: mainSrc},
+	})
+	mustSendNotification(t, client, "textDocument/didOpen", string(openP))
+	mustReadPublishDiagnostics(t, client)
+
+	// Position the cursor on the `Point` in `let p: Point = ...`.
+	// Line index 3 (0-indexed) of mainSrc; the `Point` after `: ` starts at
+	// column 11.
+	pos := Position{Line: 3, Character: 12}
+	defParams, _ := json.Marshal(TextDocumentPositionParams{
+		TextDocument: TextDocumentIdentifier{URI: uri},
+		Position:     pos,
+	})
+	mustSend(t, client, 2, "textDocument/definition", string(defParams))
+	resp, err := client.readMessage()
+	if err != nil {
+		t.Fatalf("read definition response: %v", err)
+	}
+	if resp.Error != nil || string(resp.Result) == "null" {
+		t.Fatalf("expected cross-package Location, got error=%+v result=%s", resp.Error, resp.Result)
+	}
+	var loc Location
+	if err := json.Unmarshal(resp.Result, &loc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// macOS resolves /var → /private/var; the registry walks real paths,
+	// t.TempDir uses the symlink alias. Compare after EvalSymlinks so the
+	// test is portable.
+	wantPath, errSym := filepath.EvalSymlinks(filepath.Join(typesDir, "types.intent"))
+	if errSym != nil {
+		t.Fatal(errSym)
+	}
+	want := pathToURI(wantPath)
+	if loc.URI != want {
+		t.Errorf("cross-package goto-def landed at %q, want %q", loc.URI, want)
+	}
+}

@@ -1,7 +1,7 @@
 # 0032: LSP v1 Surface
 
 **Date:** 2026-05-30
-**Status:** accepted; revised three times (Phase 19, Phase 20, Phase 21); Phase 18 commits 0a4ca14..4999b06, Phase 19 commits 888f80b..257ccfe, Phase 20 commits addd43b..757abfe, Phase 21 commits 7c44883..HEAD
+**Status:** accepted; revised four times (Phase 19, Phase 20, Phase 21, Phase 25); Phase 18 commits 0a4ca14..4999b06, Phase 19 commits 888f80b..257ccfe, Phase 20 commits addd43b..757abfe, Phase 21 commits 7c44883..HEAD, Phase 25 (test-only — see Revised section)
 **Phase:** Milestone 8 (Developer Experience)
 
 ## Context
@@ -192,7 +192,7 @@ Phase 20 adds polish + semantic tokens to v1. After Phase 19 the LSP was functio
 - **VS Code extension polish**: esbuild bundling (.vsix is 90 KB single-file vs the previous 300 KB tree), status bar item showing server state (running / starting / stopped / error), `Intent: Restart Server` and `Intent: Show Output` commands.
 - **Marketplace metadata**: CHANGELOG.md, 128×128 placeholder icon, gallery banner color, keywords. Publishing is now blocked only on credentials (publisher account, PAT) and a branded icon — engineering side is publish-ready.
 
-**Still out of v1, deferred to v1.1+:** member completion (`.field`/`.method` after `.`), find-references, rename, code actions, refactorings, cross-package goto-def, Marketplace publish (credentials), incremental semantic tokens (`/delta` and `/range`), multi-byte UTF-16, multi-root workspaces.
+**Still out of v1, deferred to v1.1+:** member completion (`.field`/`.method` after `.`), find-references, rename, code actions, refactorings, Marketplace publish (credentials), incremental semantic tokens (`/delta` and `/range`), multi-byte UTF-16, multi-root workspaces.
 
 ## Revised — 2026-05-31 (Phase 21)
 
@@ -205,4 +205,10 @@ Phase 21 closes the only outstanding v1.1 capability gap: member completion. Pha
 - Receivers resolved through scope: typed locals (`let x: Entity`), typed parameters, and `self` inside methods and constructors. Impl-block methods on the entity are included alongside the entity's own methods.
 - Unresolvable receivers (untyped, non-entity type, chained access, call-result chains) return an empty list rather than the full identifier set — surfacing keywords after `.` is worse noise than nothing.
 
-**Still out of v1, deferred (unchanged):** find-references, rename, code actions, refactorings, cross-package goto-def, Marketplace publish (credentials), incremental semantic tokens, multi-byte UTF-16, multi-root workspaces, and now also chained member access (`a.b.c`) and trait-method completion on `dyn`/generic receivers (both need richer expression typing than the LSP carries today).
+**Still out of v1, deferred (unchanged):** find-references, rename, code actions, refactorings, Marketplace publish (credentials), incremental semantic tokens, multi-byte UTF-16, multi-root workspaces, and now also chained member access (`a.b.c`) and trait-method completion on `dyn`/generic receivers (both need richer expression typing than the LSP carries today).
+
+## Revised — 2026-05-31 (Phase 25)
+
+Phase 25's regression test confirmed that **cross-package goto-definition already works** — the Phase 19/20 "deferred" claim was wrong. The workspace surface (`internal/lsp/workspace.go` `siblingModules`) invokes `compiler.ModuleRegistry.AllModules()`, which transitively discovers every module reachable through `intent.toml`'s `[dependencies]`. The resolver in `internal/lsp/symbol.go` (`resolveAcrossWorkspace`) iterates them all without gating on package boundary. Cross-package goto-def fell out for free from the Phase 19 workspace plumbing; the deferral was a planning artefact from before that work landed.
+
+Phase 25 adds a regression test (`TestDefinitionCrossPackage`) so the behaviour stays correct, and updates this ADR's deferred list to drop the stale claim. No resolver or workspace code changed — only test + docs.
