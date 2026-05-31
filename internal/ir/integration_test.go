@@ -41,7 +41,7 @@ func TestRoundTripBankAccount(t *testing.T) {
 	}
 
 	// Generate Rust code
-	rustCode := rustbe.Generate(mod)
+	rustCode := rustbe.Generate(mod, rustbe.Options{})
 
 	// Verify non-empty output
 	if rustCode == "" {
@@ -108,7 +108,7 @@ func TestRoundTripAllExamples(t *testing.T) {
 			}
 
 			// Generate Rust code
-			rustCode := rustbe.Generate(mod)
+			rustCode := rustbe.Generate(mod, rustbe.Options{})
 
 			// Verify non-empty output
 			if rustCode == "" {

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lhaig/intent/internal/backend"
 	"github.com/lhaig/intent/internal/checker"
 	"github.com/lhaig/intent/internal/diagnostic"
 	"github.com/lhaig/intent/internal/ir"
@@ -87,8 +88,11 @@ type Result struct {
 	BinaryPath  string
 }
 
-// Compile runs the full pipeline: parse -> check -> lower -> rustbe
-// Returns the result without writing files or invoking cargo.
+// Compile runs the full pipeline: parse -> check -> lower -> rustbe.
+// Returns the result without writing files or invoking cargo. The
+// emitter uses default options (contracts emitted as runtime
+// `assert!`); callers needing `--strip-contracts` use Build / BuildToTarget
+// directly.
 func Compile(source string) *Result {
 	res := &Result{}
 
@@ -111,7 +115,33 @@ func Compile(source string) *Result {
 
 	// Lower to IR, then generate Rust
 	mod := ir.Lower(prog, checkResult)
-	res.RustSource = rustbe.Generate(mod)
+	res.RustSource = rustbe.Generate(mod, rustbe.Options{})
+
+	return res
+}
+
+// CompileWithOptions is like Compile but the emitter respects the
+// supplied options (Phase 22 / ADR 0033 — currently StripContracts).
+func CompileWithOptions(source string, opts backend.BuildOptions) *Result {
+	res := &Result{}
+
+	p := parser.New(source)
+	prog := p.Parse()
+
+	if p.Diagnostics().HasErrors() {
+		res.Diagnostics = p.Diagnostics()
+		return res
+	}
+
+	checkResult := checker.CheckWithResult(prog)
+	if checkResult.Diagnostics.HasErrors() {
+		res.Diagnostics = checkResult.Diagnostics
+		return res
+	}
+	res.Diagnostics = checkResult.Diagnostics
+
+	mod := ir.Lower(prog, checkResult)
+	res.RustSource = rustbe.Generate(mod, rustbe.Options{StripContracts: opts.StripContracts})
 
 	return res
 }
@@ -200,9 +230,10 @@ func cargoBuild(rustSource, outPath string, rustDeps map[string]RustDependencySp
 
 // Build runs the full pipeline and produces a native binary.
 // It creates a temp Cargo project, writes generated Rust, runs cargo build,
-// and copies the binary to outPath.
-func Build(source, outPath string) error {
-	res := Compile(source)
+// and copies the binary to outPath. Phase 22 / ADR 0033: opts carries
+// StripContracts; cargo invocation is unchanged (always `--release`).
+func Build(source, outPath string, opts backend.BuildOptions) error {
+	res := CompileWithOptions(source, opts)
 	if res.Diagnostics != nil && res.Diagnostics.HasErrors() {
 		return fmt.Errorf("compilation errors:\n%s", res.Diagnostics.Format("input"))
 	}
@@ -269,7 +300,7 @@ func CompileProject(entryPath string) *Result {
 
 	// Lower to IR, then generate Rust
 	prog := ir.LowerAll(allModules, sortedPaths, checkResult, registry.PackageDirs())
-	res.RustSource = rustbe.GenerateAll(prog)
+	res.RustSource = rustbe.GenerateAll(prog, rustbe.Options{})
 
 	return res
 }
@@ -306,13 +337,15 @@ func CheckProject(entryPath string) *diagnostic.Diagnostics {
 	return checkResult.Diagnostics
 }
 
-// BuildProject runs the full multi-file pipeline and produces a native binary.
-func BuildProject(entryPath, outPath string) error {
+// BuildProject runs the full multi-file pipeline and produces a native
+// binary. Phase 22 / ADR 0033: opts carries StripContracts; cargo
+// invocation is unchanged (always `--release`).
+func BuildProject(entryPath, outPath string, opts backend.BuildOptions) error {
 	registry, err := NewModuleRegistry(entryPath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize module registry: %w", err)
 	}
-	res := compileFromRegistry(registry, entryPath)
+	res := compileFromRegistryWithOptions(registry, entryPath, opts)
 	if res.Diagnostics != nil && res.Diagnostics.HasErrors() {
 		return fmt.Errorf("compilation errors:\n%s", res.Diagnostics.Format(entryPath))
 	}
@@ -345,6 +378,12 @@ func resolveRustDepPaths(deps map[string]RustDependencySpec, projectRoot string)
 // so callers (like BuildProject) can reuse the registry to access the parsed
 // manifest. Mirrors CompileProject otherwise.
 func compileFromRegistry(registry *ModuleRegistry, entryPath string) *Result {
+	return compileFromRegistryWithOptions(registry, entryPath, backend.BuildOptions{})
+}
+
+// compileFromRegistryWithOptions threads BuildOptions through to the rustbe
+// emitter so --strip-contracts reaches the generated source.
+func compileFromRegistryWithOptions(registry *ModuleRegistry, entryPath string, opts backend.BuildOptions) *Result {
 	res := &Result{}
 
 	diag, err := registry.DiscoverDependencies()
@@ -381,7 +420,7 @@ func compileFromRegistry(registry *ModuleRegistry, entryPath string) *Result {
 	res.Diagnostics = checkResult.Diagnostics
 
 	prog := ir.LowerAll(allModules, sortedPaths, checkResult, registry.PackageDirs())
-	res.RustSource = rustbe.GenerateAll(prog)
+	res.RustSource = rustbe.GenerateAll(prog, rustbe.Options{StripContracts: opts.StripContracts})
 	return res
 }
 
@@ -410,7 +449,7 @@ func GenerateTests(source string) *Result {
 
 	// Generate Rust via IR pipeline
 	mod := ir.Lower(prog, checkResult)
-	rustSource := rustbe.Generate(mod)
+	rustSource := rustbe.Generate(mod, rustbe.Options{})
 
 	// Generate tests (still uses codegen.ExprToRust internally)
 	testSource := testgen.Generate(prog)
@@ -488,7 +527,7 @@ func GenerateTestsProject(entryPath string) *Result {
 
 	// Multi-file code generation via IR pipeline
 	prog := ir.LowerAll(allModules, sortedPaths, checkResult, registry.PackageDirs())
-	rustSource := rustbe.GenerateAll(prog)
+	rustSource := rustbe.GenerateAll(prog, rustbe.Options{})
 
 	// Generate tests from the entry file's AST (still uses codegen internally)
 	entryPath = sortedPaths[len(sortedPaths)-1]

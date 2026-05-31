@@ -16,6 +16,11 @@ import (
 // and returns the generated Rust source.
 func generateFromSource(t *testing.T, name, src string) string {
 	t.Helper()
+	return generateFromSourceWithOpts(t, name, src, Options{})
+}
+
+func generateFromSourceWithOpts(t *testing.T, name, src string, opts Options) string {
+	t.Helper()
 
 	p := parser.New(src)
 	prog := p.Parse()
@@ -27,7 +32,7 @@ func generateFromSource(t *testing.T, name, src string) string {
 		t.Fatalf("[%s] check errors: %s", name, result.Diagnostics.Format("test"))
 	}
 	mod := ir.Lower(prog, result)
-	return Generate(mod)
+	return Generate(mod, opts)
 }
 
 func TestGenerateHello(t *testing.T) {
@@ -836,7 +841,7 @@ entry function main() returns Int {
 	}
 
 	prog := ir.LowerAll(registry, sortedPaths, checkResult, packageDirs)
-	output := GenerateAll(prog)
+	output := GenerateAll(prog, Options{})
 
 	// The function should be called as types_distance (using module name "types"),
 	// not types_pkg_distance (using package name "types_pkg").
@@ -904,7 +909,7 @@ entry function main() returns Int {
 	}
 
 	prog := ir.LowerAll(registry, sortedPaths, checkResult, packageDirs)
-	output := GenerateAll(prog)
+	output := GenerateAll(prog, Options{})
 
 	// alpha_pkg.greet() should resolve to alpha_greet (module name "alpha")
 	if !strings.Contains(output, "alpha_greet(") {
@@ -1062,5 +1067,124 @@ func TestSanitiseTestName(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("sanitiseTestName(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// Phase 22 / ADR 0033: --strip-contracts swaps `assert!` for `debug_assert!`
+// on contract checks while leaving user-written test-body asserts alone.
+
+func TestStripContractsSwapsToDebugAssert(t *testing.T) {
+	src := `module bank version "1.0";
+
+entity Account {
+    field balance: Int;
+    invariant self.balance >= 0;
+    constructor(initial: Int)
+        requires initial >= 0
+        ensures self.balance == initial
+    {
+        self.balance = initial;
+    }
+    method deposit(amount: Int) returns Void
+        requires amount > 0
+        ensures self.balance == old(self.balance) + amount
+    {
+        self.balance = self.balance + amount;
+    }
+}
+
+entry function main() returns Int {
+    let a: Account = Account(10);
+    a.deposit(5);
+    return 0;
+}
+
+test "deposit increases balance" {
+    let a: Account = Account(10);
+    a.deposit(5);
+    assert_eq(a.balance, 15);
+}
+`
+
+	plain := generateFromSourceWithOpts(t, "strip", src, Options{})
+	stripped := generateFromSourceWithOpts(t, "strip", src, Options{StripContracts: true})
+
+	// Contract sites: plain has assert! for them, stripped has debug_assert!.
+	contractMarkers := []string{
+		"Precondition failed: initial >= 0",
+		"Postcondition failed: self . balance == initial",
+		"Invariant failed: self . balance >= 0",
+		"Precondition failed: amount > 0",
+		"Postcondition failed: self . balance == old ( self . balance ) + amount",
+	}
+	for _, marker := range contractMarkers {
+		if !strings.Contains(plain, "assert!") || !strings.Contains(plain, marker) {
+			t.Errorf("plain output missing contract assert! with marker %q", marker)
+		}
+		if strings.Contains(stripped, "assert!("+strings.Split(marker, ":")[0]) {
+			// Looking for `assert!(` not `debug_assert!(` for the contract;
+			// the message includes the marker.
+		}
+	}
+
+	// Specifically: stripped has zero `assert!(<cond>, "Precondition`/`Postcondition`/`Invariant` lines
+	// (those have been swapped to debug_assert!).
+	for _, marker := range []string{"Precondition failed", "Postcondition failed", "Invariant failed"} {
+		// Find lines containing the marker; each must be a debug_assert!.
+		for _, line := range strings.Split(stripped, "\n") {
+			if !strings.Contains(line, marker) {
+				continue
+			}
+			if !strings.Contains(line, "debug_assert!") {
+				t.Errorf("line with %q is not a debug_assert! in stripped output: %s", marker, line)
+			}
+			if strings.Contains(line, " assert!") {
+				t.Errorf("line with %q still contains assert! in stripped output: %s", marker, line)
+			}
+		}
+	}
+
+	// User-written assert_eq in the test body must remain assert_eq! in both modes.
+	if !strings.Contains(plain, "assert_eq!") {
+		t.Error("plain output missing test-body assert_eq!")
+	}
+	if !strings.Contains(stripped, "assert_eq!") {
+		t.Error("stripped output should still emit test-body assert_eq! (assertion API, not a contract)")
+	}
+	// And the test-body assert should NOT have been turned into debug_assert!.
+	for _, line := range strings.Split(stripped, "\n") {
+		if strings.Contains(line, "debug_assert_eq!") {
+			t.Errorf("test-body assert_eq was incorrectly stripped: %s", line)
+		}
+	}
+}
+
+func TestStripContractsPreservesNonContractOutput(t *testing.T) {
+	// Regression: with zero options, output must be byte-identical to the
+	// pre-Phase-22 behaviour. We can't compare to a hard-coded reference
+	// (the generator evolves), so we compare two runs of Options{} against
+	// each other and verify the contract assert! sites are still present.
+	src := `module fib version "1.0";
+function fib(n: Int) returns Int
+    requires n >= 0
+    ensures result >= 0
+{
+    if n < 2 { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+entry function main() returns Int {
+    return fib(5);
+}
+`
+	plain1 := generateFromSourceWithOpts(t, "fib", src, Options{})
+	plain2 := generateFromSourceWithOpts(t, "fib", src, Options{})
+	if plain1 != plain2 {
+		t.Error("Generate is not deterministic across two calls with Options{}")
+	}
+	if !strings.Contains(plain1, `assert!((n >= 0i64), "Precondition failed`) {
+		t.Errorf("plain output missing expected contract assert! pattern:\n%s", plain1)
+	}
+	if strings.Contains(plain1, "debug_assert!") {
+		t.Error("plain output unexpectedly contains debug_assert! (StripContracts not set)")
 	}
 }

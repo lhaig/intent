@@ -14,11 +14,11 @@ func (b *JSBackend) Name() string {
 }
 
 // Generate produces JavaScript source code from a single IR module.
-func (b *JSBackend) Generate(mod *ir.Module) string {
-	return jsbe.Generate(mod)
+func (b *JSBackend) Generate(mod *ir.Module, opts BuildOptions) string {
+	return jsbe.Generate(mod, jsbe.Options{StripContracts: opts.StripContracts})
 }
 
 // GenerateAll produces JavaScript source from a multi-module IR program.
-func (b *JSBackend) GenerateAll(prog *ir.Program) string {
-	return jsbe.GenerateAll(prog)
+func (b *JSBackend) GenerateAll(prog *ir.Program, opts BuildOptions) string {
+	return jsbe.GenerateAll(prog, jsbe.Options{StripContracts: opts.StripContracts})
 }

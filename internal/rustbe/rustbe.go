@@ -10,13 +10,24 @@ import (
 	"github.com/lhaig/intent/internal/lexer"
 )
 
+// Options carries codegen flags that aren't part of the IR. Phase 22 /
+// ADR 0033: StripContracts swaps `assert!` for `debug_assert!` on all
+// contract checks (preconditions, postconditions, invariants, loop
+// invariants, decreases/termination metrics). User-written
+// `assert(...)` / `assert_eq(...)` calls from test bodies are
+// unaffected — they're the runtime assertion API, not contracts.
+type Options struct {
+	StripContracts bool
+}
+
 // Generate produces Rust source code from a single IR Module.
-func Generate(mod *ir.Module) string {
+func Generate(mod *ir.Module, opts Options) string {
 	g := &generator{
-		entities:  make(map[string]*ir.Entity),
-		enums:     make(map[string]*ir.Enum),
-		functions: make(map[string]*ir.Function),
-		externs:   make(map[string]*ir.ExternFunction),
+		entities:       make(map[string]*ir.Entity),
+		enums:          make(map[string]*ir.Enum),
+		functions:      make(map[string]*ir.Function),
+		externs:        make(map[string]*ir.ExternFunction),
+		stripContracts: opts.StripContracts,
 	}
 
 	for _, e := range mod.Entities {
@@ -131,7 +142,7 @@ func injectAsyncUseStatements(result string, needsTokio, needsFutures bool) stri
 }
 
 // GenerateAll produces Rust source from a multi-file IR Program.
-func GenerateAll(prog *ir.Program) string {
+func GenerateAll(prog *ir.Program, opts Options) string {
 	if len(prog.Modules) == 0 {
 		return ""
 	}
@@ -225,6 +236,7 @@ func GenerateAll(prog *ir.Program) string {
 			allFunctions:    allFunctions,
 			allEntities:     allEntities,
 			allExterns:      allExterns,
+			stripContracts:  opts.StripContracts,
 		}
 
 		if !mod.IsEntry {
@@ -348,6 +360,25 @@ type generator struct {
 	allEntities     map[string]*ir.Entity         // all entities across all modules (for cross-module constructor lookups)
 	allExterns      map[string]*ir.ExternFunction // all extern (FFI) functions across all modules
 	mutatedVars     map[string]bool               // variables assigned to in current function body
+
+	// Phase 22 / ADR 0033: when true, contract checks emit
+	// `debug_assert!(...)` instead of `assert!(...)`. cargo's --release
+	// profile then compiles the calls out. User-written assertion
+	// builtins (assert/assert_eq/assert_close/assert_panics) are
+	// unaffected.
+	stripContracts bool
+}
+
+// contractAssertMacro returns the macro name to use for contract-check
+// emissions. Phase 22: returns `debug_assert!` under --strip-contracts,
+// `assert!` otherwise. This is the single point of policy — every
+// contract-check `emitLinef` uses this helper rather than a literal
+// `assert!`.
+func (g *generator) contractAssertMacro() string {
+	if g.stripContracts {
+		return "debug_assert!"
+	}
+	return "assert!"
 }
 
 func (g *generator) emit(s string) {
@@ -592,7 +623,7 @@ func (g *generator) generateFunction(f *ir.Function) {
 
 		// Requires
 		for _, req := range f.Requires {
-			g.emitLinef("assert!(%s, \"Precondition failed: %s\");\n",
+			g.emitLinef("%s(%s, \"Precondition failed: %s\");\n", g.contractAssertMacro(),
 				g.generateExpr(req.Expr, arrayRefParams), escapeRustString(req.RawText))
 		}
 
@@ -610,7 +641,7 @@ func (g *generator) generateFunction(f *ir.Function) {
 
 			g.ensuresContext = true
 			for _, ens := range f.Ensures {
-				g.emitLinef("assert!(%s, \"Postcondition failed: %s\");\n",
+				g.emitLinef("%s(%s, \"Postcondition failed: %s\");\n", g.contractAssertMacro(),
 					g.generateExpr(ens.Expr, arrayRefParams), escapeRustString(ens.RawText))
 			}
 			g.ensuresContext = false
@@ -621,7 +652,7 @@ func (g *generator) generateFunction(f *ir.Function) {
 			if len(f.Ensures) > 0 {
 				g.ensuresContext = true
 				for _, ens := range f.Ensures {
-					g.emitLinef("assert!(%s, \"Postcondition failed: %s\");\n",
+					g.emitLinef("%s(%s, \"Postcondition failed: %s\");\n", g.contractAssertMacro(),
 						g.generateExpr(ens.Expr, arrayRefParams), escapeRustString(ens.RawText))
 				}
 				g.ensuresContext = false
@@ -655,7 +686,7 @@ func (g *generator) generateEntity(e *ir.Entity) {
 		g.emitLine("fn __check_invariants(&self) {")
 		g.incIndent()
 		for _, inv := range e.Invariants {
-			g.emitLinef("assert!(%s, \"Invariant failed: %s\");\n",
+			g.emitLinef("%s(%s, \"Invariant failed: %s\");\n", g.contractAssertMacro(),
 				g.generateExpr(inv.Expr, nil), escapeRustString(inv.RawText))
 		}
 		g.decIndent()
@@ -694,7 +725,7 @@ func (g *generator) generateConstructor(e *ir.Entity) {
 
 	// Requires
 	for _, req := range ctor.Requires {
-		g.emitLinef("assert!(%s, \"Precondition failed: %s\");\n",
+		g.emitLinef("%s(%s, \"Precondition failed: %s\");\n", g.contractAssertMacro(),
 			g.generateExpr(req.Expr, nil), escapeRustString(req.RawText))
 	}
 
@@ -714,7 +745,7 @@ func (g *generator) generateConstructor(e *ir.Entity) {
 	// Ensures
 	g.ensuresContext = true
 	for _, ens := range ctor.Ensures {
-		g.emitLinef("assert!(%s, \"Postcondition failed: %s\");\n",
+		g.emitLinef("%s(%s, \"Postcondition failed: %s\");\n", g.contractAssertMacro(),
 			g.generateExpr(ens.Expr, nil), escapeRustString(ens.RawText))
 	}
 	g.ensuresContext = false
@@ -841,7 +872,7 @@ func (g *generator) generateMethod(e *ir.Entity, m *ir.Method) {
 
 	// Requires
 	for _, req := range m.Requires {
-		g.emitLinef("assert!(%s, \"Precondition failed: %s\");\n",
+		g.emitLinef("%s(%s, \"Precondition failed: %s\");\n", g.contractAssertMacro(),
 			g.generateExpr(req.Expr, nil), escapeRustString(req.RawText))
 	}
 
@@ -860,7 +891,7 @@ func (g *generator) generateMethod(e *ir.Entity, m *ir.Method) {
 
 		g.ensuresContext = true
 		for _, ens := range m.Ensures {
-			g.emitLinef("assert!(%s, \"Postcondition failed: %s\");\n",
+			g.emitLinef("%s(%s, \"Postcondition failed: %s\");\n", g.contractAssertMacro(),
 				g.generateExpr(ens.Expr, nil), escapeRustString(ens.RawText))
 		}
 		g.ensuresContext = false
@@ -876,7 +907,7 @@ func (g *generator) generateMethod(e *ir.Entity, m *ir.Method) {
 		if len(m.Ensures) > 0 {
 			g.ensuresContext = true
 			for _, ens := range m.Ensures {
-				g.emitLinef("assert!(%s, \"Postcondition failed: %s\");\n",
+				g.emitLinef("%s(%s, \"Postcondition failed: %s\");\n", g.contractAssertMacro(),
 					g.generateExpr(ens.Expr, nil), escapeRustString(ens.RawText))
 			}
 			g.ensuresContext = false
@@ -1209,7 +1240,7 @@ func (g *generator) generateWhileStmt(stmt *ir.WhileStmt, arrayRefParams map[str
 		savedEnsures := g.ensuresContext
 		g.ensuresContext = true
 		for _, inv := range stmt.Invariants {
-			g.emitLinef("assert!(%s, \"Loop invariant failed at entry: %s\");\n",
+			g.emitLinef("%s(%s, \"Loop invariant failed at entry: %s\");\n", g.contractAssertMacro(),
 				g.generateExpr(inv.Expr, arrayRefParams), escapeRustString(inv.RawText))
 		}
 		g.ensuresContext = savedEnsures
@@ -1218,7 +1249,7 @@ func (g *generator) generateWhileStmt(stmt *ir.WhileStmt, arrayRefParams map[str
 		if stmt.Decreases != nil {
 			metricExpr := g.generateExpr(stmt.Decreases.Expr, arrayRefParams)
 			g.emitLinef("let mut __decreases_prev: i64 = %s;\n", metricExpr)
-			g.emitLinef("assert!(__decreases_prev >= 0, \"Decreases metric must be non-negative at entry: %s\");\n",
+			g.emitLinef("%s(__decreases_prev >= 0, \"Decreases metric must be non-negative at entry: %s\");\n", g.contractAssertMacro(),
 				escapeRustString(stmt.Decreases.RawText))
 		}
 
@@ -1230,7 +1261,7 @@ func (g *generator) generateWhileStmt(stmt *ir.WhileStmt, arrayRefParams map[str
 		// Check invariants after iteration
 		g.ensuresContext = true
 		for _, inv := range stmt.Invariants {
-			g.emitLinef("assert!(%s, \"Loop invariant failed after iteration: %s\");\n",
+			g.emitLinef("%s(%s, \"Loop invariant failed after iteration: %s\");\n", g.contractAssertMacro(),
 				g.generateExpr(inv.Expr, arrayRefParams), escapeRustString(inv.RawText))
 		}
 		g.ensuresContext = savedEnsures
@@ -1239,9 +1270,9 @@ func (g *generator) generateWhileStmt(stmt *ir.WhileStmt, arrayRefParams map[str
 		if stmt.Decreases != nil {
 			metricExpr := g.generateExpr(stmt.Decreases.Expr, arrayRefParams)
 			g.emitLinef("let __decreases_next: i64 = %s;\n", metricExpr)
-			g.emitLinef("assert!(__decreases_next < __decreases_prev, \"Termination metric did not decrease: %s\");\n",
+			g.emitLinef("%s(__decreases_next < __decreases_prev, \"Termination metric did not decrease: %s\");\n", g.contractAssertMacro(),
 				escapeRustString(stmt.Decreases.RawText))
-			g.emitLinef("assert!(__decreases_next >= 0, \"Termination metric became negative: %s\");\n",
+			g.emitLinef("%s(__decreases_next >= 0, \"Termination metric became negative: %s\");\n", g.contractAssertMacro(),
 				escapeRustString(stmt.Decreases.RawText))
 			g.emitLine("__decreases_prev = __decreases_next;")
 		}

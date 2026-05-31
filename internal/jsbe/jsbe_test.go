@@ -47,7 +47,7 @@ func TestGenerateHello(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	// Check for essential components
 	if !strings.Contains(result, "function __intent_main()") {
@@ -90,7 +90,7 @@ func TestGenerateFunction(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	if !strings.Contains(result, "function add(a, b)") {
 		t.Errorf("Expected function add(a, b), got:\n%s", result)
@@ -166,7 +166,7 @@ func TestGenerateEntity(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	if !strings.Contains(result, "class Counter") {
 		t.Errorf("Expected class Counter, got:\n%s", result)
@@ -208,7 +208,7 @@ func TestGenerateEnum(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	if !strings.Contains(result, "const Color = {") {
 		t.Errorf("Expected const Color, got:\n%s", result)
@@ -272,7 +272,7 @@ func TestGenerateContracts(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	if !strings.Contains(result, "if (!((b !== 0))) throw new Error(\"Precondition failed: b != 0\")") {
 		t.Errorf("Expected precondition check, got:\n%s", result)
@@ -327,7 +327,7 @@ func TestGenerateAll(t *testing.T) {
 		},
 	}
 
-	result := GenerateAll(prog)
+	result := GenerateAll(prog, Options{})
 
 	if !strings.Contains(result, "function helper_square(x)") {
 		t.Errorf("Expected mangled function helper_square, got:\n%s", result)
@@ -368,7 +368,7 @@ func TestGenerateStringInterp(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	if !strings.Contains(result, "${name}") {
 		t.Errorf("Expected ${name} in template literal, got:\n%s", result)
@@ -393,7 +393,7 @@ func generateJSFromSource(t *testing.T, name, src string) string {
 		t.Fatalf("[%s] check errors: %s", name, result.Diagnostics.Format("test"))
 	}
 	mod := ir.Lower(prog, result)
-	return Generate(mod)
+	return Generate(mod, Options{})
 }
 
 func TestGenerateStringMethods(t *testing.T) {
@@ -491,7 +491,7 @@ function test_map() returns Int {
 		t.Fatalf("check errors: %s", result.Diagnostics.Format("test"))
 	}
 	mod := ir.Lower(prog, result)
-	output := Generate(mod)
+	output := Generate(mod, Options{})
 
 	expects := []string{
 		"new Map()",
@@ -627,7 +627,7 @@ func TestGenerateTimestampBuiltinJS(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	if !strings.Contains(result, "Date.now()") {
 		t.Errorf("expected Date.now() for timestamp_ms, got:\n%s", result)
@@ -648,7 +648,7 @@ func generateFromSource(t *testing.T, name, src string) string {
 		t.Fatalf("[%s] check errors: %s", name, result.Diagnostics.Format("test"))
 	}
 	mod := ir.Lower(prog, result)
-	return Generate(mod)
+	return Generate(mod, Options{})
 }
 
 func TestGenerateTraitJS(t *testing.T) {
@@ -826,7 +826,7 @@ func TestGenerateAsyncFunctionJS(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	if !strings.Contains(result, "async function fetchData(url)") {
 		t.Errorf("expected async function declaration, got:\n%s", result)
@@ -859,7 +859,7 @@ func TestGenerateAwaitExprJS(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	if !strings.Contains(result, "await future") {
 		t.Errorf("expected await expression, got:\n%s", result)
@@ -896,7 +896,7 @@ func TestGenerateSpawnExprJS(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	if !strings.Contains(result, "(async () => { return compute(42); })()") {
 		t.Errorf("expected spawn as IIFE, got:\n%s", result)
@@ -930,7 +930,7 @@ func TestGenerateAwaitAllJS(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	if !strings.Contains(result, "await Promise.all(futures)") {
 		t.Errorf("expected await Promise.all, got:\n%s", result)
@@ -964,7 +964,7 @@ func TestGenerateAwaitAnyJS(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	if !strings.Contains(result, "await Promise.race(futures)") {
 		t.Errorf("expected await Promise.race, got:\n%s", result)
@@ -999,7 +999,7 @@ func TestGenerateTimeoutJS(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	if !strings.Contains(result, "Promise.race") {
 		t.Errorf("expected Promise.race for timeout, got:\n%s", result)
@@ -1037,7 +1037,7 @@ func TestGenerateSleepJS(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	if !strings.Contains(result, "new Promise(resolve => setTimeout(resolve, 1000))") {
 		t.Errorf("expected Promise-based sleep, got:\n%s", result)
@@ -1087,7 +1087,7 @@ func TestGenerateAsyncFunctionWithContractsJS(t *testing.T) {
 		},
 	}
 
-	result := Generate(mod)
+	result := Generate(mod, Options{})
 
 	if !strings.Contains(result, "async function fetchPositive(id)") {
 		t.Errorf("expected async function with contracts, got:\n%s", result)
@@ -1278,7 +1278,7 @@ entry function main() returns Int {
 	}
 
 	prog := ir.LowerAll(registry, sortedPaths, checkResult, packageDirs)
-	output := GenerateAll(prog)
+	output := GenerateAll(prog, Options{})
 
 	// Entity defined as TypesPoint (module-name mangling). Call site must use
 	// the same prefix, NOT package-name mangling like Types_pkgPoint.
@@ -1442,5 +1442,107 @@ func TestJSSanitiseTestName(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("sanitiseTestName(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// Phase 22 / ADR 0033: --strip-contracts drops contract throw lines.
+
+func TestStripContractsDropsContractThrows(t *testing.T) {
+	src := `module bank version "1.0";
+
+entity Account {
+    field balance: Int;
+    invariant self.balance >= 0;
+    constructor(initial: Int)
+        requires initial >= 0
+        ensures self.balance == initial
+    {
+        self.balance = initial;
+    }
+    method deposit(amount: Int) returns Void
+        requires amount > 0
+        ensures self.balance == old(self.balance) + amount
+    {
+        self.balance = self.balance + amount;
+    }
+}
+
+entry function main() returns Int {
+    let a: Account = Account(10);
+    a.deposit(5);
+    return 0;
+}
+`
+	p := parser.New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("parse: %s", p.Diagnostics().Format("test"))
+	}
+	res := checker.CheckWithResult(prog)
+	if res.Diagnostics.HasErrors() {
+		t.Fatalf("check: %s", res.Diagnostics.Format("test"))
+	}
+	mod := ir.Lower(prog, res)
+
+	plain := Generate(mod, Options{})
+	stripped := Generate(mod, Options{StripContracts: true})
+
+	// Plain output must contain the contract throws.
+	for _, marker := range []string{
+		"throw new Error(\"Precondition failed:",
+		"throw new Error(\"Postcondition failed:",
+		"throw new Error(\"Invariant failed:",
+	} {
+		if !strings.Contains(plain, marker) {
+			t.Errorf("plain output missing expected marker %q", marker)
+		}
+	}
+
+	// Stripped output must contain none of them.
+	for _, marker := range []string{
+		"Precondition failed:",
+		"Postcondition failed:",
+		"Invariant failed:",
+	} {
+		if strings.Contains(stripped, marker) {
+			t.Errorf("stripped output unexpectedly contains marker %q", marker)
+		}
+	}
+}
+
+func TestStripContractsPreservesNonContractJS(t *testing.T) {
+	// Regression: Options{} produces identical output across two calls,
+	// and that output contains the expected contract throws (proving
+	// stripping isn't accidentally on by default).
+	src := `module fib version "1.0";
+function fib(n: Int) returns Int
+    requires n >= 0
+    ensures result >= 0
+{
+    if n < 2 { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+entry function main() returns Int {
+    return fib(5);
+}
+`
+	p := parser.New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("parse: %s", p.Diagnostics().Format("test"))
+	}
+	res := checker.CheckWithResult(prog)
+	if res.Diagnostics.HasErrors() {
+		t.Fatalf("check: %s", res.Diagnostics.Format("test"))
+	}
+	mod := ir.Lower(prog, res)
+
+	a := Generate(mod, Options{})
+	b := Generate(mod, Options{})
+	if a != b {
+		t.Error("Generate is not deterministic across two calls with Options{}")
+	}
+	if !strings.Contains(a, "throw new Error(\"Precondition failed:") {
+		t.Errorf("plain output missing expected contract throw:\n%s", a)
 	}
 }

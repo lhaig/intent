@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lhaig/intent/internal/backend"
 	"github.com/lhaig/intent/internal/compiler"
 	"github.com/lhaig/intent/internal/formatter"
 	"github.com/lhaig/intent/internal/linter"
@@ -43,6 +44,11 @@ Options:
   --target <target>   Target platform: rust (default), js, wasm
   --emit              Output generated source instead of building a binary
   --emit-rust         (deprecated) Same as --emit with --target rust
+  --strip-contracts   Drop runtime contract checks from emitted output
+                      (Phase 22 / ADR 0033). Rust: assert! -> debug_assert!,
+                      compiled out by cargo's release profile. JS: contract
+                      throw-on-violation lines omitted. WASM: no effect.
+                      User-written assert(...) in test bodies is unaffected.
 
 Targets:
   rust    Compile to native binary via Rust (default)
@@ -118,6 +124,7 @@ func handleBuild(args []string) {
 	emit := false
 	target := "rust"
 	var filePath string
+	opts := backend.BuildOptions{}
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -128,6 +135,8 @@ func handleBuild(args []string) {
 			target = "rust"
 		case "--emit":
 			emit = true
+		case "--strip-contracts":
+			opts.StripContracts = true
 		case "--target":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, "Error: --target requires an argument")
@@ -153,6 +162,11 @@ func handleBuild(args []string) {
 		os.Exit(1)
 	}
 
+	// Phase 22 / ADR 0033: surface the safety trade in CI logs.
+	if opts.StripContracts {
+		fmt.Fprintln(os.Stderr, "warning: --strip-contracts removes runtime contract checks; run 'intentc verify' to confirm safety properties.")
+	}
+
 	// Check if this is a multi-file project
 	isMulti, err := compiler.IsMultiFile(filePath)
 	if err != nil {
@@ -165,12 +179,12 @@ func handleBuild(args []string) {
 	if isMulti {
 		// Multi-file compilation path
 		if emit {
-			if err := compiler.EmitProjectToTarget(filePath, target, baseName); err != nil {
+			if err := compiler.EmitProjectToTarget(filePath, target, baseName, opts); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 				os.Exit(1)
 			}
 		} else {
-			if err := compiler.BuildProjectToTarget(filePath, target, baseName); err != nil {
+			if err := compiler.BuildProjectToTarget(filePath, target, baseName, opts); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 				os.Exit(1)
 			}
@@ -184,12 +198,12 @@ func handleBuild(args []string) {
 		}
 
 		if emit {
-			if err := compiler.EmitToTarget(string(source), target, baseName); err != nil {
+			if err := compiler.EmitToTarget(string(source), target, baseName, opts); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 				os.Exit(1)
 			}
 		} else {
-			if err := compiler.BuildToTarget(string(source), target, baseName); err != nil {
+			if err := compiler.BuildToTarget(string(source), target, baseName, opts); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 				os.Exit(1)
 			}

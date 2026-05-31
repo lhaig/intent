@@ -10,12 +10,22 @@ import (
 	"github.com/lhaig/intent/internal/lexer"
 )
 
+// Options carries codegen flags that aren't part of the IR. Phase 22 /
+// ADR 0033: StripContracts drops the `if (!(cond)) throw new Error(...)`
+// lines for preconditions, postconditions, and invariants. Entity
+// `__checkInvariants` methods are emitted as no-ops (kept in place so
+// generated call sites still resolve) under strip.
+type Options struct {
+	StripContracts bool
+}
+
 // Generate produces JavaScript source code from a single IR Module.
-func Generate(mod *ir.Module) string {
+func Generate(mod *ir.Module, opts Options) string {
 	g := &generator{
-		entities:  make(map[string]*ir.Entity),
-		enums:     make(map[string]*ir.Enum),
-		functions: make(map[string]*ir.Function),
+		entities:       make(map[string]*ir.Entity),
+		enums:          make(map[string]*ir.Enum),
+		functions:      make(map[string]*ir.Function),
+		stripContracts: opts.StripContracts,
 	}
 
 	for _, e := range mod.Entities {
@@ -98,11 +108,11 @@ func GenerateForTest(mod *ir.Module) string {
 	// suppress the entry-call emission, then defer to Generate.
 	modCopy := *mod
 	modCopy.IsEntry = false
-	return Generate(&modCopy)
+	return Generate(&modCopy, Options{})
 }
 
 // GenerateAll produces JavaScript from a multi-file IR Program.
-func GenerateAll(prog *ir.Program) string {
+func GenerateAll(prog *ir.Program, opts Options) string {
 	if len(prog.Modules) == 0 {
 		return ""
 	}
@@ -158,6 +168,7 @@ func GenerateAll(prog *ir.Program) string {
 			isEntryFile:     mod.IsEntry,
 			moduleManglings: moduleManglings,
 			typeOrigins:     typeOrigins,
+			stripContracts:  opts.StripContracts,
 		}
 
 		if !mod.IsEntry {
@@ -264,6 +275,22 @@ type generator struct {
 	isEntryFile     bool
 	moduleManglings map[string]string
 	typeOrigins     map[string]string // entity/enum name -> defining module's class prefix
+
+	// Phase 22 / ADR 0033: when true, drop runtime contract checks.
+	// Preconditions, postconditions, and invariant-bearing __checkInvariants
+	// emission are gated on this flag.
+	stripContracts bool
+}
+
+// emitContractCheck emits a single `if (!(cond)) throw new Error("...")`
+// line for a contract clause. Phase 22 / ADR 0033: when --strip-contracts
+// is on, the emission is skipped entirely and the caller emits nothing
+// in its place.
+func (g *generator) emitContractCheck(kind, cond, msg string) {
+	if g.stripContracts {
+		return
+	}
+	g.emitLinef("if (!(%s)) throw new Error(\"%s failed: %s\");\n", cond, kind, msg)
 }
 
 func (g *generator) mangledClassName(name string) string {
@@ -480,8 +507,7 @@ func (g *generator) generateFunction(f *ir.Function) {
 
 		// Requires
 		for _, req := range f.Requires {
-			g.emitLinef("if (!(%s)) throw new Error(\"Precondition failed: %s\");\n",
-				g.generateExpr(req.Expr), escapeJSString(req.RawText))
+			g.emitContractCheck("Precondition", g.generateExpr(req.Expr), escapeJSString(req.RawText))
 		}
 
 		// Ensures with result capture
@@ -499,8 +525,7 @@ func (g *generator) generateFunction(f *ir.Function) {
 
 			g.ensuresContext = true
 			for _, ens := range f.Ensures {
-				g.emitLinef("if (!(%s)) throw new Error(\"Postcondition failed: %s\");\n",
-					g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
+				g.emitContractCheck("Postcondition", g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
 			}
 			g.ensuresContext = false
 			g.emitLine("return __result;")
@@ -510,8 +535,7 @@ func (g *generator) generateFunction(f *ir.Function) {
 			if len(f.Ensures) > 0 {
 				g.ensuresContext = true
 				for _, ens := range f.Ensures {
-					g.emitLinef("if (!(%s)) throw new Error(\"Postcondition failed: %s\");\n",
-						g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
+					g.emitContractCheck("Postcondition", g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
 				}
 				g.ensuresContext = false
 			}
@@ -547,8 +571,7 @@ func (g *generator) generateEntity(e *ir.Entity) {
 		g.emitLine("__checkInvariants() {")
 		g.incIndent()
 		for _, inv := range e.Invariants {
-			g.emitLinef("if (!(%s)) throw new Error(\"Invariant failed: %s\");\n",
-				g.generateExpr(inv.Expr), escapeJSString(inv.RawText))
+			g.emitContractCheck("Invariant", g.generateExpr(inv.Expr), escapeJSString(inv.RawText))
 		}
 		g.decIndent()
 		g.emitLine("}")
@@ -586,8 +609,7 @@ func (g *generator) generateConstructor(e *ir.Entity) {
 
 	// Requires
 	for _, req := range ctor.Requires {
-		g.emitLinef("if (!(%s)) throw new Error(\"Precondition failed: %s\");\n",
-			g.generateExpr(req.Expr), escapeJSString(req.RawText))
+		g.emitContractCheck("Precondition", g.generateExpr(req.Expr), escapeJSString(req.RawText))
 	}
 
 	// Initialize fields with defaults
@@ -602,8 +624,7 @@ func (g *generator) generateConstructor(e *ir.Entity) {
 	// Ensures
 	g.ensuresContext = true
 	for _, ens := range ctor.Ensures {
-		g.emitLinef("if (!(%s)) throw new Error(\"Postcondition failed: %s\");\n",
-			g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
+		g.emitContractCheck("Postcondition", g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
 	}
 	g.ensuresContext = false
 	g.inConstructor = false
@@ -642,8 +663,7 @@ func (g *generator) generateMethod(e *ir.Entity, m *ir.Method) {
 
 	// Requires
 	for _, req := range m.Requires {
-		g.emitLinef("if (!(%s)) throw new Error(\"Precondition failed: %s\");\n",
-			g.generateExpr(req.Expr), escapeJSString(req.RawText))
+		g.emitContractCheck("Precondition", g.generateExpr(req.Expr), escapeJSString(req.RawText))
 	}
 
 	// Body with result capture if needed
@@ -662,8 +682,7 @@ func (g *generator) generateMethod(e *ir.Entity, m *ir.Method) {
 
 		g.ensuresContext = true
 		for _, ens := range m.Ensures {
-			g.emitLinef("if (!(%s)) throw new Error(\"Postcondition failed: %s\");\n",
-				g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
+			g.emitContractCheck("Postcondition", g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
 		}
 		g.ensuresContext = false
 
@@ -678,8 +697,7 @@ func (g *generator) generateMethod(e *ir.Entity, m *ir.Method) {
 		if len(m.Ensures) > 0 {
 			g.ensuresContext = true
 			for _, ens := range m.Ensures {
-				g.emitLinef("if (!(%s)) throw new Error(\"Postcondition failed: %s\");\n",
-					g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
+				g.emitContractCheck("Postcondition", g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
 			}
 			g.ensuresContext = false
 		}
@@ -745,8 +763,7 @@ func (g *generator) generateImplBlock(ib *ir.ImplBlock) {
 
 		// Requires
 		for _, req := range m.Requires {
-			g.emitLinef("if (!(%s)) throw new Error(\"Precondition failed: %s\");\n",
-				g.generateExpr(req.Expr), escapeJSString(req.RawText))
+			g.emitContractCheck("Precondition", g.generateExpr(req.Expr), escapeJSString(req.RawText))
 		}
 
 		// Determine whether invariant checks apply.
@@ -765,8 +782,7 @@ func (g *generator) generateImplBlock(ib *ir.ImplBlock) {
 
 			g.ensuresContext = true
 			for _, ens := range m.Ensures {
-				g.emitLinef("if (!(%s)) throw new Error(\"Postcondition failed: %s\");\n",
-					g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
+				g.emitContractCheck("Postcondition", g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
 			}
 			g.ensuresContext = false
 
@@ -781,8 +797,7 @@ func (g *generator) generateImplBlock(ib *ir.ImplBlock) {
 			if len(m.Ensures) > 0 {
 				g.ensuresContext = true
 				for _, ens := range m.Ensures {
-					g.emitLinef("if (!(%s)) throw new Error(\"Postcondition failed: %s\");\n",
-						g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
+					g.emitContractCheck("Postcondition", g.generateExpr(ens.Expr), escapeJSString(ens.RawText))
 				}
 				g.ensuresContext = false
 			}

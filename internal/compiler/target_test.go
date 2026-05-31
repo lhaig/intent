@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/lhaig/intent/internal/backend"
 )
 
 func TestEmitToTargetJS(t *testing.T) {
@@ -16,7 +18,7 @@ entry function main() returns Int {
 	baseName := "test_output_js"
 	defer os.Remove(baseName + ".js")
 
-	err := EmitToTarget(source, "js", baseName)
+	err := EmitToTarget(source, "js", baseName, backend.BuildOptions{})
 	if err != nil {
 		t.Fatalf("EmitToTarget failed: %v", err)
 	}
@@ -49,7 +51,7 @@ entry function main() returns Int {
 	baseName := "test_output_rust"
 	defer os.Remove(baseName + ".rs")
 
-	err := EmitToTarget(source, "rust", baseName)
+	err := EmitToTarget(source, "rust", baseName, backend.BuildOptions{})
 	if err != nil {
 		t.Fatalf("EmitToTarget failed: %v", err)
 	}
@@ -134,7 +136,7 @@ entry function main() returns Int {
 `
 	baseName := t.TempDir() + "/test_output_wasm"
 
-	err := EmitToTarget(source, "wasm", baseName)
+	err := EmitToTarget(source, "wasm", baseName, backend.BuildOptions{})
 	if err != nil {
 		t.Fatalf("EmitToTarget wasm failed: %v", err)
 	}
@@ -172,7 +174,7 @@ entry function main() returns Int {
 `
 	baseName := t.TempDir() + "/test_async_wasm"
 
-	err := EmitToTarget(source, "wasm", baseName)
+	err := EmitToTarget(source, "wasm", baseName, backend.BuildOptions{})
 	if err == nil {
 		t.Fatalf("expected EmitToTarget to reject async on wasm, got no error")
 	}
@@ -199,7 +201,7 @@ entry function main() returns Int { return 0; }
 `
 	baseName := t.TempDir() + "/test_extern_js"
 
-	err := EmitToTarget(source, "js", baseName)
+	err := EmitToTarget(source, "js", baseName, backend.BuildOptions{})
 	if err == nil {
 		t.Fatal("expected EmitToTarget to reject extern on js")
 	}
@@ -222,7 +224,7 @@ entry function main() returns Int { return 0; }
 `
 	baseName := t.TempDir() + "/test_extern_wasm"
 
-	err := EmitToTarget(source, "wasm", baseName)
+	err := EmitToTarget(source, "wasm", baseName, backend.BuildOptions{})
 	if err == nil {
 		t.Fatal("expected EmitToTarget to reject extern on wasm")
 	}
@@ -247,7 +249,7 @@ entry function main() returns Int {
 `
 	baseName := t.TempDir() + "/test_test_wasm"
 
-	err := EmitToTarget(source, "wasm", baseName)
+	err := EmitToTarget(source, "wasm", baseName, backend.BuildOptions{})
 	if err == nil {
 		t.Fatalf("expected EmitToTarget to reject tests on wasm, got no error")
 	}

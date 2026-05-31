@@ -14,11 +14,11 @@ func (b *RustBackend) Name() string {
 }
 
 // Generate produces Rust source code from a single IR module.
-func (b *RustBackend) Generate(mod *ir.Module) string {
-	return rustbe.Generate(mod)
+func (b *RustBackend) Generate(mod *ir.Module, opts BuildOptions) string {
+	return rustbe.Generate(mod, rustbe.Options{StripContracts: opts.StripContracts})
 }
 
 // GenerateAll produces Rust source from a multi-module IR program.
-func (b *RustBackend) GenerateAll(prog *ir.Program) string {
-	return rustbe.GenerateAll(prog)
+func (b *RustBackend) GenerateAll(prog *ir.Program, opts BuildOptions) string {
+	return rustbe.GenerateAll(prog, rustbe.Options{StripContracts: opts.StripContracts})
 }

@@ -245,3 +245,89 @@ func TestHandlePkgAdd(t *testing.T) {
 		}
 	})
 }
+
+// Phase 22 / ADR 0033: --strip-contracts swaps contract assert! for
+// debug_assert! on rust and prints a one-line stderr warning.
+
+func TestBuildStripContracts(t *testing.T) {
+	binary := buildTestBinary(t)
+
+	src := `module bank version "1.0";
+
+entity Account {
+    field balance: Int;
+    invariant self.balance >= 0;
+    constructor(initial: Int)
+        requires initial >= 0
+        ensures self.balance == initial
+    {
+        self.balance = initial;
+    }
+}
+
+entry function main() returns Int {
+    let a: Account = Account(10);
+    return 0;
+}
+`
+
+	t.Run("no flag preserves assert!", func(t *testing.T) {
+		dir := t.TempDir()
+		srcPath := filepath.Join(dir, "bank.intent")
+		if err := os.WriteFile(srcPath, []byte(src), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(binary, "build", "--emit", srcPath)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("build failed: %v\n%s", err, out)
+		}
+		rs, err := os.ReadFile(filepath.Join(dir, "bank.rs"))
+		if err != nil {
+			t.Fatalf("read emitted rust: %v", err)
+		}
+		text := string(rs)
+		if !strings.Contains(text, "assert!(") {
+			t.Errorf("expected assert! in default emit, got:\n%s", text)
+		}
+		if strings.Contains(text, "debug_assert!(") {
+			t.Errorf("did not expect debug_assert! in default emit, got:\n%s", text)
+		}
+		if strings.Contains(string(out), "--strip-contracts removes") {
+			t.Errorf("warning should not fire without --strip-contracts: %s", out)
+		}
+	})
+
+	t.Run("--strip-contracts swaps to debug_assert! and warns", func(t *testing.T) {
+		dir := t.TempDir()
+		srcPath := filepath.Join(dir, "bank.intent")
+		if err := os.WriteFile(srcPath, []byte(src), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(binary, "build", "--emit", "--strip-contracts", srcPath)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("build failed: %v\n%s", err, out)
+		}
+		rs, err := os.ReadFile(filepath.Join(dir, "bank.rs"))
+		if err != nil {
+			t.Fatalf("read emitted rust: %v", err)
+		}
+		text := string(rs)
+		if !strings.Contains(text, "debug_assert!(") {
+			t.Errorf("expected debug_assert! in stripped emit, got:\n%s", text)
+		}
+		// No contract assert! lines should remain — only test-body asserts (this
+		// example has no test bodies, so no assert! at all).
+		for _, line := range strings.Split(text, "\n") {
+			if strings.Contains(line, "assert!(") && !strings.Contains(line, "debug_assert!(") {
+				t.Errorf("unexpected non-debug assert! line in stripped emit: %s", line)
+			}
+		}
+		if !strings.Contains(string(out), "--strip-contracts removes runtime contract checks") {
+			t.Errorf("expected stderr warning, got: %s", out)
+		}
+	})
+}

@@ -389,9 +389,9 @@ func runRustTests(mod *ir.Module, prog *ir.Program, declared []string) ([]TestRe
 
 	var rustSource string
 	if mod != nil {
-		rustSource = rustbe.Generate(mod)
+		rustSource = rustbe.Generate(mod, rustbe.Options{})
 	} else {
-		rustSource = rustbe.GenerateAll(prog)
+		rustSource = rustbe.GenerateAll(prog, rustbe.Options{})
 	}
 
 	tmpDir, err := os.MkdirTemp("", "intent-test-rust-*")
@@ -508,7 +508,7 @@ func runJSTests(mod *ir.Module, prog *ir.Program, declared []string) ([]TestResu
 		// Multi-file path: emit via GenerateAll then strip the entry call as a
 		// safety net (multi-file output for the entry module may still include
 		// an __intent_main invocation).
-		jsSource = jsbe.GenerateAll(prog)
+		jsSource = jsbe.GenerateAll(prog, jsbe.Options{})
 		jsSource = stripJSEntryCall(jsSource)
 	}
 

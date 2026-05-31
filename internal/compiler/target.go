@@ -116,8 +116,10 @@ func getFileExtension(target string) string {
 	}
 }
 
-// EmitToTarget compiles source to the given target and writes output file
-func EmitToTarget(source, target, baseName string) error {
+// EmitToTarget compiles source to the given target and writes output file.
+// Phase 22 / ADR 0033: opts carries --release and --strip-contracts.
+// Zero-value opts preserves pre-Phase-22 behaviour.
+func EmitToTarget(source, target, baseName string, opts backend.BuildOptions) error {
 	// Parse
 	p := parser.New(source)
 	prog := p.Parse()
@@ -149,7 +151,7 @@ func EmitToTarget(source, target, baseName string) error {
 		if err != nil {
 			return err
 		}
-		wasmBytes := bbe.GenerateBytes(mod)
+		wasmBytes := bbe.GenerateBytes(mod, opts)
 		outPath := baseName + ".wasm"
 		if err := os.WriteFile(outPath, wasmBytes, 0644); err != nil {
 			return fmt.Errorf("failed to write output file: %w", err)
@@ -170,7 +172,7 @@ func EmitToTarget(source, target, baseName string) error {
 	if err != nil {
 		return err
 	}
-	code := be.Generate(mod)
+	code := be.Generate(mod, opts)
 
 	ext := getFileExtension(target)
 	outPath := baseName + ext
@@ -183,7 +185,7 @@ func EmitToTarget(source, target, baseName string) error {
 }
 
 // EmitProjectToTarget compiles a multi-file project to the given target and writes output file
-func EmitProjectToTarget(entryPath, target, baseName string) error {
+func EmitProjectToTarget(entryPath, target, baseName string, opts backend.BuildOptions) error {
 	// Create module registry
 	registry, err := NewModuleRegistry(entryPath)
 	if err != nil {
@@ -235,7 +237,7 @@ func EmitProjectToTarget(entryPath, target, baseName string) error {
 		if err != nil {
 			return err
 		}
-		wasmBytes := bbe.GenerateAllBytes(prog)
+		wasmBytes := bbe.GenerateAllBytes(prog, opts)
 		outPath := baseName + ".wasm"
 		if err := os.WriteFile(outPath, wasmBytes, 0644); err != nil {
 			return fmt.Errorf("failed to write output file: %w", err)
@@ -256,7 +258,7 @@ func EmitProjectToTarget(entryPath, target, baseName string) error {
 	if err != nil {
 		return err
 	}
-	code := be.GenerateAll(prog)
+	code := be.GenerateAll(prog, opts)
 
 	ext := getFileExtension(target)
 	outPath := baseName + ext
@@ -268,32 +270,33 @@ func EmitProjectToTarget(entryPath, target, baseName string) error {
 	return nil
 }
 
-// BuildToTarget compiles source to the given target and produces a binary
-func BuildToTarget(source, target, baseName string) error {
+// BuildToTarget compiles source to the given target and produces a binary.
+// Phase 22 / ADR 0033: opts carries --release and --strip-contracts.
+func BuildToTarget(source, target, baseName string, opts backend.BuildOptions) error {
 	switch target {
 	case "rust":
-		return Build(source, baseName)
+		return Build(source, baseName, opts)
 	case "js":
 		// For JS, just emit the source (no binary build step)
-		return EmitToTarget(source, target, baseName)
+		return EmitToTarget(source, target, baseName, opts)
 	case "wasm":
 		// Direct WASM emission - no Rust toolchain required
-		return EmitToTarget(source, target, baseName)
+		return EmitToTarget(source, target, baseName, opts)
 	default:
 		return fmt.Errorf("unknown target: %s", target)
 	}
 }
 
 // BuildProjectToTarget compiles a multi-file project to the given target and produces a binary
-func BuildProjectToTarget(entryPath, target, baseName string) error {
+func BuildProjectToTarget(entryPath, target, baseName string, opts backend.BuildOptions) error {
 	switch target {
 	case "rust":
-		return BuildProject(entryPath, baseName)
+		return BuildProject(entryPath, baseName, opts)
 	case "js":
-		return EmitProjectToTarget(entryPath, target, baseName)
+		return EmitProjectToTarget(entryPath, target, baseName, opts)
 	case "wasm":
 		// Direct WASM emission - no Rust toolchain required
-		return EmitProjectToTarget(entryPath, target, baseName)
+		return EmitProjectToTarget(entryPath, target, baseName, opts)
 	default:
 		return fmt.Errorf("unknown target: %s", target)
 	}
