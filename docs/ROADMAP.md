@@ -263,6 +263,9 @@ Implemented in commits 0a4ca14..4999b06.
 - VS Code extension under `editors/vscode/` (.vsix builds via `npm run package`)
 - End-to-end smoke test in `internal/lsp/e2e_test.go`
 
+### Phase 26: LSP textDocument/references (Find References) -- SHIPPED (2026-05-31)
+Implemented in commit 1c94d3d..HEAD per [ADR 0035](decisions/0035-lsp-find-references.md). Adds the `textDocument/references` LSP method covering top-level decls (function, entity, enum, trait, test, extern) plus locals/params/`self`. Locals are scope-bound to their enclosing function frame; top-level references walk every AST in the workspace (including cross-package, free from Phase 25's plumbing). `includeDeclaration` honoured per LSP spec. Method/field references and same-name disambiguation across modules are documented v1 limitations — deferred to future PRDs. ADR 0035 cites precedent from rust-analyzer, gopls, tsserver, pyright, metals.
+
 ### Phase 25: Cross-Package Goto-Def (test-only) -- SHIPPED (2026-05-31)
 Regression test `TestDefinitionCrossPackage` confirmed cross-package goto-definition already works in the LSP — the deferred claim from Phase 19/20 was a planning artefact. `workspace.siblingModules()` already returns every module discovered by `ModuleRegistry.AllModules()` (which walks `intent.toml`'s `[dependencies]` transitively); `resolveAcrossWorkspace` iterates them without gating on package boundary. Phase 25 added the test that locks the behaviour in and corrected the stale deferred-list claim in ADR 0032 (4th revision). No resolver code changed.
 
@@ -313,7 +316,7 @@ Scoped in [ADR 0032](decisions/0032-lsp-v1-surface.md) (revised in Phase 19); im
 - Signature help (active-parameter tracking)
 - Identifier completion (locals + top-level + sibling-package decls + keywords + types)
 - `intentc lsp` stdio subcommand; first-party VS Code extension (`editors/vscode/`)
-- Out of scope (v1.1+): member completion (.field/.method), find-references, rename, code actions, refactorings, semantic tokens, inlay hints, Marketplace publishing, incremental sync, multi-byte UTF-16, per-contract Z3 source positions
+- Out of scope (v1.1+): member completion (.field/.method), rename, code actions, refactorings, semantic tokens, inlay hints, Marketplace publishing, incremental sync, multi-byte UTF-16, per-contract Z3 source positions
 
 ### REPL / Playground
 - Interactive expression evaluation with contract checking

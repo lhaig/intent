@@ -1,7 +1,7 @@
 # 0032: LSP v1 Surface
 
 **Date:** 2026-05-30
-**Status:** accepted; revised four times (Phase 19, Phase 20, Phase 21, Phase 25); Phase 18 commits 0a4ca14..4999b06, Phase 19 commits 888f80b..257ccfe, Phase 20 commits addd43b..757abfe, Phase 21 commits 7c44883..HEAD, Phase 25 (test-only — see Revised section)
+**Status:** accepted; revised five times (Phase 19, Phase 20, Phase 21, Phase 25, Phase 26); Phase 18 commits 0a4ca14..4999b06, Phase 19 commits 888f80b..257ccfe, Phase 20 commits addd43b..757abfe, Phase 21 commits 7c44883..HEAD, Phase 25 (test-only), Phase 26 see ADR 0035
 **Phase:** Milestone 8 (Developer Experience)
 
 ## Context
@@ -18,9 +18,9 @@ Milestone 8 in the roadmap (`docs/ROADMAP.md`) is gated on this ADR. The downstr
 
 ### O1. v1 feature surface
 
-- **A. Diagnostics + hover + go-to-definition only.** The "MVP triple" — every modern LSP starts here. Diagnostics include checker errors, lint warnings, and parser errors; hover shows types and contracts; go-to-definition jumps to declaration. Everything else (completion, find-references, rename, code actions, formatting, signature help, document symbols, semantic tokens, inlay hints) is out.
+- **A. Diagnostics + hover + go-to-definition only.** The "MVP triple" — every modern LSP starts here. Diagnostics include checker errors, lint warnings, and parser errors; hover shows types and contracts; go-to-definition jumps to declaration. Everything else (completion, rename, code actions, formatting, signature help, document symbols, semantic tokens, inlay hints) is out.
 - **B. MVP triple + completion + document symbols.** Adds two features that materially improve perceived quality but require non-trivial new infrastructure (a completion model and a symbol-tree extractor).
-- **C. Maximal surface.** Diagnostics, hover, go-to-definition, completion, find-references, rename, code actions, formatting, signature help, document symbols, semantic tokens, inlay hints. Multi-quarter scope.
+- **C. Maximal surface.** Diagnostics, hover, go-to-definition, completion, rename, code actions, formatting, signature help, document symbols, semantic tokens, inlay hints. Multi-quarter scope.
 
 ### O2. Diagnostics — which sources
 
@@ -153,7 +153,7 @@ Milestone 8 in the roadmap (`docs/ROADMAP.md`) is gated on this ADR. The downstr
 **Follow-up work expected:**
 
 - `editors/vscode/` directory layout, build, publish flow — defined in the implementation PRD.
-- A PRD-per-deferred-feature when each is prioritised: completion, find-references, rename, code actions, formatting-via-LSP.
+- A PRD-per-deferred-feature when each is prioritised: completion, rename, code actions, formatting-via-LSP.
 - A `protocol.md` reference documenting which LSP requests/notifications the server handles, for users wiring it into non-VS Code editors.
 - An end-to-end smoke test: spawn `intentc lsp`, open a file, edit it, observe diagnostics arrive — pre-commit hook for the LSP package once it lands.
 
@@ -192,7 +192,7 @@ Phase 20 adds polish + semantic tokens to v1. After Phase 19 the LSP was functio
 - **VS Code extension polish**: esbuild bundling (.vsix is 90 KB single-file vs the previous 300 KB tree), status bar item showing server state (running / starting / stopped / error), `Intent: Restart Server` and `Intent: Show Output` commands.
 - **Marketplace metadata**: CHANGELOG.md, 128×128 placeholder icon, gallery banner color, keywords. Publishing is now blocked only on credentials (publisher account, PAT) and a branded icon — engineering side is publish-ready.
 
-**Still out of v1, deferred to v1.1+:** member completion (`.field`/`.method` after `.`), find-references, rename, code actions, refactorings, Marketplace publish (credentials), incremental semantic tokens (`/delta` and `/range`), multi-byte UTF-16, multi-root workspaces.
+**Still out of v1, deferred to v1.1+:** member completion (`.field`/`.method` after `.`), rename, code actions, refactorings, Marketplace publish (credentials), incremental semantic tokens (`/delta` and `/range`), multi-byte UTF-16, multi-root workspaces.
 
 ## Revised — 2026-05-31 (Phase 21)
 
@@ -205,10 +205,16 @@ Phase 21 closes the only outstanding v1.1 capability gap: member completion. Pha
 - Receivers resolved through scope: typed locals (`let x: Entity`), typed parameters, and `self` inside methods and constructors. Impl-block methods on the entity are included alongside the entity's own methods.
 - Unresolvable receivers (untyped, non-entity type, chained access, call-result chains) return an empty list rather than the full identifier set — surfacing keywords after `.` is worse noise than nothing.
 
-**Still out of v1, deferred (unchanged):** find-references, rename, code actions, refactorings, Marketplace publish (credentials), incremental semantic tokens, multi-byte UTF-16, multi-root workspaces, and now also chained member access (`a.b.c`) and trait-method completion on `dyn`/generic receivers (both need richer expression typing than the LSP carries today).
+**Still out of v1, deferred (unchanged):** rename, code actions, refactorings, Marketplace publish (credentials), incremental semantic tokens, multi-byte UTF-16, multi-root workspaces, and now also chained member access (`a.b.c`) and trait-method completion on `dyn`/generic receivers (both need richer expression typing than the LSP carries today).
 
 ## Revised — 2026-05-31 (Phase 25)
 
 Phase 25's regression test confirmed that **cross-package goto-definition already works** — the Phase 19/20 "deferred" claim was wrong. The workspace surface (`internal/lsp/workspace.go` `siblingModules`) invokes `compiler.ModuleRegistry.AllModules()`, which transitively discovers every module reachable through `intent.toml`'s `[dependencies]`. The resolver in `internal/lsp/symbol.go` (`resolveAcrossWorkspace`) iterates them all without gating on package boundary. Cross-package goto-def fell out for free from the Phase 19 workspace plumbing; the deferral was a planning artefact from before that work landed.
 
 Phase 25 adds a regression test (`TestDefinitionCrossPackage`) so the behaviour stays correct, and updates this ADR's deferred list to drop the stale claim. No resolver or workspace code changed — only test + docs.
+
+## Revised — 2026-05-31 (Phase 26)
+
+Phase 26 adds `textDocument/references` per [ADR 0035](0035-lsp-find-references.md). Scope (v1): top-level decls (function, entity, enum, trait, test, extern) + locals/params/`self`. Method/field references stay deferred (receiver-type disambiguation). Same-name collision across modules is a documented v1 limitation — refs match by name across the workspace; declaration-site disambiguation is future work.
+
+Now in v1: `textDocument/references` with `includeDeclaration` honour. Cross-package refs work for free via the same workspace surface that gives us cross-package goto-def. VS Code's "Find All References" (`Shift+F12`) returns useful results on all supported symbol kinds.

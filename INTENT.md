@@ -872,13 +872,14 @@ V1 surfaces (see [ADR 0032](docs/decisions/0032-lsp-v1-surface.md), revised thro
 - Diagnostics — parser, checker, lint, Z3 verification (verification runs on save, async)
 - Hover — signature + contracts on top-level decls; type info on locals, params, `self`, fields, and methods
 - Go-to-definition — same-file, same-package, and cross-package (via `intent.toml` `[dependencies]`), including locals, params, methods, fields
+- Find references — every use of a top-level decl or a local across the workspace; `includeDeclaration` honoured. Method and field refs are deferred.
 - Document symbols — outline view (top-level decls + entity members + enum variants)
 - Formatting — runs `intentc fmt` via `textDocument/formatting`
 - Signature help — parameter info inside function and single-step method calls
 - Completion — identifier suggestions (locals + top-level decls + sibling-package decls + keywords + built-in types); plus member completion on `receiver.` returning the entity's fields and methods (single-step receivers; `self` resolved in methods and constructors)
 - Semantic tokens — full-document type-aware highlighting (`textDocument/semanticTokens/full`)
 
-Out of scope for v1 (filed as v1.1+ follow-ups): chained member access (`a.b.c`), find-references, rename, code actions, refactorings, inlay hints, Marketplace publishing.
+Out of scope for v1 (filed as v1.1+ follow-ups): chained member access (`a.b.c`), find-references on methods/fields, rename, code actions, refactorings, inlay hints, Marketplace publishing.
 
 ## Operators
 

@@ -11,6 +11,7 @@ Language support for the Intent contract-based programming language. Provides:
 - Signature help with active-parameter tracking
 - Identifier completion (in-scope locals + top-level decls + sibling-package decls + keywords + built-in types)
 - Member completion after `receiver.` — entity's fields (`CompletionField`) and methods (`CompletionMethod`); `self` resolved in methods and constructors; `.` is a completion trigger character
+- Find references (`Shift+F12`) — every use of a top-level decl or a local across the workspace. Method and field references are deferred.
 
 Powered by the `intentc lsp` server (see [ADR 0032](../../docs/decisions/0032-lsp-v1-surface.md)).
 

@@ -1,6 +1,6 @@
 # Phase 26: LSP `textDocument/references` (Find References)
 
-**Status:** In Progress
+**Status:** Shipped (2026-05-31; commits 1c94d3d..HEAD)
 **Milestone:** v1.2 — Self-Improvement Foundations (LSP capability addition)
 **Decision:** [ADR 0035](../../docs/decisions/0035-lsp-find-references.md)
 

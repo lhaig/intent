@@ -74,11 +74,13 @@ Same plumbing as cross-package goto-def (Phase 25): `workspace.siblingModules()`
 
 Two functions with the same name in different modules: which references count?
 
-**A. Conflate by name only.** [Rejected.] Surprising — finding references to `add` in module A returns refs to `add` in module B too.
+**A. Conflate by name only.** [Chosen for v1.] Walk every AST in the workspace; match by symbol name. If two modules each declare `add()`, references on either include call sites from both. Documented as a known v1 limitation in INTENT.md and the VS Code README.
 
-**B. Disambiguate by declaration site.** [Chosen.] The resolver already returns a `declHit` whose `Path` and `(Line, Column)` identify the declaration. Reference matching checks the receiving caller's resolution: does it point at the *same* declaration? If yes, include. If no, exclude.
+**B. Disambiguate by declaration site.** Re-resolve every candidate reference from its source position and check whether the resolved declaration's `(Path, Line, Column)` matches the target's. Sound but O(N × resolver-cost) per request. Defer to a future PRD if a real workspace exposes the limitation.
 
-In practice for v1 (top-level decls + locals only), shadowing within a function (a `let x` shadows an outer `let x`) is handled by the scope walker — the inner `x` resolves to the inner declaration, so refs to the inner only return the inner-scope uses. Cross-module same-name functions are exact-path matches via the workspace.
+For locals/params/`self`, ambiguity isn't a question: the walker is bounded to the enclosing function's body (the scope walker already gives us that frame), so a `let x` in function A and a `let x` in function B never appear in the same reference list. Shadowing within a function is also clean — the inner `let x` only sees uses below its declaration in source order; the outer `x` sees the rest.
+
+The same-name limitation matters in practice mostly for utility names (`new`, `default`, `add`). Intent's `public` keyword means cross-module collisions tend to be explicit; the user is aware that two modules export `add` and the false positives are easy to filter mentally. The trade-off favours simpler, faster v1; revisit when a real workspace surfaces a pain point.
 
 ### O6. Performance shape
 
@@ -90,7 +92,7 @@ Files are small (most under 200 LOC), workspaces are small (under 100 files in a
 
 ## Decision
 
-**O1.B + O2 (per-kind reference semantics above) + O3 (honour includeDeclaration) + O4 (cross-package) + O5.B (declaration-site disambiguation) + O6 (linear scan, no cache) + O7 (workspace scope).**
+**O1.B + O2 (per-kind reference semantics above) + O3 (honour includeDeclaration) + O4 (cross-package) + O5.A (name-match only; same-name across modules is a known v1 limitation) + O6 (linear scan, no cache) + O7 (workspace scope).**
 
 1. Add `textDocument/references` to the LSP server's `initialize` capabilities (`referencesProvider: true`).
 2. Add a `references.go` handler in `internal/lsp/` that:
