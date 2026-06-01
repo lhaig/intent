@@ -68,3 +68,4 @@ What follows from this decision? Trade-offs accepted.
 | 0034 | [Per-contract source positions in verify results](0034-per-contract-source-positions.md) | 2026-05-31 | accepted (PRD pending) |
 | 0035 | [LSP textDocument/references scope and semantics](0035-lsp-find-references.md) | 2026-05-31 | accepted (PRD pending) |
 | 0036 | [Entity and method auto-test emission for `--target intent`](0036-testgen-entity-method-emission.md) | 2026-05-31 | accepted (PRD pending) |
+| 0037 | [Multi-param iteration in `--target intent` test generation](0037-testgen-multi-param-iteration.md) | 2026-06-01 | accepted (PRD pending) |
