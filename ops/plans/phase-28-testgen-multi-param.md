@@ -1,6 +1,6 @@
 # Phase 28: Multi-Param Iteration for `--target intent` Test Generation
 
-**Status:** In Progress
+**Status:** Shipped (2026-06-01; commits 2da9fec..HEAD)
 **Milestone:** v1.2 — Self-Improvement Foundations (Phase 17.A.2 — last prerequisite for legacy Rust-testgen retirement)
 **Decision:** [ADR 0037](../../docs/decisions/0037-testgen-multi-param-iteration.md)
 
@@ -12,16 +12,16 @@ This closes Phase 17.A.2 — the last blocker for retiring the legacy Rust testg
 
 ## Success Criteria
 
-- [ ] `generateIntentTestForFunction` handles the `allInt && len(params) >= 2` case: emit nested `while` loops, one per param, with precondition guards + call + ensures asserts in the innermost body
-- [ ] Per-param iteration count is capped at `floor(1000^(1/N))` for N params; each param's `[lo, hi]` from `intRange` is trimmed to that count
-- [ ] Param names are used as loop variables (consistent with existing single-Int code)
-- [ ] Precondition guards (`if not (<req>) { continue; }`) appear in the innermost body, once per `requires` clause
-- [ ] Non-Int params still fall through to the single-example-call branch (no regression in current behaviour)
-- [ ] New unit tests cover: two-Int-param function with derived ranges, three-Int-param function (caps each at ~10), per-param cap math correctness, fallback for mixed Int+String params, regression on the existing single-Int path
-- [ ] Generated output for a real multi-Int example (e.g., a synthetic `min` / `max` function) parses cleanly
-- [ ] `make validate` green
-- [ ] No regression in any existing testgen test
-- [ ] Phase 17 PRD `17.A.2` entry updated to reflect "satisfied by Phase 28"
+- [x] `generateIntentTestForFunction` handles the `allInt && len(params) >= 2` case: emit nested `while` loops, one per param, with precondition guards + call + ensures asserts in the innermost body
+- [x] Per-param iteration count is capped at `floor(1000^(1/N))` for N params; each param's `[lo, hi]` from `intRange` is trimmed to that count
+- [x] Param names are used as loop variables (consistent with existing single-Int code)
+- [x] Precondition guards (`if not (<req>) { continue; }`) appear in the innermost body, once per `requires` clause
+- [x] Non-Int params still fall through to the single-example-call branch (no regression in current behaviour)
+- [x] New unit tests cover: two-Int-param function with derived ranges, three-Int-param function (caps each at ~10), per-param cap math correctness, fallback for mixed Int+String params, regression on the existing single-Int path
+- [x] Generated output for a real multi-Int example (e.g., a synthetic `min` / `max` function) parses cleanly
+- [x] `make validate` green
+- [x] No regression in any existing testgen test
+- [x] Phase 17 PRD `17.A.2` entry updated to reflect "satisfied by Phase 28"
 
 ## Reference
 

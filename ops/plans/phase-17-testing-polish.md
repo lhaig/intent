@@ -145,7 +145,7 @@ These are bigger features that deserve their own PRDs if pursued. Mentioning her
 - [x] **17.C:** every flat example in `examples/*.intent` carries at least one test (19/19). `make validate` runs `intentc test` on every tested example.
 - [x] **17.D:** tests in imported modules and packages auto-discover via the entry file. JS multi-file emission now produces a unified `__intent_tests` registry; JS call sites apply the module's namePrefix when calling local functions. `examples/packages/types_pkg/types.intent` has tests that run via `intentc test examples/packages/app_pkg/main.intent`. ADR 0030 records the visibility decision.
 - [x] **17.F:** `--filter <substring>`, `--list`, `--quiet` flags ship on `intentc test`. CLI handler, runner support, and `FormatList` / `FormatResultsQuiet` helpers all in place.
-- [ ] 17.A — partial: 17.A.1 entity/method emission landed in Phase 27 (ADR 0036). 17.A.2 (multi-param iteration for free functions) still deferred; Rust-path retirement blocked on it.
+- [ ] 17.A — partial: 17.A.1 entity/method emission landed in Phase 27 (ADR 0036); 17.A.2 multi-param iteration landed in Phase 28 (ADR 0037). 17.A.4 (retire the legacy Rust testgen path) is the remaining piece — both prerequisites are now in place.
 - [ ] 17.E — deferred (future PRD) (FFI test automation).
 - [ ] 17.G — deferred (future PRD) if a real user case appears (full WASM test runner).
 - [ ] 17.H — deferred (future PRD)+ (coverage / snapshot).
