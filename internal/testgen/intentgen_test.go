@@ -347,3 +347,158 @@ entry function main() returns Int { return 0; }
 		t.Errorf("emitted Phase 27 output failed to parse in-context:\n%s", p.Diagnostics().Format("emitted"))
 	}
 }
+
+// Phase 28 / ADR 0037: multi-param iteration for free functions.
+
+func TestPerParamCap(t *testing.T) {
+	cases := []struct {
+		n, want int
+	}{
+		{1, 1000},
+		{2, 31},
+		{3, 10},
+		{4, 5},
+		{5, 3},
+		{6, 3},
+		{7, 2},
+		{8, 2},
+		{12, 2},
+	}
+	for _, tc := range cases {
+		got := perParamCap(tc.n)
+		if got != tc.want {
+			t.Errorf("perParamCap(%d) = %d, want %d", tc.n, got, tc.want)
+		}
+	}
+}
+
+func TestGenerateIntentTwoIntParams(t *testing.T) {
+	src := `module test version "1.0";
+
+function add(a: Int, b: Int) returns Int
+    requires a >= 0
+    requires b >= 0
+    ensures result == a + b
+{
+    return a + b;
+}
+
+entry function main() returns Int { return 0; }
+`
+	prog := parser.New(src).Parse()
+	out := GenerateIntent(prog, "")
+
+	want := []string{
+		`test "auto: add contracts"`,
+		"let mutable a: Int = 0;", // lower bound from `a >= 0`
+		"while a <= 10 {",         // upper default
+		"let mutable b: Int = 0;",
+		"while b <= 10 {",
+		"if not (a >= 0) { continue; }",
+		"if not (b >= 0) { continue; }",
+		"let __r: Int = add(a, b);", // call site uses declaration order
+		"assert(__r == a + b);",
+		"b = b + 1;",
+		"a = a + 1;",
+	}
+	for _, w := range want {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in output:\n%s", w, out)
+		}
+	}
+}
+
+func TestGenerateIntentThreeIntParamsRangesTrimmed(t *testing.T) {
+	src := `module test version "1.0";
+
+function clamp(x: Int, lo: Int, hi: Int) returns Int
+    requires lo <= hi
+    ensures result >= lo
+    ensures result <= hi
+{
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    return x;
+}
+
+entry function main() returns Int { return 0; }
+`
+	prog := parser.New(src).Parse()
+	out := GenerateIntent(prog, "")
+
+	// Three Int params, no per-param bounds in requires → default range
+	// [-10, 10] = 21 values, cap=10 per param, centered → [-5, 4].
+	want := []string{
+		`test "auto: clamp contracts"`,
+		"let mutable x: Int = -5;",
+		"while x <= 4 {",
+		"let mutable lo: Int = -5;",
+		"while lo <= 4 {",
+		"let mutable hi: Int = -5;",
+		"while hi <= 4 {",
+		"if not (lo <= hi) { continue; }",
+		"let __r: Int = clamp(x, lo, hi);",
+	}
+	for _, w := range want {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in output:\n%s", w, out)
+		}
+	}
+	// Call must use source order, not alphabetical (hi/lo/x).
+	if strings.Contains(out, "clamp(hi,") || strings.Contains(out, "clamp(lo,") {
+		t.Errorf("call site sorted alphabetically; expected source order clamp(x, lo, hi):\n%s", out)
+	}
+}
+
+func TestGenerateIntentMixedIntStringFallsBack(t *testing.T) {
+	src := `module test version "1.0";
+
+function greet(times: Int, name: String) returns String
+    requires times >= 0
+    ensures len(result) >= 0
+{
+    return name;
+}
+
+entry function main() returns Int { return 0; }
+`
+	prog := parser.New(src).Parse()
+	out := GenerateIntent(prog, "")
+
+	// Mixed Int+String should fall back to single-example call (no while
+	// loop emitted for this function).
+	if strings.Contains(out, "while times") {
+		t.Errorf("mixed-type param should not iterate; expected single call, got:\n%s", out)
+	}
+	if !strings.Contains(out, "greet(") {
+		t.Errorf("expected fallback call to greet(...), got:\n%s", out)
+	}
+}
+
+func TestGenerateIntentMultiParamOutputParses(t *testing.T) {
+	// Smoke: the emitted multi-param output must parse cleanly when
+	// merged into the source module.
+	src := `module test version "1.0";
+
+public function add(a: Int, b: Int) returns Int
+    requires a >= 0
+    requires b >= 0
+    ensures result == a + b
+{
+    return a + b;
+}
+
+entry function main() returns Int { return 0; }
+`
+	prog := parser.New(src).Parse()
+	out := GenerateIntent(prog, "")
+
+	combined := strings.ReplaceAll(src, "entry function main() returns Int { return 0; }",
+		strings.ReplaceAll(out, `module test_auto_tests version "1.0";`, "")) +
+		"\nentry function main() returns Int { return 0; }"
+	p := parser.New(combined)
+	p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Errorf("emitted Phase 28 output failed to parse in-context:\n%s", p.Diagnostics().Format("emitted"))
+	}
+}

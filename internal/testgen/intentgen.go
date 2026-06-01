@@ -2,7 +2,6 @@ package testgen
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/lhaig/intent/internal/ast"
@@ -96,10 +95,11 @@ func GenerateIntent(prog *ast.Program, sourceImport string) string {
 //     ensures clause. (Best-effort — real property tests for non-Int types
 //     are a follow-up.)
 func generateIntentTestForFunction(f *ast.FunctionDecl) string {
-	// Sort params by name for deterministic output.
-	params := make([]*ast.Param, len(f.Params))
-	copy(params, f.Params)
-	sort.SliceStable(params, func(i, j int) bool { return params[i].Name < params[j].Name })
+	// Use the parameter declaration order. Earlier iterations sorted
+	// params alphabetically, which is fine for single-param emission
+	// but breaks the multi-param call site (Phase 28): the call must
+	// pass arguments in the order the function declared them.
+	params := f.Params
 
 	constraints := AnalyzeConstraints(params, f.Requires)
 	allInt := allIntParams(params)
@@ -141,6 +141,37 @@ func generateIntentTestForFunction(f *ast.FunctionDecl) string {
 		sb.WriteString(fmt.Sprintf("        %s = %s + 1;\n", p.Name, p.Name))
 		sb.WriteString("    }\n")
 
+	case allInt && len(params) >= 2:
+		// Phase 28 / ADR 0037: nested while loops over each Int param,
+		// each capped at perParamCap(N) iterations so the Cartesian
+		// product stays ≤ 1000. When trimming, center the surviving
+		// range around the midpoint of the original `[lo, hi]` so
+		// coverage isn't always anchored at the lower bound. (e.g.,
+		// trimming [-10, 10] to 10 values yields [-5, 4], not [-10,
+		// -1].)
+		cap64 := int64(perParamCap(len(params)))
+		ranges := make([]paramRange, len(params))
+		for i, p := range params {
+			lo, hi := intRange(constraints[p.Name], -10, 10)
+			if hi-lo+1 > cap64 {
+				mid := (lo + hi) / 2
+				lo = mid - cap64/2
+				hi = lo + cap64 - 1
+			}
+			ranges[i] = paramRange{name: p.Name, lo: lo, hi: hi}
+		}
+		emitNestedIntLoops(&sb, ranges, "    ", func(inner *strings.Builder, indent string) {
+			emitPreconditionGuard(inner, f.Requires, indent)
+			callArgs := paramNamesCSV(params)
+			if hasResult {
+				fmt.Fprintf(inner, "%slet __r: %s = %s(%s);\n", indent,
+					typeRefToIntent(f.ReturnType), f.Name, callArgs)
+			} else {
+				fmt.Fprintf(inner, "%s%s(%s);\n", indent, f.Name, callArgs)
+			}
+			emitEnsuresAssertsIndented(inner, f.Ensures, hasResult, indent)
+		})
+
 	default:
 		// Fallback: example call with default values; assert ensures.
 		args := defaultArgsForParams(params)
@@ -167,6 +198,59 @@ func allIntParams(params []*ast.Param) bool {
 		}
 	}
 	return true
+}
+
+// paramRange records the inclusive iteration bounds for one Int parameter
+// in the multi-param emission path (Phase 28 / ADR 0037).
+type paramRange struct {
+	name string
+	lo   int64
+	hi   int64
+}
+
+// perParamCap returns floor(1000^(1/n)) — the upper bound on iteration
+// count per parameter so the Cartesian product across all params stays
+// at or below 1000 (Phase 28 / ADR 0037 §O3.C). Hand-tabled rather than
+// floating-point pow/floor to avoid drift on a fixed cap.
+func perParamCap(n int) int {
+	switch n {
+	case 0, 1:
+		return 1000
+	case 2:
+		return 31
+	case 3:
+		return 10
+	case 4:
+		return 5
+	case 5, 6:
+		return 3
+	default:
+		return 2
+	}
+}
+
+// emitNestedIntLoops writes one `let mutable <p>: Int = <lo>; while <p>
+// <= <hi> { ... }` per param, calling innerBody at maximum nesting
+// depth (the innermost loop body). Each loop closes with `<p> = <p> + 1;`
+// before its closing brace, in reverse order.
+//
+// `indent` is the indent of the outermost loop ("    " for a typical
+// `test "..." {` body). Inner indents grow by 4 spaces per nesting
+// level.
+func emitNestedIntLoops(sb *strings.Builder, ranges []paramRange, indent string, innerBody func(inner *strings.Builder, indent string)) {
+	for _, r := range ranges {
+		fmt.Fprintf(sb, "%slet mutable %s: Int = %d;\n", indent, r.name, r.lo)
+		fmt.Fprintf(sb, "%swhile %s <= %d {\n", indent, r.name, r.hi)
+		indent += "    "
+	}
+	innerBody(sb, indent)
+	for i := len(ranges) - 1; i >= 0; i-- {
+		indentBefore := indent[4:] // pop one level
+		r := ranges[i]
+		fmt.Fprintf(sb, "%s%s = %s + 1;\n", indent, r.name, r.name)
+		fmt.Fprintf(sb, "%s}\n", indentBefore)
+		indent = indentBefore
+	}
 }
 
 // intRange returns the iteration bounds for an Int-typed parameter, falling
