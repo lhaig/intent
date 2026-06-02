@@ -424,45 +424,11 @@ func compileFromRegistryWithOptions(registry *ModuleRegistry, entryPath string, 
 	return res
 }
 
-// GenerateTests runs parse -> check -> codegen -> testgen for a single file.
-// Returns Rust source with appended contract test module.
-// Note: testgen still uses codegen.ExprToRust() directly -- see Phase 5 plan.
-func GenerateTests(source string) *Result {
-	res := &Result{}
-
-	// Parse
-	p := parser.New(source)
-	prog := p.Parse()
-
-	if p.Diagnostics().HasErrors() {
-		res.Diagnostics = p.Diagnostics()
-		return res
-	}
-
-	// Type check
-	checkResult := checker.CheckWithResult(prog)
-	if checkResult.Diagnostics.HasErrors() {
-		res.Diagnostics = checkResult.Diagnostics
-		return res
-	}
-	res.Diagnostics = checkResult.Diagnostics
-
-	// Generate Rust via IR pipeline
-	mod := ir.Lower(prog, checkResult)
-	rustSource := rustbe.Generate(mod, rustbe.Options{})
-
-	// Generate tests (still uses codegen.ExprToRust internally)
-	testSource := testgen.Generate(prog)
-
-	res.RustSource = rustSource + testSource
-
-	return res
-}
-
-// GenerateIntentTests is the phase 16 / ADR 0029 task 16.8 Intent-emission
-// counterpart to GenerateTests. `sourceImport` is the relative path the
-// generated file will use to import the source module so generated tests
-// can call into it (typically the basename of the source file).
+// GenerateIntentTests parses, type-checks, and emits a sibling .intent test
+// file from a source file's contracts. `sourceImport` is the relative path
+// the generated file will use to import the source module so generated tests
+// can call into it (typically the basename of the source file). Phase 16 /
+// ADR 0029 introduced this path; Phase 29 / ADR 0038 made it the only path.
 func GenerateIntentTests(source, sourceImport string) (string, error) {
 	p := parser.New(source)
 	prog := p.Parse()
@@ -474,69 +440,6 @@ func GenerateIntentTests(source, sourceImport string) (string, error) {
 		return "", fmt.Errorf("type-check errors:\n%s", checkResult.Diagnostics.Format("input"))
 	}
 	return testgen.GenerateIntent(prog, sourceImport), nil
-}
-
-// GenerateTestsProject runs the multi-file pipeline with test generation.
-func GenerateTestsProject(entryPath string) *Result {
-	res := &Result{}
-
-	// Create module registry
-	registry, err := NewModuleRegistry(entryPath)
-	if err != nil {
-		res.Diagnostics = diagnostic.New()
-		res.Diagnostics.Errorf(0, 0, "failed to initialize module registry: %s", err)
-		return res
-	}
-
-	// Discover all dependencies
-	diag, err := registry.DiscoverDependencies()
-	if err != nil {
-		if diag == nil {
-			diag = diagnostic.New()
-		}
-		diag.Errorf(0, 0, "%s", err)
-		res.Diagnostics = diag
-		return res
-	}
-	if diag.HasErrors() {
-		res.Diagnostics = diag
-		return res
-	}
-
-	// Warn if cross-package imports are present
-	if registry.HasCrossPackageImports() {
-		diag.Warningf(0, 0, "cross-package type references (entities, enums, traits) in code generation have limited support; simple imports work but complex type hierarchies may produce incomplete output")
-	}
-
-	// Topological sort
-	sortedPaths, err := registry.TopologicalSort()
-	if err != nil {
-		res.Diagnostics = diagnostic.New()
-		res.Diagnostics.Errorf(0, 0, "%s", err)
-		return res
-	}
-
-	// Cross-file type checking
-	allModules := registry.AllModules()
-	checkResult := checker.CheckAll(allModules, sortedPaths, registry.PackageDirs())
-	if checkResult.Diagnostics.HasErrors() {
-		res.Diagnostics = checkResult.Diagnostics
-		return res
-	}
-	res.Diagnostics = checkResult.Diagnostics
-
-	// Multi-file code generation via IR pipeline
-	prog := ir.LowerAll(allModules, sortedPaths, checkResult, registry.PackageDirs())
-	rustSource := rustbe.GenerateAll(prog, rustbe.Options{})
-
-	// Generate tests from the entry file's AST (still uses codegen internally)
-	entryPath = sortedPaths[len(sortedPaths)-1]
-	entryProg := allModules[entryPath]
-	testSource := testgen.Generate(entryProg)
-
-	res.RustSource = rustSource + testSource
-
-	return res
 }
 
 // IsMultiFile checks if the given file path is a multi-file project.

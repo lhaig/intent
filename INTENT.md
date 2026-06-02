@@ -927,8 +927,8 @@ intentc verify <file.intent>                        # verify contracts with Z3 S
 intentc fmt <file.intent>                           # format source to canonical style
 intentc fmt --check <file.intent>                   # check formatting (exit 1 if not formatted)
 intentc lint <file.intent>                          # lint for style issues
-intentc test-gen <file.intent>                      # generate property-based tests
-intentc test-gen --emit <file.intent>               # write tests to _test.rs file
+intentc test-gen <file.intent>                      # generate property-based test blocks (Intent)
+intentc test-gen --emit <file.intent>               # write sibling _test.intent file
 ```
 
 Requires Go (to build the compiler) and Rust/Cargo (to compile generated code). Z3 is optional (for `verify` command).

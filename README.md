@@ -137,7 +137,7 @@ intentc check <file.intent>                                      Parse and type-
 intentc verify <file.intent>                                     Verify contracts with Z3 SMT solver
 intentc fmt [--check] <file.intent>                              Format source code
 intentc lint <file.intent>                                       Run lint checks
-intentc test-gen [--emit] [--target intent|rust] <file>          Generate property-based tests
+intentc test-gen [--emit] <file>                                 Generate property-based test blocks
 intentc test [--target t] [--all-targets] [--filter s]
              [--list] [--quiet] <file>                            Run in-language tests
 intentc pkg init|add|remove|install|list                          Local package management

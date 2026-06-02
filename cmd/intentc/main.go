@@ -27,7 +27,7 @@ Usage:
   intentc build [--target <target>] [--emit] <file.intent>    Compile to binary or source
   intentc check <file.intent>                                  Parse and type-check only
   intentc verify <file.intent>                                 Verify contracts using Z3 SMT solver
-  intentc test-gen [--emit] <file.intent>                      Generate Rust with property-based contract tests
+  intentc test-gen [--emit] <file.intent>                      Generate Intent test blocks from contracts
   intentc test [--target <t>] [--all-targets] [--filter <s>] [--list] [--quiet] <file.intent>
                                                                Run in-language tests on one or more targets
   intentc fmt [--check] <file.intent>                          Format source to canonical style
@@ -69,8 +69,8 @@ Examples:
   intentc build main.intent                     Build multi-file project (auto-detects imports)
   intentc check hello.intent                    Check for errors without building
   intentc verify hello.intent                   Verify contracts with Z3 (requires z3 on PATH)
-  intentc test-gen fibonacci.intent             Generate Rust with contract tests to stdout
-  intentc test-gen --emit fibonacci.intent      Write to fibonacci_test.rs
+  intentc test-gen fibonacci.intent             Generate Intent test blocks to stdout
+  intentc test-gen --emit fibonacci.intent      Write to fibonacci_test.intent
   intentc test hello.intent                     Run all tests in hello.intent on the rust target
   intentc test --target js hello.intent         Run tests on the js target (requires node)
   intentc test --all-targets hello.intent       Run on rust + js + wasm; flag cross-target divergence
@@ -262,7 +262,7 @@ func handleCheck(args []string) {
 
 func handleTestGen(args []string) {
 	emitFile := false
-	target := "rust" // legacy default; phase 16 introduces --target intent
+	target := "intent"
 	var filePath string
 
 	for i := 0; i < len(args); i++ {
@@ -277,10 +277,6 @@ func handleTestGen(args []string) {
 			}
 			i++
 			target = args[i]
-			if target != "rust" && target != "intent" {
-				fmt.Fprintf(os.Stderr, "Error: unknown test-gen target: %s (expected rust or intent)\n", target)
-				os.Exit(1)
-			}
 		default:
 			if strings.HasPrefix(arg, "-") {
 				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", arg)
@@ -290,88 +286,57 @@ func handleTestGen(args []string) {
 		}
 	}
 
+	// Phase 29 / ADR 0038: the legacy `--target rust` testgen path was retired
+	// once the Intent emitter covered entities (Phase 27) and multi-parameter
+	// iteration (Phase 28). Generated `.intent` test files run unchanged on
+	// every backend (rust / js / wasm) via `intentc test`.
+	if target == "rust" {
+		fmt.Fprintln(os.Stderr, "Error: `intentc test-gen --target rust` was removed in Phase 29 (ADR 0038).")
+		fmt.Fprintln(os.Stderr, "Use `intentc test-gen --emit <file.intent>` to write a sibling _test.intent file,")
+		fmt.Fprintln(os.Stderr, "then run `intentc test --target rust <file.intent>` to execute it on the Rust backend.")
+		os.Exit(1)
+	}
+	if target != "intent" {
+		fmt.Fprintf(os.Stderr, "Error: unknown test-gen target: %s (expected intent)\n", target)
+		os.Exit(1)
+	}
+
 	if filePath == "" {
 		fmt.Fprintln(os.Stderr, "Error: no input file specified")
 		os.Exit(1)
 	}
 
-	// Phase 16 / ADR 0029: --target intent produces a sibling .intent file
-	// of test blocks consumable by `intentc test`. The legacy --target rust
-	// path remains for entity tests and other cases not yet covered by the
-	// Intent emission.
-	if target == "intent" {
-		source, err := os.ReadFile(filePath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
-			os.Exit(1)
-		}
-		// Generated tests live alongside the source file so the relative
-		// import resolves cleanly. The import path is the source basename
-		// (e.g. "fibonacci.intent").
-		srcDir := filepath.Dir(filePath)
-		srcBaseWithExt := filepath.Base(filePath)
-		srcBase := strings.TrimSuffix(srcBaseWithExt, filepath.Ext(srcBaseWithExt))
-
-		// When piping to stdout, omit the import so the user can decide where
-		// the file will live; when writing alongside the source, embed it.
-		importPath := ""
-		if emitFile {
-			importPath = srcBaseWithExt
-		}
-
-		intentSrc, err := compiler.GenerateIntentTests(string(source), importPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-			os.Exit(1)
-		}
-		if emitFile {
-			outPath := filepath.Join(srcDir, srcBase+"_test.intent")
-			if err := os.WriteFile(outPath, []byte(intentSrc), 0644); err != nil {
-				fmt.Fprintf(os.Stderr, "Error writing file: %s\n", err)
-				os.Exit(1)
-			}
-			fmt.Printf("Wrote %s\n", outPath)
-		} else {
-			fmt.Print(intentSrc)
-		}
-		return
-	}
-
-	// Check if this is a multi-file project
-	isMulti, err := compiler.IsMultiFile(filePath)
+	source, err := os.ReadFile(filePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
 		os.Exit(1)
 	}
 
-	baseName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
-
-	var res *compiler.Result
-	if isMulti {
-		res = compiler.GenerateTestsProject(filePath)
-	} else {
-		source, err := os.ReadFile(filePath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
-			os.Exit(1)
-		}
-		res = compiler.GenerateTests(string(source))
+	// Generated tests live alongside the source file so the relative import
+	// resolves cleanly. When piping to stdout, omit the import so the user
+	// can decide where the file will live.
+	srcDir := filepath.Dir(filePath)
+	srcBaseWithExt := filepath.Base(filePath)
+	srcBase := strings.TrimSuffix(srcBaseWithExt, filepath.Ext(srcBaseWithExt))
+	importPath := ""
+	if emitFile {
+		importPath = srcBaseWithExt
 	}
 
-	if res.Diagnostics != nil && res.Diagnostics.HasErrors() {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", res.Diagnostics.Format(filePath))
+	intentSrc, err := compiler.GenerateIntentTests(string(source), importPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)
 	}
-
 	if emitFile {
-		outPath := baseName + "_test.rs"
-		if err := os.WriteFile(outPath, []byte(res.RustSource), 0644); err != nil {
+		outPath := filepath.Join(srcDir, srcBase+"_test.intent")
+		if err := os.WriteFile(outPath, []byte(intentSrc), 0644); err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing file: %s\n", err)
 			os.Exit(1)
 		}
 		fmt.Printf("Wrote %s\n", outPath)
 	} else {
-		fmt.Print(res.RustSource)
+		fmt.Print(intentSrc)
 	}
 }
 

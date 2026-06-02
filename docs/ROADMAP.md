@@ -247,7 +247,8 @@ Design lives in `ops/plans/phase-16-testing-framework.md` (Shipped). 10 commits 
 - [x] 17.C: tests for all 19 flat examples
 - [x] 17.D: cross-package test discovery (ADR 0030)
 - [x] 17.F: `--filter`, `--list`, `--quiet` DX flags
-- [ ] 17.A / 17.E / 17.G / 17.H: deferred (future PRDs) with documented rationale
+- [x] 17.A: testgen migration to `--target intent` — entity/method emission (Phase 27), multi-param iteration (Phase 28), legacy Rust path retired (Phase 29)
+- [ ] 17.E / 17.G / 17.H: deferred (future PRDs) with documented rationale
 
 Design + execution record: `ops/plans/phase-17-testing-polish.md`.
 
@@ -262,6 +263,9 @@ Implemented in commits 0a4ca14..4999b06.
 - Go-to-definition: same-file + same-package via the workspace cache
 - VS Code extension under `editors/vscode/` (.vsix builds via `npm run package`)
 - End-to-end smoke test in `internal/lsp/e2e_test.go`
+
+### Phase 29: Retire Legacy Rust testgen Path (17.A.4) -- SHIPPED (2026-06-02)
+Implemented per [ADR 0038](decisions/0038-retire-legacy-rust-testgen.md). With Phase 27 (entity/method emission) and Phase 28 (multi-param iteration) both shipped, `--target intent` covers the surface area the legacy Rust emitter handled. This phase removes the legacy path: `intentc test-gen` now defaults to `--target intent`; `--target rust` errors with a migration message pointing at `intentc test-gen --emit` + `intentc test --target rust`. Deleted `internal/testgen/{testgen.go,rustutil.go,values.go,testgen_test.go}` (~1.9k LOC) plus `compiler.GenerateTests` / `compiler.GenerateTestsProject`. Migrated `TestConstraintAnalysis` to `internal/testgen/constraints_test.go`. Makefile `test-gen-examples` now emits `_test.intent` siblings; `make clean` removes them. Closes Phase 17.A; the testgen package now has one emission path that produces target-agnostic Intent test blocks, executable on every backend via `intentc test`.
 
 ### Phase 28: testgen `--target intent` Multi-Param Iteration -- SHIPPED (2026-06-01)
 Implemented in commit 2da9fec..HEAD per [ADR 0037](decisions/0037-testgen-multi-param-iteration.md). Free functions with N ≥ 2 Int params now emit nested `while` loops in source-order, capped at `floor(1000^(1/N))` iterations per param. Each loop range is trimmed centred around the original midpoint (`[-10, 10]` → `[-5, 4]` for N=3) so coverage isn't always anchored at the lower bound. Discovered a pre-existing correctness bug: `generateIntentTestForFunction` sorted params alphabetically, which broke the multi-param call site (`clamp(hi, lo, x)` instead of `clamp(x, lo, hi)`); fixed in this phase by using declaration order. Closes Phase 17.A.2 — the last prerequisite for retiring the legacy Rust testgen path (17.A.4 becomes deliverable). ADR 0037 cites precedent from QuickCheck, Hypothesis, fast-check, AutoTest, Pex, Dafny.
