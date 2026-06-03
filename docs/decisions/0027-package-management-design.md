@@ -1,7 +1,7 @@
 # 0027: Package Management -- Design Plan
 
 **Date:** 2026-03-20
-**Status:** accepted (registry remote-fetch deferred)
+**Status:** accepted; version-resolution semantics revised by [ADR 0039](0039-package-registry-git-mvs.md) (registry deferral resolved)
 **Phase:** v1.1 (Phase 13)
 
 ## Implementation Notes

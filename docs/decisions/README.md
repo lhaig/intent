@@ -58,7 +58,7 @@ What follows from this decision? Trade-offs accepted.
 | 0024 | [JavaScript multi-file codegen fix](0024-js-multifile-codegen-fix.md) | 2026-03-20 | accepted |
 | 0025 | [User-defined generics design](0025-user-defined-generics-design.md) | 2026-03-20 | accepted |
 | 0026 | [Concurrency and async design](0026-concurrency-async-design.md) | 2026-03-20 | accepted (revised in Phase 14) |
-| 0027 | [Package management design](0027-package-management-design.md) | 2026-03-20 | accepted (registry deferred) |
+| 0027 | [Package management design](0027-package-management-design.md) | 2026-03-20 | accepted; revised by ADR 0039 (MVS replaces constraint solver) |
 | 0028 | [Rust FFI / crate imports](0028-rust-ffi-crate-imports.md) | 2026-05-28 | accepted |
 | 0029 | [In-language testing framework](0029-in-language-testing.md) | 2026-05-29 | accepted |
 | 0030 | [Cross-package test visibility](0030-cross-package-test-visibility.md) | 2026-05-30 | accepted |
@@ -70,3 +70,4 @@ What follows from this decision? Trade-offs accepted.
 | 0036 | [Entity and method auto-test emission for `--target intent`](0036-testgen-entity-method-emission.md) | 2026-05-31 | accepted (PRD pending) |
 | 0037 | [Multi-param iteration in `--target intent` test generation](0037-testgen-multi-param-iteration.md) | 2026-06-01 | accepted (PRD pending) |
 | 0038 | [Retire the legacy Rust `testgen` path](0038-retire-legacy-rust-testgen.md) | 2026-06-02 | accepted |
+| 0039 | [Package registry — git-based + MVS](0039-package-registry-git-mvs.md) | 2026-06-03 | accepted (PRD pending) |
