@@ -13,6 +13,7 @@ type Manifest struct {
 	Package          PackageInfo
 	Dependencies     map[string]DependencySpec
 	RustDependencies map[string]RustDependencySpec // Phase 15 / ADR 0028
+	Warnings         []string                      // Phase 30 / ADR 0039: deprecation notices for legacy syntaxes
 }
 
 // RustDependencySpec describes a Cargo crate to bundle into the generated
@@ -64,16 +65,28 @@ type PackageInfo struct {
 	Description string
 }
 
-// DependencySpec describes a single dependency.
+// DependencySpec describes a single dependency. Phase 30 / ADR 0039 added
+// the Git field; Version semantics changed from constraint to minimum version.
 type DependencySpec struct {
-	Version string // semver constraint
+	Version string // minimum version (ADR 0039); legacy constraint form (^/~) still parses but is reinterpreted as >=
 	Path    string // local path (optional, for development)
+	Git     string // git source URL (e.g. "github.com/lhaig/foo"); requires Version; mutually exclusive with Path
 }
 
-// Validate checks that a DependencySpec does not have both Version and Path set.
+// Validate enforces the mutual-exclusion + required-field rules for a
+// dependency spec:
+//   - at most one of {Path, Git} may be set
+//   - Version + Path is not allowed (a path dep doesn't have a version)
+//   - Git requires Version
 func (d DependencySpec) Validate() error {
+	if d.Path != "" && d.Git != "" {
+		return fmt.Errorf("dependency cannot have both path %q and git %q", d.Path, d.Git)
+	}
 	if d.Version != "" && d.Path != "" {
 		return fmt.Errorf("dependency cannot have both version %q and path %q", d.Version, d.Path)
+	}
+	if d.Git != "" && d.Version == "" {
+		return fmt.Errorf("dependency with git source %q must also specify a version", d.Git)
 	}
 	return nil
 }
@@ -145,7 +158,7 @@ func ParseManifest(data []byte) (*Manifest, error) {
 			}
 
 		case "dependencies":
-			dep, err := parseDependencyValue(value, lineNum)
+			dep, warns, err := parseDependencyValue(value, lineNum, key)
 			if err != nil {
 				return nil, err
 			}
@@ -155,6 +168,7 @@ func ParseManifest(data []byte) (*Manifest, error) {
 				return nil, fmt.Errorf("line %d: %w", lineNum, err)
 			}
 			m.Dependencies[key] = dep
+			m.Warnings = append(m.Warnings, warns...)
 
 		case "rust_dependencies":
 			dep, err := parseRustDependencyValue(value, lineNum)
@@ -181,15 +195,23 @@ func parseString(value string, lineNum int) (string, error) {
 	return value[1 : len(value)-1], nil
 }
 
-// parseDependencyValue parses either a quoted version string or an inline table.
-func parseDependencyValue(value string, lineNum int) (DependencySpec, error) {
-	// Simple string: "0.2.0"
+// parseDependencyValue parses either a quoted version string or an inline
+// table. The depName parameter is used only for warning messages. Returned
+// warnings describe deprecated syntaxes the caller may want to surface to
+// the user; they do not indicate parse failure.
+func parseDependencyValue(value string, lineNum int, depName string) (DependencySpec, []string, error) {
+	var warnings []string
+
+	// Simple string: "0.2.0" — legacy form deprecated in Phase 30.
 	if len(value) >= 2 && value[0] == '"' {
 		str, err := parseString(value, lineNum)
 		if err != nil {
-			return DependencySpec{}, err
+			return DependencySpec{}, nil, err
 		}
-		return DependencySpec{Version: str}, nil
+		warnings = append(warnings,
+			fmt.Sprintf("line %d: dependency %q uses the bare-version short form (deprecated by ADR 0039); declare a `git = \"...\"` source or `path = \"...\"` instead", lineNum, depName))
+		warnings = append(warnings, versionStringWarnings(lineNum, depName, str)...)
+		return DependencySpec{Version: str}, warnings, nil
 	}
 
 	// Inline table: { key1 = "val1", key2 = "val2" }
@@ -197,7 +219,7 @@ func parseDependencyValue(value string, lineNum int) (DependencySpec, error) {
 		inner := strings.TrimSpace(value[1 : len(value)-1])
 		dep := DependencySpec{}
 		if inner == "" {
-			return dep, nil
+			return dep, nil, nil
 		}
 		// Limitation: splitting on "," would break if quoted values contain commas.
 		// This is acceptable for the minimal TOML subset we support.
@@ -209,27 +231,47 @@ func parseDependencyValue(value string, lineNum int) (DependencySpec, error) {
 			}
 			pEq := strings.Index(pair, "=")
 			if pEq < 0 {
-				return DependencySpec{}, fmt.Errorf("line %d: invalid inline table entry: %s", lineNum, pair)
+				return DependencySpec{}, nil, fmt.Errorf("line %d: invalid inline table entry: %s", lineNum, pair)
 			}
 			pKey := strings.TrimSpace(pair[:pEq])
 			pVal := strings.TrimSpace(pair[pEq+1:])
 			str, err := parseString(pVal, lineNum)
 			if err != nil {
-				return DependencySpec{}, fmt.Errorf("line %d: in inline table: %w", lineNum, err)
+				return DependencySpec{}, nil, fmt.Errorf("line %d: in inline table: %w", lineNum, err)
 			}
 			switch pKey {
 			case "version":
 				dep.Version = str
+				warnings = append(warnings, versionStringWarnings(lineNum, depName, str)...)
 			case "path":
 				dep.Path = str
+			case "git":
+				dep.Git = str
 			default:
-				return DependencySpec{}, fmt.Errorf("line %d: unknown dependency key: %s", lineNum, pKey)
+				return DependencySpec{}, nil, fmt.Errorf("line %d: unknown dependency key: %s", lineNum, pKey)
 			}
 		}
-		return dep, nil
+		return dep, warnings, nil
 	}
 
-	return DependencySpec{}, fmt.Errorf("line %d: expected quoted string or inline table, got: %s", lineNum, value)
+	return DependencySpec{}, nil, fmt.Errorf("line %d: expected quoted string or inline table, got: %s", lineNum, value)
+}
+
+// versionStringWarnings flags deprecated constraint operators (`^`, `~`) on a
+// version string. Phase 30 / ADR 0039: the constraint solver is retired in
+// favour of MVS, which uses plain minimum-version semantics.
+func versionStringWarnings(lineNum int, depName, version string) []string {
+	v := strings.TrimSpace(version)
+	if len(v) == 0 {
+		return nil
+	}
+	switch v[0] {
+	case '^':
+		return []string{fmt.Sprintf("line %d: dependency %q version %q uses the deprecated `^` constraint (ADR 0039); MVS treats it as `>= %s` — drop the `^`", lineNum, depName, version, strings.TrimSpace(v[1:]))}
+	case '~':
+		return []string{fmt.Sprintf("line %d: dependency %q version %q uses the deprecated `~` constraint (ADR 0039); MVS treats it as `>= %s` — drop the `~`", lineNum, depName, version, strings.TrimSpace(v[1:]))}
+	}
+	return nil
 }
 
 // parseRustDependencyValue parses either a quoted version string or an inline
@@ -408,9 +450,12 @@ func WriteManifest(path string, m *Manifest) error {
 		sort.Strings(names)
 		for _, name := range names {
 			dep := m.Dependencies[name]
-			if dep.Path != "" {
+			switch {
+			case dep.Git != "":
+				sb.WriteString(fmt.Sprintf("%s = { git = %q, version = %q }\n", name, dep.Git, dep.Version))
+			case dep.Path != "":
 				sb.WriteString(fmt.Sprintf("%s = { path = %q }\n", name, dep.Path))
-			} else {
+			default:
 				sb.WriteString(fmt.Sprintf("%s = %q\n", name, dep.Version))
 			}
 		}

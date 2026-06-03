@@ -373,8 +373,11 @@ func TestDependencySpecValidate(t *testing.T) {
 	}{
 		{"version only", DependencySpec{Version: "1.0.0"}, false},
 		{"path only", DependencySpec{Path: "../lib"}, false},
+		{"git + version", DependencySpec{Git: "github.com/lhaig/foo", Version: "1.0.0"}, false},
 		{"empty", DependencySpec{}, false},
 		{"both version and path", DependencySpec{Version: "1.0.0", Path: "../lib"}, true},
+		{"both git and path", DependencySpec{Git: "github.com/lhaig/foo", Path: "../lib"}, true},
+		{"git without version", DependencySpec{Git: "github.com/lhaig/foo"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -383,6 +386,155 @@ func TestDependencySpecValidate(t *testing.T) {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestManifestParseGitDependency(t *testing.T) {
+	input := `[package]
+name = "test"
+version = "0.1.0"
+
+[dependencies]
+foo = { git = "github.com/lhaig/foo", version = "1.2.3" }
+`
+	m, err := ParseManifest([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	dep, ok := m.Dependencies["foo"]
+	if !ok {
+		t.Fatal("expected dependency 'foo'")
+	}
+	if dep.Git != "github.com/lhaig/foo" {
+		t.Errorf("expected Git = github.com/lhaig/foo, got %q", dep.Git)
+	}
+	if dep.Version != "1.2.3" {
+		t.Errorf("expected Version = 1.2.3, got %q", dep.Version)
+	}
+	if len(m.Warnings) != 0 {
+		t.Errorf("expected no warnings for canonical git syntax, got: %v", m.Warnings)
+	}
+}
+
+func TestManifestParseGitWithoutVersionRejected(t *testing.T) {
+	input := `[package]
+name = "test"
+version = "0.1.0"
+
+[dependencies]
+foo = { git = "github.com/lhaig/foo" }
+`
+	_, err := ParseManifest([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for git dependency missing version")
+	}
+	if !strings.Contains(err.Error(), "must also specify a version") {
+		t.Errorf("expected error about missing version, got: %v", err)
+	}
+}
+
+func TestManifestParseGitPlusPathRejected(t *testing.T) {
+	input := `[package]
+name = "test"
+version = "0.1.0"
+
+[dependencies]
+foo = { git = "github.com/lhaig/foo", path = "../foo" }
+`
+	_, err := ParseManifest([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for dependency with both git and path")
+	}
+	if !strings.Contains(err.Error(), "cannot have both path") {
+		t.Errorf("expected error about both path and git, got: %v", err)
+	}
+}
+
+func TestManifestParseBareVersionEmitsWarning(t *testing.T) {
+	input := `[package]
+name = "test"
+version = "0.1.0"
+
+[dependencies]
+foo = "1.0.0"
+`
+	m, err := ParseManifest([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(m.Warnings) == 0 {
+		t.Fatal("expected a deprecation warning for bare-version short form")
+	}
+	if !strings.Contains(m.Warnings[0], "bare-version short form") {
+		t.Errorf("expected warning to mention bare-version short form, got: %s", m.Warnings[0])
+	}
+}
+
+func TestManifestParseCaretConstraintEmitsWarning(t *testing.T) {
+	input := `[package]
+name = "test"
+version = "0.1.0"
+
+[dependencies]
+foo = { git = "github.com/lhaig/foo", version = "^1.2.3" }
+`
+	m, err := ParseManifest([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var found bool
+	for _, w := range m.Warnings {
+		if strings.Contains(w, "deprecated `^` constraint") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a `^` deprecation warning, got: %v", m.Warnings)
+	}
+}
+
+func TestManifestParseTildeConstraintEmitsWarning(t *testing.T) {
+	input := `[package]
+name = "test"
+version = "0.1.0"
+
+[dependencies]
+foo = { git = "github.com/lhaig/foo", version = "~1.2.3" }
+`
+	m, err := ParseManifest([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var found bool
+	for _, w := range m.Warnings {
+		if strings.Contains(w, "deprecated `~` constraint") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a `~` deprecation warning, got: %v", m.Warnings)
+	}
+}
+
+func TestManifestWriteGitDependencyRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "intent.toml")
+	original := &Manifest{
+		Package: PackageInfo{Name: "test", Version: "0.1.0"},
+		Dependencies: map[string]DependencySpec{
+			"foo": {Git: "github.com/lhaig/foo", Version: "1.2.3"},
+		},
+	}
+	if err := WriteManifest(manifestPath, original); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	loaded, err := LoadManifest(dir)
+	if err != nil {
+		t.Fatalf("LoadManifest: %v", err)
+	}
+	got := loaded.Dependencies["foo"]
+	if got.Git != "github.com/lhaig/foo" || got.Version != "1.2.3" {
+		t.Errorf("round-trip mismatch: got Git=%q Version=%q", got.Git, got.Version)
 	}
 }
 

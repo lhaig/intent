@@ -3,6 +3,7 @@ package compiler
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -572,5 +573,114 @@ func TestChecksumSameFileSameResult(t *testing.T) {
 
 	if sum1 != sum2 {
 		t.Errorf("same file should produce same checksum: %s != %s", sum1, sum2)
+	}
+}
+
+// --- Phase 30 / ADR 0039 §5: git-source cache layout tests ---
+
+func TestParseGitURLBasic(t *testing.T) {
+	cases := []struct {
+		in         string
+		host, o, r string
+		wantErr    bool
+	}{
+		{"github.com/lhaig/foo", "github.com", "lhaig", "foo", false},
+		{"https://github.com/lhaig/foo.git", "github.com", "lhaig", "foo", false},
+		{"git@github.com:lhaig/foo.git", "github.com", "lhaig", "foo", false},
+		{"github.com/lhaig/foo/extra", "", "", "", true}, // sub-path inside repo
+		{"foo", "", "", "", true},                        // too few segments
+		{"github.com/../foo/bar", "", "", "", true},      // traversal
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			host, owner, repo, err := ParseGitURL(c.in)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, c.wantErr)
+			}
+			if c.wantErr {
+				return
+			}
+			if host != c.host || owner != c.o || repo != c.r {
+				t.Errorf("got %s/%s/%s, want %s/%s/%s", host, owner, repo, c.host, c.o, c.r)
+			}
+		})
+	}
+}
+
+func TestGitCachePathLayout(t *testing.T) {
+	c := &PackageCache{CacheDir: filepath.Join(t.TempDir(), "intentcache")}
+	got, err := c.GitCachePath("github.com", "lhaig", "foo", "abc123def")
+	if err != nil {
+		t.Fatalf("GitCachePath: %v", err)
+	}
+	want := filepath.Join(c.CacheDir, "git", "github.com", "lhaig", "foo@abc123def")
+	if got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestGitCachePathRejectsTraversal(t *testing.T) {
+	c := &PackageCache{CacheDir: t.TempDir()}
+	if _, err := c.GitCachePath("..", "lhaig", "foo", "abc"); err == nil {
+		t.Error("expected error on traversal in host")
+	}
+	if _, err := c.GitCachePath("github.com", "lhaig", "..", "abc"); err == nil {
+		t.Error("expected error on traversal in repo")
+	}
+}
+
+func TestRefreshGitWipesOnlyGitEntries(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), "intentcache")
+	c := &PackageCache{CacheDir: cacheDir}
+
+	// Plant a legacy entry and a git entry.
+	legacyDir := filepath.Join(cacheDir, "legacy_pkg", "1.0.0")
+	gitDir, err := c.GitCachePath("github.com", "lhaig", "foo", "abc")
+	if err != nil {
+		t.Fatalf("GitCachePath: %v", err)
+	}
+	for _, d := range []string{legacyDir, gitDir} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "x.intent"), []byte("hi"), 0644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	if err := c.RefreshGit(); err != nil {
+		t.Fatalf("RefreshGit: %v", err)
+	}
+
+	if _, err := os.Stat(gitDir); !os.IsNotExist(err) {
+		t.Error("git cache entry should have been removed")
+	}
+	if _, err := os.Stat(legacyDir); err != nil {
+		t.Error("legacy cache entry should be untouched")
+	}
+}
+
+func TestGitTreeChecksumMatchesTreeHash(t *testing.T) {
+	c := &PackageCache{CacheDir: filepath.Join(t.TempDir(), "intentcache")}
+	dir, err := c.GitCachePath("github.com", "lhaig", "foo", "abc")
+	if err != nil {
+		t.Fatalf("GitCachePath: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "intent.toml"), []byte("[package]\nname = \"foo\"\nversion = \"1.0.0\"\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := c.GitTreeChecksum("github.com", "lhaig", "foo", "abc")
+	if err != nil {
+		t.Fatalf("GitTreeChecksum: %v", err)
+	}
+	if !strings.HasPrefix(got, "sha256:") {
+		t.Errorf("expected sha256: prefix, got %q", got)
+	}
+	expected, _ := TreeHash(dir)
+	if got != FormatChecksum(expected) {
+		t.Errorf("checksum mismatch: got %s, want %s", got, FormatChecksum(expected))
 	}
 }

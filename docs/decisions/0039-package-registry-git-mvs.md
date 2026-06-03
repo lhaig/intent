@@ -165,7 +165,7 @@ Cross-major upgrades are explicit (Go's `go get` model): `intentc pkg upgrade fo
 
 Each cached package gets a **tree-hash checksum**, recorded in the lockfile and verified on every load:
 
-- **Algorithm:** sha256 of the concatenation of, in NFC-normalised sorted-path order, `len(path) || path || len(content) || content` for every file in the package tree (excluding `.git/`, build artifacts, and OS junk like `.DS_Store`).
+- **Algorithm:** sha256 of the concatenation of, in **byte-sorted path order**, `len(path) || path || len(content) || content` for every file in the package tree (excluding `.git/`, build artifacts, and OS junk like `.DS_Store`). Lengths are little-endian uint64; paths are forward-slash-joined relative to the package root. Unicode normalisation (NFC) is intentionally omitted in v1 to keep the toolchain zero-external-deps; the same content fetched on the same OS produces the same hash, which is the property MVS reproducibility actually requires. A v2 normalisation pass can be added if cross-OS-encoding drift becomes a real failure mode.
 - **Why not the git tree object hash?** Two reasons: (a) it would tie the design to git forever; the same content fetched from a non-git mirror (HTTP tarball, IPFS, etc.) should hash identically. (b) git tree hashes use sha1; sha256 git is still rolling out and not assumed.
 - **Verification:** every `intentc build` re-hashes the cached tree and compares against the lockfile entry. Mismatch is a hard error ("cache poisoning detected; run `intentc pkg install --refresh`").
 

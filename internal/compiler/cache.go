@@ -268,3 +268,153 @@ func (c *PackageCache) ChecksumMatch(name, version string, sourceFiles []string,
 
 	return strings.TrimSpace(string(stored)) == current, nil
 }
+
+// --- Phase 30 / ADR 0039 §5: git-source cache layout -----------------------
+//
+// Git-sourced packages are keyed by (host, owner, repo, rev) where rev is the
+// full commit hash. This is content-addressed at the commit level — the same
+// (host, owner, repo, rev) always points at the same tree, even if the source
+// tag is later moved. The legacy CacheDir/<name>/<version>/ layout is
+// preserved for ADR-0027-era bare-version manifests.
+
+// gitSubdir is the root of the git-source cache namespace.
+const gitSubdir = "git"
+
+// validGitComponent matches a safe single path component: alphanumeric plus
+// dot, hyphen, underscore. Excludes path separators and "..".
+var validGitComponent = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+func validateGitComponent(s, label string) error {
+	if s == "" {
+		return fmt.Errorf("%s must not be empty", label)
+	}
+	if strings.Contains(s, "..") {
+		return fmt.Errorf("%s %q contains path traversal sequence", label, s)
+	}
+	if !validGitComponent.MatchString(s) {
+		return fmt.Errorf("%s %q contains invalid characters", label, s)
+	}
+	return nil
+}
+
+// ParseGitURL decomposes a short URL like "github.com/lhaig/foo" or
+// "https://github.com/lhaig/foo.git" into (host, owner, repo). The owner is
+// the first path segment and repo is the second (further segments are
+// rejected — sub-paths inside a repo are out of scope in v1).
+//
+// Local filesystem paths (starting with "/", "./", "../") are mapped to a
+// sentinel "_local" host with the parent directory as owner and the basename
+// (sans ".git") as repo. This keeps the cache layout intact for test fixtures
+// without leaking arbitrary path structure into ~/.intent/cache/.
+func ParseGitURL(url string) (host, owner, repo string, err error) {
+	s := strings.TrimSpace(url)
+	// Local filesystem paths get a synthetic key — they're only used by
+	// tests and would otherwise be rejected by the host/owner/repo shape.
+	if strings.HasPrefix(s, "/") || strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../") {
+		return localPathCacheKey(s)
+	}
+	// Strip scheme.
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	// Strip user@ for SSH-style: git@github.com:lhaig/foo.git
+	if at := strings.Index(s, "@"); at >= 0 && !strings.Contains(s[:at], "/") {
+		s = s[at+1:]
+		// SSH form uses ":" between host and path; normalise to "/".
+		s = strings.Replace(s, ":", "/", 1)
+	}
+	s = strings.TrimSuffix(s, ".git")
+	parts := strings.Split(s, "/")
+	// Filter empty segments (handles trailing slashes).
+	clean := parts[:0]
+	for _, p := range parts {
+		if p != "" {
+			clean = append(clean, p)
+		}
+	}
+	if len(clean) < 3 {
+		return "", "", "", fmt.Errorf("git URL %q: expected host/owner/repo", url)
+	}
+	if len(clean) > 3 {
+		return "", "", "", fmt.Errorf("git URL %q: sub-paths inside a repo are not supported in v1", url)
+	}
+	host, owner, repo = clean[0], clean[1], clean[2]
+	for _, pair := range []struct{ s, l string }{{host, "host"}, {owner, "owner"}, {repo, "repo"}} {
+		if err := validateGitComponent(pair.s, pair.l); err != nil {
+			return "", "", "", err
+		}
+	}
+	return host, owner, repo, nil
+}
+
+// localPathCacheKey derives a (host, owner, repo) tuple from a local
+// filesystem path. The owner is a sha256 prefix of the canonical path so two
+// distinct local repos with the same basename don't collide.
+func localPathCacheKey(p string) (host, owner, repo string, err error) {
+	cleaned := filepath.Clean(p)
+	abs, absErr := filepath.Abs(cleaned)
+	if absErr == nil {
+		cleaned = abs
+	}
+	base := filepath.Base(cleaned)
+	base = strings.TrimSuffix(base, ".git")
+	if base == "" || base == "." || base == "/" {
+		return "", "", "", fmt.Errorf("local git path %q: cannot derive repo name", p)
+	}
+	sum := sha256.Sum256([]byte(cleaned))
+	owner = hex.EncodeToString(sum[:4])
+	// Validate the synthesized components against the same rules as
+	// network-hosted ones so subsequent path joins remain safe.
+	for _, pair := range []struct{ s, l string }{{"_local", "host"}, {owner, "owner"}, {base, "repo"}} {
+		if err := validateGitComponent(pair.s, pair.l); err != nil {
+			return "", "", "", err
+		}
+	}
+	return "_local", owner, base, nil
+}
+
+// GitCachePath returns the cache path for a git-sourced package keyed by
+// commit hash. ADR 0039 §5. Rev must be the full commit hash (40 hex chars).
+func (c *PackageCache) GitCachePath(host, owner, repo, rev string) (string, error) {
+	for _, pair := range []struct{ s, l string }{{host, "host"}, {owner, "owner"}, {repo, "repo"}, {rev, "rev"}} {
+		if err := validateGitComponent(pair.s, pair.l); err != nil {
+			return "", err
+		}
+	}
+	return filepath.Join(c.CacheDir, gitSubdir, host, owner, repo+"@"+rev), nil
+}
+
+// HasGit reports whether the git cache contains a tree for (host, owner, repo, rev).
+func (c *PackageCache) HasGit(host, owner, repo, rev string) bool {
+	dir, err := c.GitCachePath(host, owner, repo, rev)
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(dir)
+	return err == nil && info.IsDir()
+}
+
+// RefreshGit wipes the git-source portion of the cache while leaving the
+// legacy name/version entries alone. Used by `intentc pkg install --refresh`.
+func (c *PackageCache) RefreshGit() error {
+	dir := filepath.Join(c.CacheDir, gitSubdir)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil
+	}
+	return os.RemoveAll(dir)
+}
+
+// GitTreeChecksum computes the ADR 0039 §7 tree-hash of a cached git package
+// and returns the lockfile-format string. Used by the resolver / lockfile
+// integration in CLI wiring (30.6).
+func (c *PackageCache) GitTreeChecksum(host, owner, repo, rev string) (string, error) {
+	dir, err := c.GitCachePath(host, owner, repo, rev)
+	if err != nil {
+		return "", err
+	}
+	sum, err := TreeHash(dir)
+	if err != nil {
+		return "", err
+	}
+	return FormatChecksum(sum), nil
+}

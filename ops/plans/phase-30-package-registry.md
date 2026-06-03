@@ -52,7 +52,7 @@ Deliver a working git-based package registry with MVS resolution, a committed `i
 - `Fetcher` wraps `git` invocations. Methods: `ListTags(url) ([]Tag, error)`, `Clone(url, rev, dest) error`.
 - `ListTags` uses `git ls-remote --tags <url>`, parses `refs/tags/vMAJOR.MINOR.PATCH`, drops non-semver tags, returns sorted descending.
 - `Clone` shallow-clones to a temp dir, `git checkout <rev>`, moves to final cache path atomically.
-- `TreeHash(dir) ([]byte, error)`: walks the directory in NFC-normalised sorted-path order, hashing `len(path) || path || len(content) || content` per file; excludes `.git/`, `.DS_Store`, build artefacts.
+- `TreeHash(dir) ([]byte, error)`: walks the directory in byte-sorted-path order (raw `<` on UTF-8 bytes), hashing `len(path) || path || len(content) || content` per file with length as little-endian uint64; excludes `.git/`, `.DS_Store`, build artefacts. NFC normalisation deliberately omitted in v1 (see ADR 0039 §7).
 - All operations honour user's existing git credentials — no special auth handling.
 
 **Acceptance:** Unit tests with a local bare git repo fixture (no network): `ListTags` enumerates correctly, `Clone` populates a directory at the right rev, `TreeHash` is stable across identical trees, differs on any byte change.

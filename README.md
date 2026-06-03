@@ -140,7 +140,7 @@ intentc lint <file.intent>                                       Run lint checks
 intentc test-gen [--emit] <file>                                 Generate property-based test blocks
 intentc test [--target t] [--all-targets] [--filter s]
              [--list] [--quiet] <file>                            Run in-language tests
-intentc pkg init|add|remove|install|list                          Local package management
+intentc pkg init|add|remove|install|upgrade|vendor|list           Package management (git-based, MVS — ADR 0039)
 intentc lsp                                                       Start the LSP server (stdio)
 ```
 

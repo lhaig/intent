@@ -256,30 +256,15 @@ func hasValidOverlap(constraints []Constraint) bool {
 	return false
 }
 
-// ConstraintBaseVersion parses a version constraint string and returns the base
-// version suitable for use as a cache key. For constraints like "^1.0.0",
-// "~1.2.3", or ">=2.0.0", this returns the base version ("1.0.0", "1.2.3",
-// "2.0.0") which is always a valid cache name.
+// ConstraintBaseVersion parses a version constraint string and returns the
+// base version suitable for use as a legacy cache key (e.g. "^1.0.0" → "1.0.0").
 //
-// Limitation: This returns the base version from the constraint, not the
-// actual resolved version. For example, "^1.0.0" returns "1.0.0" even though
-// a registry might resolve it to "1.2.3". Without a package registry or lock
-// file, this is the only deterministic approach — there is no source of truth
-// for which compatible version should be selected.
-//
-// This is internally consistent: both cache storage (in StoreInCache) and
-// cache lookup (in LoadFromCache) call ConstraintBaseVersion, so they always agree
-// on the cache key. However, if a newer compatible version is published,
-// the cache entry won't reflect it until the constraint itself is updated.
-//
-// TODO: When a package registry is added, this should resolve to the actual
-// latest version matching the constraint (e.g., "^1.0.0" → "1.3.2") and a
-// lock file should pin the resolved version for reproducible builds.
-//
-// Note: for the "<" operator, the returned version is the constraint
-// bound (the upper limit), not a version that satisfies the constraint.
-// This is acceptable because the value is used only as a cache directory
-// name, not as a resolved dependency version.
+// Phase 30 / ADR 0039: this function is retained only for the back-compat
+// path in ModuleRegistry.resolvePackageImport, which falls back to the
+// legacy ~/.intent/cache/<name>/<version>/ layout for bare-version manifests.
+// New code should use the resolved version from intent.lock instead. The
+// MVS resolver (Resolver.Resolve) is the authoritative source for which
+// version a dependency resolves to; this function never consults a registry.
 func ConstraintBaseVersion(constraintStr string) (string, error) {
 	c, err := ParseConstraint(constraintStr)
 	if err != nil {

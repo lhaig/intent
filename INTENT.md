@@ -618,18 +618,19 @@ description = "My reusable Intent library"
 
 ### Adding Dependencies
 
-```bash
-intentc pkg add graph-types 1.0.0              # exact version
-intentc pkg add utils "^2.0.0"                 # compatible range
-intentc pkg remove graph-types                 # remove a dependency
-```
-
-Or edit `intent.toml` directly. Local path dependencies for development:
+Phase 30 / ADR 0039: dependencies are git-sourced with minimum-version
+selection (MVS). Edit `intent.toml`:
 
 ```toml
 [dependencies]
-my-lib = { path = "../my-lib" }
+graph_types = { git = "github.com/lhaig/graph_types", version = "1.0.0" }
+my_lib      = { path = "../my_lib" }                  # local-path deps unchanged
 ```
+
+The `version = "1.0.0"` is the *minimum* acceptable version — the resolver
+picks the highest patch tag at the same major. Cross-major conflicts are
+hard errors. The legacy bare-version short form (`foo = "1.0.0"`) and
+`^`/`~` constraint operators still parse but emit deprecation warnings.
 
 ### Importing Packages
 
@@ -671,21 +672,67 @@ entry function main() returns Int {
 }
 ```
 
-### Version Constraints
+### Version Resolution (MVS)
 
-| Constraint | Meaning |
-|------------|---------|
-| `"1.0.0"` | Exact version |
-| `"^1.0.0"` | Compatible updates (>=1.0.0, <2.0.0) |
-| `"^0.1.0"` | Compatible updates (>=0.1.0, <0.2.0) |
-| `"^0.0.1"` | Exact version (>=0.0.1, <0.0.2) |
-| `"~1.0.0"` | Patch updates only (>=1.0.0, <1.1.0) |
-| `">=1.0.0"` | Minimum version |
-| `"<2.0.0"` | Maximum version (exclusive) |
+Phase 30 / ADR 0039 replaces the earlier constraint-solver with Go-style
+**Minimum Version Selection**:
 
-The caret operator (`^`) follows standard semver conventions for pre-1.0 versions: `^0.y.z` treats the minor version as the compatibility boundary, and `^0.0.z` pins to the exact patch version.
+- `version = "1.0.0"` is a *minimum*. The resolver walks the dependency
+  graph, takes the maximum minimum per package, and selects the highest
+  available patch tag at the same major.
+- `^1.0.0` / `~1.0.0` still parse but emit a deprecation warning and are
+  treated as plain `>= 1.0.0` minima.
+- Cross-major conflicts (e.g. one parent requires `foo >= 1.x`, another
+  requires `foo >= 2.x`) are hard errors. No diamond-dep tolerance in v1.
+- Two parents pointing at different git URLs for the same dependency
+  name is a hard error.
 
-Resolved packages are cached at `~/.intent/cache/`. Run `intentc pkg install` to resolve and fetch all dependencies.
+### Lockfile and Cache
+
+`intentc pkg install` resolves dependencies, fetches each via `git clone`,
+populates `~/.intent/cache/git/<host>/<owner>/<repo>@<rev>/`, and writes
+**`intent.lock`** next to `intent.toml`:
+
+```toml
+# intent.lock — DO NOT EDIT BY HAND
+version = 1
+generated = "2026-06-03T12:00:00Z"
+
+[[package]]
+name = "graph_types"
+version = "1.0.0"
+source = "git+https://github.com/lhaig/graph_types.git"
+rev = "a7c4f9e8b3..."
+checksum = "sha256:8f3e..."
+dependencies = []
+```
+
+**Commit `intent.lock` to source control** — it pins the exact resolved
+versions and commit hashes for reproducible builds. The sha256 checksum
+is recomputed on every build and refuses to load mismatched trees.
+
+### Offline / vendored builds
+
+```bash
+intentc pkg vendor
+```
+
+Copies the resolved package set into `./vendor/<name>-<version>/`. When
+`./vendor/` exists, `intentc build` reads from it instead of `~/.intent/cache/`.
+Use this for air-gapped CI or to commit the dependency set alongside source.
+
+### Other commands
+
+```bash
+intentc pkg install [--refresh]      # resolve + fetch + write lockfile
+intentc pkg upgrade <name> [--major] # bump a dep's minimum to latest tag
+intentc pkg vendor                   # populate ./vendor/ from lockfile
+intentc pkg list                     # show declared dependencies
+```
+
+`--refresh` wipes the git-source portion of `~/.intent/cache/` before
+re-fetching. `--major` opens cross-major upgrades (otherwise the bump is
+constrained to the current major).
 
 ## Rust FFI (Crate Imports)
 

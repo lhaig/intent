@@ -1,0 +1,17 @@
+[package]
+name = "git_dep_demo"
+version = "0.1.0"
+description = "Illustrative: declaring a git-source dependency (Phase 30 / ADR 0039)"
+
+[dependencies]
+# Replace the URL below with a real public Intent package once one exists.
+# Running `intentc pkg install` against this manifest will:
+#   1. Resolve `lib` per MVS (highest patch tag at major 1 with version >= 1.0.0)
+#   2. Clone the repo into ~/.intent/cache/git/<host>/<owner>/<repo>@<rev>/
+#   3. Write intent.lock with the resolved version, rev, and sha256 tree-hash
+#   4. On subsequent runs, verify cached trees against the lockfile checksum
+#
+# This file is illustrative only — the URL is a placeholder. The real
+# end-to-end registry test lives in internal/compiler/loader_test.go
+# (TestPkgInstallEndToEnd) and runs against a local bare git fixture.
+lib = { git = "github.com/example/intent-lib", version = "1.0.0" }

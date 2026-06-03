@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/lhaig/intent/internal/backend"
 	"github.com/lhaig/intent/internal/compiler"
@@ -578,12 +579,15 @@ func handleLint(args []string) {
 }
 
 const pkgUsage = `Usage:
-  intentc pkg init                     Create intent.toml from module declarations
-  intentc pkg add <name> <version>     Add dependency with version constraint
-  intentc pkg add <name> --path <dir>  Add local path dependency
-  intentc pkg remove <name>            Remove dependency from manifest
-  intentc pkg install                  Resolve and cache all dependencies
-  intentc pkg list                     Show dependency tree
+  intentc pkg init                            Create intent.toml from module declarations
+  intentc pkg add <name> <version>            Add dependency with version constraint
+  intentc pkg add <name> --git <url> <ver>    Add git-source dependency (ADR 0039)
+  intentc pkg add <name> --path <dir>         Add local path dependency
+  intentc pkg remove <name>                   Remove dependency from manifest
+  intentc pkg install [--refresh]             Resolve, fetch, and write intent.lock
+  intentc pkg upgrade <name> [--major]        Bump a dep to the latest compatible version
+  intentc pkg vendor                          Copy resolved deps into ./vendor/ for offline builds
+  intentc pkg list                            Show dependency tree
 `
 
 // handleLsp starts the Intent LSP server on stdio. Phase 18 / ADR 0032.
@@ -617,7 +621,11 @@ func handlePkg(args []string) {
 	case "remove":
 		handlePkgRemove(args[1:])
 	case "install":
-		handlePkgInstall()
+		handlePkgInstall(args[1:])
+	case "upgrade":
+		handlePkgUpgrade(args[1:])
+	case "vendor":
+		handlePkgVendor(args[1:])
 	case "list":
 		handlePkgList()
 	default:
@@ -849,7 +857,18 @@ func handlePkgRemove(args []string) {
 	fmt.Printf("Removed dependency %s\n", name)
 }
 
-func handlePkgInstall() {
+func handlePkgInstall(args []string) {
+	refresh := false
+	for _, a := range args {
+		switch a {
+		case "--refresh":
+			refresh = true
+		default:
+			fmt.Fprintf(os.Stderr, "Unknown pkg install flag: %s\n", a)
+			os.Exit(1)
+		}
+	}
+
 	manifestDir, err := filepath.Abs(".")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -860,6 +879,9 @@ func handlePkgInstall() {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		fmt.Fprintln(os.Stderr, "Run 'intentc pkg init' to create an intent.toml first.")
 		os.Exit(1)
+	}
+	for _, w := range m.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}
 
 	if len(m.Dependencies) == 0 {
@@ -872,89 +894,258 @@ func handlePkgInstall() {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)
 	}
-
-	// Check if any versioned dependencies exist and warn early.
-	hasVersioned := false
-	for _, dep := range m.Dependencies {
-		if dep.Path == "" && dep.Version != "" {
-			hasVersioned = true
-			break
-		}
-	}
-	if hasVersioned {
-		fmt.Fprintln(os.Stderr, "WARNING: no package registry available. Versioned dependencies can only be resolved from the local cache.")
-	}
-
-	hasErrors := false
-	hasUnresolved := false
-	names := sortedKeys(m.Dependencies)
-	for _, name := range names {
-		dep := m.Dependencies[name]
-
-		if dep.Path != "" {
-			// Local path dependency - resolve relative to manifest directory, not CWD
-			resolvedPath := dep.Path
-			if !filepath.IsAbs(dep.Path) {
-				resolvedPath = filepath.Join(manifestDir, dep.Path)
-			}
-			info, err := os.Stat(resolvedPath)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  %s: ERROR path %q not found\n", name, dep.Path)
-				hasErrors = true
-				continue
-			}
-			if !info.IsDir() {
-				fmt.Fprintf(os.Stderr, "  %s: ERROR path %q is not a directory\n", name, dep.Path)
-				hasErrors = true
-				continue
-			}
-			fmt.Printf("  %s: ok (local: %s)\n", name, dep.Path)
-			continue
-		}
-
-		// Versioned dependency - check cache
-		if dep.Version == "" {
-			fmt.Fprintf(os.Stderr, "  %s: ERROR no version specified\n", name)
-			hasErrors = true
-			continue
-		}
-
-		// Resolve the constraint to a concrete version for cache lookup.
-		// ConstraintBaseVersion extracts the base version from constraints like
-		// "^1.0.0" -> "1.0.0", ensuring consistent cache keys.
-		//
-		// Limitation: For caret/tilde constraints (e.g. ^1.0.0, ~1.2.0) the
-		// resolved version may differ from the constraint's base version. When
-		// a real package registry is added, the resolved version (not the
-		// constraint base) should be used as the cache key.
-		version, err := compiler.ConstraintBaseVersion(dep.Version)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %s: ERROR invalid version %q: %s\n", name, dep.Version, err)
-			hasErrors = true
-			continue
-		}
-
-		if cache.Has(name, version) {
-			fmt.Printf("  %s@%s: cached\n", name, version)
-		} else if found, foundVer := cache.FindMatchingVersion(name, dep.Version); found {
-			fmt.Printf("  %s@%s: cached (constraint %s matched cached version)\n", name, foundVer, dep.Version)
-		} else {
-			// TODO: Cache population will happen once a package registry is available. Store/StoreWithChecksum APIs are ready for integration.
-			fmt.Fprintf(os.Stderr, "  %s@%s: not installed — no registry available to fetch this version\n", name, version)
-			hasUnresolved = true
+	if refresh {
+		if err := cache.RefreshGit(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error refreshing cache: %s\n", err)
+			os.Exit(1)
 		}
 	}
 
-	if hasErrors {
+	loader := &compiler.GitFsLoader{
+		Fetcher: compiler.GitFetcher{},
+		Cache:   cache,
+		Root:    manifestDir,
+	}
+	rs, err := (&compiler.Resolver{Loader: loader}).Resolve(m, manifestDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error resolving dependencies: %s\n", err)
 		os.Exit(1)
 	}
 
-	if hasUnresolved {
-		fmt.Fprintln(os.Stderr, "\nSome packages could not be installed (no registry available).")
-		fmt.Fprintln(os.Stderr, "To use local packages instead, add them with: intentc pkg add <name> --path <dir>")
-	} else {
-		fmt.Println("Install complete.")
+	// Checksum each git-source package from its cached tree.
+	checksumOf := func(p compiler.LockedPackage) (string, error) {
+		if !strings.HasPrefix(p.Source, "git+") {
+			return "", nil
+		}
+		// Locate the resolved package to obtain its (host, owner, repo, rev).
+		for _, rp := range rs.Packages {
+			if rp.Name != p.Name {
+				continue
+			}
+			if !rp.Source.IsGit() {
+				return "", nil
+			}
+			host, owner, repo, err := compiler.ParseGitURL(rp.Source.Git)
+			if err != nil {
+				return "", err
+			}
+			return cache.GitTreeChecksum(host, owner, repo, rp.Rev)
+		}
+		return "", fmt.Errorf("no resolved package matches lockfile entry %s", p.Name)
 	}
+
+	lock, err := compiler.FromResolvedSet(rs, checksumOf, time.Now())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error computing lockfile: %s\n", err)
+		os.Exit(1)
+	}
+	lockPath := filepath.Join(manifestDir, "intent.lock")
+	if err := compiler.WriteLockfile(lockPath, lock); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing %s: %s\n", lockPath, err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Resolved %d package(s); lockfile written to %s.\n", len(lock.Packages), lockPath)
+	for _, p := range lock.Packages {
+		fmt.Printf("  %s@%s\n", p.Name, p.Version.String())
+	}
+}
+
+// handlePkgUpgrade bumps a single dependency's minimum version in intent.toml
+// and re-runs install. Without --major, the bump is constrained to the same
+// major version. With --major, the highest available major is selected.
+func handlePkgUpgrade(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "Usage: intentc pkg upgrade <name> [--major]")
+		os.Exit(1)
+	}
+	allowMajor := false
+	var name string
+	for _, a := range args {
+		switch {
+		case a == "--major":
+			allowMajor = true
+		case !strings.HasPrefix(a, "-"):
+			if name != "" {
+				fmt.Fprintln(os.Stderr, "Error: upgrade takes exactly one package name")
+				os.Exit(1)
+			}
+			name = a
+		default:
+			fmt.Fprintf(os.Stderr, "Unknown pkg upgrade flag: %s\n", a)
+			os.Exit(1)
+		}
+	}
+	if name == "" {
+		fmt.Fprintln(os.Stderr, "Error: missing package name")
+		os.Exit(1)
+	}
+
+	manifestDir, err := filepath.Abs(".")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	m, err := compiler.LoadManifest(manifestDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
+	}
+	dep, ok := m.Dependencies[name]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "Error: %s is not a declared dependency\n", name)
+		os.Exit(1)
+	}
+	if !dep.IsGit() {
+		fmt.Fprintf(os.Stderr, "Error: only git dependencies can be upgraded; %s is %s\n", name, dependencyKind(dep))
+		os.Exit(1)
+	}
+
+	curr, err := compiler.ParseVersion(strings.TrimLeft(dep.Version, "^~>= "))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: current version %q is not a valid semver: %s\n", dep.Version, err)
+		os.Exit(1)
+	}
+	tags, err := compiler.GitFetcher{}.ListTags(dep.Git)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error listing tags for %s: %s\n", dep.Git, err)
+		os.Exit(1)
+	}
+	if len(tags) == 0 {
+		fmt.Fprintf(os.Stderr, "Error: %s has no semver tags\n", dep.Git)
+		os.Exit(1)
+	}
+	var picked compiler.Tag
+	found := false
+	for _, t := range tags {
+		if !allowMajor && t.Version.Major != curr.Major {
+			continue
+		}
+		if t.Version.Compare(curr) <= 0 {
+			continue
+		}
+		if !found || t.Version.Compare(picked.Version) > 0 {
+			picked = t
+			found = true
+		}
+	}
+	if !found {
+		fmt.Fprintf(os.Stderr, "Nothing to upgrade — %s is already at the latest %s tag.\n", name, upgradeScope(allowMajor))
+		return
+	}
+
+	dep.Version = picked.Version.String()
+	m.Dependencies[name] = dep
+	if err := compiler.WriteManifest(filepath.Join(manifestDir, "intent.toml"), m); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing intent.toml: %s\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Bumped %s to %s. Run `intentc pkg install` to refresh the lockfile.\n", name, picked.Version.String())
+}
+
+func dependencyKind(d compiler.DependencySpec) string {
+	switch {
+	case d.IsPath():
+		return "a path dependency"
+	case d.IsGit():
+		return "a git dependency"
+	default:
+		return "a bare-version dependency"
+	}
+}
+
+func upgradeScope(allowMajor bool) string {
+	if allowMajor {
+		return "version"
+	}
+	return "same-major version"
+}
+
+// handlePkgVendor reads intent.lock and copies each resolved package's cached
+// tree into ./vendor/<name>-<version>/. When ./vendor/ exists, future builds
+// read from it instead of the cache — ADR 0039 §8.
+func handlePkgVendor(args []string) {
+	if len(args) > 0 {
+		fmt.Fprintln(os.Stderr, "Usage: intentc pkg vendor")
+		os.Exit(1)
+	}
+	manifestDir, err := filepath.Abs(".")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	lockPath := filepath.Join(manifestDir, "intent.lock")
+	lock, err := compiler.ReadLockfile(lockPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		fmt.Fprintln(os.Stderr, "Run 'intentc pkg install' first to create intent.lock.")
+		os.Exit(1)
+	}
+
+	cache, err := compiler.NewPackageCache()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
+	}
+
+	vendorDir := filepath.Join(manifestDir, "vendor")
+	if err := os.RemoveAll(vendorDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Error wiping vendor dir: %s\n", err)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll(vendorDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating vendor dir: %s\n", err)
+		os.Exit(1)
+	}
+
+	for _, p := range lock.Packages {
+		if !strings.HasPrefix(p.Source, "git+") {
+			continue // skip path deps; they already live where they live
+		}
+		gitURL := strings.TrimPrefix(p.Source, "git+")
+		host, owner, repo, err := compiler.ParseGitURL(gitURL)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %s: %s\n", p.Name, err)
+			os.Exit(1)
+		}
+		src, err := cache.GitCachePath(host, owner, repo, p.Rev)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %s: %s\n", p.Name, err)
+			os.Exit(1)
+		}
+		if _, err := os.Stat(src); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %s@%s not in cache (run `intentc pkg install`).\n", p.Name, p.Version.String())
+			os.Exit(1)
+		}
+		dest := filepath.Join(vendorDir, fmt.Sprintf("%s-%s", p.Name, p.Version.String()))
+		if err := copyTree(src, dest); err != nil {
+			fmt.Fprintf(os.Stderr, "Error copying %s: %s\n", p.Name, err)
+			os.Exit(1)
+		}
+		fmt.Printf("  vendored %s@%s\n", p.Name, p.Version.String())
+	}
+	fmt.Printf("Vendored %d package(s) to %s\n", len(lock.Packages), vendorDir)
+}
+
+func copyTree(src, dest string) error {
+	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		out := filepath.Join(dest, rel)
+		if d.IsDir() {
+			return os.MkdirAll(out, 0755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(out, data, 0644)
+	})
 }
 
 func handlePkgList() {
