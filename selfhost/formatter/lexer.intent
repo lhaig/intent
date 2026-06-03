@@ -1,0 +1,480 @@
+// selfhost/formatter/lexer.intent — Phase 32 / ADR 0040 stage2.
+//
+// First Intent-in-Intent code. Tokenises a useful subset of Intent source:
+// identifiers + keywords (small table), integer literals, double-quoted
+// string literals (no interpolation, no escape decoding), the common
+// punctuation, and EOF. Whitespace and single-line `//` comments are
+// skipped. Expansion (escape decoding, string interpolation, multi-line
+// comments, char literals, float literals, etc.) is left for follow-up
+// phases as the parser surfaces what it needs.
+//
+// Design notes:
+//   - Token.kind is a plain Int with named accessor functions (tk_*).
+//     Intent enums with pattern matching would force each kind check to
+//     be a match arm; a plain Int kind keeps call sites concise.
+//   - Lexer state lives on a mutable entity. position is a codepoint
+//     index into source.
+
+module formatter_lexer version "0.1.0";
+
+// --- Token kind constants ---------------------------------------------------
+//
+// Stable small integers. The values themselves don't escape into source so
+// any non-overlapping assignment is fine, but they're chosen to leave room
+// for grouping (1-9 literals, 10-39 punctuation, 40+ keywords).
+
+public function tk_ident() returns Int { return 1; }
+public function tk_int() returns Int { return 2; }
+public function tk_string() returns Int { return 3; }
+
+public function tk_lparen() returns Int { return 10; }
+public function tk_rparen() returns Int { return 11; }
+public function tk_lbrace() returns Int { return 12; }
+public function tk_rbrace() returns Int { return 13; }
+public function tk_lbracket() returns Int { return 14; }
+public function tk_rbracket() returns Int { return 15; }
+public function tk_semicolon() returns Int { return 16; }
+public function tk_comma() returns Int { return 17; }
+public function tk_colon() returns Int { return 18; }
+public function tk_dot() returns Int { return 19; }
+public function tk_dotdot() returns Int { return 20; }
+public function tk_assign() returns Int { return 21; }
+public function tk_arrow() returns Int { return 22; }   // =>
+public function tk_plus() returns Int { return 23; }
+public function tk_minus() returns Int { return 24; }
+public function tk_star() returns Int { return 25; }
+public function tk_slash() returns Int { return 26; }
+public function tk_percent() returns Int { return 27; }
+public function tk_eq() returns Int { return 28; }      // ==
+public function tk_neq() returns Int { return 29; }     // !=
+public function tk_lt() returns Int { return 30; }
+public function tk_gt() returns Int { return 31; }
+public function tk_leq() returns Int { return 32; }
+public function tk_geq() returns Int { return 33; }
+public function tk_question() returns Int { return 34; }
+public function tk_pipe() returns Int { return 35; }
+public function tk_at() returns Int { return 36; }
+
+// Keywords. Identifiers that match these get their kind rewritten before
+// the Token is emitted. v1 covers the common ones; the parser phase will
+// extend the table as needed.
+public function kw_module() returns Int { return 40; }
+public function kw_version() returns Int { return 41; }
+public function kw_function() returns Int { return 42; }
+public function kw_entry() returns Int { return 43; }
+public function kw_returns() returns Int { return 44; }
+public function kw_let() returns Int { return 45; }
+public function kw_mutable() returns Int { return 46; }
+public function kw_return() returns Int { return 47; }
+public function kw_if() returns Int { return 48; }
+public function kw_else() returns Int { return 49; }
+public function kw_while() returns Int { return 50; }
+public function kw_true() returns Int { return 51; }
+public function kw_false() returns Int { return 52; }
+public function kw_and() returns Int { return 53; }
+public function kw_or() returns Int { return 54; }
+public function kw_not() returns Int { return 55; }
+public function kw_int_type() returns Int { return 56; }
+public function kw_string_type() returns Int { return 57; }
+public function kw_bool_type() returns Int { return 58; }
+public function kw_void_type() returns Int { return 59; }
+
+public function tk_eof() returns Int { return 98; }
+public function tk_error() returns Int { return 99; }
+
+// Maps an identifier text to a keyword kind, or tk_ident() if not a keyword.
+// Linear scan is fine — the keyword set is small and Phase 32's hot path
+// isn't this function.
+public function keyword_kind(text: String) returns Int {
+    if text == "module" { return kw_module(); }
+    if text == "version" { return kw_version(); }
+    if text == "function" { return kw_function(); }
+    if text == "entry" { return kw_entry(); }
+    if text == "returns" { return kw_returns(); }
+    if text == "let" { return kw_let(); }
+    if text == "mutable" { return kw_mutable(); }
+    if text == "return" { return kw_return(); }
+    if text == "if" { return kw_if(); }
+    if text == "else" { return kw_else(); }
+    if text == "while" { return kw_while(); }
+    if text == "true" { return kw_true(); }
+    if text == "false" { return kw_false(); }
+    if text == "and" { return kw_and(); }
+    if text == "or" { return kw_or(); }
+    if text == "not" { return kw_not(); }
+    if text == "Int" { return kw_int_type(); }
+    if text == "String" { return kw_string_type(); }
+    if text == "Bool" { return kw_bool_type(); }
+    if text == "Void" { return kw_void_type(); }
+    return tk_ident();
+}
+
+// --- Token ------------------------------------------------------------------
+
+public entity Token {
+    field kind: Int;
+    field text: String;
+    field line: Int;
+    field column: Int;
+
+    constructor(kind: Int, text: String, line: Int, column: Int) {
+        self.kind = kind;
+        self.text = text;
+        self.line = line;
+        self.column = column;
+    }
+}
+
+// --- Char predicate helpers -------------------------------------------------
+
+public function is_ident_start(c: Char) returns Bool {
+    return c.is_alpha() or c == '_';
+}
+
+public function is_ident_continue(c: Char) returns Bool {
+    return c.is_alphanumeric() or c == '_';
+}
+
+// --- Lexer ------------------------------------------------------------------
+
+public entity Lexer {
+    field source: String;
+    field position: Int;
+    field line: Int;
+    field column: Int;
+
+    constructor(source: String) {
+        self.source = source;
+        self.position = 0;
+        self.line = 1;
+        self.column = 1;
+    }
+
+    method at_end() returns Bool {
+        return self.position >= len(self.source);
+    }
+
+    // Returns the char at the current position; callers must check at_end
+    // first. When at_end, we return '\0' as a defensive default.
+    method peek() returns Char {
+        if self.at_end() { return '\0'; }
+        return self.source[self.position];
+    }
+
+    // Returns the char one past the current position, or '\0' at EOF.
+    method peek2() returns Char {
+        let next: Int = self.position + 1;
+        if next >= len(self.source) { return '\0'; }
+        return self.source[next];
+    }
+
+    // Consume one codepoint, advancing position + column. Newlines bump line
+    // and reset column to 1.
+    method advance() returns Char {
+        if self.at_end() { return '\0'; }
+        let c: Char = self.source[self.position];
+        self.position = self.position + 1;
+        if c == '\n' {
+            self.line = self.line + 1;
+            self.column = 1;
+        } else {
+            self.column = self.column + 1;
+        }
+        return c;
+    }
+
+    method skip_whitespace_and_comments() returns Void {
+        while not self.at_end() {
+            let c: Char = self.peek();
+            if c == ' ' or c == '\t' or c == '\n' or c == '\r' {
+                self.advance();
+            } else {
+                if c == '/' and self.peek2() == '/' {
+                    // Single-line comment: skip to end of line.
+                    while not self.at_end() and self.peek() != '\n' {
+                        self.advance();
+                    }
+                } else {
+                    return;
+                }
+            }
+        }
+    }
+
+    method scan_identifier_or_keyword(start_line: Int, start_col: Int) returns Token {
+        let start: Int = self.position;
+        while not self.at_end() and is_ident_continue(self.peek()) {
+            self.advance();
+        }
+        let text: String = self.source[start..self.position];
+        let kind: Int = keyword_kind(text);
+        return Token(kind, text, start_line, start_col);
+    }
+
+    method scan_int_literal(start_line: Int, start_col: Int) returns Token {
+        let start: Int = self.position;
+        while not self.at_end() and self.peek().is_digit() {
+            self.advance();
+        }
+        let text: String = self.source[start..self.position];
+        return Token(tk_int(), text, start_line, start_col);
+    }
+
+    // v1 string literal: matches `"..."` without decoding escapes. The text
+    // field carries the *raw* literal including surrounding quotes so the
+    // parser can choose how to interpret it. Newlines inside the literal
+    // are rejected (terminated as error).
+    method scan_string_literal(start_line: Int, start_col: Int) returns Token {
+        let start: Int = self.position;
+        self.advance(); // consume opening "
+        while not self.at_end() {
+            let c: Char = self.peek();
+            if c == '"' {
+                self.advance(); // consume closing "
+                let text: String = self.source[start..self.position];
+                return Token(tk_string(), text, start_line, start_col);
+            }
+            if c == '\n' {
+                let text_err: String = self.source[start..self.position];
+                return Token(tk_error(), text_err, start_line, start_col);
+            }
+            // For v1, accept `\` followed by any char as a 2-char sequence
+            // (escape decoding deferred). This keeps `\"` from terminating
+            // the literal prematurely.
+            if c == '\\' {
+                self.advance();
+                if not self.at_end() {
+                    self.advance();
+                }
+            } else {
+                self.advance();
+            }
+        }
+        let text_eof: String = self.source[start..self.position];
+        return Token(tk_error(), text_eof, start_line, start_col);
+    }
+
+    // Consume one token's worth of input. Caller pre-skips whitespace.
+    method scan_one(start_line: Int, start_col: Int) returns Token {
+        let c: Char = self.peek();
+
+        if is_ident_start(c) {
+            return self.scan_identifier_or_keyword(start_line, start_col);
+        }
+        if c.is_digit() {
+            return self.scan_int_literal(start_line, start_col);
+        }
+        if c == '"' {
+            return self.scan_string_literal(start_line, start_col);
+        }
+
+        // Single-char punctuation, with two-char lookahead for == != <= >=
+        // .. and =>.
+        self.advance();
+        if c == '(' { return Token(tk_lparen(), "(", start_line, start_col); }
+        if c == ')' { return Token(tk_rparen(), ")", start_line, start_col); }
+        if c == '{' { return Token(tk_lbrace(), '{'.to_string(), start_line, start_col); }
+        if c == '}' { return Token(tk_rbrace(), '}'.to_string(), start_line, start_col); }
+        if c == '[' { return Token(tk_lbracket(), "[", start_line, start_col); }
+        if c == ']' { return Token(tk_rbracket(), "]", start_line, start_col); }
+        if c == ';' { return Token(tk_semicolon(), ";", start_line, start_col); }
+        if c == ',' { return Token(tk_comma(), ",", start_line, start_col); }
+        if c == ':' { return Token(tk_colon(), ":", start_line, start_col); }
+        if c == '+' { return Token(tk_plus(), "+", start_line, start_col); }
+        if c == '-' { return Token(tk_minus(), "-", start_line, start_col); }
+        if c == '*' { return Token(tk_star(), "*", start_line, start_col); }
+        if c == '/' { return Token(tk_slash(), "/", start_line, start_col); }
+        if c == '%' { return Token(tk_percent(), "%", start_line, start_col); }
+        if c == '?' { return Token(tk_question(), "?", start_line, start_col); }
+        if c == '|' { return Token(tk_pipe(), "|", start_line, start_col); }
+        if c == '@' { return Token(tk_at(), "@", start_line, start_col); }
+        if c == '.' {
+            if not self.at_end() and self.peek() == '.' {
+                self.advance();
+                return Token(tk_dotdot(), "..", start_line, start_col);
+            }
+            return Token(tk_dot(), ".", start_line, start_col);
+        }
+        if c == '=' {
+            if not self.at_end() and self.peek() == '=' {
+                self.advance();
+                return Token(tk_eq(), "==", start_line, start_col);
+            }
+            if not self.at_end() and self.peek() == '>' {
+                self.advance();
+                return Token(tk_arrow(), "=>", start_line, start_col);
+            }
+            return Token(tk_assign(), "=", start_line, start_col);
+        }
+        if c == '!' {
+            if not self.at_end() and self.peek() == '=' {
+                self.advance();
+                return Token(tk_neq(), "!=", start_line, start_col);
+            }
+            return Token(tk_error(), "!", start_line, start_col);
+        }
+        if c == '<' {
+            if not self.at_end() and self.peek() == '=' {
+                self.advance();
+                return Token(tk_leq(), "<=", start_line, start_col);
+            }
+            return Token(tk_lt(), "<", start_line, start_col);
+        }
+        if c == '>' {
+            if not self.at_end() and self.peek() == '=' {
+                self.advance();
+                return Token(tk_geq(), ">=", start_line, start_col);
+            }
+            return Token(tk_gt(), ">", start_line, start_col);
+        }
+        return Token(tk_error(), c.to_string(), start_line, start_col);
+    }
+
+    // Scan the whole input. Emits a synthetic tk_eof() terminator so the
+    // parser doesn't need to bounds-check the token stream.
+    method scan_all() returns Array<Token> {
+        let mutable tokens: Array<Token> = [];
+        while true {
+            self.skip_whitespace_and_comments();
+            if self.at_end() {
+                tokens.push(Token(tk_eof(), "", self.line, self.column));
+                return tokens;
+            }
+            let l: Int = self.line;
+            let c: Int = self.column;
+            let tok: Token = self.scan_one(l, c);
+            tokens.push(tok);
+        }
+        return tokens;
+    }
+}
+
+// --- Top-level convenience --------------------------------------------------
+
+public function lex(source: String) returns Array<Token> {
+    let mutable l: Lexer = Lexer(source);
+    return l.scan_all();
+}
+
+entry function main() returns Int { return 0; }
+
+// --- In-language tests ------------------------------------------------------
+
+test "lex empty source emits only EOF" {
+    let toks: Array<Token> = lex("");
+    assert_eq(len(toks), 1);
+    assert_eq(toks[0].kind, tk_eof());
+}
+
+test "lex whitespace-only source emits only EOF" {
+    let toks: Array<Token> = lex("   \t\n  ");
+    assert_eq(len(toks), 1);
+    assert_eq(toks[0].kind, tk_eof());
+}
+
+test "lex single identifier" {
+    let toks: Array<Token> = lex("foo");
+    assert_eq(len(toks), 2);
+    assert_eq(toks[0].kind, tk_ident());
+    assert_eq(toks[0].text, "foo");
+    assert_eq(toks[1].kind, tk_eof());
+}
+
+test "identifier with underscore and digits" {
+    let toks: Array<Token> = lex("foo_bar123");
+    assert_eq(len(toks), 2);
+    assert_eq(toks[0].kind, tk_ident());
+    assert_eq(toks[0].text, "foo_bar123");
+}
+
+test "keywords resolve to keyword kinds" {
+    let toks: Array<Token> = lex("function let return if else");
+    assert_eq(len(toks), 6);
+    assert_eq(toks[0].kind, kw_function());
+    assert_eq(toks[1].kind, kw_let());
+    assert_eq(toks[2].kind, kw_return());
+    assert_eq(toks[3].kind, kw_if());
+    assert_eq(toks[4].kind, kw_else());
+    assert_eq(toks[5].kind, tk_eof());
+}
+
+test "integer literal" {
+    let toks: Array<Token> = lex("42");
+    assert_eq(len(toks), 2);
+    assert_eq(toks[0].kind, tk_int());
+    assert_eq(toks[0].text, "42");
+}
+
+test "punctuation singletons" {
+    // Test source is built char-by-char because literal braces in Intent
+    // string literals trigger interpolation parsing.
+    let src: String = "();" + '{'.to_string() + '}'.to_string() + ",.:";
+    let toks: Array<Token> = lex(src);
+    assert_eq(toks[0].kind, tk_lparen());
+    assert_eq(toks[1].kind, tk_rparen());
+    assert_eq(toks[2].kind, tk_semicolon());
+    assert_eq(toks[3].kind, tk_lbrace());
+    assert_eq(toks[4].kind, tk_rbrace());
+    assert_eq(toks[5].kind, tk_comma());
+    assert_eq(toks[6].kind, tk_dot());
+    assert_eq(toks[7].kind, tk_colon());
+    assert_eq(toks[8].kind, tk_eof());
+}
+
+test "multi-char operators" {
+    let toks: Array<Token> = lex("== != <= >= .. =>");
+    assert_eq(toks[0].kind, tk_eq());
+    assert_eq(toks[1].kind, tk_neq());
+    assert_eq(toks[2].kind, tk_leq());
+    assert_eq(toks[3].kind, tk_geq());
+    assert_eq(toks[4].kind, tk_dotdot());
+    assert_eq(toks[5].kind, tk_arrow());
+    assert_eq(toks[6].kind, tk_eof());
+}
+
+test "string literal preserves quotes in text" {
+    let toks: Array<Token> = lex("\"hello\"");
+    assert_eq(len(toks), 2);
+    assert_eq(toks[0].kind, tk_string());
+    assert_eq(toks[0].text, "\"hello\"");
+}
+
+test "string literal allows escaped backslash without terminating early" {
+    let toks: Array<Token> = lex("\"a\\\"b\"");
+    assert_eq(toks[0].kind, tk_string());
+    assert_eq(toks[1].kind, tk_eof());
+}
+
+test "single-line comments skipped" {
+    let toks: Array<Token> = lex("// hello world\nfoo");
+    assert_eq(toks[0].kind, tk_ident());
+    assert_eq(toks[0].text, "foo");
+    assert_eq(toks[1].kind, tk_eof());
+}
+
+test "line and column tracking" {
+    let toks: Array<Token> = lex("foo\n bar");
+    assert_eq(toks[0].line, 1);
+    assert_eq(toks[0].column, 1);
+    assert_eq(toks[1].line, 2);
+    assert_eq(toks[1].column, 2);
+}
+
+test "small program token sequence" {
+    let src: String = "function f() returns Int " + '{'.to_string() + " return 42; " + '}'.to_string();
+    let toks: Array<Token> = lex(src);
+    assert_eq(toks[0].kind, kw_function());
+    assert_eq(toks[1].kind, tk_ident());
+    assert_eq(toks[1].text, "f");
+    assert_eq(toks[2].kind, tk_lparen());
+    assert_eq(toks[3].kind, tk_rparen());
+    assert_eq(toks[4].kind, kw_returns());
+    assert_eq(toks[5].kind, kw_int_type());
+    assert_eq(toks[6].kind, tk_lbrace());
+    assert_eq(toks[7].kind, kw_return());
+    assert_eq(toks[8].kind, tk_int());
+    assert_eq(toks[8].text, "42");
+    assert_eq(toks[9].kind, tk_semicolon());
+    assert_eq(toks[10].kind, tk_rbrace());
+    assert_eq(toks[11].kind, tk_eof());
+}

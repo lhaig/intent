@@ -782,8 +782,22 @@ func stmtMutatesSelf(stmt Stmt) bool {
 		if targetsMutSelf(s.Target) {
 			return true
 		}
+		// Also catch self.<...> = ...method_call_on_self()... patterns.
+		if exprMutatesSelf(s.Value) {
+			return true
+		}
 	case *ir.ExprStmt:
 		if exprMutatesSelf(s.Expr) {
+			return true
+		}
+	case *ir.LetStmt:
+		// Phase 32: let x = self.<mutating>() must mark the enclosing
+		// method as &mut self too.
+		if s.Value != nil && exprMutatesSelf(s.Value) {
+			return true
+		}
+	case *ir.ReturnStmt:
+		if s.Value != nil && exprMutatesSelf(s.Value) {
 			return true
 		}
 	case *ir.IfStmt:
@@ -798,8 +812,6 @@ func stmtMutatesSelf(stmt Stmt) bool {
 		if methodMutatesSelf(s.Body) {
 			return true
 		}
-	case *ir.ReturnStmt:
-		// return doesn't mutate self
 	}
 	return false
 }
@@ -818,11 +830,21 @@ func targetsMutSelf(expr ir.Expr) bool {
 	return false
 }
 
-// exprMutatesSelf checks if an expression statement mutates self (e.g., self.list.push(x)).
+// exprMutatesSelf checks if an expression statement mutates self.
+//
+// Cases that count as mutating:
+//   - self.<mutating-stdlib-method>(...) on self.field (push/pop/etc.)
+//   - self.<user-method>(...) — conservative: any call on `self` directly
+//     may mutate, since the called user method may be &mut self.
 func exprMutatesSelf(expr ir.Expr) bool {
 	switch e := expr.(type) {
 	case *ir.MethodCallExpr:
-		// Check if object is self or self.field and method is mutating
+		// Direct call on self: assume potentially mutating (Phase 32).
+		if _, ok := e.Object.(*ir.SelfRef); ok {
+			return true
+		}
+		// Indirect (self.field.method): only the known mutating stdlib
+		// methods count.
 		if isSelfOrSelfField(e.Object) {
 			mutatingMethods := map[string]bool{
 				"push": true, "pop": true, "insert": true, "remove": true,
