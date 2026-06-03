@@ -71,3 +71,5 @@ What follows from this decision? Trade-offs accepted.
 | 0037 | [Multi-param iteration in `--target intent` test generation](0037-testgen-multi-param-iteration.md) | 2026-06-01 | accepted (PRD pending) |
 | 0038 | [Retire the legacy Rust `testgen` path](0038-retire-legacy-rust-testgen.md) | 2026-06-02 | accepted |
 | 0039 | [Package registry — git-based + MVS](0039-package-registry-git-mvs.md) | 2026-06-03 | accepted (PRD pending) |
+| 0040 | [Self-hosted formatter strategy](0040-self-hosted-formatter-strategy.md) | 2026-06-03 | accepted (strategic; per-phase ADRs follow) |
+| 0041 | [String indexing and `Char` type](0041-string-indexing-and-char-type.md) | 2026-06-03 | accepted (PRD: phase-31-string-primitives.md) |

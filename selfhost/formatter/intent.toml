@@ -1,0 +1,8 @@
+[package]
+name = "intent_formatter"
+version = "0.0.0"
+description = "Stage2 Intent formatter (selfhost). Scaffold only — see README.md and ADR 0040."
+
+[dependencies]
+# Empty for now. Phase 32+ will add deps if useful (e.g., a stdlib package
+# once one exists).
