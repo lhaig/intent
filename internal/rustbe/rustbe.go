@@ -733,18 +733,26 @@ func (g *generator) generateConstructor(e *ir.Entity) {
 			g.generateExpr(req.Expr, nil), escapeRustString(req.RawText))
 	}
 
-	// Initialize with defaults
+	// Phase 33: hoist top-level `self.<field> = <expr>;` assignments into
+	// the struct literal so entity-typed fields don't need defaults. Any
+	// statement that isn't a direct self.field assignment stays in the body.
+	directInits, bodyRest := splitConstructorInits(ctor.Body)
+
 	g.emitLinef("let mut __self = %s {\n", mangledName)
 	g.incIndent()
 	for _, f := range e.Fields {
-		g.emitLinef("%s: %s,\n", f.Name, g.defaultValue(f.Type))
+		if expr, ok := directInits[f.Name]; ok {
+			g.emitLinef("%s: %s,\n", f.Name, g.generateExpr(expr, nil))
+		} else {
+			g.emitLinef("%s: %s,\n", f.Name, g.defaultValue(f.Type))
+		}
 	}
 	g.decIndent()
 	g.emitLine("};")
 
-	// Body
+	// Body (statements that weren't lifted into the struct literal).
 	g.inConstructor = true
-	g.generateStmts(ctor.Body)
+	g.generateStmts(bodyRest)
 
 	// Ensures
 	g.ensuresContext = true
@@ -763,6 +771,33 @@ func (g *generator) generateConstructor(e *ir.Entity) {
 	g.emitLine("__self")
 	g.decIndent()
 	g.emitLine("}")
+}
+
+// splitConstructorInits walks a constructor body and pulls out top-level
+// `self.<field> = <expr>;` assignments. Returns the field-name → expr map
+// for hoisting into the struct literal plus the remaining body statements
+// in original order. Statements inside if/while/for blocks aren't lifted
+// (defaultValue is used for those fields).
+//
+// Phase 33: needed because entity-typed fields don't have a sane default,
+// and emitting `EntityName { /* default fields */ }` doesn't compile.
+func splitConstructorInits(body []Stmt) (map[string]ir.Expr, []Stmt) {
+	inits := map[string]ir.Expr{}
+	rest := make([]Stmt, 0, len(body))
+	for _, stmt := range body {
+		if assign, ok := stmt.(*ir.AssignStmt); ok {
+			if fa, ok := assign.Target.(*ir.FieldAccessExpr); ok {
+				if _, isSelf := fa.Object.(*ir.SelfRef); isSelf {
+					if _, already := inits[fa.Field]; !already {
+						inits[fa.Field] = assign.Value
+						continue
+					}
+				}
+			}
+		}
+		rest = append(rest, stmt)
+	}
+	return inits, rest
 }
 
 // methodMutatesSelf checks if a method's body mutates self (assigns to self fields,
@@ -1178,15 +1213,31 @@ func (g *generator) generateStmt(s ir.Stmt, arrayRefParams map[string]bool) {
 			valueStr)
 
 	case *ir.ReturnStmt:
+		var retValueStr string
+		if stmt.Value != nil {
+			retValueStr = g.generateExpr(stmt.Value, arrayRefParams)
+			// Clone non-Copy field-access / index-access return values
+			// to avoid partial moves (mirror of the AssignStmt logic).
+			if fa, ok := stmt.Value.(*ir.FieldAccessExpr); ok && !isCopyType(fa.Type) {
+				if !strings.HasSuffix(retValueStr, ".clone()") {
+					retValueStr += ".clone()"
+				}
+			}
+			if idx, ok := stmt.Value.(*ir.IndexExpr); ok && !isCopyType(idx.Type) {
+				if !strings.HasSuffix(retValueStr, ".clone()") {
+					retValueStr += ".clone()"
+				}
+			}
+		}
 		if g.inLabeledBlock {
 			if stmt.Value != nil {
-				g.emitLinef("break 'body %s;\n", g.generateExpr(stmt.Value, arrayRefParams))
+				g.emitLinef("break 'body %s;\n", retValueStr)
 			} else {
 				g.emitLine("break 'body;")
 			}
 		} else {
 			if stmt.Value != nil {
-				g.emitLinef("return %s;\n", g.generateExpr(stmt.Value, arrayRefParams))
+				g.emitLinef("return %s;\n", retValueStr)
 			} else {
 				g.emitLine("return;")
 			}

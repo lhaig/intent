@@ -1,0 +1,504 @@
+// selfhost/formatter/parser.intent — Phase 33 / ADR 0040 stage2.
+//
+// Parses the top-level shape of an Intent program:
+//   - module declaration
+//   - imports
+//   - function declarations (signature only; body kept as raw text for now)
+//
+// Out of scope (deferred to Phase 34+):
+//   - parsing statements / expressions inside function bodies
+//   - entity / trait / impl / intent / test / extern declarations
+//   - type-argument lists (Array<T>, Result<T,E>, etc.) — v1 parser
+//     captures a primitive type or bare identifier and stores it as the
+//     return-type string.
+//
+// Builds on Phase 32's lexer (formatter_lexer module).
+
+module formatter_parser version "0.1.0";
+
+import "lexer.intent";
+
+// --- AST entities -----------------------------------------------------------
+
+public entity Param {
+    field name: String;
+    field type_name: String;
+
+    constructor(name: String, type_name: String) {
+        self.name = name;
+        self.type_name = type_name;
+    }
+}
+
+public entity FunctionDecl {
+    field name: String;
+    field is_public: Bool;
+    field is_entry: Bool;
+    field is_async: Bool;
+    field params: Array<Param>;
+    field return_type: String;
+    field body_text: String; // raw source between { ... } — Phase 34 will parse it
+
+    constructor(name: String, is_public: Bool, is_entry: Bool, is_async: Bool, params: Array<Param>, return_type: String, body_text: String) {
+        self.name = name;
+        self.is_public = is_public;
+        self.is_entry = is_entry;
+        self.is_async = is_async;
+        self.params = params;
+        self.return_type = return_type;
+        self.body_text = body_text;
+    }
+}
+
+public entity ImportDecl {
+    field is_package: Bool;
+    field path: String; // file path for file imports; package identifier for package imports
+
+    constructor(is_package: Bool, path: String) {
+        self.is_package = is_package;
+        self.path = path;
+    }
+}
+
+public entity ModuleDecl {
+    field name: String;
+    field module_version: String;
+
+    constructor(name: String, module_version: String) {
+        self.name = name;
+        self.module_version = module_version;
+    }
+}
+
+public entity Program {
+    field module_decl: ModuleDecl;
+    field imports: Array<ImportDecl>;
+    field functions: Array<FunctionDecl>;
+    field error: String; // empty when parse succeeded
+
+    constructor(module_decl: ModuleDecl, imports: Array<ImportDecl>, functions: Array<FunctionDecl>, error: String) {
+        self.module_decl = module_decl;
+        self.imports = imports;
+        self.functions = functions;
+        self.error = error;
+    }
+}
+
+// --- Parser -----------------------------------------------------------------
+
+public entity Parser {
+    field tokens: Array<Token>;
+    field position: Int;
+    field error: String;
+
+    constructor(source: String) {
+        self.tokens = formatter_lexer.lex(source);
+        self.position = 0;
+        self.error = "";
+    }
+
+    method at_end() returns Bool {
+        return self.peek_kind() == formatter_lexer.tk_eof();
+    }
+
+    method peek_kind() returns Int {
+        return self.tokens[self.position].kind;
+    }
+
+    method peek_text() returns String {
+        return self.tokens[self.position].text;
+    }
+
+    method peek_n(n: Int) returns Int {
+        let idx: Int = self.position + n;
+        if idx >= len(self.tokens) {
+            return formatter_lexer.tk_eof();
+        }
+        return self.tokens[idx].kind;
+    }
+
+    method advance() returns Token {
+        let tok: Token = self.tokens[self.position];
+        if self.position < len(self.tokens) - 1 {
+            self.position = self.position + 1;
+        }
+        return tok;
+    }
+
+    method check(kind: Int) returns Bool {
+        return self.peek_kind() == kind;
+    }
+
+    method check_consume(kind: Int) returns Bool {
+        if self.check(kind) {
+            self.advance();
+            return true;
+        }
+        return false;
+    }
+
+    // Records an error and advances past one token so we make progress.
+    // Returns the offending token's text for callers that want it.
+    method fail(message: String) returns String {
+        if self.error == "" {
+            let tok: Token = self.tokens[self.position];
+            self.error = "line " + tok.line.to_string() + " col " + tok.column.to_string() + ": " + message;
+        }
+        if not self.at_end() {
+            self.advance();
+        }
+        return "";
+    }
+
+    method expect(kind: Int, what: String) returns Token {
+        if self.check(kind) {
+            return self.advance();
+        }
+        self.fail("expected " + what);
+        return self.tokens[self.position];
+    }
+
+    // Strips the surrounding quotes from a string-literal token text.
+    method unquote(text: String) returns String {
+        let n: Int = len(text);
+        if n < 2 {
+            return text;
+        }
+        return text[1..n - 1];
+    }
+
+    // --- top-level parse entry points -------------------------------------
+
+    method parse_module_decl() returns ModuleDecl {
+        self.expect(formatter_lexer.kw_module(), "'module' keyword");
+        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "module name");
+        self.expect(formatter_lexer.kw_version(), "'version' keyword");
+        let ver_tok: Token = self.expect(formatter_lexer.tk_string(), "version string literal");
+        self.expect(formatter_lexer.tk_semicolon(), "';' after module declaration");
+        return ModuleDecl(name_tok.text, self.unquote(ver_tok.text));
+    }
+
+    method parse_import_decl() returns ImportDecl {
+        self.expect(formatter_lexer.kw_import_marker(), "'import' keyword");
+        if self.check(formatter_lexer.tk_string()) {
+            let path_tok: Token = self.advance();
+            self.expect(formatter_lexer.tk_semicolon(), "';' after import");
+            return ImportDecl(false, self.unquote(path_tok.text));
+        }
+        if self.check(formatter_lexer.tk_ident()) {
+            let pkg_tok: Token = self.advance();
+            let mutable path: String = pkg_tok.text;
+            // Dotted package paths: pkg.sub.deeper
+            while self.check_consume(formatter_lexer.tk_dot()) {
+                if self.check(formatter_lexer.tk_ident()) {
+                    let seg: Token = self.advance();
+                    path = path + "." + seg.text;
+                } else {
+                    self.fail("expected identifier after '.' in import");
+                    return ImportDecl(true, path);
+                }
+            }
+            self.expect(formatter_lexer.tk_semicolon(), "';' after import");
+            return ImportDecl(true, path);
+        }
+        self.fail("expected string or identifier after 'import'");
+        return ImportDecl(false, "");
+    }
+
+    method parse_param() returns Param {
+        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "parameter name");
+        self.expect(formatter_lexer.tk_colon(), "':' after parameter name");
+        let type_name: String = self.parse_type_name();
+        return Param(name_tok.text, type_name);
+    }
+
+    // Recognises a primitive type (Int / String / Bool / Void / Char) or a
+    // bare identifier. Generic arguments (Array<T>, Result<T, E>) are
+    // consumed but not modelled — Phase 33 stores the head only and
+    // discards the args. Phase 34+ will replace this with a real TypeRef.
+    method parse_type_name() returns String {
+        let tok: Token = self.advance();
+        let mutable name: String = tok.text;
+        // Skip a single optional <...> generic-arg list (no nesting in v1).
+        if self.check_consume(formatter_lexer.tk_lt()) {
+            let mutable depth: Int = 1;
+            while depth > 0 and not self.at_end() {
+                if self.check_consume(formatter_lexer.tk_lt()) {
+                    depth = depth + 1;
+                } else {
+                    if self.check_consume(formatter_lexer.tk_gt()) {
+                        depth = depth - 1;
+                    } else {
+                        self.advance();
+                    }
+                }
+            }
+            name = name + "<...>";
+        }
+        return name;
+    }
+
+    method parse_function_decl() returns FunctionDecl {
+        let mutable is_public: Bool = false;
+        let mutable is_async: Bool = false;
+        let mutable is_entry: Bool = false;
+
+        // Optional modifiers in any order before `function`.
+        // (The full grammar restricts ordering more tightly; v1 parser
+        // accepts any.)
+        let mutable scanning_modifiers: Bool = true;
+        while scanning_modifiers {
+            if self.check(formatter_lexer.kw_public_marker()) {
+                self.advance();
+                is_public = true;
+            } else {
+                if self.check(formatter_lexer.kw_async_marker()) {
+                    self.advance();
+                    is_async = true;
+                } else {
+                    if self.check(formatter_lexer.kw_entry()) {
+                        self.advance();
+                        is_entry = true;
+                    } else {
+                        scanning_modifiers = false;
+                    }
+                }
+            }
+        }
+
+        self.expect(formatter_lexer.kw_function(), "'function' keyword");
+        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "function name");
+
+        self.expect(formatter_lexer.tk_lparen(), "'(' after function name");
+        let mutable params: Array<Param> = [];
+        if not self.check(formatter_lexer.tk_rparen()) {
+            params.push(self.parse_param());
+            while self.check_consume(formatter_lexer.tk_comma()) {
+                params.push(self.parse_param());
+            }
+        }
+        self.expect(formatter_lexer.tk_rparen(), "')' to close parameter list");
+
+        // Contracts on top-level functions are part of the surface (`requires`
+        // / `ensures` / `decreases`) but they aren't tokenised as keywords
+        // in v1's lexer. Skip them by scanning identifiers/expressions until
+        // we hit `returns` or `{`.
+
+        self.expect(formatter_lexer.kw_returns(), "'returns' after parameter list");
+        let return_type: String = self.parse_type_name();
+
+        // Skip optional contract clauses (requires/ensures/decreases). Each
+        // starts with an identifier and runs to end-of-line-ish. v1 just
+        // bails out when we see `{` or EOF.
+        while self.check(formatter_lexer.tk_ident()) {
+            // Skip the contract keyword + its predicate up to the next
+            // top-level boundary. Heuristic: consume until newline-ish — we
+            // approximate by skipping tokens until { or end of function.
+            self.advance();
+            // crude scan: keep going until we hit `{` or another contract-
+            // looking ident at column 1 — Phase 34 will replace this.
+            while not self.at_end() and not self.check(formatter_lexer.tk_lbrace()) and not self.check(formatter_lexer.tk_ident()) {
+                self.advance();
+            }
+        }
+
+        let body_text: String = self.consume_braced_body();
+        return FunctionDecl(name_tok.text, is_public, is_entry, is_async, params, return_type, body_text);
+    }
+
+    // Consumes the body block `{ ... }` and returns the raw source text
+    // between the outer braces (exclusive). Tracks depth so nested braces
+    // don't terminate early. Phase 33's "skip body" approach.
+    method consume_braced_body() returns String {
+        self.expect(formatter_lexer.tk_lbrace(), "open brace to start function body");
+        // Track source positions to slice the raw body text. After the
+        // `{` advance, the previous token's line/column lets us locate
+        // the position in `source`. We use a simpler approach: walk
+        // tokens with a depth counter, recording where the body started
+        // and ended in the *source string* by indexing token positions.
+        //
+        // Approximation: rebuild body text by joining token texts with
+        // single spaces. Loses formatting fidelity but is enough for
+        // Phase 33 (which doesn't need the body, just to skip it).
+        let mutable depth: Int = 1;
+        let mutable parts: Array<String> = [];
+        while depth > 0 and not self.at_end() {
+            if self.check(formatter_lexer.tk_lbrace()) {
+                depth = depth + 1;
+                let lb: Token = self.advance();
+                parts.push(lb.text);
+            } else {
+                if self.check(formatter_lexer.tk_rbrace()) {
+                    depth = depth - 1;
+                    let rb: Token = self.advance();
+                    if depth > 0 {
+                        parts.push(rb.text);
+                    }
+                } else {
+                    let other: Token = self.advance();
+                    parts.push(other.text);
+                }
+            }
+        }
+        if depth != 0 {
+            self.error = "unterminated function body";
+        }
+        return join_with_space(parts);
+    }
+
+    method parse_program() returns Program {
+        let mutable imports: Array<ImportDecl> = [];
+        let mutable functions: Array<FunctionDecl> = [];
+        let module_decl: ModuleDecl = self.parse_module_decl();
+
+        while not self.at_end() and self.error == "" {
+            if self.check(formatter_lexer.kw_import_marker()) {
+                imports.push(self.parse_import_decl());
+            } else {
+                // Look ahead for a function declaration. Accept `function`,
+                // `public function`, `entry function`, `async function`, or
+                // any combination of those modifiers. Other declaration
+                // kinds (entity, enum, trait, etc.) are not in Phase 33's
+                // scope — we surface a clear error and stop.
+                if self.is_at_function_start() {
+                    functions.push(self.parse_function_decl());
+                } else {
+                    self.fail("unexpected top-level token (Phase 33 parses module/import/function only)");
+                    return Program(module_decl, imports, functions, self.error);
+                }
+            }
+        }
+
+        return Program(module_decl, imports, functions, self.error);
+    }
+
+    // True if the next 1-3 tokens introduce a function declaration.
+    method is_at_function_start() returns Bool {
+        if self.check(formatter_lexer.kw_function()) { return true; }
+        if self.check(formatter_lexer.kw_entry()) { return true; }
+        if self.check(formatter_lexer.kw_public_marker()) { return true; }
+        if self.check(formatter_lexer.kw_async_marker()) { return true; }
+        return false;
+    }
+}
+
+// Joins string parts with single spaces. Phase 33 helper for body capture.
+public function join_with_space(parts: Array<String>) returns String {
+    let mutable out: String = "";
+    let mutable i: Int = 0;
+    while i < len(parts) {
+        if i > 0 {
+            out = out + " ";
+        }
+        out = out + parts[i];
+        i = i + 1;
+    }
+    return out;
+}
+
+public function parse(source: String) returns Program {
+    let mutable p: Parser = Parser(source);
+    return p.parse_program();
+}
+
+entry function main() returns Int { return 0; }
+
+// --- In-language tests ------------------------------------------------------
+
+test "parse minimal module declaration" {
+    let prog: Program = parse("module foo version \"1.0\";");
+    assert_eq(prog.error, "");
+    assert_eq(prog.module_decl.name, "foo");
+    assert_eq(prog.module_decl.module_version, "1.0");
+    assert_eq(len(prog.imports), 0);
+    assert_eq(len(prog.functions), 0);
+}
+
+test "parse module with file imports" {
+    let prog: Program = parse("module app version \"0.1\"; import \"helpers.intent\"; import \"types.intent\";");
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.imports), 2);
+    assert_eq(prog.imports[0].is_package, false);
+    assert_eq(prog.imports[0].path, "helpers.intent");
+    assert_eq(prog.imports[1].path, "types.intent");
+}
+
+test "parse module with package import" {
+    let prog: Program = parse("module app version \"0.1\"; import graph_types;");
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.imports), 1);
+    assert_eq(prog.imports[0].is_package, true);
+    assert_eq(prog.imports[0].path, "graph_types");
+}
+
+test "parse module with dotted package import" {
+    let prog: Program = parse("module app version \"0.1\"; import graph_types.validation;");
+    assert_eq(prog.error, "");
+    assert_eq(prog.imports[0].is_package, true);
+    assert_eq(prog.imports[0].path, "graph_types.validation");
+}
+
+test "parse function signature with no params" {
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions), 1);
+    assert_eq(prog.functions[0].name, "f");
+    assert_eq(prog.functions[0].is_public, false);
+    assert_eq(prog.functions[0].is_entry, false);
+    assert_eq(prog.functions[0].is_async, false);
+    assert_eq(len(prog.functions[0].params), 0);
+    assert_eq(prog.functions[0].return_type, "Int");
+}
+
+test "parse function with parameters" {
+    let src: String = "module m version \"1.0\"; function add(a: Int, b: Int) returns Int " + '{'.to_string() + " return a + b; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions[0].params), 2);
+    assert_eq(prog.functions[0].params[0].name, "a");
+    assert_eq(prog.functions[0].params[0].type_name, "Int");
+    assert_eq(prog.functions[0].params[1].name, "b");
+}
+
+test "parse entry function" {
+    let src: String = "module m version \"1.0\"; entry function main() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(prog.functions[0].is_entry, true);
+    assert_eq(prog.functions[0].name, "main");
+}
+
+test "parse public function" {
+    let src: String = "module m version \"1.0\"; public function helper() returns Void " + '{'.to_string() + " " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(prog.functions[0].is_public, true);
+}
+
+test "parse multiple functions" {
+    let src: String = "module m version \"1.0\"; function a() returns Int " + '{'.to_string() + " return 1; " + '}'.to_string() + " function b() returns Int " + '{'.to_string() + " return 2; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions), 2);
+    assert_eq(prog.functions[0].name, "a");
+    assert_eq(prog.functions[1].name, "b");
+}
+
+test "function with generic return type captures head" {
+    let src: String = "module m version \"1.0\"; function get_items() returns Array<Int> " + '{'.to_string() + " " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(prog.functions[0].return_type, "Array<...>");
+}
+
+test "parser reports unexpected token at top level" {
+    let prog: Program = parse("module m version \"1.0\"; entity Foo " + '{'.to_string() + " field x: Int; " + '}'.to_string());
+    // Entities are not in Phase 33 scope; expect an error.
+    assert(prog.error != "");
+}
+
+test "missing semicolon after module records error" {
+    let prog: Program = parse("module foo version \"1.0\"");
+    assert(prog.error != "");
+}

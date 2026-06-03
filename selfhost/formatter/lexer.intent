@@ -79,6 +79,13 @@ public function kw_string_type() returns Int { return 57; }
 public function kw_bool_type() returns Int { return 58; }
 public function kw_void_type() returns Int { return 59; }
 
+// Phase 33 additions — keywords needed by the parser (import / public / async).
+// `_marker` suffix avoids collision with Intent's own reserved-word handling
+// when this file is itself parsed.
+public function kw_import_marker() returns Int { return 60; }
+public function kw_public_marker() returns Int { return 61; }
+public function kw_async_marker() returns Int { return 62; }
+
 public function tk_eof() returns Int { return 98; }
 public function tk_error() returns Int { return 99; }
 
@@ -106,6 +113,9 @@ public function keyword_kind(text: String) returns Int {
     if text == "String" { return kw_string_type(); }
     if text == "Bool" { return kw_bool_type(); }
     if text == "Void" { return kw_void_type(); }
+    if text == "import" { return kw_import_marker(); }
+    if text == "public" { return kw_public_marker(); }
+    if text == "async" { return kw_async_marker(); }
     return tk_ident();
 }
 
@@ -356,9 +366,10 @@ public function lex(source: String) returns Array<Token> {
     return l.scan_all();
 }
 
-entry function main() returns Int { return 0; }
-
 // --- In-language tests ------------------------------------------------------
+// No entry function here — when this file is the entry of `intentc test`,
+// the test runner synthesises one. When it's imported by another stage2
+// file (parser.intent), the entry lives there.
 
 test "lex empty source emits only EOF" {
     let toks: Array<Token> = lex("");
