@@ -1,201 +1,39 @@
-// selfhost/formatter/parser.intent — Phases 33-35 / ADR 0040 stage2.
+// selfhost/formatter/parser.intent — Phases 33-36 / ADR 0040 stage2.
 //
 // Parses Intent source into a structured AST:
 //   - module declaration
 //   - imports
-//   - function declarations (modifiers + signature)
+//   - top-level declarations: function, entity, enum, trait, impl,
+//     test, extern, intent block (Phase 36).
 //   - function bodies as Block of statements (let / return / if-else /
 //     while / expression statements) — Phase 34.
 //   - expressions inside statements: literals, identifiers, calls,
 //     field/method access, indexing, ranges, array literals, unary +
 //     binary operators with full precedence — Phase 35.
 //
-// Out of scope (deferred to Phase 36+):
-//   - entity / trait / impl / intent / test / extern declarations.
+// Out of scope (deferred to Phase 37+):
 //   - type-argument lists (Array<T>, Result<T,E>, etc.) — captures a
 //     primitive type or bare identifier with a "<...>" suffix marker.
 //   - match expressions / for / break / continue / try / await.
 //   - lambdas (`(x) => expr`), interpolated strings (`${expr}`), char
 //     literals (`'a'`), float literals — stage2 lexer doesn't tokenise
 //     them yet either.
-//
-// Builds on Phase 32's lexer (formatter_lexer module).
+//   - contract clauses (requires / ensures / decreases / invariant
+//     expressions) — Phase 36 skips them with the Phase 33 ident-eat
+//     heuristic; a real contract parser is Phase 38+.
 //
 // AST shape choice: each AST node is one entity with an Int `kind`
-// discriminator + per-kind fields, mirroring how Token uses `kind: Int`
-// in the lexer. Intent enums with payloads would force every field
-// access through a match arm and each arm is a single expression, so a
-// sum-typed Stmt/Expr would be awkward to consume. Single-entity-with-
-// tag is the same trade Token already makes; recursive sizing isn't a
-// problem because nested children are reached via Array<...> which is
-// heap-allocated.
+// discriminator + per-kind fields. See ast.intent for the entity
+// definitions and the rationale.
+//
+// File layout: AST entities + kind constants + AST helpers live in
+// `ast.intent`. This file holds the `Parser` entity, parse methods,
+// the top-level `parse(source)` convenience, and the in-language tests.
 
 module formatter_parser version "0.1.0";
 
 import "lexer.intent";
-
-// --- Statement kind constants -----------------------------------------------
-//
-// Same Int-discriminator pattern as Token's tk_*() functions in the lexer.
-
-public function st_let() returns Int { return 1; }
-public function st_return() returns Int { return 2; }
-public function st_if() returns Int { return 3; }
-public function st_while() returns Int { return 4; }
-public function st_expr() returns Int { return 5; }
-
-// --- Expression kind constants ----------------------------------------------
-
-public function ex_void() returns Int { return 0; }        // placeholder for absent expr (e.g. `return;`)
-public function ex_int() returns Int { return 1; }
-public function ex_string() returns Int { return 2; }
-public function ex_bool() returns Int { return 3; }
-public function ex_ident() returns Int { return 4; }
-public function ex_unary() returns Int { return 5; }       // children=[operand], name=op
-public function ex_binop() returns Int { return 6; }       // children=[lhs, rhs], name=op
-public function ex_call() returns Int { return 7; }        // children=[callee, arg1..argN]
-public function ex_index() returns Int { return 8; }       // children=[object, index]
-public function ex_field() returns Int { return 9; }       // children=[object], name=field
-public function ex_array() returns Int { return 10; }      // children=[elem1..elemN]
-public function ex_range() returns Int { return 11; }      // children=[start, end]
-public function ex_paren() returns Int { return 12; }      // children=[inner]
-
-// --- AST entities -----------------------------------------------------------
-
-public entity Param {
-    field name: String;
-    field type_name: String;
-
-    constructor(name: String, type_name: String) {
-        self.name = name;
-        self.type_name = type_name;
-    }
-}
-
-// Expression node. Field usage by kind:
-//   ex_void    — no fields set (placeholder for absent expression)
-//   ex_int     — int_value
-//   ex_string  — str_value (unquoted, escapes still raw)
-//   ex_bool    — bool_value
-//   ex_ident   — name
-//   ex_unary   — name (operator: "-", "not"), children=[operand]
-//   ex_binop   — name (operator), children=[lhs, rhs]
-//   ex_call    — children=[callee, arg1..argN]
-//   ex_index   — children=[object, index]
-//   ex_field   — name (field), children=[object]
-//   ex_array   — children=[elem1..elemN]
-//   ex_range   — children=[start, end]
-//   ex_paren   — children=[inner]
-// Mutually-recursive sizing through Stmt is safe: every back-edge to Expr
-// goes through Array<Expr> (heap-allocated).
-public entity Expr {
-    field kind: Int;
-    field int_value: Int;
-    field str_value: String;
-    field bool_value: Bool;
-    field name: String;
-    field children: Array<Expr>;
-
-    constructor(kind: Int, int_value: Int, str_value: String, bool_value: Bool, name: String, children: Array<Expr>) {
-        self.kind = kind;
-        self.int_value = int_value;
-        self.str_value = str_value;
-        self.bool_value = bool_value;
-        self.name = name;
-        self.children = children;
-    }
-}
-
-// Statement node. Field usage by kind:
-//   st_let    — name, type_name, is_mutable, expr (rhs)
-//   st_return — expr (may be ex_void for `return;`)
-//   st_expr   — expr
-//   st_if     — expr (condition), then_block, else_block, has_else
-//   st_while  — expr (condition), then_block (body)
-// Unused fields are populated with defaults ("" / false / empty_block() / empty_expr()).
-public entity Stmt {
-    field kind: Int;
-    field expr: Expr;
-    field name: String;
-    field type_name: String;
-    field is_mutable: Bool;
-    field then_block: Block;
-    field else_block: Block;
-    field has_else: Bool;
-
-    constructor(kind: Int, expr: Expr, name: String, type_name: String, is_mutable: Bool, then_block: Block, else_block: Block, has_else: Bool) {
-        self.kind = kind;
-        self.expr = expr;
-        self.name = name;
-        self.type_name = type_name;
-        self.is_mutable = is_mutable;
-        self.then_block = then_block;
-        self.else_block = else_block;
-        self.has_else = has_else;
-    }
-}
-
-public entity Block {
-    field stmts: Array<Stmt>;
-
-    constructor(stmts: Array<Stmt>) {
-        self.stmts = stmts;
-    }
-}
-
-public entity FunctionDecl {
-    field name: String;
-    field is_public: Bool;
-    field is_entry: Bool;
-    field is_async: Bool;
-    field params: Array<Param>;
-    field return_type: String;
-    field body: Block;
-
-    constructor(name: String, is_public: Bool, is_entry: Bool, is_async: Bool, params: Array<Param>, return_type: String, body: Block) {
-        self.name = name;
-        self.is_public = is_public;
-        self.is_entry = is_entry;
-        self.is_async = is_async;
-        self.params = params;
-        self.return_type = return_type;
-        self.body = body;
-    }
-}
-
-public entity ImportDecl {
-    field is_package: Bool;
-    field path: String; // file path for file imports; package identifier for package imports
-
-    constructor(is_package: Bool, path: String) {
-        self.is_package = is_package;
-        self.path = path;
-    }
-}
-
-public entity ModuleDecl {
-    field name: String;
-    field module_version: String;
-
-    constructor(name: String, module_version: String) {
-        self.name = name;
-        self.module_version = module_version;
-    }
-}
-
-public entity Program {
-    field module_decl: ModuleDecl;
-    field imports: Array<ImportDecl>;
-    field functions: Array<FunctionDecl>;
-    field error: String; // empty when parse succeeded
-
-    constructor(module_decl: ModuleDecl, imports: Array<ImportDecl>, functions: Array<FunctionDecl>, error: String) {
-        self.module_decl = module_decl;
-        self.imports = imports;
-        self.functions = functions;
-        self.error = error;
-    }
-}
+import "ast.intent";
 
 // --- Parser -----------------------------------------------------------------
 
@@ -416,7 +254,7 @@ public entity Parser {
         }
 
         let body: Block = self.parse_block();
-        return FunctionDecl(name_tok.text, is_public, is_entry, is_async, params, return_type, body);
+        return FunctionDecl(name_tok.text, is_public, is_entry, is_async, false, params, return_type, body);
     }
 
     // --- statement-level parse -------------------------------------------
@@ -465,18 +303,18 @@ public entity Parser {
         self.expect(formatter_lexer.tk_assign(), "'=' in let binding");
         let rhs: Expr = self.parse_expr();
         self.expect(formatter_lexer.tk_semicolon(), "';' to end let statement");
-        return Stmt(st_let(), rhs, name_tok.text, type_name, is_mut, empty_block(), empty_block(), false);
+        return Stmt(formatter_ast.st_let(), rhs, name_tok.text, type_name, is_mut, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
     }
 
     // `return [EXPR];`
     method parse_return_stmt() returns Stmt {
         self.expect(formatter_lexer.kw_return(), "'return'");
-        let mutable rhs: Expr = empty_expr();
+        let mutable rhs: Expr = formatter_ast.empty_expr();
         if not self.check(formatter_lexer.tk_semicolon()) {
             rhs = self.parse_expr();
         }
         self.expect(formatter_lexer.tk_semicolon(), "';' to end return statement");
-        return Stmt(st_return(), rhs, "", "", false, empty_block(), empty_block(), false);
+        return Stmt(formatter_ast.st_return(), rhs, "", "", false, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
     }
 
     // `if EXPR { BLOCK } [else (if-stmt | { BLOCK })]`. `else if` chains
@@ -486,7 +324,7 @@ public entity Parser {
         self.expect(formatter_lexer.kw_if(), "'if'");
         let cond: Expr = self.parse_expr();
         let then_blk: Block = self.parse_block();
-        let mutable else_blk: Block = empty_block();
+        let mutable else_blk: Block = formatter_ast.empty_block();
         let mutable has_else: Bool = false;
         if self.check_consume(formatter_lexer.kw_else()) {
             has_else = true;
@@ -498,7 +336,7 @@ public entity Parser {
                 else_blk = self.parse_block();
             }
         }
-        return Stmt(st_if(), cond, "", "", false, then_blk, else_blk, has_else);
+        return Stmt(formatter_ast.st_if(), cond, "", "", false, then_blk, else_blk, has_else);
     }
 
     // `while EXPR { BLOCK }`
@@ -506,7 +344,7 @@ public entity Parser {
         self.expect(formatter_lexer.kw_while(), "'while'");
         let cond: Expr = self.parse_expr();
         let body: Block = self.parse_block();
-        return Stmt(st_while(), cond, "", "", false, body, empty_block(), false);
+        return Stmt(formatter_ast.st_while(), cond, "", "", false, body, formatter_ast.empty_block(), false);
     }
 
     // Anything else (assignment, bare call, etc.) — parse a full expression
@@ -514,7 +352,7 @@ public entity Parser {
     method parse_expr_stmt() returns Stmt {
         let e: Expr = self.parse_expr();
         self.expect(formatter_lexer.tk_semicolon(), "';' to end expression statement");
-        return Stmt(st_expr(), e, "", "", false, empty_block(), empty_block(), false);
+        return Stmt(formatter_ast.st_expr(), e, "", "", false, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
     }
 
     // --- expression parser (Pratt / precedence climbing) ------------------
@@ -551,7 +389,7 @@ public entity Parser {
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            return Expr(ex_binop(), 0, "", false, op_tok.text, children);
+            return Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
         return lhs;
     }
@@ -564,7 +402,7 @@ public entity Parser {
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            lhs = Expr(ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
         return lhs;
     }
@@ -577,7 +415,7 @@ public entity Parser {
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            lhs = Expr(ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
         return lhs;
     }
@@ -590,7 +428,7 @@ public entity Parser {
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            lhs = Expr(ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
         return lhs;
     }
@@ -603,7 +441,7 @@ public entity Parser {
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            lhs = Expr(ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
         return lhs;
     }
@@ -623,7 +461,7 @@ public entity Parser {
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            return Expr(ex_range(), 0, "", false, "", children);
+            return Expr(formatter_ast.ex_range(), 0, "", false, "", children);
         }
         return lhs;
     }
@@ -636,7 +474,7 @@ public entity Parser {
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            lhs = Expr(ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
         return lhs;
     }
@@ -649,7 +487,7 @@ public entity Parser {
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            lhs = Expr(ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
         return lhs;
     }
@@ -667,14 +505,14 @@ public entity Parser {
             let operand: Expr = self.parse_unary();
             let mutable children: Array<Expr> = [];
             children.push(operand);
-            return Expr(ex_unary(), 0, "", false, "-", children);
+            return Expr(formatter_ast.ex_unary(), 0, "", false, "-", children);
         }
         if self.check(formatter_lexer.kw_not()) {
             self.advance();
             let operand: Expr = self.parse_unary();
             let mutable children: Array<Expr> = [];
             children.push(operand);
-            return Expr(ex_unary(), 0, "", false, "not", children);
+            return Expr(formatter_ast.ex_unary(), 0, "", false, "not", children);
         }
         return self.parse_postfix();
     }
@@ -692,7 +530,7 @@ public entity Parser {
                     }
                 }
                 self.expect(formatter_lexer.tk_rparen(), "')' to close call");
-                e = Expr(ex_call(), 0, "", false, "", children);
+                e = Expr(formatter_ast.ex_call(), 0, "", false, "", children);
             } else {
                 if self.check_consume(formatter_lexer.tk_lbracket()) {
                     let idx: Expr = self.parse_expr();
@@ -700,13 +538,13 @@ public entity Parser {
                     let mutable children: Array<Expr> = [];
                     children.push(e);
                     children.push(idx);
-                    e = Expr(ex_index(), 0, "", false, "", children);
+                    e = Expr(formatter_ast.ex_index(), 0, "", false, "", children);
                 } else {
                     if self.check_consume(formatter_lexer.tk_dot()) {
                         let fld: Token = self.expect(formatter_lexer.tk_ident(), "field name after '.'");
                         let mutable children: Array<Expr> = [];
                         children.push(e);
-                        e = Expr(ex_field(), 0, "", false, fld.text, children);
+                        e = Expr(formatter_ast.ex_field(), 0, "", false, fld.text, children);
                     } else {
                         return e;
                     }
@@ -721,27 +559,27 @@ public entity Parser {
         if kind == formatter_lexer.tk_int() {
             let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(ex_int(), parse_int(tok.text), "", false, "", children);
+            return Expr(formatter_ast.ex_int(), formatter_ast.parse_int(tok.text), "", false, "", children);
         }
         if kind == formatter_lexer.tk_string() {
             let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(ex_string(), 0, self.unquote(tok.text), false, "", children);
+            return Expr(formatter_ast.ex_string(), 0, self.unquote(tok.text), false, "", children);
         }
         if kind == formatter_lexer.kw_true() {
             self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(ex_bool(), 0, "", true, "", children);
+            return Expr(formatter_ast.ex_bool(), 0, "", true, "", children);
         }
         if kind == formatter_lexer.kw_false() {
             self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(ex_bool(), 0, "", false, "", children);
+            return Expr(formatter_ast.ex_bool(), 0, "", false, "", children);
         }
         if kind == formatter_lexer.tk_ident() {
             let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(ex_ident(), 0, "", false, tok.text, children);
+            return Expr(formatter_ast.ex_ident(), 0, "", false, tok.text, children);
         }
         if kind == formatter_lexer.tk_lparen() {
             self.advance();
@@ -749,7 +587,7 @@ public entity Parser {
             self.expect(formatter_lexer.tk_rparen(), "')' to close parenthesised expression");
             let mutable children: Array<Expr> = [];
             children.push(inner);
-            return Expr(ex_paren(), 0, "", false, "", children);
+            return Expr(formatter_ast.ex_paren(), 0, "", false, "", children);
         }
         if kind == formatter_lexer.tk_lbracket() {
             self.advance();
@@ -761,93 +599,356 @@ public entity Parser {
                 }
             }
             self.expect(formatter_lexer.tk_rbracket(), "']' to close array literal");
-            return Expr(ex_array(), 0, "", false, "", elems);
+            return Expr(formatter_ast.ex_array(), 0, "", false, "", elems);
         }
         self.fail("expected expression");
-        return empty_expr();
+        return formatter_ast.empty_expr();
     }
 
     method parse_program() returns Program {
-        let mutable imports: Array<ImportDecl> = [];
-        let mutable functions: Array<FunctionDecl> = [];
         let module_decl: ModuleDecl = self.parse_module_decl();
+        let mutable prog: Program = formatter_ast.empty_program(module_decl);
 
         while not self.at_end() and self.error == "" {
             if self.check(formatter_lexer.kw_import_marker()) {
-                imports.push(self.parse_import_decl());
+                prog.imports.push(self.parse_import_decl());
             } else {
-                // Look ahead for a function declaration. Accept `function`,
-                // `public function`, `entry function`, `async function`, or
-                // any combination of those modifiers. Other declaration
-                // kinds (entity, enum, trait, etc.) are not in Phase 33's
-                // scope — we surface a clear error and stop.
-                if self.is_at_function_start() {
-                    functions.push(self.parse_function_decl());
+                if self.check(formatter_lexer.kw_entity_marker()) {
+                    prog.entities.push(self.parse_entity_decl(false));
                 } else {
-                    self.fail("unexpected top-level token (Phase 33 parses module/import/function only)");
-                    return Program(module_decl, imports, functions, self.error);
+                    if self.check(formatter_lexer.kw_enum_marker()) {
+                        prog.enums.push(self.parse_enum_decl(false));
+                    } else {
+                        if self.check(formatter_lexer.kw_trait_marker()) {
+                            prog.traits.push(self.parse_trait_decl(false));
+                        } else {
+                            if self.check(formatter_lexer.kw_impl_marker()) {
+                                prog.impls.push(self.parse_impl_decl());
+                            } else {
+                                if self.check(formatter_lexer.kw_test_marker()) {
+                                    prog.tests.push(self.parse_test_decl());
+                                } else {
+                                    if self.check(formatter_lexer.kw_extern_marker()) {
+                                        prog.externs.push(self.parse_extern_decl());
+                                    } else {
+                                        if self.check(formatter_lexer.kw_intent_marker()) {
+                                            prog.intent_blocks.push(self.parse_intent_block());
+                                        } else {
+                                            if self.check(formatter_lexer.kw_public_marker()) {
+                                                // `public` can precede function, entity, enum, trait.
+                                                // Consume `public` and dispatch on what follows.
+                                                self.advance();
+                                                if self.check(formatter_lexer.kw_entity_marker()) {
+                                                    prog.entities.push(self.parse_entity_decl(true));
+                                                } else {
+                                                    if self.check(formatter_lexer.kw_enum_marker()) {
+                                                        prog.enums.push(self.parse_enum_decl(true));
+                                                    } else {
+                                                        if self.check(formatter_lexer.kw_trait_marker()) {
+                                                            prog.traits.push(self.parse_trait_decl(true));
+                                                        } else {
+                                                            // `public function ...` — parse the function
+                                                            // and mark it public after.
+                                                            let mutable fd: FunctionDecl = self.parse_function_decl();
+                                                            fd.is_public = true;
+                                                            prog.functions.push(fd);
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                if self.is_at_function_start() {
+                                                    prog.functions.push(self.parse_function_decl());
+                                                } else {
+                                                    self.fail("expected a top-level declaration (module / import / function / entity / enum / trait / impl / test / extern / intent)");
+                                                    prog.error = self.error;
+                                                    return prog;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        return Program(module_decl, imports, functions, self.error);
+        prog.error = self.error;
+        return prog;
     }
 
-    // True if the next 1-3 tokens introduce a function declaration.
+    // True if the next 1-3 tokens introduce a function declaration. The
+    // `public function` case is dispatched inline in parse_program because
+    // entity mutation across a helper call doesn't propagate in the Rust
+    // backend (entities are passed by value / cloned).
     method is_at_function_start() returns Bool {
         if self.check(formatter_lexer.kw_function()) { return true; }
         if self.check(formatter_lexer.kw_entry()) { return true; }
-        if self.check(formatter_lexer.kw_public_marker()) { return true; }
         if self.check(formatter_lexer.kw_async_marker()) { return true; }
         return false;
     }
-}
 
-// Empty Block constructor (avoids a bare `Block([])` literal where the
-// element type cannot be inferred at the call site).
-public function empty_block() returns Block {
-    let mutable s: Array<Stmt> = [];
-    return Block(s);
-}
+    // --- Phase 36: top-level declaration parsers --------------------------
 
-// Placeholder Expr for absent expressions (e.g. `return;`). kind == ex_void.
-public function empty_expr() returns Expr {
-    let mutable c: Array<Expr> = [];
-    return Expr(ex_void(), 0, "", false, "", c);
-}
-
-// Parses a decimal integer-literal token's text into an Int. The stage2
-// lexer only emits tk_int for runs of digit characters (no sign, no
-// leading whitespace), so input is assumed well-formed. Negative numbers
-// reach this via unary minus in the expression parser, not via a sign in
-// the token text.
-public function parse_int(text: String) returns Int {
-    let mutable n: Int = 0;
-    let mutable i: Int = 0;
-    let zero_cp: Int = '0'.to_codepoint();
-    while i < len(text) {
-        let c: Char = text[i];
-        if c.is_digit() {
-            n = n * 10 + (c.to_codepoint() - zero_cp);
+    // `entity NAME { field*; ctor?; method*; invariant?; }`
+    method parse_entity_decl(is_public: Bool) returns EntityDecl {
+        self.expect(formatter_lexer.kw_entity_marker(), "'entity'");
+        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "entity name");
+        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start entity body");
+        let mutable fields: Array<FieldDecl> = [];
+        let mutable methods: Array<FunctionDecl> = [];
+        let mutable has_ctor: Bool = false;
+        let mutable ctor: FunctionDecl = formatter_ast.empty_function_decl();
+        let mutable invariants: Array<Expr> = [];
+        while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
+            if self.check(formatter_lexer.kw_field_marker()) {
+                fields.push(self.parse_field_decl());
+            } else {
+                if self.check(formatter_lexer.kw_constructor_marker()) {
+                    ctor = self.parse_constructor_decl();
+                    has_ctor = true;
+                } else {
+                    if self.check(formatter_lexer.kw_method_marker()) {
+                        methods.push(self.parse_method_decl());
+                    } else {
+                        if self.check(formatter_lexer.kw_invariant_marker()) {
+                            let invs: Array<Expr> = self.parse_invariant_block();
+                            let mutable j: Int = 0;
+                            while j < len(invs) {
+                                invariants.push(invs[j]);
+                                j = j + 1;
+                            }
+                        } else {
+                            self.fail("expected 'field', 'constructor', 'method', or 'invariant' in entity body");
+                            return EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants);
+                        }
+                    }
+                }
+            }
         }
-        i = i + 1;
+        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close entity body");
+        return EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants);
     }
-    return n;
+
+    // `field NAME: TYPE;`
+    method parse_field_decl() returns FieldDecl {
+        self.expect(formatter_lexer.kw_field_marker(), "'field'");
+        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "field name");
+        self.expect(formatter_lexer.tk_colon(), "':' after field name");
+        let type_name: String = self.parse_type_name();
+        self.expect(formatter_lexer.tk_semicolon(), "';' after field declaration");
+        return FieldDecl(name_tok.text, type_name);
+    }
+
+    // `constructor(params) { body }`
+    method parse_constructor_decl() returns FunctionDecl {
+        self.expect(formatter_lexer.kw_constructor_marker(), "'constructor'");
+        self.expect(formatter_lexer.tk_lparen(), "'(' after 'constructor'");
+        let mutable params: Array<Param> = [];
+        if not self.check(formatter_lexer.tk_rparen()) {
+            params.push(self.parse_param());
+            while self.check_consume(formatter_lexer.tk_comma()) {
+                params.push(self.parse_param());
+            }
+        }
+        self.expect(formatter_lexer.tk_rparen(), "')' to close constructor params");
+        let body: Block = self.parse_block();
+        return FunctionDecl("constructor", false, false, false, true, params, "", body);
+    }
+
+    // `method NAME(params) returns TYPE { body }` — contract clauses are
+    // currently skipped between `returns TYPE` and `{` the same way
+    // parse_function_decl does for top-level functions.
+    method parse_method_decl() returns FunctionDecl {
+        self.expect(formatter_lexer.kw_method_marker(), "'method'");
+        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "method name");
+        self.expect(formatter_lexer.tk_lparen(), "'(' after method name");
+        let mutable params: Array<Param> = [];
+        if not self.check(formatter_lexer.tk_rparen()) {
+            params.push(self.parse_param());
+            while self.check_consume(formatter_lexer.tk_comma()) {
+                params.push(self.parse_param());
+            }
+        }
+        self.expect(formatter_lexer.tk_rparen(), "')' to close method params");
+        self.expect(formatter_lexer.kw_returns(), "'returns' after method params");
+        let ret: String = self.parse_type_name();
+        self.skip_method_contracts();
+        let body: Block = self.parse_block();
+        return FunctionDecl(name_tok.text, false, false, false, false, params, ret, body);
+    }
+
+    // `invariant { EXPR; EXPR; ... }` — collect the bodies as Exprs.
+    method parse_invariant_block() returns Array<Expr> {
+        self.expect(formatter_lexer.kw_invariant_marker(), "'invariant'");
+        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start invariant block");
+        let mutable exprs: Array<Expr> = [];
+        while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
+            exprs.push(self.parse_expr());
+            self.expect(formatter_lexer.tk_semicolon(), "';' after invariant expression");
+        }
+        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close invariant block");
+        return exprs;
+    }
+
+    // Crude contract-clause skip — same heuristic as parse_function_decl
+    // uses at the top level. Replaced by a real contract parser in Phase 38+.
+    method skip_method_contracts() returns Void {
+        while self.check(formatter_lexer.tk_ident()) {
+            self.advance();
+            while not self.at_end() and not self.check(formatter_lexer.tk_lbrace()) and not self.check(formatter_lexer.tk_ident()) {
+                self.advance();
+            }
+        }
+    }
+
+    // `enum NAME { VARIANT, VARIANT, ... }`
+    method parse_enum_decl(is_public: Bool) returns EnumDecl {
+        self.expect(formatter_lexer.kw_enum_marker(), "'enum'");
+        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "enum name");
+        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start enum body");
+        let mutable variants: Array<EnumVariant> = [];
+        if not self.check(formatter_lexer.tk_rbrace()) {
+            variants.push(self.parse_enum_variant());
+            while self.check_consume(formatter_lexer.tk_comma()) {
+                if self.check(formatter_lexer.tk_rbrace()) {
+                    // Trailing comma — accepted.
+                    self.fail_off();
+                } else {
+                    variants.push(self.parse_enum_variant());
+                }
+            }
+        }
+        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close enum body");
+        return EnumDecl(name_tok.text, is_public, variants);
+    }
+
+    // Helper used by the trailing-comma branch: a no-op that documents
+    // that we deliberately consume nothing when accepting the trailing
+    // comma case. Kept as a method to centralise the intent.
+    method fail_off() returns Void {
+        return;
+    }
+
+    // `NAME` or `NAME(param, param, ...)`
+    method parse_enum_variant() returns EnumVariant {
+        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "enum variant name");
+        let mutable params: Array<Param> = [];
+        if self.check_consume(formatter_lexer.tk_lparen()) {
+            if not self.check(formatter_lexer.tk_rparen()) {
+                params.push(self.parse_param());
+                while self.check_consume(formatter_lexer.tk_comma()) {
+                    params.push(self.parse_param());
+                }
+            }
+            self.expect(formatter_lexer.tk_rparen(), "')' to close variant params");
+        }
+        return EnumVariant(name_tok.text, params);
+    }
+
+    // `trait NAME { method NAME(params) returns TYPE; ... }`
+    method parse_trait_decl(is_public: Bool) returns TraitDecl {
+        self.expect(formatter_lexer.kw_trait_marker(), "'trait'");
+        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "trait name");
+        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start trait body");
+        let mutable methods: Array<TraitMethodSig> = [];
+        while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
+            methods.push(self.parse_trait_method_sig());
+        }
+        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close trait body");
+        return TraitDecl(name_tok.text, is_public, methods);
+    }
+
+    method parse_trait_method_sig() returns TraitMethodSig {
+        self.expect(formatter_lexer.kw_method_marker(), "'method' in trait body");
+        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "method name");
+        self.expect(formatter_lexer.tk_lparen(), "'(' after method name");
+        let mutable params: Array<Param> = [];
+        if not self.check(formatter_lexer.tk_rparen()) {
+            params.push(self.parse_param());
+            while self.check_consume(formatter_lexer.tk_comma()) {
+                params.push(self.parse_param());
+            }
+        }
+        self.expect(formatter_lexer.tk_rparen(), "')' to close method params");
+        self.expect(formatter_lexer.kw_returns(), "'returns' after method params");
+        let ret: String = self.parse_type_name();
+        self.expect(formatter_lexer.tk_semicolon(), "';' to end trait method signature");
+        return TraitMethodSig(name_tok.text, params, ret);
+    }
+
+    // `impl TRAIT for ENTITY { method ... method ... }`
+    method parse_impl_decl() returns ImplDecl {
+        self.expect(formatter_lexer.kw_impl_marker(), "'impl'");
+        let trait_tok: Token = self.expect(formatter_lexer.tk_ident(), "trait name");
+        self.expect(formatter_lexer.kw_for_marker(), "'for' in impl declaration");
+        let entity_tok: Token = self.expect(formatter_lexer.tk_ident(), "entity name");
+        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start impl body");
+        let mutable methods: Array<FunctionDecl> = [];
+        while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
+            methods.push(self.parse_method_decl());
+        }
+        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close impl body");
+        return ImplDecl(trait_tok.text, entity_tok.text, methods);
+    }
+
+    // `test "name" { body }`
+    method parse_test_decl() returns TestDecl {
+        self.expect(formatter_lexer.kw_test_marker(), "'test'");
+        let name_tok: Token = self.expect(formatter_lexer.tk_string(), "test name (string literal)");
+        let body: Block = self.parse_block();
+        return TestDecl(self.unquote(name_tok.text), body);
+    }
+
+    // `extern "target" function NAME(params) returns TYPE;`
+    method parse_extern_decl() returns ExternDecl {
+        self.expect(formatter_lexer.kw_extern_marker(), "'extern'");
+        let target_tok: Token = self.expect(formatter_lexer.tk_string(), "target string literal");
+        self.expect(formatter_lexer.kw_function(), "'function' after extern target");
+        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "extern function name");
+        self.expect(formatter_lexer.tk_lparen(), "'(' after extern function name");
+        let mutable params: Array<Param> = [];
+        if not self.check(formatter_lexer.tk_rparen()) {
+            params.push(self.parse_param());
+            while self.check_consume(formatter_lexer.tk_comma()) {
+                params.push(self.parse_param());
+            }
+        }
+        self.expect(formatter_lexer.tk_rparen(), "')' to close extern params");
+        self.expect(formatter_lexer.kw_returns(), "'returns' after extern params");
+        let ret: String = self.parse_type_name();
+        self.expect(formatter_lexer.tk_semicolon(), "';' to end extern declaration");
+        return ExternDecl(self.unquote(target_tok.text), name_tok.text, params, ret);
+    }
+
+    // `intent "description" { verified_by ident; verified_by ident; ... }`
+    method parse_intent_block() returns IntentBlock {
+        self.expect(formatter_lexer.kw_intent_marker(), "'intent'");
+        let goal_tok: Token = self.expect(formatter_lexer.tk_string(), "intent goal (string literal)");
+        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start intent block");
+        let mutable verifs: Array<String> = [];
+        while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
+            // `verified_by` isn't a lexer keyword — it's a regular ident
+            // that we consume by text match. Anything else here is a
+            // parse error.
+            if self.check(formatter_lexer.tk_ident()) and self.peek_text() == "verified_by" {
+                self.advance();
+                let ref_tok: Token = self.expect(formatter_lexer.tk_ident(), "contract identifier after 'verified_by'");
+                self.expect(formatter_lexer.tk_semicolon(), "';' after verified_by clause");
+                verifs.push(ref_tok.text);
+            } else {
+                self.fail("expected 'verified_by' clause in intent block");
+                return IntentBlock(self.unquote(goal_tok.text), verifs);
+            }
+        }
+        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close intent block");
+        return IntentBlock(self.unquote(goal_tok.text), verifs);
+    }
 }
 
-// Joins string parts with single spaces. Phase 33 helper for body capture.
-public function join_with_space(parts: Array<String>) returns String {
-    let mutable out: String = "";
-    let mutable i: Int = 0;
-    while i < len(parts) {
-        if i > 0 {
-            out = out + " ";
-        }
-        out = out + parts[i];
-        i = i + 1;
-    }
-    return out;
-}
+// AST helpers (empty_block, empty_expr, parse_int) moved to ast.intent in
+// Phase 36 along with the entity declarations.
 
 public function parse(source: String) returns Program {
     let mutable p: Parser = Parser(source);
@@ -946,8 +1047,10 @@ test "function with generic return type captures head" {
 }
 
 test "parser reports unexpected token at top level" {
-    let prog: Program = parse("module m version \"1.0\"; entity Foo " + '{'.to_string() + " field x: Int; " + '}'.to_string());
-    // Entities are not in Phase 33 scope; expect an error.
+    // A bare integer literal at the top level isn't a valid declaration
+    // start in any phase. Entities / enums / traits / impls / tests /
+    // externs / intent blocks are now accepted (Phase 36).
+    let prog: Program = parse("module m version \"1.0\"; 42;");
     assert(prog.error != "");
 }
 
@@ -971,8 +1074,8 @@ test "single return parses as one st_return statement" {
     assert_eq(prog.error, "");
     assert_eq(len(prog.functions[0].body.stmts), 1);
     let s: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(s.kind, st_return());
-    assert_eq(s.expr.kind, ex_int());
+    assert_eq(s.kind, formatter_ast.st_return());
+    assert_eq(s.expr.kind, formatter_ast.ex_int());
     assert_eq(s.expr.int_value, 0);
 }
 
@@ -981,8 +1084,8 @@ test "return without value records ex_void" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let s: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(s.kind, st_return());
-    assert_eq(s.expr.kind, ex_void());
+    assert_eq(s.kind, formatter_ast.st_return());
+    assert_eq(s.expr.kind, formatter_ast.ex_void());
 }
 
 test "let with type annotation" {
@@ -991,15 +1094,15 @@ test "let with type annotation" {
     assert_eq(prog.error, "");
     assert_eq(len(prog.functions[0].body.stmts), 2);
     let l: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(l.kind, st_let());
+    assert_eq(l.kind, formatter_ast.st_let());
     assert_eq(l.name, "x");
     assert_eq(l.type_name, "Int");
     assert_eq(l.is_mutable, false);
-    assert_eq(l.expr.kind, ex_int());
+    assert_eq(l.expr.kind, formatter_ast.ex_int());
     assert_eq(l.expr.int_value, 7);
     let r: Stmt = prog.functions[0].body.stmts[1];
-    assert_eq(r.kind, st_return());
-    assert_eq(r.expr.kind, ex_ident());
+    assert_eq(r.kind, formatter_ast.st_return());
+    assert_eq(r.expr.kind, formatter_ast.ex_ident());
     assert_eq(r.expr.name, "x");
 }
 
@@ -1008,11 +1111,11 @@ test "let mutable without annotation" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let l: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(l.kind, st_let());
+    assert_eq(l.kind, formatter_ast.st_let());
     assert_eq(l.name, "y");
     assert_eq(l.type_name, "");
     assert_eq(l.is_mutable, true);
-    assert_eq(l.expr.kind, ex_int());
+    assert_eq(l.expr.kind, formatter_ast.ex_int());
     assert_eq(l.expr.int_value, 0);
 }
 
@@ -1022,16 +1125,16 @@ test "expression statement is parsed as assignment binop" {
     assert_eq(prog.error, "");
     assert_eq(len(prog.functions[0].body.stmts), 3);
     let s: Stmt = prog.functions[0].body.stmts[1];
-    assert_eq(s.kind, st_expr());
-    assert_eq(s.expr.kind, ex_binop());
+    assert_eq(s.kind, formatter_ast.st_expr());
+    assert_eq(s.expr.kind, formatter_ast.ex_binop());
     assert_eq(s.expr.name, "=");
-    assert_eq(s.expr.children[0].kind, ex_ident());
+    assert_eq(s.expr.children[0].kind, formatter_ast.ex_ident());
     assert_eq(s.expr.children[0].name, "y");
     let rhs: Expr = s.expr.children[1];
-    assert_eq(rhs.kind, ex_binop());
+    assert_eq(rhs.kind, formatter_ast.ex_binop());
     assert_eq(rhs.name, "+");
     assert_eq(rhs.children[0].name, "y");
-    assert_eq(rhs.children[1].kind, ex_int());
+    assert_eq(rhs.children[1].kind, formatter_ast.ex_int());
     assert_eq(rhs.children[1].int_value, 1);
 }
 
@@ -1041,16 +1144,16 @@ test "if statement without else" {
     assert_eq(prog.error, "");
     assert_eq(len(prog.functions[0].body.stmts), 2);
     let iff: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(iff.kind, st_if());
-    assert_eq(iff.expr.kind, ex_binop());
+    assert_eq(iff.kind, formatter_ast.st_if());
+    assert_eq(iff.expr.kind, formatter_ast.ex_binop());
     assert_eq(iff.expr.name, ">");
     assert_eq(iff.expr.children[0].name, "x");
     assert_eq(iff.expr.children[1].int_value, 0);
     assert_eq(iff.has_else, false);
     assert_eq(len(iff.then_block.stmts), 1);
     let inner: Stmt = iff.then_block.stmts[0];
-    assert_eq(inner.kind, st_return());
-    assert_eq(inner.expr.kind, ex_int());
+    assert_eq(inner.kind, formatter_ast.st_return());
+    assert_eq(inner.expr.kind, formatter_ast.ex_int());
     assert_eq(inner.expr.int_value, 1);
 }
 
@@ -1059,11 +1162,11 @@ test "if-else statement" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let iff: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(iff.kind, st_if());
+    assert_eq(iff.kind, formatter_ast.st_if());
     assert_eq(iff.has_else, true);
     assert_eq(len(iff.else_block.stmts), 1);
     let else_ret: Stmt = iff.else_block.stmts[0];
-    assert_eq(else_ret.expr.kind, ex_int());
+    assert_eq(else_ret.expr.kind, formatter_ast.ex_int());
     assert_eq(else_ret.expr.int_value, 0);
 }
 
@@ -1076,12 +1179,12 @@ test "else if chains into nested if in else_block" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let outer: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(outer.kind, st_if());
+    assert_eq(outer.kind, formatter_ast.st_if());
     assert_eq(outer.has_else, true);
     assert_eq(len(outer.else_block.stmts), 1);
     let inner: Stmt = outer.else_block.stmts[0];
-    assert_eq(inner.kind, st_if());
-    assert_eq(inner.expr.kind, ex_binop());
+    assert_eq(inner.kind, formatter_ast.st_if());
+    assert_eq(inner.expr.kind, formatter_ast.ex_binop());
     assert_eq(inner.expr.name, "<");
     assert_eq(inner.has_else, true);
     assert_eq(inner.else_block.stmts[0].expr.int_value, 0);
@@ -1094,15 +1197,15 @@ test "while statement" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let w: Stmt = prog.functions[0].body.stmts[1];
-    assert_eq(w.kind, st_while());
-    assert_eq(w.expr.kind, ex_binop());
+    assert_eq(w.kind, formatter_ast.st_while());
+    assert_eq(w.expr.kind, formatter_ast.ex_binop());
     assert_eq(w.expr.name, "<");
     assert_eq(w.expr.children[0].name, "i");
     assert_eq(w.expr.children[1].int_value, 10);
     assert_eq(len(w.then_block.stmts), 1);
     let inc: Stmt = w.then_block.stmts[0];
-    assert_eq(inc.kind, st_expr());
-    assert_eq(inc.expr.kind, ex_binop());
+    assert_eq(inc.kind, formatter_ast.st_expr());
+    assert_eq(inc.expr.kind, formatter_ast.ex_binop());
     assert_eq(inc.expr.name, "=");
 }
 
@@ -1112,9 +1215,9 @@ test "call expression with arguments parses as ex_call" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let l: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(l.expr.kind, ex_call());
+    assert_eq(l.expr.kind, formatter_ast.ex_call());
     assert_eq(len(l.expr.children), 3);
-    assert_eq(l.expr.children[0].kind, ex_ident());
+    assert_eq(l.expr.children[0].kind, formatter_ast.ex_ident());
     assert_eq(l.expr.children[0].name, "add");
     assert_eq(l.expr.children[1].int_value, 1);
     assert_eq(l.expr.children[2].int_value, 2);
@@ -1129,10 +1232,10 @@ test "nested if inside if then-block" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let outer: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(outer.kind, st_if());
+    assert_eq(outer.kind, formatter_ast.st_if());
     let inner: Stmt = outer.then_block.stmts[0];
-    assert_eq(inner.kind, st_if());
-    assert_eq(inner.expr.kind, ex_binop());
+    assert_eq(inner.kind, formatter_ast.st_if());
+    assert_eq(inner.expr.kind, formatter_ast.ex_binop());
     assert_eq(inner.expr.name, ">");
     assert_eq(inner.expr.children[0].name, "y");
 }
@@ -1157,28 +1260,28 @@ public function wrap_in_let(rhs_text: String) returns String {
 }
 
 test "parse_int converts decimal token text" {
-    assert_eq(parse_int("0"), 0);
-    assert_eq(parse_int("7"), 7);
-    assert_eq(parse_int("42"), 42);
-    assert_eq(parse_int("12345"), 12345);
+    assert_eq(formatter_ast.parse_int("0"), 0);
+    assert_eq(formatter_ast.parse_int("7"), 7);
+    assert_eq(formatter_ast.parse_int("42"), 42);
+    assert_eq(formatter_ast.parse_int("12345"), 12345);
 }
 
 test "integer literal expression" {
     let prog: Program = parse(wrap_in_let("99"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, ex_int());
+    assert_eq(e.kind, formatter_ast.ex_int());
     assert_eq(e.int_value, 99);
 }
 
 test "bool literals parse as ex_bool" {
     let prog_t: Program = parse(wrap_in_let("true"));
     let e_t: Expr = single_let_rhs(prog_t);
-    assert_eq(e_t.kind, ex_bool());
+    assert_eq(e_t.kind, formatter_ast.ex_bool());
     assert_eq(e_t.bool_value, true);
     let prog_f: Program = parse(wrap_in_let("false"));
     let e_f: Expr = single_let_rhs(prog_f);
-    assert_eq(e_f.kind, ex_bool());
+    assert_eq(e_f.kind, formatter_ast.ex_bool());
     assert_eq(e_f.bool_value, false);
 }
 
@@ -1188,7 +1291,7 @@ test "string literal preserves quotes-stripped value" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, ex_string());
+    assert_eq(e.kind, formatter_ast.ex_string());
     assert_eq(e.str_value, "hello");
 }
 
@@ -1196,9 +1299,9 @@ test "unary minus on int literal" {
     let prog: Program = parse(wrap_in_let("-5"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, ex_unary());
+    assert_eq(e.kind, formatter_ast.ex_unary());
     assert_eq(e.name, "-");
-    assert_eq(e.children[0].kind, ex_int());
+    assert_eq(e.children[0].kind, formatter_ast.ex_int());
     assert_eq(e.children[0].int_value, 5);
 }
 
@@ -1208,9 +1311,9 @@ test "unary not on bool" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, ex_unary());
+    assert_eq(e.kind, formatter_ast.ex_unary());
     assert_eq(e.name, "not");
-    assert_eq(e.children[0].kind, ex_bool());
+    assert_eq(e.children[0].kind, formatter_ast.ex_bool());
     assert_eq(e.children[0].bool_value, true);
 }
 
@@ -1218,11 +1321,11 @@ test "operator precedence: 1 + 2 * 3 binds * tighter" {
     let prog: Program = parse(wrap_in_let("1 + 2 * 3"));
     assert_eq(prog.error, "");
     let root: Expr = single_let_rhs(prog);
-    assert_eq(root.kind, ex_binop());
+    assert_eq(root.kind, formatter_ast.ex_binop());
     assert_eq(root.name, "+");
     assert_eq(root.children[0].int_value, 1);
     let rhs: Expr = root.children[1];
-    assert_eq(rhs.kind, ex_binop());
+    assert_eq(rhs.kind, formatter_ast.ex_binop());
     assert_eq(rhs.name, "*");
     assert_eq(rhs.children[0].int_value, 2);
     assert_eq(rhs.children[1].int_value, 3);
@@ -1234,7 +1337,7 @@ test "operator precedence: comparison binds tighter than and" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let root: Expr = single_let_rhs(prog);
-    assert_eq(root.kind, ex_binop());
+    assert_eq(root.kind, formatter_ast.ex_binop());
     assert_eq(root.name, "and");
     assert_eq(root.children[0].name, "<");
     assert_eq(root.children[1].name, ">");
@@ -1244,11 +1347,11 @@ test "parens override precedence" {
     let prog: Program = parse(wrap_in_let("(1 + 2) * 3"));
     assert_eq(prog.error, "");
     let root: Expr = single_let_rhs(prog);
-    assert_eq(root.kind, ex_binop());
+    assert_eq(root.kind, formatter_ast.ex_binop());
     assert_eq(root.name, "*");
-    assert_eq(root.children[0].kind, ex_paren());
+    assert_eq(root.children[0].kind, formatter_ast.ex_paren());
     let inner: Expr = root.children[0].children[0];
-    assert_eq(inner.kind, ex_binop());
+    assert_eq(inner.kind, formatter_ast.ex_binop());
     assert_eq(inner.name, "+");
 }
 
@@ -1258,11 +1361,11 @@ test "assignment is right-associative" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let s: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(s.expr.kind, ex_binop());
+    assert_eq(s.expr.kind, formatter_ast.ex_binop());
     assert_eq(s.expr.name, "=");
     assert_eq(s.expr.children[0].name, "a");
     let rhs: Expr = s.expr.children[1];
-    assert_eq(rhs.kind, ex_binop());
+    assert_eq(rhs.kind, formatter_ast.ex_binop());
     assert_eq(rhs.name, "=");
     assert_eq(rhs.children[0].name, "b");
     assert_eq(rhs.children[1].name, "c");
@@ -1274,9 +1377,9 @@ test "field access via dot" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, ex_field());
+    assert_eq(e.kind, formatter_ast.ex_field());
     assert_eq(e.name, "position");
-    assert_eq(e.children[0].kind, ex_ident());
+    assert_eq(e.children[0].kind, formatter_ast.ex_ident());
     assert_eq(e.children[0].name, "self");
 }
 
@@ -1287,9 +1390,9 @@ test "method call: x.to_string()" {
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
     // x.to_string() = call(field(ident "x", "to_string"))
-    assert_eq(e.kind, ex_call());
+    assert_eq(e.kind, formatter_ast.ex_call());
     let callee: Expr = e.children[0];
-    assert_eq(callee.kind, ex_field());
+    assert_eq(callee.kind, formatter_ast.ex_field());
     assert_eq(callee.name, "to_string");
     assert_eq(callee.children[0].name, "x");
 }
@@ -1298,7 +1401,7 @@ test "indexing: arr[0]" {
     let prog: Program = parse(wrap_in_let("arr[0]"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, ex_index());
+    assert_eq(e.kind, formatter_ast.ex_index());
     assert_eq(e.children[0].name, "arr");
     assert_eq(e.children[1].int_value, 0);
 }
@@ -1309,9 +1412,9 @@ test "slice: s[i..j] parses as index of range" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, ex_index());
+    assert_eq(e.kind, formatter_ast.ex_index());
     let idx: Expr = e.children[1];
-    assert_eq(idx.kind, ex_range());
+    assert_eq(idx.kind, formatter_ast.ex_range());
     assert_eq(idx.children[0].int_value, 1);
     assert_eq(idx.children[1].int_value, 5);
 }
@@ -1320,7 +1423,7 @@ test "array literal parses as ex_array" {
     let prog: Program = parse(wrap_in_let("[10, 20, 30]"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, ex_array());
+    assert_eq(e.kind, formatter_ast.ex_array());
     assert_eq(len(e.children), 3);
     assert_eq(e.children[0].int_value, 10);
     assert_eq(e.children[1].int_value, 20);
@@ -1331,7 +1434,7 @@ test "empty array literal" {
     let prog: Program = parse(wrap_in_let("[]"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, ex_array());
+    assert_eq(e.kind, formatter_ast.ex_array());
     assert_eq(len(e.children), 0);
 }
 
@@ -1339,7 +1442,7 @@ test "no-arg call: f()" {
     let prog: Program = parse(wrap_in_let("f()"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, ex_call());
+    assert_eq(e.kind, formatter_ast.ex_call());
     assert_eq(len(e.children), 1);
     assert_eq(e.children[0].name, "f");
 }
@@ -1348,10 +1451,10 @@ test "nested call f(g(x))" {
     let prog: Program = parse(wrap_in_let("f(g(x))"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, ex_call());
+    assert_eq(e.kind, formatter_ast.ex_call());
     assert_eq(e.children[0].name, "f");
     let arg: Expr = e.children[1];
-    assert_eq(arg.kind, ex_call());
+    assert_eq(arg.kind, formatter_ast.ex_call());
     assert_eq(arg.children[0].name, "g");
     assert_eq(arg.children[1].name, "x");
 }
@@ -1361,14 +1464,14 @@ test "method chain a.b().c() left-associates" {
     assert_eq(prog.error, "");
     let outer: Expr = single_let_rhs(prog);
     // outer = call(field(call(field(a, b)), c))
-    assert_eq(outer.kind, ex_call());
+    assert_eq(outer.kind, formatter_ast.ex_call());
     let callee_c: Expr = outer.children[0];
-    assert_eq(callee_c.kind, ex_field());
+    assert_eq(callee_c.kind, formatter_ast.ex_field());
     assert_eq(callee_c.name, "c");
     let inner_call: Expr = callee_c.children[0];
-    assert_eq(inner_call.kind, ex_call());
+    assert_eq(inner_call.kind, formatter_ast.ex_call());
     let callee_b: Expr = inner_call.children[0];
-    assert_eq(callee_b.kind, ex_field());
+    assert_eq(callee_b.kind, formatter_ast.ex_field());
     assert_eq(callee_b.name, "b");
     assert_eq(callee_b.children[0].name, "a");
 }
@@ -1377,9 +1480,9 @@ test "qualified call via module path: mod.func(arg)" {
     let prog: Program = parse(wrap_in_let("formatter_lexer.tk_eof()"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, ex_call());
+    assert_eq(e.kind, formatter_ast.ex_call());
     let callee: Expr = e.children[0];
-    assert_eq(callee.kind, ex_field());
+    assert_eq(callee.kind, formatter_ast.ex_field());
     assert_eq(callee.name, "tk_eof");
     assert_eq(callee.children[0].name, "formatter_lexer");
 }
@@ -1401,4 +1504,204 @@ test "missing expression after = reports error" {
         + " let x: Int = ; return 0; " + '}'.to_string();
     let prog: Program = parse(src);
     assert(prog.error != "");
+}
+
+// --- Phase 36: top-level declaration tests ----------------------------------
+
+test "entity with two fields and no methods" {
+    let src: String = "module m version \"1.0\"; entity Point " + '{'.to_string()
+        + " field x: Int; field y: Int; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.entities), 1);
+    let e: EntityDecl = prog.entities[0];
+    assert_eq(e.name, "Point");
+    assert_eq(e.is_public, false);
+    assert_eq(len(e.fields), 2);
+    assert_eq(e.fields[0].name, "x");
+    assert_eq(e.fields[0].type_name, "Int");
+    assert_eq(e.fields[1].name, "y");
+    assert_eq(e.has_constructor, false);
+}
+
+test "public entity is marked public" {
+    let src: String = "module m version \"1.0\"; public entity Token " + '{'.to_string()
+        + " field kind: Int; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.entities), 1);
+    assert_eq(prog.entities[0].is_public, true);
+    assert_eq(prog.entities[0].name, "Token");
+}
+
+test "entity with constructor" {
+    let src: String = "module m version \"1.0\"; entity Pair " + '{'.to_string()
+        + " field a: Int; field b: Int; "
+        + " constructor(a: Int, b: Int) " + '{'.to_string() + " self.a = a; self.b = b; " + '}'.to_string()
+        + " " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    let e: EntityDecl = prog.entities[0];
+    assert_eq(e.has_constructor, true);
+    assert_eq(e.ctor.is_constructor, true);
+    assert_eq(len(e.ctor.params), 2);
+    assert_eq(e.ctor.params[0].name, "a");
+    assert_eq(len(e.ctor.body.stmts), 2);
+}
+
+test "entity with method" {
+    let src: String = "module m version \"1.0\"; entity Counter " + '{'.to_string()
+        + " field n: Int; "
+        + " method get() returns Int " + '{'.to_string() + " return self.n; " + '}'.to_string()
+        + " " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    let e: EntityDecl = prog.entities[0];
+    assert_eq(len(e.methods), 1);
+    assert_eq(e.methods[0].name, "get");
+    assert_eq(e.methods[0].return_type, "Int");
+    assert_eq(e.methods[0].is_constructor, false);
+}
+
+test "entity with invariant block" {
+    let src: String = "module m version \"1.0\"; entity Bounded " + '{'.to_string()
+        + " field n: Int; "
+        + " invariant " + '{'.to_string() + " self.n >= 0; self.n < 100; " + '}'.to_string()
+        + " " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    let e: EntityDecl = prog.entities[0];
+    assert_eq(len(e.invariants), 2);
+    assert_eq(e.invariants[0].kind, formatter_ast.ex_binop());
+    assert_eq(e.invariants[0].name, ">=");
+}
+
+test "enum with unit variants" {
+    let src: String = "module m version \"1.0\"; enum Status " + '{'.to_string()
+        + " Pending, Running, Complete " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.enums), 1);
+    let e: EnumDecl = prog.enums[0];
+    assert_eq(e.name, "Status");
+    assert_eq(len(e.variants), 3);
+    assert_eq(e.variants[0].name, "Pending");
+    assert_eq(len(e.variants[0].params), 0);
+}
+
+test "enum with data-carrying variants" {
+    let src: String = "module m version \"1.0\"; enum Shape " + '{'.to_string()
+        + " Circle(radius: Int), Square(side: Int), Point " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    let e: EnumDecl = prog.enums[0];
+    assert_eq(len(e.variants), 3);
+    assert_eq(e.variants[0].name, "Circle");
+    assert_eq(len(e.variants[0].params), 1);
+    assert_eq(e.variants[0].params[0].name, "radius");
+    assert_eq(e.variants[1].name, "Square");
+    assert_eq(len(e.variants[1].params), 1);
+    assert_eq(e.variants[2].name, "Point");
+    assert_eq(len(e.variants[2].params), 0);
+}
+
+test "trait with method signatures" {
+    let src: String = "module m version \"1.0\"; trait Drawable " + '{'.to_string()
+        + " method draw() returns Void; method area() returns Int; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.traits), 1);
+    let t: TraitDecl = prog.traits[0];
+    assert_eq(t.name, "Drawable");
+    assert_eq(len(t.methods), 2);
+    assert_eq(t.methods[0].name, "draw");
+    assert_eq(t.methods[0].return_type, "Void");
+    assert_eq(t.methods[1].name, "area");
+}
+
+test "impl Trait for Entity with methods" {
+    let src: String = "module m version \"1.0\"; impl Drawable for Circle " + '{'.to_string()
+        + " method draw() returns Void " + '{'.to_string() + " " + '}'.to_string()
+        + " method area() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string()
+        + " " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.impls), 1);
+    let i: ImplDecl = prog.impls[0];
+    assert_eq(i.trait_name, "Drawable");
+    assert_eq(i.entity_name, "Circle");
+    assert_eq(len(i.methods), 2);
+}
+
+test "test declaration captures name and body" {
+    let src: String = "module m version \"1.0\"; test \"sanity\" " + '{'.to_string()
+        + " let x: Int = 1; assert_eq(x, 1); " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.tests), 1);
+    let t: TestDecl = prog.tests[0];
+    assert_eq(t.name, "sanity");
+    assert_eq(len(t.body.stmts), 2);
+}
+
+test "extern declaration captures target + signature" {
+    let src: String = "module m version \"1.0\"; extern \"rust\" function panic(msg: String) returns Void;";
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.externs), 1);
+    let e: ExternDecl = prog.externs[0];
+    assert_eq(e.target, "rust");
+    assert_eq(e.func_name, "panic");
+    assert_eq(len(e.params), 1);
+    assert_eq(e.params[0].name, "msg");
+    assert_eq(e.return_type, "Void");
+}
+
+test "intent block captures goal and verified_by refs" {
+    let src: String = "module m version \"1.0\"; intent \"non-negative balance\" " + '{'.to_string()
+        + " verified_by ensures_positive; verified_by no_overdraft; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.intent_blocks), 1);
+    let ib: IntentBlock = prog.intent_blocks[0];
+    assert_eq(ib.goal_text, "non-negative balance");
+    assert_eq(len(ib.verifications), 2);
+    assert_eq(ib.verifications[0], "ensures_positive");
+    assert_eq(ib.verifications[1], "no_overdraft");
+}
+
+test "mixed declarations parse in any order" {
+    let src: String = "module m version \"1.0\"; "
+        + "entity E " + '{'.to_string() + " field a: Int; " + '}'.to_string()
+        + " function f() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string()
+        + " test \"t\" " + '{'.to_string() + " " + '}'.to_string()
+        + " enum K " + '{'.to_string() + " A " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.entities), 1);
+    assert_eq(len(prog.functions), 1);
+    assert_eq(len(prog.tests), 1);
+    assert_eq(len(prog.enums), 1);
+}
+
+test "synthetic dogfood: parse a small entity with methods and tests" {
+    let src: String = "module sample version \"0.1\"; "
+        + "public entity Counter " + '{'.to_string()
+        + " field n: Int; "
+        + " constructor(initial: Int) " + '{'.to_string() + " self.n = initial; " + '}'.to_string()
+        + " method increment() returns Int " + '{'.to_string()
+        + " self.n = self.n + 1; return self.n; " + '}'.to_string()
+        + " " + '}'.to_string()
+        + " test \"counter increments\" " + '{'.to_string()
+        + " let c: Counter = Counter(0); let n: Int = c.increment(); assert_eq(n, 1); " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.entities), 1);
+    let counter: EntityDecl = prog.entities[0];
+    assert_eq(counter.name, "Counter");
+    assert_eq(counter.is_public, true);
+    assert_eq(counter.has_constructor, true);
+    assert_eq(len(counter.methods), 1);
+    assert_eq(len(prog.tests), 1);
+    assert_eq(prog.tests[0].name, "counter increments");
 }

@@ -86,6 +86,23 @@ public function kw_import_marker() returns Int { return 60; }
 public function kw_public_marker() returns Int { return 61; }
 public function kw_async_marker() returns Int { return 62; }
 
+// Phase 36 additions — top-level declaration keywords. `_marker` suffix
+// applied to those that collide with Intent's reserved-word handling when
+// this file's source is itself parsed (entity / enum / trait / impl / test
+// / extern / intent / field / constructor / method / invariant / for).
+public function kw_entity_marker() returns Int { return 63; }
+public function kw_enum_marker() returns Int { return 64; }
+public function kw_trait_marker() returns Int { return 65; }
+public function kw_impl_marker() returns Int { return 66; }
+public function kw_test_marker() returns Int { return 67; }
+public function kw_extern_marker() returns Int { return 68; }
+public function kw_intent_marker() returns Int { return 69; }
+public function kw_field_marker() returns Int { return 70; }
+public function kw_constructor_marker() returns Int { return 71; }
+public function kw_method_marker() returns Int { return 72; }
+public function kw_invariant_marker() returns Int { return 73; }
+public function kw_for_marker() returns Int { return 74; }
+
 public function tk_eof() returns Int { return 98; }
 public function tk_error() returns Int { return 99; }
 
@@ -116,6 +133,18 @@ public function keyword_kind(text: String) returns Int {
     if text == "import" { return kw_import_marker(); }
     if text == "public" { return kw_public_marker(); }
     if text == "async" { return kw_async_marker(); }
+    if text == "entity" { return kw_entity_marker(); }
+    if text == "enum" { return kw_enum_marker(); }
+    if text == "trait" { return kw_trait_marker(); }
+    if text == "impl" { return kw_impl_marker(); }
+    if text == "test" { return kw_test_marker(); }
+    if text == "extern" { return kw_extern_marker(); }
+    if text == "intent" { return kw_intent_marker(); }
+    if text == "field" { return kw_field_marker(); }
+    if text == "constructor" { return kw_constructor_marker(); }
+    if text == "method" { return kw_method_marker(); }
+    if text == "invariant" { return kw_invariant_marker(); }
+    if text == "for" { return kw_for_marker(); }
     return tk_ident();
 }
 

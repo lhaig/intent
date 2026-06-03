@@ -1,0 +1,395 @@
+// selfhost/formatter/ast.intent — Phase 36 / ADR 0040 stage2.
+//
+// AST entity declarations + kind constants + AST-side helpers, split out
+// from parser.intent at the start of Phase 36. The split is motivated by
+// parser.intent growing past 1400 LOC; adding 7 more declaration entities
+// in this phase would push that to ~2000 LOC and make the file hard to
+// navigate. Keeping AST types here, parsing logic in parser.intent.
+//
+// Design notes (apply to every entity defined below):
+//   - Each AST node is one entity with an Int `kind` discriminator + the
+//     fields used by all kinds it represents. Mirrors how Token uses
+//     `kind: Int` in the lexer. Intent enums with payloads would force
+//     every field access through a match arm (each arm being a single
+//     expression), so a sum-typed Stmt/Expr would be awkward to consume.
+//   - Mutually-recursive sizing is safe because nested children are
+//     reached via Array<...> (heap-allocated). Stmt/Block, Expr/Expr,
+//     and EntityDecl/FunctionDecl/Block all participate.
+//   - Unused fields per kind are populated with defaults ("" / false /
+//     empty_block() / empty_expr()). Wasteful but uniform; same trade
+//     Token already makes.
+
+module formatter_ast version "0.1.0";
+
+// --- Statement kind constants -----------------------------------------------
+
+public function st_let() returns Int { return 1; }
+public function st_return() returns Int { return 2; }
+public function st_if() returns Int { return 3; }
+public function st_while() returns Int { return 4; }
+public function st_expr() returns Int { return 5; }
+
+// --- Expression kind constants ----------------------------------------------
+
+public function ex_void() returns Int { return 0; }        // placeholder for absent expr (e.g. `return;`)
+public function ex_int() returns Int { return 1; }
+public function ex_string() returns Int { return 2; }
+public function ex_bool() returns Int { return 3; }
+public function ex_ident() returns Int { return 4; }
+public function ex_unary() returns Int { return 5; }       // children=[operand], name=op
+public function ex_binop() returns Int { return 6; }       // children=[lhs, rhs], name=op
+public function ex_call() returns Int { return 7; }        // children=[callee, arg1..argN]
+public function ex_index() returns Int { return 8; }       // children=[object, index]
+public function ex_field() returns Int { return 9; }       // children=[object], name=field
+public function ex_array() returns Int { return 10; }      // children=[elem1..elemN]
+public function ex_range() returns Int { return 11; }      // children=[start, end]
+public function ex_paren() returns Int { return 12; }      // children=[inner]
+
+// --- Shared AST entities ----------------------------------------------------
+
+public entity Param {
+    field name: String;
+    field type_name: String;
+
+    constructor(name: String, type_name: String) {
+        self.name = name;
+        self.type_name = type_name;
+    }
+}
+
+// Expression node. Field usage by kind:
+//   ex_void    — no fields set
+//   ex_int     — int_value
+//   ex_string  — str_value (unquoted, escapes still raw)
+//   ex_bool    — bool_value
+//   ex_ident   — name
+//   ex_unary   — name (op), children=[operand]
+//   ex_binop   — name (op), children=[lhs, rhs]
+//   ex_call    — children=[callee, arg1..argN]
+//   ex_index   — children=[object, index]
+//   ex_field   — name (field), children=[object]
+//   ex_array   — children=[elem1..elemN]
+//   ex_range   — children=[start, end]
+//   ex_paren   — children=[inner]
+public entity Expr {
+    field kind: Int;
+    field int_value: Int;
+    field str_value: String;
+    field bool_value: Bool;
+    field name: String;
+    field children: Array<Expr>;
+
+    constructor(kind: Int, int_value: Int, str_value: String, bool_value: Bool, name: String, children: Array<Expr>) {
+        self.kind = kind;
+        self.int_value = int_value;
+        self.str_value = str_value;
+        self.bool_value = bool_value;
+        self.name = name;
+        self.children = children;
+    }
+}
+
+// Statement node. Field usage by kind:
+//   st_let    — name, type_name, is_mutable, expr (rhs)
+//   st_return — expr (may be ex_void for `return;`)
+//   st_expr   — expr
+//   st_if     — expr (condition), then_block, else_block, has_else
+//   st_while  — expr (condition), then_block (body)
+public entity Stmt {
+    field kind: Int;
+    field expr: Expr;
+    field name: String;
+    field type_name: String;
+    field is_mutable: Bool;
+    field then_block: Block;
+    field else_block: Block;
+    field has_else: Bool;
+
+    constructor(kind: Int, expr: Expr, name: String, type_name: String, is_mutable: Bool, then_block: Block, else_block: Block, has_else: Bool) {
+        self.kind = kind;
+        self.expr = expr;
+        self.name = name;
+        self.type_name = type_name;
+        self.is_mutable = is_mutable;
+        self.then_block = then_block;
+        self.else_block = else_block;
+        self.has_else = has_else;
+    }
+}
+
+public entity Block {
+    field stmts: Array<Stmt>;
+
+    constructor(stmts: Array<Stmt>) {
+        self.stmts = stmts;
+    }
+}
+
+// FunctionDecl is reused for top-level functions, entity methods, entity
+// constructors, and impl methods. The `is_constructor` flag distinguishes
+// constructor bodies (no return type) from methods.
+public entity FunctionDecl {
+    field name: String;
+    field is_public: Bool;
+    field is_entry: Bool;
+    field is_async: Bool;
+    field is_constructor: Bool;
+    field params: Array<Param>;
+    field return_type: String;
+    field body: Block;
+
+    constructor(name: String, is_public: Bool, is_entry: Bool, is_async: Bool, is_constructor: Bool, params: Array<Param>, return_type: String, body: Block) {
+        self.name = name;
+        self.is_public = is_public;
+        self.is_entry = is_entry;
+        self.is_async = is_async;
+        self.is_constructor = is_constructor;
+        self.params = params;
+        self.return_type = return_type;
+        self.body = body;
+    }
+}
+
+public entity ImportDecl {
+    field is_package: Bool;
+    field path: String;
+
+    constructor(is_package: Bool, path: String) {
+        self.is_package = is_package;
+        self.path = path;
+    }
+}
+
+public entity ModuleDecl {
+    field name: String;
+    field module_version: String;
+
+    constructor(name: String, module_version: String) {
+        self.name = name;
+        self.module_version = module_version;
+    }
+}
+
+// --- Declaration entities added in Phase 36 ---------------------------------
+
+public entity FieldDecl {
+    field name: String;
+    field type_name: String;
+
+    constructor(name: String, type_name: String) {
+        self.name = name;
+        self.type_name = type_name;
+    }
+}
+
+// Entity declaration. Constructors and methods are both stored as
+// FunctionDecl (the constructor with is_constructor=true). Invariants
+// are the boolean Exprs found inside `invariant { ... }` blocks.
+public entity EntityDecl {
+    field name: String;
+    field is_public: Bool;
+    field fields: Array<FieldDecl>;
+    field methods: Array<FunctionDecl>;
+    field has_constructor: Bool;
+    field ctor: FunctionDecl;
+    field invariants: Array<Expr>;
+
+    constructor(name: String, is_public: Bool, fields: Array<FieldDecl>, methods: Array<FunctionDecl>, has_constructor: Bool, ctor: FunctionDecl, invariants: Array<Expr>) {
+        self.name = name;
+        self.is_public = is_public;
+        self.fields = fields;
+        self.methods = methods;
+        self.has_constructor = has_constructor;
+        self.ctor = ctor;
+        self.invariants = invariants;
+    }
+}
+
+public entity EnumVariant {
+    field name: String;
+    field params: Array<Param>;  // empty for unit variants
+
+    constructor(name: String, params: Array<Param>) {
+        self.name = name;
+        self.params = params;
+    }
+}
+
+public entity EnumDecl {
+    field name: String;
+    field is_public: Bool;
+    field variants: Array<EnumVariant>;
+
+    constructor(name: String, is_public: Bool, variants: Array<EnumVariant>) {
+        self.name = name;
+        self.is_public = is_public;
+        self.variants = variants;
+    }
+}
+
+// Trait method signature: same shape as FunctionDecl minus the body and
+// the modifier flags that don't apply.
+public entity TraitMethodSig {
+    field name: String;
+    field params: Array<Param>;
+    field return_type: String;
+
+    constructor(name: String, params: Array<Param>, return_type: String) {
+        self.name = name;
+        self.params = params;
+        self.return_type = return_type;
+    }
+}
+
+public entity TraitDecl {
+    field name: String;
+    field is_public: Bool;
+    field methods: Array<TraitMethodSig>;
+
+    constructor(name: String, is_public: Bool, methods: Array<TraitMethodSig>) {
+        self.name = name;
+        self.is_public = is_public;
+        self.methods = methods;
+    }
+}
+
+public entity ImplDecl {
+    field trait_name: String;
+    field entity_name: String;
+    field methods: Array<FunctionDecl>;
+
+    constructor(trait_name: String, entity_name: String, methods: Array<FunctionDecl>) {
+        self.trait_name = trait_name;
+        self.entity_name = entity_name;
+        self.methods = methods;
+    }
+}
+
+public entity IntentBlock {
+    // `goal` / `verified_by` are Intent reserved words inside the surface
+    // grammar's `intent { ... }` block; renamed here to avoid collision
+    // when this file is itself parsed.
+    field goal_text: String;
+    field verifications: Array<String>;
+
+    constructor(goal_text: String, verifications: Array<String>) {
+        self.goal_text = goal_text;
+        self.verifications = verifications;
+    }
+}
+
+public entity TestDecl {
+    field name: String;
+    field body: Block;
+
+    constructor(name: String, body: Block) {
+        self.name = name;
+        self.body = body;
+    }
+}
+
+public entity ExternDecl {
+    field target: String;       // unquoted: "rust", "js", etc.
+    field func_name: String;
+    field params: Array<Param>;
+    field return_type: String;
+
+    constructor(target: String, func_name: String, params: Array<Param>, return_type: String) {
+        self.target = target;
+        self.func_name = func_name;
+        self.params = params;
+        self.return_type = return_type;
+    }
+}
+
+// Program now holds parallel arrays per top-level declaration kind. Source
+// order across kinds is not preserved at this layer — Phase 37 (formatter)
+// will need either to attach line/column to each decl or move to a single
+// Array<TopLevelDecl> sequence. Per-kind arrays match Phase 33's pattern
+// for `imports` / `functions` and keep this phase's diff narrow.
+public entity Program {
+    field module_decl: ModuleDecl;
+    field imports: Array<ImportDecl>;
+    field functions: Array<FunctionDecl>;
+    field entities: Array<EntityDecl>;
+    field enums: Array<EnumDecl>;
+    field traits: Array<TraitDecl>;
+    field impls: Array<ImplDecl>;
+    field intent_blocks: Array<IntentBlock>;
+    field tests: Array<TestDecl>;
+    field externs: Array<ExternDecl>;
+    field error: String;
+
+    constructor(module_decl: ModuleDecl, imports: Array<ImportDecl>, functions: Array<FunctionDecl>, entities: Array<EntityDecl>, enums: Array<EnumDecl>, traits: Array<TraitDecl>, impls: Array<ImplDecl>, intent_blocks: Array<IntentBlock>, tests: Array<TestDecl>, externs: Array<ExternDecl>, error: String) {
+        self.module_decl = module_decl;
+        self.imports = imports;
+        self.functions = functions;
+        self.entities = entities;
+        self.enums = enums;
+        self.traits = traits;
+        self.impls = impls;
+        self.intent_blocks = intent_blocks;
+        self.tests = tests;
+        self.externs = externs;
+        self.error = error;
+    }
+}
+
+// --- Helpers ----------------------------------------------------------------
+
+// Empty Block constructor (avoids a bare `Block([])` literal where the
+// element type cannot be inferred at the call site).
+public function empty_block() returns Block {
+    let mutable s: Array<Stmt> = [];
+    return Block(s);
+}
+
+// Placeholder Expr for absent expressions (e.g. `return;`). kind == ex_void.
+public function empty_expr() returns Expr {
+    let mutable c: Array<Expr> = [];
+    return Expr(ex_void(), 0, "", false, "", c);
+}
+
+// Placeholder FunctionDecl for the `ctor` field on entities that don't
+// have a constructor.
+public function empty_function_decl() returns FunctionDecl {
+    let mutable params: Array<Param> = [];
+    return FunctionDecl("", false, false, false, false, params, "", empty_block());
+}
+
+// Parses a decimal integer-literal token's text into an Int. The stage2
+// lexer only emits tk_int for runs of digit characters, so input is
+// assumed well-formed. Negative numbers reach this via unary minus in
+// the expression parser, not via a sign in the token text.
+public function parse_int(text: String) returns Int {
+    let mutable n: Int = 0;
+    let mutable i: Int = 0;
+    let zero_cp: Int = '0'.to_codepoint();
+    while i < len(text) {
+        let c: Char = text[i];
+        if c.is_digit() {
+            n = n * 10 + (c.to_codepoint() - zero_cp);
+        }
+        i = i + 1;
+    }
+    return n;
+}
+
+// Builds an empty Program with the given module declaration. Useful for
+// parsers that want to accumulate decls into a starter Program.
+public function empty_program(module_decl: ModuleDecl) returns Program {
+    let mutable imps: Array<ImportDecl> = [];
+    let mutable fns: Array<FunctionDecl> = [];
+    let mutable ents: Array<EntityDecl> = [];
+    let mutable enums_a: Array<EnumDecl> = [];
+    let mutable traits_a: Array<TraitDecl> = [];
+    let mutable impls_a: Array<ImplDecl> = [];
+    let mutable ibs: Array<IntentBlock> = [];
+    let mutable tsts: Array<TestDecl> = [];
+    let mutable exts: Array<ExternDecl> = [];
+    return Program(module_decl, imps, fns, ents, enums_a, traits_a, impls_a, ibs, tsts, exts, "");
+}
+
+// No entry function here — when this file is itself the entry of
+// `intentc test`, the runner synthesises one. When imported by
+// parser.intent, the entry lives there (same pattern as lexer.intent).

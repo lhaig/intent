@@ -1,6 +1,6 @@
-# Pickup Notes — 2026-06-03 (after Phase 35)
+# Pickup Notes — 2026-06-03 (after Phase 36)
 
-Handoff after the fourth stage2 deliverable shipped.
+Handoff after the fifth stage2 deliverable shipped.
 
 ## Where we are
 
@@ -11,75 +11,78 @@ Today's session shipped (in order):
 - **Phase 32** — Lexer in Intent.
 - **Phase 33** — Parser top-level in Intent.
 - **Phase 34** — Statement parser in Intent.
-- **Phase 35** — Expression parser in Intent (this session).
+- **Phase 35** — Expression parser in Intent.
+- **Phase 36** — Top-level declarations + AST split (this session).
 
-Stage2 (`selfhost/formatter/`) now has two files (`lexer.intent` + `parser.intent`, ~1900 LOC combined) and **60 passing in-language tests on rust + js**. The parser produces a fully structured AST:
-- `Program { module_decl, imports, functions, error }`
-- `FunctionDecl { ..., body: Block }`
-- `Block { stmts: Array<Stmt> }`
-- `Stmt { kind, expr: Expr, name, type_name, is_mutable, then_block, else_block, has_else }`
-- `Expr { kind, int_value, str_value, bool_value, name, children: Array<Expr> }`
+Stage2 (`selfhost/formatter/`) is now three files:
+- `lexer.intent` (520 LOC) — tokenizer.
+- `ast.intent` (395 LOC) — every AST entity + kind constant + AST-side helper.
+- `parser.intent` (1707 LOC, ~700 LOC parser + ~1000 LOC tests) — `Parser` entity + parse methods + the `parse(source)` convenience + tests.
 
-Expressions are fully parsed (literals, identifiers, calls, method chains, field access, indexing, slicing, ranges, array literals, unary + binary operators with proper precedence, parens). Assignments are parsed as right-associative `=` binops at the lowest precedence.
+The parser handles the full structural surface of Intent programs: module / imports / functions / entities (with fields, constructors, methods, invariant blocks) / enums (unit + data-carrying variants) / traits / impls / tests / externs / intent blocks. Inside function bodies, statements (`let`, `return`, `if`/`else`, `while`, expression stmts) and expressions (literals, identifiers, calls, method chains, field access, indexing, slicing, ranges, array literals, full operator precedence) all parse to a real AST.
 
-## Language gaps surfaced and fixed in Phase 35
+**74 in-language tests pass on rust + js.** `make validate` green.
 
-None — zero Go / backend changes were needed. Earlier phases' groundwork (Char ergonomics from Phase 31, `&mut self` propagation from Phase 32, constructor-field-hoist from Phase 33) carried this phase end-to-end. The framework is mature enough that several stage2 phases can ship without language changes.
+## Language gaps surfaced in Phase 36
 
-## Workarounds applied this phase
+Two real backend gaps surfaced (workarounds applied; fixes deferred):
 
-| Gap | Workaround | Suggested follow-up |
+| Gap | Workaround in Phase 36 | Future fix |
 |---|---|---|
-| No `String.to_int()` builtin. | In-Intent `parse_int(s)` walks codepoints using `Char.to_codepoint` + `Char.is_digit`. | Optional ADR: add `String.to_int(): Result<Int, String>` and `String.parse_int(): Int` (panics on bad input) to the surface. Marginal value vs. the in-Intent helper. |
+| Cross-module free-function calls need module prefix (`formatter_ast.empty_block()`); entities don't. | Bulk-qualified ~100 call sites. | Either let bare free-function names resolve through imports (emitter change), or document as a deliberate namespacing rule. ADR needed if we want the former. |
+| Entity-typed method/function parameters are passed by value (cloned) in the Rust backend. Mutations on the parameter don't propagate back. | Inlined the `public` declaration dispatch in `parse_program` instead of factoring a `parse_public_decl(prog)` helper that mutated `prog`. | Auto-`&mut` entity parameters when the body mutates them, analogous to Phase 32's `&mut self` work for methods. Needs an ADR + emitter change. |
 
-Carried-over gaps still open (no fix this phase, no new bite):
-- `{` / `}` in string literals trigger interpolation parsing → use `'{'.to_string()` concat.
-- `let _:` rejected → use expression statements.
+Plus three reserved-word collisions on intuitive field/local names: `goal` → `goal_text`, `verified_by` → `verifications`, `result` → `exprs`. A future polish ADR could narrow Intent's reserved-word set in field/local positions.
+
+Carried-over gaps still open (unchanged this phase):
+- `{` / `}` in string literals trigger interpolation parsing → `'{'.to_string()` concat.
+- `let _:` rejected → expression statements.
 - `version` is a reserved word → use `module_version` etc.
-- Cross-module entity types can't be qualified (`module.Entity`) → use bare entity names from imports.
-- Constructor double-use of a `String` parameter triggers borrow error → restructure to single-use.
-- Multi-line `/* */` comments not skipped by stage2 lexer.
-- Char / float literals not in stage2 lexer.
-- String interpolation tokenisation not split into parts.
-- Bare `Block([])` / `Expr` literals can't infer element type → use `empty_block()` / `empty_expr()` helpers.
+- Cross-module entity-type qualification (`module.Entity`) is rejected — entities must be referenced bare from imported modules.
+- Constructor double-use of a `String` parameter triggers borrow error in the Rust backend.
+- No `String.to_int()` builtin → in-Intent `parse_int` via Phase 31 Char primitives.
+- Stage2 lexer doesn't tokenize char literals (`'a'`), float literals, multi-line `/* */` comments, or interpolated string parts.
 
 ## Immediate next step
 
-**Phase 36 — Top-level declarations in Intent (entity / enum / trait / impl / intent / test / extern).** Stage2 parser currently only handles module / import / function declarations at the top level. Phase 36 covers the rest of the declaration grammar so the parser can ingest real Intent files end-to-end (including its own source).
+**Phase 37 — Stage2 lexer extensions, then begin the formatter.**
 
-Recommended scope:
+Phase 37 is a two-part deliverable:
 
-1. **Split AST into `selfhost/formatter/ast.intent`.** `parser.intent` is now 1404 LOC and pure-AST entities mixed in with parsing logic obscure the structure. The split is the natural prelude to adding new declaration kinds. Carries the cross-module entity-types gap (workaround: import bare names, same as Phase 33 does with `Token`).
+**Part A: stage2 lexer extensions** (prerequisite for full self-parse dogfood and for the formatter to handle real Intent source). Add to `lexer.intent`:
+- **Char literals**: `'a'`, `'\n'`, `'\t'`, `'\\'`, `'\''`, `'\u{1234}'`. Emit as new token kind `tk_char` carrying the raw literal text. Phase 31 already added `Char` at the type level; the stage2 lexer just needs to recognise the syntax.
+- **Float literals**: `3.14`, `1.5e10`, `2.5e-3`. Emit as `tk_float`. The Phase 35 expression parser will need a corresponding `ex_float` Expr kind + a `parse_float` helper (modelled on `parse_int`).
+- **Multi-line `/* ... */` comments**: extend `skip_whitespace_and_comments` to handle these. Nested comments per the Intent grammar.
+- **String interpolation tokenisation** (stretch): currently the whole `"abc ${expr} def"` lexes as one `tk_string`. The formatter will eventually need the interp segments split out — could be a `tk_string_start` / `tk_string_part` / `tk_interp_start` / `tk_interp_end` sequence. May defer to a follow-up if Part B can land without it.
 
-2. **New declaration AST entities:**
-   - `EntityDecl { name, is_public, fields: Array<FieldDecl>, methods: Array<FunctionDecl>, constructor: Constructor (optional), invariants: Array<Expr> }`
-   - `FieldDecl { name, type_name, default_expr: Expr (optional) }`
-   - `EnumDecl { name, is_public, variants: Array<EnumVariant> }`
-   - `EnumVariant { name, params: Array<Param> }`
-   - `TraitDecl { name, methods: Array<TraitMethodSig> }`
-   - `ImplDecl { trait_name, entity_name, methods: Array<FunctionDecl> }`
-   - `IntentBlock { goal: String, verified_by: Array<String> }`
-   - `TestDecl { name: String, body: Block }`
-   - `ExternDecl { name, params, return_type, target_path }`
+**Part B: begin the formatter** (`selfhost/formatter/format.intent`). Build an `AST → String` emitter. Initial scope:
+- Module + import lines.
+- Function declarations with parameter lists, return types, and (initially) raw-text body re-emission via re-tokenisation. A proper statement/expression formatter follows incrementally.
+- Entity / enum / trait / impl / test / extern declarations.
+- Per-line indentation by AST depth (entity body indented 4 spaces, statement body the same, etc.).
 
-3. **Update `Program`** to hold `Array<EntityDecl>`, `Array<EnumDecl>`, etc., or a single `Array<TopLevelDecl>` with a kind discriminator. The latter is simpler.
+The dogfood goal: `intentc fmt` (current Go impl) and `selfhost/formatter` (stage2 Intent impl) produce byte-equal output on a small corpus. Initial corpus: `examples/hello.intent`, `examples/fibonacci.intent`, `selfhost/formatter/lexer.intent`. Full parity is a Phase 38+ milestone.
 
-4. **New parse methods** per declaration form. Reuse `parse_block`, `parse_expr`, `parse_function_decl` heavily.
+Recommended sequencing for Phase 37:
+1. Part A first (char + float + multi-line comments). Stage2 tests around the new token kinds.
+2. Wire `tk_char` / `tk_float` into the expression parser as new primary kinds.
+3. Self-parse dogfood: `parse(read_file("selfhost/formatter/lexer.intent"))` succeeds — first real-world test.
+4. Begin Part B.
 
-5. **Tests** covering each declaration kind + the round-trip of `parser.intent` itself (parse the stage2 parser source with the stage2 parser — first dogfood checkpoint).
+Likely new gaps Phase 37 will surface:
+- File I/O in stage2 (`read_file`). Probably needs a stage1 extern.
+- A real `TypeRef` AST if the formatter needs to round-trip `Array<Int>`, `Result<T, E>`, etc. instead of the current `<...>`-suffix string.
+- Source-order tracking on `Program` (or per-decl `line: Int`) if the formatter needs to interleave declarations of different kinds.
 
-Likely new gaps Phase 36 may surface:
-- Type-argument parsing: `Array<T>`, `Result<T, E>`, `Map<K, V>` currently stored as `"Array<...>"` string. A real `TypeRef` AST might be needed for the formatter to round-trip types correctly. Could be deferred to Phase 37.
-- Cross-module imports of new entity types from `ast.intent`.
-- Constructor parsing — `constructor(args) { body }` syntax inside an `entity` block.
-
-## Other candidates (orthogonal)
+## Other candidates (orthogonal to stage2 work)
 
 - **Verify-aware stripping** (`--strip-contracts=verified`) — ADR 0033 deferred.
 - **String surface follow-up ADR** — `s.to_int()`, `s.index_of`, `s.replace`, Unicode-aware predicates.
 - **Phase 17.G — WASM test runner**, **17.H — coverage**.
 - **Phase 23 — VS Code Marketplace publish**.
 - **ADR 004x — Package registry signing**.
+- **Backend ADR — Cross-module function call qualification** (surfaced in Phase 36).
+- **Backend ADR — Auto-`&mut` for entity parameters** (surfaced in Phase 36).
 
 ## Memory state
 
@@ -94,4 +97,4 @@ Durable items (unchanged this phase):
 
 1. `git log --oneline -10` for recent landings.
 2. `aiki task` for the open task list.
-3. Recommended start: open `selfhost/formatter/parser.intent` to refresh on the AST shape (especially `Stmt` and `Expr`), then begin Phase 36. Suggested first move: split AST entities + kind constants into `ast.intent` (read-only refactor; tests should be unaffected) before adding new declaration kinds. After the split, `parser.intent` keeps the `Parser` entity + parse methods + helpers + tests; `ast.intent` holds the entity declarations + kind constants.
+3. Recommended start: re-read `selfhost/formatter/ast.intent` to refresh on the AST shape (now split out, all entities + kind constants in one file), then begin Phase 37 with Part A (lexer extensions). Suggested order: char literals first (smallest surface, unblocks parser test for `'{'.to_string()` patterns), then float literals (the Phase 35 expression parser already has `parse_int`; modelling `parse_float` on top is straightforward), then multi-line comments. Self-parse dogfood after Part A lands.
