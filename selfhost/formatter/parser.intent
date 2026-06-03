@@ -1,22 +1,43 @@
-// selfhost/formatter/parser.intent — Phase 33 / ADR 0040 stage2.
+// selfhost/formatter/parser.intent — Phase 33 + 34 / ADR 0040 stage2.
 //
 // Parses the top-level shape of an Intent program:
 //   - module declaration
 //   - imports
-//   - function declarations (signature only; body kept as raw text for now)
+//   - function declarations (modifiers + signature)
+//   - function bodies as Block of statements (let / return / if-else /
+//     while / expression statements). Phase 34 addition.
 //
-// Out of scope (deferred to Phase 34+):
-//   - parsing statements / expressions inside function bodies
-//   - entity / trait / impl / intent / test / extern declarations
-//   - type-argument lists (Array<T>, Result<T,E>, etc.) — v1 parser
-//     captures a primitive type or bare identifier and stores it as the
-//     return-type string.
+// Out of scope (deferred to Phase 35+):
+//   - parsing expressions properly — Phase 34 captures expression text as
+//     a raw token-joined String via depth-balanced bracket scanning.
+//   - entity / trait / impl / intent / test / extern declarations.
+//   - type-argument lists (Array<T>, Result<T,E>, etc.) — captures a
+//     primitive type or bare identifier with a "<...>" suffix marker.
+//   - match / for / break / continue / try / await statements.
 //
 // Builds on Phase 32's lexer (formatter_lexer module).
+//
+// AST shape choice (Phase 34): one `Stmt` entity with Int discriminator
+// + per-kind fields, mirroring how Token uses `kind: Int`. Intent enums
+// with payloads would force every field access through a match arm and
+// each arm is a single expression, so a sum-typed Stmt would be awkward
+// to consume. Single-entity-with-tag is the same trade Token already
+// makes; recursive sizing isn't a problem because nested Block fields
+// are reached via Array<Stmt> which is heap-allocated.
 
 module formatter_parser version "0.1.0";
 
 import "lexer.intent";
+
+// --- Statement kind constants -----------------------------------------------
+//
+// Same Int-discriminator pattern as Token's tk_*() functions in the lexer.
+
+public function st_let() returns Int { return 1; }
+public function st_return() returns Int { return 2; }
+public function st_if() returns Int { return 3; }
+public function st_while() returns Int { return 4; }
+public function st_expr() returns Int { return 5; }
 
 // --- AST entities -----------------------------------------------------------
 
@@ -30,6 +51,43 @@ public entity Param {
     }
 }
 
+// Statement node. Field usage by kind:
+//   st_let    — name, type_name, is_mutable, expr_text (rhs)
+//   st_return — expr_text (may be empty for `return;`)
+//   st_expr   — expr_text
+//   st_if     — expr_text (condition), then_block, else_block, has_else
+//   st_while  — expr_text (condition), then_block (body)
+// Unused fields are populated with default values ("" / false / empty_block()).
+public entity Stmt {
+    field kind: Int;
+    field expr_text: String;
+    field name: String;
+    field type_name: String;
+    field is_mutable: Bool;
+    field then_block: Block;
+    field else_block: Block;
+    field has_else: Bool;
+
+    constructor(kind: Int, expr_text: String, name: String, type_name: String, is_mutable: Bool, then_block: Block, else_block: Block, has_else: Bool) {
+        self.kind = kind;
+        self.expr_text = expr_text;
+        self.name = name;
+        self.type_name = type_name;
+        self.is_mutable = is_mutable;
+        self.then_block = then_block;
+        self.else_block = else_block;
+        self.has_else = has_else;
+    }
+}
+
+public entity Block {
+    field stmts: Array<Stmt>;
+
+    constructor(stmts: Array<Stmt>) {
+        self.stmts = stmts;
+    }
+}
+
 public entity FunctionDecl {
     field name: String;
     field is_public: Bool;
@@ -37,16 +95,16 @@ public entity FunctionDecl {
     field is_async: Bool;
     field params: Array<Param>;
     field return_type: String;
-    field body_text: String; // raw source between { ... } — Phase 34 will parse it
+    field body: Block;
 
-    constructor(name: String, is_public: Bool, is_entry: Bool, is_async: Bool, params: Array<Param>, return_type: String, body_text: String) {
+    constructor(name: String, is_public: Bool, is_entry: Bool, is_async: Bool, params: Array<Param>, return_type: String, body: Block) {
         self.name = name;
         self.is_public = is_public;
         self.is_entry = is_entry;
         self.is_async = is_async;
         self.params = params;
         self.return_type = return_type;
-        self.body_text = body_text;
+        self.body = body;
     }
 }
 
@@ -302,46 +360,160 @@ public entity Parser {
             }
         }
 
-        let body_text: String = self.consume_braced_body();
-        return FunctionDecl(name_tok.text, is_public, is_entry, is_async, params, return_type, body_text);
+        let body: Block = self.parse_block();
+        return FunctionDecl(name_tok.text, is_public, is_entry, is_async, params, return_type, body);
     }
 
-    // Consumes the body block `{ ... }` and returns the raw source text
-    // between the outer braces (exclusive). Tracks depth so nested braces
-    // don't terminate early. Phase 33's "skip body" approach.
-    method consume_braced_body() returns String {
-        self.expect(formatter_lexer.tk_lbrace(), "open brace to start function body");
-        // Track source positions to slice the raw body text. After the
-        // `{` advance, the previous token's line/column lets us locate
-        // the position in `source`. We use a simpler approach: walk
-        // tokens with a depth counter, recording where the body started
-        // and ended in the *source string* by indexing token positions.
-        //
-        // Approximation: rebuild body text by joining token texts with
-        // single spaces. Loses formatting fidelity but is enough for
-        // Phase 33 (which doesn't need the body, just to skip it).
-        let mutable depth: Int = 1;
-        let mutable parts: Array<String> = [];
-        while depth > 0 and not self.at_end() {
-            if self.check(formatter_lexer.tk_lbrace()) {
-                depth = depth + 1;
-                let lb: Token = self.advance();
-                parts.push(lb.text);
+    // --- statement-level parse -------------------------------------------
+
+    // Parses a brace-delimited `{ ... }` block: consumes opening `{`, then
+    // dispatches into statement parsers until it sees a `}` at this level.
+    // Records (but does not propagate via panic) any error via self.fail.
+    method parse_block() returns Block {
+        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start block");
+        let mutable stmts: Array<Stmt> = [];
+        while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
+            stmts.push(self.parse_statement());
+        }
+        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close block");
+        return Block(stmts);
+    }
+
+    method parse_statement() returns Stmt {
+        if self.check(formatter_lexer.kw_let()) {
+            return self.parse_let_stmt();
+        }
+        if self.check(formatter_lexer.kw_return()) {
+            return self.parse_return_stmt();
+        }
+        if self.check(formatter_lexer.kw_if()) {
+            return self.parse_if_stmt();
+        }
+        if self.check(formatter_lexer.kw_while()) {
+            return self.parse_while_stmt();
+        }
+        return self.parse_expr_stmt();
+    }
+
+    // `let [mutable] IDENT [: TYPE] = EXPR;`
+    method parse_let_stmt() returns Stmt {
+        self.expect(formatter_lexer.kw_let(), "'let'");
+        let mutable is_mut: Bool = false;
+        if self.check_consume(formatter_lexer.kw_mutable()) {
+            is_mut = true;
+        }
+        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "binding name");
+        let mutable type_name: String = "";
+        if self.check_consume(formatter_lexer.tk_colon()) {
+            type_name = self.parse_type_name();
+        }
+        self.expect(formatter_lexer.tk_assign(), "'=' in let binding");
+        let rhs: String = self.capture_expr_until_semi();
+        self.expect(formatter_lexer.tk_semicolon(), "';' to end let statement");
+        return Stmt(st_let(), rhs, name_tok.text, type_name, is_mut, empty_block(), empty_block(), false);
+    }
+
+    // `return [EXPR];`
+    method parse_return_stmt() returns Stmt {
+        self.expect(formatter_lexer.kw_return(), "'return'");
+        let mutable rhs: String = "";
+        if not self.check(formatter_lexer.tk_semicolon()) {
+            rhs = self.capture_expr_until_semi();
+        }
+        self.expect(formatter_lexer.tk_semicolon(), "';' to end return statement");
+        return Stmt(st_return(), rhs, "", "", false, empty_block(), empty_block(), false);
+    }
+
+    // `if EXPR { BLOCK } [else (if-stmt | { BLOCK })]`. `else if` chains
+    // are folded into a single-statement else-block whose only statement
+    // is the nested if.
+    method parse_if_stmt() returns Stmt {
+        self.expect(formatter_lexer.kw_if(), "'if'");
+        let cond: String = self.capture_expr_until_lbrace();
+        let then_blk: Block = self.parse_block();
+        let mutable else_blk: Block = empty_block();
+        let mutable has_else: Bool = false;
+        if self.check_consume(formatter_lexer.kw_else()) {
+            has_else = true;
+            if self.check(formatter_lexer.kw_if()) {
+                let mutable inner: Array<Stmt> = [];
+                inner.push(self.parse_if_stmt());
+                else_blk = Block(inner);
             } else {
-                if self.check(formatter_lexer.tk_rbrace()) {
-                    depth = depth - 1;
-                    let rb: Token = self.advance();
-                    if depth > 0 {
-                        parts.push(rb.text);
-                    }
-                } else {
-                    let other: Token = self.advance();
-                    parts.push(other.text);
-                }
+                else_blk = self.parse_block();
             }
         }
-        if depth != 0 {
-            self.error = "unterminated function body";
+        return Stmt(st_if(), cond, "", "", false, then_blk, else_blk, has_else);
+    }
+
+    // `while EXPR { BLOCK }`
+    method parse_while_stmt() returns Stmt {
+        self.expect(formatter_lexer.kw_while(), "'while'");
+        let cond: String = self.capture_expr_until_lbrace();
+        let body: Block = self.parse_block();
+        return Stmt(st_while(), cond, "", "", false, body, empty_block(), false);
+    }
+
+    // Anything else: capture until `;` and consume it.
+    method parse_expr_stmt() returns Stmt {
+        let text: String = self.capture_expr_until_semi();
+        self.expect(formatter_lexer.tk_semicolon(), "';' to end expression statement");
+        return Stmt(st_expr(), text, "", "", false, empty_block(), empty_block(), false);
+    }
+
+    // --- expression-text capture (Phase 34 stub) -------------------------
+    //
+    // Scans tokens, tracking nesting depth of `(`, `[`, `{`, until a
+    // terminator at depth 0 is seen. The terminator is NOT consumed —
+    // the caller is responsible. Joins captured token texts with single
+    // spaces. Phase 35 replaces this with a real expression parser.
+
+    method capture_expr_until_semi() returns String {
+        let mutable parts: Array<String> = [];
+        let mutable paren_d: Int = 0;
+        let mutable bracket_d: Int = 0;
+        let mutable brace_d: Int = 0;
+        while not self.at_end() {
+            let k: Int = self.peek_kind();
+            if paren_d == 0 and bracket_d == 0 and brace_d == 0 and k == formatter_lexer.tk_semicolon() {
+                return join_with_space(parts);
+            }
+            // Bail out before consuming an unbalanced closing brace —
+            // that's the enclosing block's terminator, not ours.
+            if brace_d == 0 and k == formatter_lexer.tk_rbrace() {
+                self.fail("unterminated expression (missing ';')");
+                return join_with_space(parts);
+            }
+            let t: Token = self.advance();
+            parts.push(t.text);
+            if k == formatter_lexer.tk_lparen() { paren_d = paren_d + 1; }
+            if k == formatter_lexer.tk_rparen() { paren_d = paren_d - 1; }
+            if k == formatter_lexer.tk_lbracket() { bracket_d = bracket_d + 1; }
+            if k == formatter_lexer.tk_rbracket() { bracket_d = bracket_d - 1; }
+            if k == formatter_lexer.tk_lbrace() { brace_d = brace_d + 1; }
+            if k == formatter_lexer.tk_rbrace() { brace_d = brace_d - 1; }
+        }
+        return join_with_space(parts);
+    }
+
+    // For if / while conditions: capture until `{` at depth 0. Conditions
+    // don't contain block expressions in the surface language yet, so we
+    // only balance `(` and `[`.
+    method capture_expr_until_lbrace() returns String {
+        let mutable parts: Array<String> = [];
+        let mutable paren_d: Int = 0;
+        let mutable bracket_d: Int = 0;
+        while not self.at_end() {
+            let k: Int = self.peek_kind();
+            if paren_d == 0 and bracket_d == 0 and k == formatter_lexer.tk_lbrace() {
+                return join_with_space(parts);
+            }
+            let t: Token = self.advance();
+            parts.push(t.text);
+            if k == formatter_lexer.tk_lparen() { paren_d = paren_d + 1; }
+            if k == formatter_lexer.tk_rparen() { paren_d = paren_d - 1; }
+            if k == formatter_lexer.tk_lbracket() { bracket_d = bracket_d + 1; }
+            if k == formatter_lexer.tk_rbracket() { bracket_d = bracket_d - 1; }
         }
         return join_with_space(parts);
     }
@@ -380,6 +552,13 @@ public entity Parser {
         if self.check(formatter_lexer.kw_async_marker()) { return true; }
         return false;
     }
+}
+
+// Empty Block constructor (avoids a bare `Block([])` literal where the
+// element type cannot be inferred at the call site).
+public function empty_block() returns Block {
+    let mutable s: Array<Stmt> = [];
+    return Block(s);
 }
 
 // Joins string parts with single spaces. Phase 33 helper for body capture.
@@ -500,5 +679,150 @@ test "parser reports unexpected token at top level" {
 
 test "missing semicolon after module records error" {
     let prog: Program = parse("module foo version \"1.0\"");
+    assert(prog.error != "");
+}
+
+// --- Phase 34: statement parser tests ---------------------------------------
+
+test "empty function body produces empty block" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + '{'.to_string() + " " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions[0].body.stmts), 0);
+}
+
+test "single return parses as one st_return statement" {
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions[0].body.stmts), 1);
+    assert_eq(prog.functions[0].body.stmts[0].kind, st_return());
+    assert_eq(prog.functions[0].body.stmts[0].expr_text, "0");
+}
+
+test "return without value records empty expr" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + '{'.to_string() + " return; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(prog.functions[0].body.stmts[0].kind, st_return());
+    assert_eq(prog.functions[0].body.stmts[0].expr_text, "");
+}
+
+test "let with type annotation" {
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let x: Int = 7; return x; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions[0].body.stmts), 2);
+    assert_eq(prog.functions[0].body.stmts[0].kind, st_let());
+    assert_eq(prog.functions[0].body.stmts[0].name, "x");
+    assert_eq(prog.functions[0].body.stmts[0].type_name, "Int");
+    assert_eq(prog.functions[0].body.stmts[0].is_mutable, false);
+    assert_eq(prog.functions[0].body.stmts[0].expr_text, "7");
+    assert_eq(prog.functions[0].body.stmts[1].kind, st_return());
+    assert_eq(prog.functions[0].body.stmts[1].expr_text, "x");
+}
+
+test "let mutable without annotation" {
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let mutable y = 0; return y; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(prog.functions[0].body.stmts[0].kind, st_let());
+    assert_eq(prog.functions[0].body.stmts[0].name, "y");
+    assert_eq(prog.functions[0].body.stmts[0].type_name, "");
+    assert_eq(prog.functions[0].body.stmts[0].is_mutable, true);
+    assert_eq(prog.functions[0].body.stmts[0].expr_text, "0");
+}
+
+test "expression statement (assignment)" {
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let mutable y = 0; y = y + 1; return y; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions[0].body.stmts), 3);
+    assert_eq(prog.functions[0].body.stmts[1].kind, st_expr());
+    assert_eq(prog.functions[0].body.stmts[1].expr_text, "y = y + 1");
+}
+
+test "if statement without else" {
+    let src: String = "module m version \"1.0\"; function f(x: Int) returns Int " + '{'.to_string() + " if x > 0 " + '{'.to_string() + " return 1; " + '}'.to_string() + " return 0; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions[0].body.stmts), 2);
+    assert_eq(prog.functions[0].body.stmts[0].kind, st_if());
+    assert_eq(prog.functions[0].body.stmts[0].expr_text, "x > 0");
+    assert_eq(prog.functions[0].body.stmts[0].has_else, false);
+    assert_eq(len(prog.functions[0].body.stmts[0].then_block.stmts), 1);
+    assert_eq(prog.functions[0].body.stmts[0].then_block.stmts[0].kind, st_return());
+    assert_eq(prog.functions[0].body.stmts[0].then_block.stmts[0].expr_text, "1");
+}
+
+test "if-else statement" {
+    let src: String = "module m version \"1.0\"; function f(x: Int) returns Int " + '{'.to_string() + " if x > 0 " + '{'.to_string() + " return 1; " + '}'.to_string() + " else " + '{'.to_string() + " return 0; " + '}'.to_string() + " " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(prog.functions[0].body.stmts[0].kind, st_if());
+    assert_eq(prog.functions[0].body.stmts[0].has_else, true);
+    assert_eq(len(prog.functions[0].body.stmts[0].else_block.stmts), 1);
+    assert_eq(prog.functions[0].body.stmts[0].else_block.stmts[0].expr_text, "0");
+}
+
+test "else if chains into nested if in else_block" {
+    let src: String = "module m version \"1.0\"; function f(x: Int) returns Int " + '{'.to_string()
+        + " if x > 0 " + '{'.to_string() + " return 1; " + '}'.to_string()
+        + " else if x < 0 " + '{'.to_string() + " return -1; " + '}'.to_string()
+        + " else " + '{'.to_string() + " return 0; " + '}'.to_string()
+        + " " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    let outer: Stmt = prog.functions[0].body.stmts[0];
+    assert_eq(outer.kind, st_if());
+    assert_eq(outer.has_else, true);
+    assert_eq(len(outer.else_block.stmts), 1);
+    let inner: Stmt = outer.else_block.stmts[0];
+    assert_eq(inner.kind, st_if());
+    assert_eq(inner.expr_text, "x < 0");
+    assert_eq(inner.has_else, true);
+    assert_eq(inner.else_block.stmts[0].expr_text, "0");
+}
+
+test "while statement" {
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string()
+        + " let mutable i: Int = 0; while i < 10 " + '{'.to_string() + " i = i + 1; " + '}'.to_string()
+        + " return i; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    let w: Stmt = prog.functions[0].body.stmts[1];
+    assert_eq(w.kind, st_while());
+    assert_eq(w.expr_text, "i < 10");
+    assert_eq(len(w.then_block.stmts), 1);
+    assert_eq(w.then_block.stmts[0].kind, st_expr());
+    assert_eq(w.then_block.stmts[0].expr_text, "i = i + 1");
+}
+
+test "expression with balanced parens captures correctly" {
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string()
+        + " let x: Int = add(1, 2); return x; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(prog.functions[0].body.stmts[0].expr_text, "add ( 1 , 2 )");
+}
+
+test "nested if inside if then-block" {
+    let src: String = "module m version \"1.0\"; function f(x: Int, y: Int) returns Int " + '{'.to_string()
+        + " if x > 0 " + '{'.to_string()
+        + " if y > 0 " + '{'.to_string() + " return 1; " + '}'.to_string()
+        + " " + '}'.to_string()
+        + " return 0; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    let outer: Stmt = prog.functions[0].body.stmts[0];
+    assert_eq(outer.kind, st_if());
+    let inner: Stmt = outer.then_block.stmts[0];
+    assert_eq(inner.kind, st_if());
+    assert_eq(inner.expr_text, "y > 0");
+}
+
+test "missing semicolon after return is reported" {
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " return 0 " + '}'.to_string();
+    let prog: Program = parse(src);
     assert(prog.error != "");
 }

@@ -4,9 +4,9 @@ Stage2 Intent formatter — Intent-implemented `intentc fmt`. Lives alongside
 stage1's Go formatter (`internal/formatter/`); will eventually replace it
 once parity is reached.
 
-**Status (2026-06-03):** lexer + top-level parser shipped (Phases 32, 33).
-25 in-language tests passing on rust + js. Statement parsing is the next
-step.
+**Status (2026-06-03):** lexer + top-level parser + statement parser
+shipped (Phases 32, 33, 34). 38 in-language tests passing on rust + js.
+Expression parsing is the next step.
 
 ## Big picture
 
@@ -55,8 +55,8 @@ selfhost/formatter/
 | **31** | Stage1 adds `Char` type, `s[i]`, `s[i..j]`, `len(s)`, char predicates ([ADR 0041](../../docs/decisions/0041-string-indexing-and-char-type.md)). | **Shipped** (commit `54f05b4`) |
 | **32** | Lexer in Intent: tokenise a useful subset of source. | **Shipped** (commit `859998f`; [PRD](../../ops/plans/phase-32-lexer-in-intent.md)) |
 | **33** | AST entity layout + parser for top-level decls (module / imports / function signatures). | **Shipped** (commit `3d3fdef`; [PRD](../../ops/plans/phase-33-parser-toplevel-in-intent.md)) |
-| **34** | Statement-level parser (`let`, `return`, `if`, `while`, expression statements, `Block`). | Next |
-| **35** | Expression parser with precedence. | Blocked on 34 |
+| **34** | Statement-level parser (`let`, `return`, `if`/`else`, `while`, expression statements, `Block`). | **Shipped** ([PRD](../../ops/plans/phase-34-statement-parser-in-intent.md)) |
+| **35** | Expression parser with precedence. | Next |
 | **36** | Entity / trait / impl / intent block parsing. | Blocked on 33-34 |
 | **37** | Formatter (AST → string), byte-parity on a corpus. | Blocked on 33-36 |
 | **38** | Full-feature parser parity (async, pattern matching, generics). | Blocked on 33-37 |
@@ -89,7 +89,7 @@ Run the stage2 tests on every backend with:
 
 ```bash
 intentc test --all-targets selfhost/formatter/lexer.intent     # 13 tests
-intentc test --all-targets selfhost/formatter/parser.intent    # 12 tests + the 13 lexer tests (imported)
+intentc test --all-targets selfhost/formatter/parser.intent    # 25 tests + the 13 lexer tests (imported) = 38
 ```
 
 PRs should reference the relevant phase number.
