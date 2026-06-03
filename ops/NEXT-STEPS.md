@@ -1,63 +1,57 @@
-# Pickup Notes — 2026-06-03 (evening)
+# Pickup Notes — 2026-06-03 (late evening)
 
-Handoff after the Phase 30 ship + the self-hosting kickoff (ADRs 0040, 0041 + Phase 31 PRD + selfhost scaffolding). Resume from here.
+Handoff after Phase 31 ship. Resume from here.
 
 ## Where we are
 
-Shipped today: Phase 30 (package registry — git + MVS, commit `9898b53`, pushed to `origin/main`). Then sketched the multi-phase self-hosting plan as design artefacts:
+Shipped today (in order):
+- **Phase 30** (commit `9898b53`) — package registry, git + MVS.
+- **ADRs 0040 + 0041 + Phase 31 PRD + scaffolding** (commit `dfd3063`) — self-hosting strategic frame + first language-gap design.
+- **Phase 31** (this session) — `Char` primitive + string indexing/slicing + `len(s)` for String + ASCII char predicates + `char_from_codepoint`. Three backends + Z3 verifier integration. About to commit.
 
-- **ADR 0040** — Self-hosted formatter strategy (stage1/stage2 mental model from Zig; Intent-parses-Intent direction; full byte-parity target; multi-phase, gap-driven).
-- **ADR 0041** — String indexing + `Char` type (the first language gap that blocks writing a lexer in Intent).
-- **Phase 31 PRD** — `ops/plans/phase-31-string-primitives.md` (9 tasks; ~1.5-2k LOC; covers lexer / parser / checker / IR / 3 backends / Z3 verify / docs / feature-coverage example).
-- **selfhost/** tree scaffolded (READMEs + empty `intent.toml`); no Intent code yet.
-
-Branch `main`, working tree about to commit the docs. Nothing has changed in stage1 code yet — all design.
+The first language extension for stage2 self-hosting is in place. A hand-rolled lexer in Intent is now writable.
 
 ## Immediate next step
 
-**Implement Phase 31** per `ops/plans/phase-31-string-primitives.md`. This is the prerequisite for *any* stage2 Intent code. Until it lands, the lexer can't be written; until the lexer lands, nothing else in the self-hosting plan can move.
+**Phase 32 — lexer in Intent (`selfhost/formatter/lexer.intent`).** With Phase 31's primitives, the lexer can iterate codepoint-by-codepoint, classify with `is_alpha`/`is_digit`/`is_whitespace`, and extract token text via slicing. Recommended approach:
 
-Phase 31 surface (recap):
-1. Lexer: `'a'` char-literal token + escape forms.
-2. AST + parser: `CharLit` node + slice via `RangeExpr` inside `IndexExpr`.
-3. Checker: `Char` primitive + relaxed `IndexExpr`/`len()` for String + char built-ins.
-4. IR + Rust backend (precomputed `Vec<char>`).
-5. IR + JS backend (`Array.from(s)`).
-6. IR + WASM backend (per-string offset table).
-7. Z3 verifier integration.
-8. Feature-coverage example + differential `--all-targets` test.
-9. Docs (INTENT.md, DESIGN.md, grammar.ebnf).
+1. Define a `Token` entity in `selfhost/formatter/ast.intent` (or a sibling file) — kind + literal + line + column. Probably best modelled as an enum since Intent already supports data-carrying variants.
+2. Write `lex(source: String) returns Array<Token>` in `selfhost/formatter/lexer.intent`. Start with the smallest useful subset: idents, ints, strings, keywords, punctuation. Defer interpolation, multi-line strings, comments-aware lex modes.
+3. Add an in-language test block exercising the lexer against a fixture string of every token kind.
 
-Acceptance: `make validate` green; `intentc test --all-targets examples/char_string_demo.intent` green; a verify test on a contract using char predicates passes.
+Likely gaps Phase 32 will surface (each worth its own ADR if they actually block work):
+- **`s.to_int() -> Result<Int, String>`** for parsing integer literals — straightforward extension.
+- **Sum-type ergonomics richer than enum** if Token-kind enum gets unwieldy.
+- **Stdin streaming** for the eventual `selfhost/formatter/main.intent` binary.
 
-## After Phase 31
+## Strategic context
 
-Phase 32 — write the lexer in Intent (`selfhost/formatter/lexer.intent`). The first stage2 code. Phase 33+ are parser layers. See ADR 0040 §"Delivery phases" for the indicative sequence and `selfhost/formatter/README.md` for the per-phase status table.
+Per `[[project-self-hosting-priority]]`, self-hosting is the priority. Phase 29 + 30 + 31 are the foundation:
+- 29 retired the parallel Rust testgen path so the toolchain has one test-emission code path.
+- 30 added the package registry so stage2 tools can declare and depend on packages.
+- 31 added the language extensions needed to lex Intent source from Intent.
 
-## Open ADRs / threads from this session
-
-- **ADR 0040** (strategy) — accepted; the meta-ADR for the self-hosting milestone.
-- **ADR 0041** (Char type + string indexing) — accepted; Phase 31 implementation.
-- **Open follow-ups** (per ADR 0040 §"Open questions"): char type details (resolved by 0041), sum types beyond enum (TBD when parser phase needs them), dynamic dispatch for visitor pattern (TBD), I/O streaming for stage2 binaries (TBD), stage1 retirement criteria (TBD, post-parity).
+Phases 32–39 (per ADR 0040) build the stage2 formatter incrementally. Phase numbers are indicative — each phase may surface its own language gap, in which case the gap gets its own ADR before the implementation phase resumes.
 
 ## Other candidates (orthogonal, not on the self-hosting critical path)
 
 - **Verify-aware stripping** (`--strip-contracts=verified`) — ADR 0033 deferred.
+- **String surface follow-up ADR** — `s.to_int()` parse, `s.index_of(needle)`, `s.replace(...)`, Unicode-aware predicates. Each as needed by Phase 32+.
 - **Phase 17.G — WASM test runner.**
 - **Phase 17.H — Coverage / snapshot testing.**
-- **Phase 23 — VS Code Marketplace publish.** Blocked on user-supplied publisher account, PAT, branded icon.
-- **ADR 004x — Signing for the package registry** (ADR 0039 §9 deferred).
+- **Phase 23 — VS Code Marketplace publish.** Blocked on user-supplied publisher account, PAT, icon.
+- **ADR 004x — Package registry signing.** ADR 0039 §9 deferred.
 
 ## Memory state
 
 Four durable items hold:
 - `project_intent_is_a_new_language` — every cross-cutting decision should cite prior-art precedent.
 - `feedback_write_adrs_along_the_way` — ADRs are written as decisions land, with precedent tables.
-- `feedback_minimise_mistakes_in_autonomous_runs` — re-read code before editing, run `make validate` after each task, surface uncertainty instead of guessing.
-- `project_self_hosting_priority` — bootstrapping Intent with itself is the near-term goal; package registry was the major unblock (now done); first stage2 target is the formatter.
+- `feedback_minimise_mistakes_in_autonomous_runs` — re-read code before editing, run `make validate` after each task, surface uncertainty.
+- `project_self_hosting_priority` — bootstrapping Intent with itself is the near-term goal.
 
 ## How to resume
 
-1. `git log --oneline -8` to see the recent landings (Phase 30 + the design pass).
+1. `git log --oneline -10` for recent landings (Phases 30/31, ADRs 0039-0041).
 2. `aiki task` for the open task list.
-3. Recommended start: open `ops/plans/phase-31-string-primitives.md`, pick task 31.1 (lexer char-literal token), and begin. Each task in the PRD is sized to be a single focused commit.
+3. Recommended start: open `selfhost/formatter/README.md`, then sketch the Token entity layout and start Phase 32. The lexer is the smallest piece and surfaces the first round of gaps.

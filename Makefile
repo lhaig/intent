@@ -107,7 +107,8 @@ TESTED_EXAMPLES := \
 	examples/task_queue.intent \
 	examples/io_demo.intent \
 	examples/js_demo.intent \
-	examples/target_specific_demo.intent
+	examples/target_specific_demo.intent \
+	examples/char_string_demo.intent
 
 # Run `intentc test` over each example that has tests, on the default target.
 test-examples: build

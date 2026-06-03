@@ -101,6 +101,9 @@ func typeForIR(t *checker.Type) byte {
 		return valF64
 	case "Bool":
 		return valI32
+	case "Char":
+		// Phase 31 / ADR 0041: Char is represented as i32 (codepoint).
+		return valI32
 	case "String":
 		// Strings are represented as i32 pointers into linear memory
 		return valI32
@@ -642,6 +645,11 @@ func (fc *funcCompiler) compileExpr(expr ir.Expr) {
 		} else {
 			fc.body = append(fc.body, encodeLEB128S(0)...)
 		}
+
+	case *ir.CharLit:
+		// Phase 31 / ADR 0041: Char is i32 (codepoint).
+		fc.body = append(fc.body, opI32Const)
+		fc.body = append(fc.body, encodeLEB128S(int64(e.Value))...)
 
 	case *ir.StringLit:
 		// Store string in data segment, push pointer as i32

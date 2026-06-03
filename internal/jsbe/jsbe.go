@@ -1107,6 +1107,10 @@ func (g *generator) generateExpr(e ir.Expr) string {
 		}
 		return "false"
 
+	case *ir.CharLit:
+		// Phase 31 / ADR 0041: JS represents Char as a Number (the codepoint).
+		return fmt.Sprintf("%d", expr.Value)
+
 	case *ir.ArrayLit:
 		if len(expr.Elements) == 0 {
 			if expr.Type != nil && expr.Type.Name == "Map" {
@@ -1121,6 +1125,19 @@ func (g *generator) generateExpr(e ir.Expr) string {
 		return fmt.Sprintf("[%s]", strings.Join(elems, ", "))
 
 	case *ir.IndexExpr:
+		// Phase 31 / ADR 0041: String indexing/slicing uses Array.from to handle
+		// codepoints uniformly across surrogate pairs.
+		if objType := expr.Object.ExprType(); objType != nil && objType.Name == "String" {
+			obj := g.generateExpr(expr.Object)
+			if rng, ok := expr.Index.(*ir.RangeExpr); ok {
+				start := g.generateExpr(rng.Start)
+				end := g.generateExpr(rng.End)
+				return fmt.Sprintf("Array.from(%s).slice(%s, %s).join('')", obj, start, end)
+			}
+			idx := g.generateExpr(expr.Index)
+			// Codepoint at the i-th Unicode scalar value.
+			return fmt.Sprintf("Array.from(%s)[%s].codePointAt(0)", obj, idx)
+		}
 		return fmt.Sprintf("%s[%s]",
 			g.generateExpr(expr.Object),
 			g.generateExpr(expr.Index))
@@ -1232,7 +1249,17 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr) string {
 			if expr.Args[0].ExprType() != nil && expr.Args[0].ExprType().Name == "Map" {
 				return fmt.Sprintf("(%s.size)", arg)
 			}
+			// Phase 31 / ADR 0041: String len is codepoint count, not UTF-16 code units.
+			if expr.Args[0].ExprType() != nil && expr.Args[0].ExprType().Name == "String" {
+				return fmt.Sprintf("(Array.from(%s).length)", arg)
+			}
 			return fmt.Sprintf("(%s.length)", arg)
+		}
+	case "char_from_codepoint":
+		// Phase 31 / ADR 0041.
+		if len(expr.Args) == 1 {
+			n := g.generateExpr(expr.Args[0])
+			return fmt.Sprintf("((__cp) => (Number.isInteger(__cp) && __cp >= 0 && __cp <= 0x10FFFF && (__cp < 0xD800 || __cp > 0xDFFF)) ? { _tag: \"Ok\", value: __cp } : { _tag: \"Err\", value: \"codepoint out of range or surrogate\" })(%s)", n)
 		}
 	// Phase 16 / ADR 0029: assertion builtins.
 	case "assert":
@@ -1416,16 +1443,43 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr) string {
 		return fmt.Sprintf("(%s._tag === \"None\")", obj)
 	}
 
-	// to_string() method on Int, Float, Bool
+	// to_string() method on Int, Float, Bool, Char.
+	// Phase 31 / ADR 0041: Char.to_string emits the single-char string via codepoint.
 	if expr.Method == "to_string" && len(expr.Args) == 0 {
+		if objType := expr.Object.ExprType(); objType != nil && objType.Name == "Char" {
+			return fmt.Sprintf("String.fromCodePoint(%s)", obj)
+		}
 		return fmt.Sprintf("String(%s)", obj)
+	}
+
+	// Phase 31 / ADR 0041: Char methods.
+	if objType := expr.Object.ExprType(); objType != nil && objType.Name == "Char" {
+		switch expr.Method {
+		case "to_codepoint":
+			// Char is stored as JS Number (codepoint), so to_codepoint is identity.
+			// Matches IntLit's JS representation (also Number), so assert_eq works.
+			return fmt.Sprintf("(%s)", obj)
+		case "is_digit":
+			return fmt.Sprintf("((__c) => __c >= 48 && __c <= 57)(%s)", obj)
+		case "is_alpha":
+			return fmt.Sprintf("((__c) => (__c >= 65 && __c <= 90) || (__c >= 97 && __c <= 122))(%s)", obj)
+		case "is_alphanumeric":
+			return fmt.Sprintf("((__c) => (__c >= 48 && __c <= 57) || (__c >= 65 && __c <= 90) || (__c >= 97 && __c <= 122))(%s)", obj)
+		case "is_whitespace":
+			return fmt.Sprintf("((__c) => __c === 32 || __c === 9 || __c === 10 || __c === 13)(%s)", obj)
+		case "is_lowercase":
+			return fmt.Sprintf("((__c) => __c >= 97 && __c <= 122)(%s)", obj)
+		case "is_uppercase":
+			return fmt.Sprintf("((__c) => __c >= 65 && __c <= 90)(%s)", obj)
+		}
 	}
 
 	// String methods
 	if objType := expr.Object.ExprType(); objType != nil && objType.Name == "String" {
 		switch expr.Method {
 		case "len":
-			return fmt.Sprintf("BigInt(%s.length)", obj)
+			// Phase 31 / ADR 0041: codepoint count, not UTF-16 code units.
+			return fmt.Sprintf("BigInt(Array.from(%s).length)", obj)
 		case "to_lowercase":
 			return fmt.Sprintf("%s.toLowerCase()", obj)
 		case "trim":

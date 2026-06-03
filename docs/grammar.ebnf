@@ -262,11 +262,13 @@ postfix_expr = primary_expr , { postfix_op } ;
 
 postfix_op = "." , identifier , [ "(" , [ arg_list ] , ")" ]
            | "(" , [ arg_list ] , ")"
-           | "[" , expression , "]"
+           | "[" , expression , [ ".." , expression ] , "]"
            | "?" ;
 (* The first alternative handles both field access (no parens) and method calls (with parens). *)
 (* The second alternative handles bare function calls on an identifier primary. *)
-(* The third alternative handles array/map indexing. *)
+(* The third alternative handles array/map indexing, AND -- when the inner    *)
+(* expression is followed by ".." and another expression -- string slicing    *)
+(* (Phase 31 / ADR 0041): s[start..end] is a half-open codepoint slice.       *)
 (* The fourth alternative is the try operator for Result<T,E> error propagation. *)
 (* Note: Function calls are: identifier followed by postfix_op "(" args ")".    *)
 (*       Method calls are: expr "." identifier "(" args ")".                     *)
@@ -280,6 +282,7 @@ primary_expr = int_literal
              | string_literal
              | string_interp
              | bool_literal
+             | char_literal
              | "self"
              | "result"
              | "old" , "(" , expression , ")"
@@ -331,6 +334,7 @@ type_ref = "Int"
          | "Float"
          | "String"
          | "Bool"
+         | "Char"
          | "Void"
          | "Array" , "<" , type_ref , ">"
          | "Map" , "<" , type_ref , "," , type_ref , ">"
@@ -363,6 +367,16 @@ escape_sequence = '\"'
                | '\r' ;
 
 bool_literal = "true" | "false" ;
+
+char_literal = "'" , char_body , "'" ;
+(* Phase 31 / ADR 0041: A Unicode scalar value. char_body is one of:    *)
+(*   - any single non-'\' non-' character (e.g. 'a', 'A', '0', ' ')     *)
+(*   - a char escape: '\n', '\t', '\r', '\\', '\'', '\"', '\0'          *)
+(*   - a Unicode escape: '\u{HEX}' where HEX is 1..6 hex digits         *)
+(* Surrogate codepoints (U+D800..U+DFFF) and out-of-range values are    *)
+(* lex errors. Empty ('') and multi-character ('ab') forms are rejected.*)
+
+char_body = ? a single Unicode scalar value or escape sequence ? ;
 
 string_interp = '"' , { string_char | "${" , expression , "}" } , '"' ;
 (* String interpolation: "Hello ${name}, you are ${age} years old" *)

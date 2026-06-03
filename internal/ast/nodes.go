@@ -542,6 +542,17 @@ type BoolLit struct {
 func (b *BoolLit) Pos() (int, int) { return b.Line, b.Column }
 func (b *BoolLit) exprNode()       {}
 
+// CharLit represents a Unicode-scalar-value character literal: 'a', '\n', '\u{1234}'.
+// Phase 31 / ADR 0041. Value is the decoded codepoint.
+type CharLit struct {
+	Value  int32 // Unicode scalar value (0..0x10FFFF excluding surrogates)
+	Line   int
+	Column int
+}
+
+func (c *CharLit) Pos() (int, int) { return c.Line, c.Column }
+func (c *CharLit) exprNode()       {}
+
 // ArrayLit represents an array literal [expr, expr, ...]
 type ArrayLit struct {
 	Elements []Expression

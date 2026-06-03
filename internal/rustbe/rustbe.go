@@ -449,6 +449,8 @@ func (g *generator) mapType(t *checker.Type) string {
 		return "bool"
 	case "Void":
 		return "()"
+	case "Char":
+		return "char"
 	case "Array":
 		if t.IsGeneric && len(t.TypeParams) == 1 {
 			return "Vec<" + g.mapType(t.TypeParams[0]) + ">"
@@ -509,6 +511,8 @@ func (g *generator) defaultValue(t *checker.Type) string {
 		return "String::new()"
 	case "Bool":
 		return "false"
+	case "Char":
+		return "'\\0'"
 	case "Array":
 		return "Vec::new()"
 	case "Map":
@@ -1406,6 +1410,9 @@ func (g *generator) generateExpr(e ir.Expr, arrayRefParams map[string]bool) stri
 		}
 		return "false"
 
+	case *ir.CharLit:
+		return fmt.Sprintf("'\\u{%X}'", expr.Value)
+
 	case *ir.ArrayLit:
 		if len(expr.Elements) == 0 {
 			if expr.Type != nil && expr.Type.Name == "Map" {
@@ -1421,6 +1428,17 @@ func (g *generator) generateExpr(e ir.Expr, arrayRefParams map[string]bool) stri
 		return fmt.Sprintf("vec![%s]", strings.Join(elems, ", "))
 
 	case *ir.IndexExpr:
+		// Phase 31 / ADR 0041: String indexing/slicing dispatches to .chars().
+		if objType := expr.Object.ExprType(); objType != nil && objType.Name == "String" {
+			obj := g.generateExpr(expr.Object, arrayRefParams)
+			if rng, ok := expr.Index.(*ir.RangeExpr); ok {
+				start := g.generateExpr(rng.Start, arrayRefParams)
+				end := g.generateExpr(rng.End, arrayRefParams)
+				return fmt.Sprintf("((%s).chars().skip(%s as usize).take((%s - %s) as usize).collect::<String>())", obj, start, end, start)
+			}
+			idx := g.generateExpr(expr.Index, arrayRefParams)
+			return fmt.Sprintf("((%s).chars().nth(%s as usize).expect(\"string index out of bounds\"))", obj, idx)
+		}
 		return fmt.Sprintf("%s[%s as usize]",
 			g.generateExpr(expr.Object, arrayRefParams),
 			g.generateExpr(expr.Index, arrayRefParams))
@@ -1669,7 +1687,17 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr, arrayRefParams map[st
 	case "len":
 		if len(expr.Args) == 1 {
 			arg := g.generateExpr(expr.Args[0], arrayRefParams)
+			// Phase 31 / ADR 0041: String len is codepoint count, not byte count.
+			if argType := expr.Args[0].ExprType(); argType != nil && argType.Name == "String" {
+				return fmt.Sprintf("((%s).chars().count() as i64)", arg)
+			}
 			return fmt.Sprintf("(%s.len() as i64)", arg)
+		}
+	case "char_from_codepoint":
+		// Phase 31 / ADR 0041.
+		if len(expr.Args) == 1 {
+			n := g.generateExpr(expr.Args[0], arrayRefParams)
+			return fmt.Sprintf("(match u32::try_from(%s).ok().and_then(std::char::from_u32) { Some(c) => Ok::<char, String>(c), None => Err::<char, String>(\"codepoint out of range or surrogate\".to_string()) })", n)
 		}
 	// Phase 16 / ADR 0029: assertion builtins.
 	case "assert":
@@ -1898,11 +1926,32 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr, arrayRefPara
 		return fmt.Sprintf("%s.to_string()", obj)
 	}
 
+	// Phase 31 / ADR 0041: Char methods.
+	if objType := expr.Object.ExprType(); objType != nil && objType.Name == "Char" {
+		switch expr.Method {
+		case "to_codepoint":
+			return fmt.Sprintf("((%s) as u32 as i64)", obj)
+		case "is_digit":
+			return fmt.Sprintf("(%s).is_ascii_digit()", obj)
+		case "is_alpha":
+			return fmt.Sprintf("(%s).is_ascii_alphabetic()", obj)
+		case "is_alphanumeric":
+			return fmt.Sprintf("(%s).is_ascii_alphanumeric()", obj)
+		case "is_whitespace":
+			return fmt.Sprintf("{ let __c = %s; __c == ' ' || __c == '\\t' || __c == '\\n' || __c == '\\r' }", obj)
+		case "is_lowercase":
+			return fmt.Sprintf("(%s).is_ascii_lowercase()", obj)
+		case "is_uppercase":
+			return fmt.Sprintf("(%s).is_ascii_uppercase()", obj)
+		}
+	}
+
 	// String methods
 	if objType := expr.Object.ExprType(); objType != nil && objType.Name == "String" {
 		switch expr.Method {
 		case "len":
-			return fmt.Sprintf("(%s.len() as i64)", obj)
+			// Phase 31 / ADR 0041: char count, not byte count.
+			return fmt.Sprintf("(%s.chars().count() as i64)", obj)
 		case "to_lowercase":
 			return fmt.Sprintf("%s.to_lowercase()", obj)
 		case "trim":

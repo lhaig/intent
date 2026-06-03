@@ -16,6 +16,7 @@ const (
 	FLOAT_LIT     // 123.45
 	STRING_LIT    // "hello"
 	STRING_INTERP // "hello {expr} world" - contains {expr} interpolation markers
+	CHAR_LIT      // 'a', '\n', '\u{1234}' (Phase 31 / ADR 0041)
 
 	// Keywords
 	MODULE
@@ -77,6 +78,7 @@ const (
 	STRING_TYPE
 	BOOL_TYPE
 	VOID_TYPE
+	CHAR_TYPE // Phase 31 / ADR 0041: Char primitive
 
 	// Operators
 	PLUS    // +
@@ -134,6 +136,8 @@ func (t TokenType) String() string {
 		return "STRING_LIT"
 	case STRING_INTERP:
 		return "STRING_INTERP"
+	case CHAR_LIT:
+		return "CHAR_LIT"
 	case MODULE:
 		return "MODULE"
 	case VERSION:
@@ -251,6 +255,8 @@ func (t TokenType) String() string {
 		return "BOOL_TYPE"
 	case VOID_TYPE:
 		return "VOID_TYPE"
+	case CHAR_TYPE:
+		return "CHAR_TYPE"
 	case PLUS:
 		return "PLUS"
 	case MINUS:
@@ -365,6 +371,7 @@ var keywords = map[string]TokenType{
 	"String":      STRING_TYPE,
 	"Bool":        BOOL_TYPE,
 	"Void":        VOID_TYPE,
+	"Char":        CHAR_TYPE,
 }
 
 // LookupIdent checks if an identifier is a keyword

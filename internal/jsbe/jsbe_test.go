@@ -429,7 +429,7 @@ function test_split(s: String) returns Array<String> {
 		name     string
 		expected string
 	}{
-		{"len", "BigInt(s.length)"},
+		{"len", "BigInt(Array.from(s).length)"},
 		{"to_lowercase", "s.toLowerCase()"},
 		{"trim", "s.trim()"},
 		{"starts_with", "s.startsWith("},

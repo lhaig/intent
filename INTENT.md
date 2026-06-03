@@ -22,13 +22,14 @@ import "<path>.intent";          // optional, for multi-file projects
 
 ### Primitive Types
 
-| Type     | Description              | Rust Mapping |
-|----------|--------------------------|-------------|
-| `Int`    | 64-bit signed integer    | `i64`       |
-| `Float`  | 64-bit floating point    | `f64`       |
-| `String` | Owned UTF-8 string       | `String`    |
-| `Bool`   | Boolean                  | `bool`      |
-| `Void`   | Unit / no value          | `()`        |
+| Type     | Description                              | Rust Mapping |
+|----------|------------------------------------------|-------------|
+| `Int`    | 64-bit signed integer                    | `i64`       |
+| `Float`  | 64-bit floating point                    | `f64`       |
+| `String` | Owned UTF-8 string (codepoint-indexed)   | `String`    |
+| `Bool`   | Boolean                                  | `bool`      |
+| `Char`   | Unicode scalar value (ADR 0041)          | `char`      |
+| `Void`   | Unit / no value                          | `()`        |
 
 ### Parameterized Types
 
@@ -182,6 +183,68 @@ items.push(3);                             // append (mutable only)
 - Index must be `Int`.
 - `len()` returns `Int`.
 - Arrays are passed by reference to functions automatically.
+
+## Strings and `Char`
+
+Intent strings are owned UTF-8 sequences indexed by **Unicode scalar value**
+(codepoint), not by byte (ADR 0041). The companion `Char` primitive is a
+single Unicode scalar value.
+
+```
+let s: String = "hello";
+let n: Int = len(s);                       // codepoint count: 5
+let c: Char = s[0];                        // 'h'
+let head: String = s[0..2];                // "he"
+let lit: Char = 'A';                       // char literal
+let nl: Char = '\n';                       // escape
+let u: Char = '\u{1234}';                  // explicit codepoint
+```
+
+### Char predicates and conversions
+
+ASCII-only in v1 — Unicode-aware variants are a follow-up ADR.
+
+```
+c.is_digit()           // '0'..'9'
+c.is_alpha()           // 'a'..'z' or 'A'..'Z'
+c.is_alphanumeric()    // digit or letter
+c.is_whitespace()      // ' ', '\t', '\n', '\r'
+c.is_lowercase()       // 'a'..'z'
+c.is_uppercase()       // 'A'..'Z'
+
+c.to_codepoint()                              // → Int
+char_from_codepoint(n)                        // → Result<Char, String>
+c.to_string()                                 // single-char String
+```
+
+### String methods
+
+```
+len(s)                                        // codepoint count (free fn)
+s.len()                                       // same as len(s) (method form)
+s[i]                                          // i-th codepoint as Char
+s[i..j]                                       // half-open codepoint slice (String)
+s.to_lowercase()                              // ASCII lowercase
+s.trim()                                      // strip leading/trailing whitespace
+s.starts_with(prefix)                         // Bool
+s.contains(needle)                            // Bool
+s.split(sep)                                  // Array<String>
+```
+
+### Rules and trade-offs
+
+- `s[i]` is **codepoint-indexed**, not byte-indexed. Out-of-bounds is a
+  runtime contract violation (matches `Array<T>[i]` semantics).
+- `len(s)` and `s[i..j]` likewise count codepoints. The backends precompute
+  a codepoint table per indexed string at the cost of a constant factor;
+  performance is not a v1 concern.
+- No implicit `Char ↔ Int` conversion. Compare chars to char literals
+  (`c == 'a'`); compare codepoints to ints (`c.to_codepoint() >= 48`).
+- Negative indexing is not supported. Open-ended slices (`s[i..]`, `s[..j]`)
+  are not in v1.
+- `Char` literal escapes: `\n`, `\t`, `\r`, `\\`, `\'`, `\"`, `\0`, and
+  `\u{HEX}` (1-6 hex digits). Surrogate codepoints (`\u{D800}..\u{DFFF}`)
+  and out-of-range values are lex errors.
 
 ## Entities
 

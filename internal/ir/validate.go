@@ -363,7 +363,7 @@ func validateExpr(expr Expr, context string) []string {
 			errors = append(errors, validateExpr(e.Expr, context)...)
 		}
 
-	case *OldRef, *VarRef, *SelfRef, *ResultRef, *IntLit, *FloatLit, *StringLit, *BoolLit:
+	case *OldRef, *VarRef, *SelfRef, *ResultRef, *IntLit, *FloatLit, *StringLit, *BoolLit, *CharLit:
 		// No validation needed for leaf nodes
 
 	case *LambdaExpr:

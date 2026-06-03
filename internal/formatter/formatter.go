@@ -660,6 +660,9 @@ func (f *formatter) formatExprPrec(e ast.Expression, parentPrec int) string {
 		}
 		return "false"
 
+	case *ast.CharLit:
+		return formatCharLit(expr.Value)
+
 	case *ast.ArrayLit:
 		elems := make([]string, len(expr.Elements))
 		for i, elem := range expr.Elements {
@@ -851,4 +854,31 @@ func operatorString(op lexer.TokenType) string {
 	default:
 		return "?"
 	}
+}
+
+// formatCharLit renders a CharLit codepoint back to its canonical 'literal'
+// source form. Common escapes use named forms; everything else (including
+// non-printable / non-ASCII) uses the \u{HEX} form.
+//
+// Phase 31 / ADR 0041.
+func formatCharLit(cp int32) string {
+	switch cp {
+	case '\n':
+		return `'\n'`
+	case '\t':
+		return `'\t'`
+	case '\r':
+		return `'\r'`
+	case '\\':
+		return `'\\'`
+	case '\'':
+		return `'\''`
+	case 0:
+		return `'\0'`
+	}
+	if cp >= 0x20 && cp < 0x7F {
+		// Printable ASCII (excluding the special cases above) renders directly.
+		return fmt.Sprintf("'%c'", cp)
+	}
+	return fmt.Sprintf("'\\u{%X}'", cp)
 }

@@ -199,8 +199,9 @@ Intent uses a nominal type system with no subtyping and no type inference beyond
 |-------------|-------------|-------------|
 | `Int`       | `i64`       | 64-bit signed integer |
 | `Float`     | `f64`       | 64-bit IEEE 754 floating-point |
-| `String`    | `String`    | Owned UTF-8 string |
+| `String`    | `String`    | Owned UTF-8 string, codepoint-indexed (ADR 0041) |
 | `Bool`      | `bool`      | Boolean (`true` or `false`) |
+| `Char`      | `char`      | Unicode scalar value (ADR 0041, Phase 31) |
 | `Void`      | `()`        | Unit type, no value |
 
 ### 4.2 Generic Container Types

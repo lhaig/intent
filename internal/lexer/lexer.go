@@ -1,5 +1,7 @@
 package lexer
 
+import "unicode/utf8"
+
 // Lexer scans Intent source code and produces tokens
 type Lexer struct {
 	input        string
@@ -151,6 +153,152 @@ func (l *Lexer) readString() (string, bool, bool) {
 	return literal, hasInterp, true
 }
 
+// readCharLit reads a char literal of the form '<content>' where <content>
+// is one of: a single ASCII non-control byte, a non-ASCII UTF-8 sequence,
+// or an escape sequence (\n \t \r \\ \' \" \0 \u{HEX}).
+//
+// Returns the decoded character as a UTF-8 string (one Unicode scalar value)
+// plus a success bool. The opening quote has already been consumed.
+//
+// Phase 31 / ADR 0041.
+func (l *Lexer) readCharLit() (string, bool) {
+	// l.ch currently points to the first byte AFTER the opening quote.
+	if l.ch == 0 || l.ch == '\n' {
+		return "", false // unterminated
+	}
+	if l.ch == '\'' {
+		return "", false // empty literal ''
+	}
+
+	var decoded string
+	var ok bool
+	if l.ch == '\\' {
+		decoded, ok = l.readCharEscape()
+		if !ok {
+			return "", false
+		}
+	} else if l.ch < 0x80 {
+		// Single ASCII byte.
+		decoded = string(rune(l.ch))
+		l.readChar()
+	} else {
+		// Multi-byte UTF-8 sequence. Decode from the raw input slice.
+		r, size := utf8.DecodeRuneInString(l.input[l.position:])
+		if r == utf8.RuneError && size <= 1 {
+			return "", false
+		}
+		decoded = string(r)
+		// Advance past the entire rune.
+		for i := 0; i < size; i++ {
+			l.readChar()
+		}
+	}
+
+	// Must be closed by a single quote.
+	if l.ch != '\'' {
+		return "", false // too many chars / missing close
+	}
+	l.readChar() // consume closing quote
+	return decoded, true
+}
+
+// readCharEscape consumes a backslash and an escape body, returning the
+// decoded single-codepoint UTF-8 string. l.ch must currently be on the
+// backslash; the function advances past the entire escape on success.
+func (l *Lexer) readCharEscape() (string, bool) {
+	if l.ch != '\\' {
+		return "", false
+	}
+	l.readChar() // consume '\'
+	switch l.ch {
+	case 'n':
+		l.readChar()
+		return "\n", true
+	case 't':
+		l.readChar()
+		return "\t", true
+	case 'r':
+		l.readChar()
+		return "\r", true
+	case '\\':
+		l.readChar()
+		return "\\", true
+	case '\'':
+		l.readChar()
+		return "'", true
+	case '"':
+		l.readChar()
+		return "\"", true
+	case '0':
+		l.readChar()
+		return "\x00", true
+	case 'u':
+		// \u{HEX}
+		l.readChar() // consume 'u'
+		if l.ch != '{' {
+			return "", false
+		}
+		l.readChar() // consume '{'
+		var hex string
+		for l.ch != '}' {
+			if l.ch == 0 || l.ch == '\n' || l.ch == '\'' {
+				return "", false
+			}
+			if !isHexDigit(l.ch) {
+				return "", false
+			}
+			hex += string(l.ch)
+			l.readChar()
+			if len(hex) > 6 { // max 6 hex digits for U+10FFFF
+				return "", false
+			}
+		}
+		if hex == "" {
+			return "", false
+		}
+		l.readChar() // consume '}'
+		codepoint, err := parseHex(hex)
+		if err {
+			return "", false
+		}
+		// Reject surrogates and out-of-range.
+		if codepoint < 0 || codepoint > 0x10FFFF {
+			return "", false
+		}
+		if codepoint >= 0xD800 && codepoint <= 0xDFFF {
+			return "", false
+		}
+		return string(rune(codepoint)), true
+	default:
+		return "", false
+	}
+}
+
+func isHexDigit(ch byte) bool {
+	return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
+}
+
+// parseHex returns (value, errorFlag). errorFlag true on bad input.
+func parseHex(s string) (int, bool) {
+	v := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		var d int
+		switch {
+		case c >= '0' && c <= '9':
+			d = int(c - '0')
+		case c >= 'a' && c <= 'f':
+			d = int(c-'a') + 10
+		case c >= 'A' && c <= 'F':
+			d = int(c-'A') + 10
+		default:
+			return 0, true
+		}
+		v = v*16 + d
+	}
+	return v, false
+}
+
 // NextToken returns the next token from the input
 func (l *Lexer) NextToken() Token {
 	var tok Token
@@ -259,6 +407,16 @@ func (l *Lexer) NextToken() Token {
 		} else {
 			tok = Token{Type: STRING_LIT, Literal: str, Line: tok.Line, Column: tok.Column}
 		}
+	case '\'':
+		// Phase 31 / ADR 0041: char literal.
+		l.readChar() // consume opening quote
+		decoded, ok := l.readCharLit()
+		if !ok {
+			tok = Token{Type: ILLEGAL, Literal: "invalid char literal", Line: tok.Line, Column: tok.Column}
+			return tok
+		}
+		tok = Token{Type: CHAR_LIT, Literal: decoded, Line: tok.Line, Column: tok.Column}
+		return tok // readCharLit already advanced past the closing quote
 	case 0:
 		tok = Token{Type: EOF, Literal: "", Line: tok.Line, Column: tok.Column}
 	default:

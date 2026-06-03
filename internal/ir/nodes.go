@@ -463,6 +463,16 @@ type BoolLit struct {
 func (e *BoolLit) ExprType() *checker.Type { return e.Type }
 func (*BoolLit) exprNode()                 {}
 
+// CharLit represents a Unicode-scalar-value character literal.
+// Phase 31 / ADR 0041. Value is the codepoint (0..0x10FFFF, no surrogates).
+type CharLit struct {
+	Value int32
+	Type  *checker.Type
+}
+
+func (e *CharLit) ExprType() *checker.Type { return e.Type }
+func (*CharLit) exprNode()                 {}
+
 // ArrayLit represents an array literal.
 type ArrayLit struct {
 	Elements []Expr

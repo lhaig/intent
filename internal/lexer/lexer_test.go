@@ -738,3 +738,118 @@ func TestNextToken_FnKeyword(t *testing.T) {
 		})
 	}
 }
+
+// --- Phase 31 / ADR 0041: char literals ---
+
+func TestCharLiteralBasic(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string // decoded Unicode scalar value as a UTF-8 string
+	}{
+		{"'a'", "a"},
+		{"'0'", "0"},
+		{"' '", " "},
+		{"'A'", "A"},
+		{"'_'", "_"},
+	}
+	for _, c := range cases {
+		t.Run(c.input, func(t *testing.T) {
+			l := New(c.input)
+			tok := l.NextToken()
+			if tok.Type != CHAR_LIT {
+				t.Fatalf("want CHAR_LIT, got %s (literal=%q)", tok.Type, tok.Literal)
+			}
+			if tok.Literal != c.want {
+				t.Errorf("literal: want %q, got %q", c.want, tok.Literal)
+			}
+			if l.NextToken().Type != EOF {
+				t.Error("expected EOF after char literal")
+			}
+		})
+	}
+}
+
+func TestCharLiteralEscapes(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{`'\n'`, "\n"},
+		{`'\t'`, "\t"},
+		{`'\r'`, "\r"},
+		{`'\\'`, "\\"},
+		{`'\''`, "'"},
+		{`'\"'`, "\""},
+		{`'\0'`, "\x00"},
+		{`'\u{1234}'`, "ሴ"},
+		{`'\u{0041}'`, "A"},
+		{`'\u{10FFFF}'`, "\U0010FFFF"},
+	}
+	for _, c := range cases {
+		t.Run(c.input, func(t *testing.T) {
+			l := New(c.input)
+			tok := l.NextToken()
+			if tok.Type != CHAR_LIT {
+				t.Fatalf("want CHAR_LIT, got %s (literal=%q)", tok.Type, tok.Literal)
+			}
+			if tok.Literal != c.want {
+				t.Errorf("literal: want %q (%U), got %q (%U)",
+					c.want, []rune(c.want)[0], tok.Literal, []rune(tok.Literal)[0])
+			}
+		})
+	}
+}
+
+func TestCharLiteralRejectsInvalid(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{"empty", `''`},
+		{"two chars", `'ab'`},
+		{"unterminated", `'a`},
+		{"unterminated newline", "'a\n'"},
+		{"bad escape", `'\q'`},
+		{"surrogate", `'\u{D800}'`},
+		{"out of range", `'\u{110000}'`},
+		{"empty unicode", `'\u{}'`},
+		{"unclosed unicode", `'\u{1234`},
+		{"non-hex unicode", `'\u{12XY}'`},
+		{"too many hex", `'\u{1234567}'`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			l := New(c.input)
+			tok := l.NextToken()
+			if tok.Type != ILLEGAL {
+				t.Errorf("want ILLEGAL, got %s (literal=%q)", tok.Type, tok.Literal)
+			}
+		})
+	}
+}
+
+func TestCharLiteralInContext(t *testing.T) {
+	// Make sure char literals coexist with surrounding tokens.
+	input := `let c: Char = 'a';`
+	l := New(input)
+	expected := []TokenType{LET, IDENT, COLON, CHAR_TYPE, ASSIGN, CHAR_LIT, SEMICOLON, EOF}
+	for i, want := range expected {
+		tok := l.NextToken()
+		if tok.Type != want {
+			t.Errorf("token[%d]: want %s, got %s (literal=%q)", i, want, tok.Type, tok.Literal)
+		}
+	}
+}
+
+func TestCharLiteralNonASCII(t *testing.T) {
+	// A multi-byte UTF-8 char literal should parse as one Unicode scalar value.
+	input := "'é'" // 'é'
+	l := New(input)
+	tok := l.NextToken()
+	if tok.Type != CHAR_LIT {
+		t.Fatalf("want CHAR_LIT, got %s (literal=%q)", tok.Type, tok.Literal)
+	}
+	if tok.Literal != "é" {
+		t.Errorf("literal: want %q, got %q", "é", tok.Literal)
+	}
+}

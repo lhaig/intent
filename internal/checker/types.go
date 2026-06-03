@@ -72,6 +72,7 @@ var (
 	TypeString = &Type{Name: "String"}
 	TypeBool   = &Type{Name: "Bool"}
 	TypeVoid   = &Type{Name: "Void"}
+	TypeChar   = &Type{Name: "Char"} // Phase 31 / ADR 0041
 )
 
 // ResolveType resolves a type reference to a Type object
@@ -95,6 +96,8 @@ func ResolveTypeWithParams(ref *ast.TypeRef, entities map[string]*EntityInfo, en
 		return TypeBool
 	case "Void":
 		return TypeVoid
+	case "Char":
+		return TypeChar
 	case "Array":
 		// Array requires exactly 1 type argument
 		if len(ref.TypeArgs) != 1 {

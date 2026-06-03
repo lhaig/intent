@@ -1523,6 +1523,8 @@ func (c *Checker) checkExpression(expr ast.Expression, scope *Scope) *Type {
 		return c.storeExprType(expr, TypeString)
 	case *ast.BoolLit:
 		return c.storeExprType(expr, TypeBool)
+	case *ast.CharLit:
+		return c.storeExprType(expr, TypeChar)
 	case *ast.ArrayLit:
 		return c.storeExprType(expr, c.checkArrayLit(e, scope))
 	case *ast.IndexExpr:
@@ -1586,9 +1588,9 @@ func (c *Checker) checkBinaryExpr(expr *ast.BinaryExpr, scope *Scope) *Type {
 		return nil
 
 	case lexer.EQ, lexer.NEQ:
-		// Works on Int, Float, String, Bool (same types)
+		// Works on Int, Float, String, Bool, Char (same types). ADR 0041 adds Char.
 		if leftType.Equal(rightType) {
-			if leftType.Equal(TypeInt) || leftType.Equal(TypeFloat) || leftType.Equal(TypeString) || leftType.Equal(TypeBool) {
+			if leftType.Equal(TypeInt) || leftType.Equal(TypeFloat) || leftType.Equal(TypeString) || leftType.Equal(TypeBool) || leftType.Equal(TypeChar) {
 				return TypeBool
 			}
 		}
@@ -1596,9 +1598,9 @@ func (c *Checker) checkBinaryExpr(expr *ast.BinaryExpr, scope *Scope) *Type {
 		return nil
 
 	case lexer.LT, lexer.GT, lexer.LEQ, lexer.GEQ:
-		// Works on Int, Float, String (same types)
+		// Works on Int, Float, String, Char (same types). ADR 0041 adds Char.
 		if leftType.Equal(rightType) {
-			if leftType.Equal(TypeInt) || leftType.Equal(TypeFloat) || leftType.Equal(TypeString) {
+			if leftType.Equal(TypeInt) || leftType.Equal(TypeFloat) || leftType.Equal(TypeString) || leftType.Equal(TypeChar) {
 				return TypeBool
 			}
 		}
@@ -1738,6 +1740,22 @@ func (c *Checker) checkCallExpr(expr *ast.CallExpr, scope *Scope) *Type {
 	}
 
 	// Handle len() built-in
+	// Phase 31 / ADR 0041: Char.from_codepoint(n) is exposed as a free builtin
+	// `char_from_codepoint(n: Int) returns Result<Char, String>`. The naming
+	// avoids needing Type::method syntax in v1; a future ADR can graduate it
+	// to a static method form.
+	if expr.Function == "char_from_codepoint" {
+		if len(expr.Args) != 1 {
+			c.diag.Errorf(line, col, "char_from_codepoint() requires exactly 1 argument, got %d", len(expr.Args))
+			return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeChar, TypeString}, EnumInfo: instantiateResult(TypeChar, TypeString)}
+		}
+		argType := c.checkExpression(expr.Args[0], scope)
+		if argType != nil && !argType.Equal(TypeInt) {
+			c.diag.Errorf(line, col, "char_from_codepoint() argument must be Int, got %s", argType.String())
+		}
+		return &Type{Name: "Result", IsEnum: true, IsGeneric: true, TypeParams: []*Type{TypeChar, TypeString}, EnumInfo: instantiateResult(TypeChar, TypeString)}
+	}
+
 	if expr.Function == "len" {
 		if len(expr.Args) != 1 {
 			c.diag.Errorf(line, col, "len() requires exactly 1 argument, got %d", len(expr.Args))
@@ -1745,8 +1763,12 @@ func (c *Checker) checkCallExpr(expr *ast.CallExpr, scope *Scope) *Type {
 		}
 		argType := c.checkExpression(expr.Args[0], scope)
 		if argType != nil {
+			// Phase 31 / ADR 0041: len() now also accepts String (codepoint count).
+			if argType.Equal(TypeString) {
+				return TypeInt
+			}
 			if (argType.Name != "Array" && argType.Name != "Map") || !argType.IsGeneric {
-				c.diag.Errorf(line, col, "len() requires Array or Map argument, got %s", argType.String())
+				c.diag.Errorf(line, col, "len() requires Array, Map, or String argument, got %s", argType.String())
 			}
 		}
 		return TypeInt
@@ -2436,13 +2458,33 @@ func (c *Checker) checkMethodCallExpr(expr *ast.MethodCallExpr, scope *Scope) *T
 		}
 	}
 
-	// Handle to_string() method on Int, Float, Bool
+	// Handle to_string() method on Int, Float, Bool, Char.
+	// Phase 31 / ADR 0041 adds Char.
 	if expr.Method == "to_string" {
-		if objType.Equal(TypeInt) || objType.Equal(TypeFloat) || objType.Equal(TypeBool) {
+		if objType.Equal(TypeInt) || objType.Equal(TypeFloat) || objType.Equal(TypeBool) || objType.Equal(TypeChar) {
 			if len(expr.Args) != 0 {
 				c.diag.Errorf(line, col, "to_string() requires no arguments, got %d", len(expr.Args))
 			}
 			return TypeString
+		}
+	}
+
+	// Phase 31 / ADR 0041: Char methods.
+	if objType.Equal(TypeChar) {
+		switch expr.Method {
+		case "to_codepoint":
+			if len(expr.Args) != 0 {
+				c.diag.Errorf(line, col, "to_codepoint() requires no arguments, got %d", len(expr.Args))
+			}
+			return TypeInt
+		case "is_digit", "is_alpha", "is_alphanumeric", "is_whitespace", "is_lowercase", "is_uppercase":
+			if len(expr.Args) != 0 {
+				c.diag.Errorf(line, col, "%s() requires no arguments, got %d", expr.Method, len(expr.Args))
+			}
+			return TypeBool
+		default:
+			c.diag.Errorf(line, col, "Char has no method '%s'", expr.Method)
+			return nil
 		}
 	}
 
@@ -2694,13 +2736,37 @@ func (c *Checker) checkArrayLit(lit *ast.ArrayLit, scope *Scope) *Type {
 	}
 }
 
-// checkIndexExpr checks an index expression
+// checkIndexExpr checks an index expression (Array<T>[i], String[i], String[i..j]).
+// Phase 31 / ADR 0041 added String indexing (returns Char) and String slicing
+// (returns String) via a RangeExpr in the Index slot.
 func (c *Checker) checkIndexExpr(expr *ast.IndexExpr, scope *Scope) *Type {
 	line, col := expr.Pos()
 
 	objType := c.checkExpression(expr.Object, scope)
 	if objType == nil {
 		return nil
+	}
+
+	// String indexing / slicing (ADR 0041).
+	if objType.Equal(TypeString) {
+		if rng, ok := expr.Index.(*ast.RangeExpr); ok {
+			// String[Int..Int] -> String
+			startT := c.checkExpression(rng.Start, scope)
+			endT := c.checkExpression(rng.End, scope)
+			if startT != nil && !startT.Equal(TypeInt) {
+				c.diag.Errorf(line, col, "string slice start must be Int, got %s", startT.String())
+			}
+			if endT != nil && !endT.Equal(TypeInt) {
+				c.diag.Errorf(line, col, "string slice end must be Int, got %s", endT.String())
+			}
+			return TypeString
+		}
+		// String[Int] -> Char
+		indexType := c.checkExpression(expr.Index, scope)
+		if indexType != nil && !indexType.Equal(TypeInt) {
+			c.diag.Errorf(line, col, "string index must be Int, got %s", indexType.String())
+		}
+		return TypeChar
 	}
 
 	// Object must be Array<T>

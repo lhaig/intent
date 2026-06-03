@@ -3393,3 +3393,121 @@ entry function main() returns Int {
 		t.Errorf("expected 2 functions, got %d", len(prog.Functions))
 	}
 }
+
+// --- Phase 31 / ADR 0041: CharLit + slice expressions ---
+
+func TestParseCharLitInLet(t *testing.T) {
+	src := `module m version "1.0";
+function f() returns Char { let c: Char = 'a'; return c; }
+entry function main() returns Int { return 0; }`
+	p := New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("t"))
+	}
+	if len(prog.Functions) < 2 {
+		t.Fatalf("expected 2 functions, got %d", len(prog.Functions))
+	}
+	fn := prog.Functions[0]
+	if fn.ReturnType.Name != "Char" {
+		t.Errorf("expected return type Char, got %s", fn.ReturnType.Name)
+	}
+	if len(fn.Body.Statements) == 0 {
+		t.Fatal("expected statements in function body")
+	}
+	letStmt, ok := fn.Body.Statements[0].(*ast.LetStmt)
+	if !ok {
+		t.Fatalf("expected LetStmt, got %T", fn.Body.Statements[0])
+	}
+	if letStmt.Type == nil || letStmt.Type.Name != "Char" {
+		t.Errorf("expected let with Char type, got %v", letStmt.Type)
+	}
+	charLit, ok := letStmt.Value.(*ast.CharLit)
+	if !ok {
+		t.Fatalf("expected CharLit, got %T", letStmt.Value)
+	}
+	if charLit.Value != 'a' {
+		t.Errorf("expected codepoint 97, got %d", charLit.Value)
+	}
+}
+
+func TestParseCharLitEscapes(t *testing.T) {
+	cases := []struct {
+		lit  string
+		want int32
+	}{
+		{`'\n'`, '\n'},
+		{`'\t'`, '\t'},
+		{`'\\'`, '\\'},
+		{`'\u{0041}'`, 'A'},
+		{`'\u{1234}'`, 0x1234},
+	}
+	for _, c := range cases {
+		t.Run(c.lit, func(t *testing.T) {
+			src := `module m version "1.0";
+function f() returns Char { return ` + c.lit + `; }
+entry function main() returns Int { return 0; }`
+			p := New(src)
+			prog := p.Parse()
+			if p.Diagnostics().HasErrors() {
+				t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("t"))
+			}
+			fn := prog.Functions[0]
+			retStmt := fn.Body.Statements[0].(*ast.ReturnStmt)
+			lit, ok := retStmt.Value.(*ast.CharLit)
+			if !ok {
+				t.Fatalf("expected CharLit, got %T", retStmt.Value)
+			}
+			if lit.Value != c.want {
+				t.Errorf("value: got %d, want %d", lit.Value, c.want)
+			}
+		})
+	}
+}
+
+func TestParseStringIndex(t *testing.T) {
+	src := `module m version "1.0";
+function head(s: String) returns Char { return s[0]; }
+entry function main() returns Int { return 0; }`
+	p := New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("t"))
+	}
+	fn := prog.Functions[0]
+	retStmt := fn.Body.Statements[0].(*ast.ReturnStmt)
+	idx, ok := retStmt.Value.(*ast.IndexExpr)
+	if !ok {
+		t.Fatalf("expected IndexExpr, got %T", retStmt.Value)
+	}
+	if _, isRange := idx.Index.(*ast.RangeExpr); isRange {
+		t.Error("plain s[0] should not parse as a slice")
+	}
+}
+
+func TestParseStringSlice(t *testing.T) {
+	src := `module m version "1.0";
+function chunk(s: String) returns String { return s[1..3]; }
+entry function main() returns Int { return 0; }`
+	p := New(src)
+	prog := p.Parse()
+	if p.Diagnostics().HasErrors() {
+		t.Fatalf("unexpected errors: %s", p.Diagnostics().Format("t"))
+	}
+	fn := prog.Functions[0]
+	retStmt := fn.Body.Statements[0].(*ast.ReturnStmt)
+	idx, ok := retStmt.Value.(*ast.IndexExpr)
+	if !ok {
+		t.Fatalf("expected IndexExpr, got %T", retStmt.Value)
+	}
+	rng, ok := idx.Index.(*ast.RangeExpr)
+	if !ok {
+		t.Fatalf("expected RangeExpr inside slice, got %T", idx.Index)
+	}
+	if start, _ := rng.Start.(*ast.IntLit); start == nil || start.Value != "1" {
+		t.Errorf("slice start not 1: %v", rng.Start)
+	}
+	if end, _ := rng.End.(*ast.IntLit); end == nil || end.Value != "3" {
+		t.Errorf("slice end not 3: %v", rng.End)
+	}
+}

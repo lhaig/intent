@@ -1206,13 +1206,13 @@ entry function main() returns Int {
 	}
 	found := false
 	for _, d := range diag.All() {
-		if strings.Contains(d.Message, "len() requires Array or Map argument") {
+		if strings.Contains(d.Message, "len() requires Array, Map, or String argument") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("Expected 'len() requires Array or Map argument' error, got: %s", diag.Format("test"))
+		t.Errorf("Expected 'len() requires Array, Map, or String argument' error, got: %s", diag.Format("test"))
 	}
 }
 
@@ -4846,5 +4846,112 @@ entry function main() returns Int { return 0; }
 	}
 	if !strings.Contains(d.Format("test"), "duplicate @target_specific") {
 		t.Errorf("expected duplicate-annotation diagnostic, got: %s", d.Format("test"))
+	}
+}
+
+// --- Phase 31 / ADR 0041: Char + string indexing checker tests ---
+
+func TestCheckCharLitAndType(t *testing.T) {
+	source := `module test version "1.0.0";
+function f() returns Char { let c: Char = 'a'; return c; }
+entry function main() returns Int { return 0; }`
+	d := parseAndCheck(t, source)
+	if d.HasErrors() {
+		t.Errorf("unexpected errors: %s", d.Format("test"))
+	}
+}
+
+func TestCheckCharComparisons(t *testing.T) {
+	source := `module test version "1.0.0";
+function f(c: Char) returns Bool { return c == 'a' or c == '0' or c >= 'A'; }
+entry function main() returns Int { return 0; }`
+	d := parseAndCheck(t, source)
+	if d.HasErrors() {
+		t.Errorf("unexpected errors: %s", d.Format("test"))
+	}
+}
+
+func TestCheckCharIntComparisonRejected(t *testing.T) {
+	source := `module test version "1.0.0";
+function f(c: Char) returns Bool { return c == 65; }
+entry function main() returns Int { return 0; }`
+	d := parseAndCheck(t, source)
+	if !d.HasErrors() {
+		t.Error("expected error: Char == Int has no implicit conversion")
+	}
+}
+
+func TestCheckStringIndexReturnsChar(t *testing.T) {
+	source := `module test version "1.0.0";
+function head(s: String) returns Char { return s[0]; }
+entry function main() returns Int { return 0; }`
+	d := parseAndCheck(t, source)
+	if d.HasErrors() {
+		t.Errorf("unexpected errors: %s", d.Format("test"))
+	}
+}
+
+func TestCheckStringSliceReturnsString(t *testing.T) {
+	source := `module test version "1.0.0";
+function chunk(s: String) returns String { return s[1..3]; }
+entry function main() returns Int { return 0; }`
+	d := parseAndCheck(t, source)
+	if d.HasErrors() {
+		t.Errorf("unexpected errors: %s", d.Format("test"))
+	}
+}
+
+func TestCheckLenOfString(t *testing.T) {
+	source := `module test version "1.0.0";
+function size(s: String) returns Int { return len(s); }
+entry function main() returns Int { return 0; }`
+	d := parseAndCheck(t, source)
+	if d.HasErrors() {
+		t.Errorf("unexpected errors: %s", d.Format("test"))
+	}
+}
+
+func TestCheckCharPredicates(t *testing.T) {
+	source := `module test version "1.0.0";
+function classify(c: Char) returns Bool {
+    return c.is_digit() or c.is_alpha() or c.is_alphanumeric() or c.is_whitespace() or c.is_lowercase() or c.is_uppercase();
+}
+entry function main() returns Int { return 0; }`
+	d := parseAndCheck(t, source)
+	if d.HasErrors() {
+		t.Errorf("unexpected errors: %s", d.Format("test"))
+	}
+}
+
+func TestCheckCharToCodepointAndBack(t *testing.T) {
+	source := `module test version "1.0.0";
+function roundtrip(c: Char) returns Result<Char, String> {
+    let cp: Int = c.to_codepoint();
+    return char_from_codepoint(cp);
+}
+entry function main() returns Int { return 0; }`
+	d := parseAndCheck(t, source)
+	if d.HasErrors() {
+		t.Errorf("unexpected errors: %s", d.Format("test"))
+	}
+}
+
+func TestCheckCharToString(t *testing.T) {
+	source := `module test version "1.0.0";
+function as_str(c: Char) returns String { return c.to_string(); }
+entry function main() returns Int { return 0; }`
+	d := parseAndCheck(t, source)
+	if d.HasErrors() {
+		t.Errorf("unexpected errors: %s", d.Format("test"))
+	}
+}
+
+func TestCheckUnknownCharMethodRejected(t *testing.T) {
+	source := `module test version "1.0.0";
+function f(c: Char) returns Bool { return c.is_emoji(); }
+entry function main() returns Int { return 0; }`
+	d := parseAndCheck(t, source)
+	if !d.HasErrors() {
+		t.Error("expected error for unknown Char method")
 	}
 }

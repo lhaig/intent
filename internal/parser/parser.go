@@ -824,7 +824,7 @@ func (p *Parser) tryParseTypeArgs() ([]*ast.TypeRef, bool) {
 		// A type argument must start with a type name (IDENT or builtin type keyword)
 		tok := p.current()
 		switch tok.Type {
-		case lexer.INT_TYPE, lexer.FLOAT_TYPE, lexer.STRING_TYPE, lexer.BOOL_TYPE, lexer.VOID_TYPE, lexer.IDENT:
+		case lexer.INT_TYPE, lexer.FLOAT_TYPE, lexer.STRING_TYPE, lexer.BOOL_TYPE, lexer.VOID_TYPE, lexer.CHAR_TYPE, lexer.IDENT:
 			// Valid start of type
 		default:
 			// Not a type argument list - backtrack
@@ -918,6 +918,9 @@ func (p *Parser) parseTypeRef() *ast.TypeRef {
 	case lexer.VOID_TYPE:
 		p.advance()
 		name = "Void"
+	case lexer.CHAR_TYPE:
+		p.advance()
+		name = "Char"
 	case lexer.FN:
 		p.advance()
 		return p.parseFnTypeRef(tok)
@@ -1325,9 +1328,19 @@ func (p *Parser) parsePostfix() ast.Expression {
 
 	for {
 		if p.check(lexer.LBRACKET) {
-			// Index access: expr[index]
+			// Index access: expr[index] OR slice: expr[start..end] (Phase 31 / ADR 0041)
 			p.advance() // consume '['
 			index := p.parseExpression()
+			if p.check(lexer.DOTDOT) {
+				p.advance() // consume '..'
+				end := p.parseExpression()
+				index = &ast.RangeExpr{
+					Start:  index,
+					End:    end,
+					Line:   line,
+					Column: col,
+				}
+			}
 			p.expect(lexer.RBRACKET)
 			expr = &ast.IndexExpr{
 				Object: expr,
@@ -1431,6 +1444,16 @@ func (p *Parser) parsePrimary() ast.Expression {
 	case lexer.STRING_INTERP:
 		p.advance()
 		return p.parseStringInterp(tok)
+	case lexer.CHAR_LIT:
+		p.advance()
+		// tok.Literal carries the decoded Unicode scalar value as a UTF-8 string.
+		// Reconstruct the codepoint.
+		runes := []rune(tok.Literal)
+		var value int32
+		if len(runes) >= 1 {
+			value = int32(runes[0])
+		}
+		return &ast.CharLit{Value: value, Line: tok.Line, Column: tok.Column}
 	case lexer.TRUE:
 		p.advance()
 		return &ast.BoolLit{Value: true, Line: tok.Line, Column: tok.Column}

@@ -82,6 +82,13 @@ func typeToSMTSort(t *checker.Type) string {
 		return "Bool"
 	case "Float":
 		return "Real"
+	case "Char":
+		// Phase 31 / ADR 0041: Char is a bounded integer in Z3's eyes.
+		// Range constraints (0..0x10FFFF excluding surrogates) get added
+		// at declare-const time by the contract translator if it's
+		// integrated; for v1 we leave Char unbounded in SMT terms and rely
+		// on the predicates' literal-codepoint comparisons being tight.
+		return "Int"
 	default:
 		// For unsupported types, use Int as fallback
 		return "Int"
@@ -245,6 +252,32 @@ func entityExprToSMT(expr ir.Expr) string {
 			return "true"
 		}
 		return "false"
+	case *ir.CharLit:
+		// Phase 31 / ADR 0041: Char encoded as Int codepoint in SMT.
+		return fmt.Sprintf("%d", e.Value)
+	case *ir.MethodCallExpr:
+		// Char predicate translation (ADR 0041): emit pure integer
+		// comparisons on the codepoint so Z3 can reason about them.
+		if objType := e.Object.ExprType(); objType != nil && objType.Name == "Char" {
+			obj := entityExprToSMT(e.Object)
+			switch e.Method {
+			case "to_codepoint":
+				return obj
+			case "is_digit":
+				return fmt.Sprintf("(and (>= %s 48) (<= %s 57))", obj, obj)
+			case "is_alpha":
+				return fmt.Sprintf("(or (and (>= %s 65) (<= %s 90)) (and (>= %s 97) (<= %s 122)))", obj, obj, obj, obj)
+			case "is_alphanumeric":
+				return fmt.Sprintf("(or (and (>= %s 48) (<= %s 57)) (and (>= %s 65) (<= %s 90)) (and (>= %s 97) (<= %s 122)))", obj, obj, obj, obj, obj, obj)
+			case "is_whitespace":
+				return fmt.Sprintf("(or (= %s 32) (= %s 9) (= %s 10) (= %s 13))", obj, obj, obj, obj)
+			case "is_lowercase":
+				return fmt.Sprintf("(and (>= %s 97) (<= %s 122))", obj, obj)
+			case "is_uppercase":
+				return fmt.Sprintf("(and (>= %s 65) (<= %s 90))", obj, obj)
+			}
+		}
+		return "true"
 	case *ir.ForallExpr:
 		return entityForallExprToSMT(e)
 	case *ir.ExistsExpr:
@@ -477,6 +510,31 @@ func exprToSMT(expr ir.Expr) string {
 			return "true"
 		}
 		return "false"
+	case *ir.CharLit:
+		// Phase 31 / ADR 0041: Char encoded as Int codepoint in SMT.
+		return fmt.Sprintf("%d", e.Value)
+	case *ir.MethodCallExpr:
+		// Char predicates: see entityExprToSMT for the same translation.
+		if objType := e.Object.ExprType(); objType != nil && objType.Name == "Char" {
+			obj := exprToSMT(e.Object)
+			switch e.Method {
+			case "to_codepoint":
+				return obj
+			case "is_digit":
+				return fmt.Sprintf("(and (>= %s 48) (<= %s 57))", obj, obj)
+			case "is_alpha":
+				return fmt.Sprintf("(or (and (>= %s 65) (<= %s 90)) (and (>= %s 97) (<= %s 122)))", obj, obj, obj, obj)
+			case "is_alphanumeric":
+				return fmt.Sprintf("(or (and (>= %s 48) (<= %s 57)) (and (>= %s 65) (<= %s 90)) (and (>= %s 97) (<= %s 122)))", obj, obj, obj, obj, obj, obj)
+			case "is_whitespace":
+				return fmt.Sprintf("(or (= %s 32) (= %s 9) (= %s 10) (= %s 13))", obj, obj, obj, obj)
+			case "is_lowercase":
+				return fmt.Sprintf("(and (>= %s 97) (<= %s 122))", obj, obj)
+			case "is_uppercase":
+				return fmt.Sprintf("(and (>= %s 65) (<= %s 90))", obj, obj)
+			}
+		}
+		return "true"
 	case *ir.ForallExpr:
 		return forallExprToSMT(e)
 	case *ir.ExistsExpr:

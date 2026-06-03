@@ -240,7 +240,7 @@ function test_chain(s: String) returns String {
 		name     string
 		expected string
 	}{
-		{"len", "(s.len() as i64)"},
+		{"len", "(s.chars().count() as i64)"},
 		{"to_lowercase", "s.to_lowercase()"},
 		{"trim", "s.trim().to_string()"},
 		{"starts_with", "s.starts_with("},

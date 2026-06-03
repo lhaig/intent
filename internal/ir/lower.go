@@ -956,6 +956,9 @@ func (l *lowerer) lowerExpr(e ast.Expression) Expr {
 	case *ast.BoolLit:
 		return &BoolLit{Value: expr.Value, Type: l.typeOf(e)}
 
+	case *ast.CharLit:
+		return &CharLit{Value: expr.Value, Type: l.typeOf(e)}
+
 	case *ast.ArrayLit:
 		elems := make([]Expr, len(expr.Elements))
 		for i, el := range expr.Elements {
@@ -1704,6 +1707,9 @@ func (l *lowerer) resolveCallKind(expr *ast.CallExpr) (CallKind, string) {
 		return CallBuiltin, ""
 	// Phase 16 / ADR 0029: in-language assertion builtins.
 	case "assert", "assert_eq", "assert_close", "assert_panics":
+		return CallBuiltin, ""
+	// Phase 31 / ADR 0041: char primitives.
+	case "char_from_codepoint":
 		return CallBuiltin, ""
 	}
 

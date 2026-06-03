@@ -1,0 +1,133 @@
+// Phase 31 / ADR 0041 feature-coverage example.
+// Exercises Char literals, indexing, slicing, len, predicates, comparisons,
+// codepoint round-trip, and to_string. Runnable on every backend via
+// `intentc test --all-targets examples/char_string_demo.intent`.
+
+module char_string_demo version "1.0";
+
+function classify(c: Char) returns Int
+    ensures result >= 0 and result <= 3
+{
+    if c.is_digit() { return 1; }
+    if c.is_alpha() { return 2; }
+    if c.is_whitespace() { return 3; }
+    return 0;
+}
+
+function count_digits(s: String) returns Int
+    ensures result >= 0 and result <= len(s)
+{
+    let mutable total: Int = 0;
+    let mutable i: Int = 0;
+    while i < len(s) {
+        if s[i].is_digit() {
+            total = total + 1;
+        }
+        i = i + 1;
+    }
+    return total;
+}
+
+entry function main() returns Int {
+    return 0;
+}
+
+test "char literals carry the correct codepoint" {
+    assert_eq('A'.to_codepoint(), 65);
+    assert_eq('a'.to_codepoint(), 97);
+    assert_eq('0'.to_codepoint(), 48);
+    assert_eq('\n'.to_codepoint(), 10);
+    assert_eq('\t'.to_codepoint(), 9);
+    assert_eq('\\'.to_codepoint(), 92);
+}
+
+test "char predicates classify ASCII correctly" {
+    assert(('0').is_digit());
+    assert(('9').is_digit());
+    assert(not ('A').is_digit());
+
+    assert(('A').is_alpha());
+    assert(('z').is_alpha());
+    assert(not ('5').is_alpha());
+
+    assert(('a').is_lowercase());
+    assert(not ('A').is_lowercase());
+    assert(('Z').is_uppercase());
+    assert(not ('z').is_uppercase());
+
+    assert((' ').is_whitespace());
+    assert(('\n').is_whitespace());
+    assert(('\t').is_whitespace());
+    assert(not ('a').is_whitespace());
+
+    assert(('A').is_alphanumeric());
+    assert(('7').is_alphanumeric());
+    assert(not (' ').is_alphanumeric());
+}
+
+test "char comparisons" {
+    assert('a' == 'a');
+    assert('a' != 'b');
+    assert('a' < 'b');
+    assert('z' > 'a');
+    assert('A' <= 'A');
+}
+
+test "char roundtrip via codepoint" {
+    let cp: Int = 'X'.to_codepoint();
+    let back: Result<Char, String> = char_from_codepoint(cp);
+    assert(back.is_ok());
+    let recovered_cp: Int = match back {
+        Ok(c) => c.to_codepoint(),
+        Err(_) => 0,
+    };
+    assert_eq(recovered_cp, 88);
+}
+
+test "char_from_codepoint rejects surrogates and out-of-range" {
+    let surrogate: Result<Char, String> = char_from_codepoint(55296);
+    assert(surrogate.is_err());
+
+    let too_big: Result<Char, String> = char_from_codepoint(1114112);
+    assert(too_big.is_err());
+}
+
+test "char to_string produces single-char string" {
+    let s: String = 'A'.to_string();
+    assert_eq(s, "A");
+}
+
+test "string length is codepoint count" {
+    assert_eq(len("hello"), 5);
+    assert_eq(len(""), 0);
+    assert_eq(len("a"), 1);
+}
+
+test "string index returns char at codepoint position" {
+    let s: String = "hello";
+    assert_eq(s[0], 'h');
+    assert_eq(s[1], 'e');
+    assert_eq(s[4], 'o');
+}
+
+test "string slice returns substring" {
+    let s: String = "hello world";
+    assert_eq(s[0..5], "hello");
+    assert_eq(s[6..11], "world");
+    assert_eq(s[0..0], "");
+    assert_eq(s[1..3], "el");
+}
+
+test "classify on assorted chars" {
+    assert_eq(classify('5'), 1);
+    assert_eq(classify('A'), 2);
+    assert_eq(classify(' '), 3);
+    assert_eq(classify('!'), 0);
+}
+
+test "count_digits scans a string" {
+    assert_eq(count_digits(""), 0);
+    assert_eq(count_digits("abc"), 0);
+    assert_eq(count_digits("a1b2c3"), 3);
+    assert_eq(count_digits("12345"), 5);
+}
