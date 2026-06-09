@@ -1720,10 +1720,15 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[strin
 		}
 		for i, arg := range expr.Args {
 			argStr := g.generateExpr(arg, arrayRefParams)
-			// Pass arrays by reference
+			// Pass arrays/maps by reference. Function signature is
+			// `&Vec<T>` / `&HashMap<K,V>`; the call site must match.
+			// VarRef, FieldAccess, and IndexExpr all produce place
+			// expressions we can borrow directly; cloneIfNeeded below sees
+			// the leading `&` and leaves them alone.
 			if funcDef != nil && i < len(funcDef.Params) {
 				if funcDef.Params[i].Type != nil && (funcDef.Params[i].Type.Name == "Array" || funcDef.Params[i].Type.Name == "Map") {
-					if _, ok := arg.(*ir.VarRef); ok {
+					switch arg.(type) {
+					case *ir.VarRef, *ir.FieldAccessExpr, *ir.IndexExpr:
 						argStr = "&" + argStr
 					}
 				}

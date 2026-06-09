@@ -1188,3 +1188,52 @@ entry function main() returns Int {
 		t.Error("plain output unexpectedly contains debug_assert! (StripContracts not set)")
 	}
 }
+
+// Regression: when a function takes `Array<T>` (compiled to `&Vec<T>`) and the
+// call site passes a struct field, the previous emitter dropped the leading
+// `&`, producing `obj.field.clone()` (owned Vec) where `&Vec` was expected.
+// Surfaced by stage2 formatter (Phase 38) passing `EnumVariant.params` /
+// `TraitMethodSig.params` / `ExternDecl.params` to a shared helper. Fix:
+// extend the array-ref coercion to cover FieldAccessExpr and IndexExpr in
+// addition to bare VarRef.
+func TestArrayParamFieldAccessCallBorrows(t *testing.T) {
+	src := `module m version "1.0";
+
+entity Box {
+    field xs: Array<Int>;
+
+    constructor(xs: Array<Int>) {
+        self.xs = xs;
+    }
+}
+
+function sum(xs: Array<Int>) returns Int {
+    let mutable s: Int = 0;
+    let mutable i: Int = 0;
+    while i < len(xs) {
+        s = s + xs[i];
+        i = i + 1;
+    }
+    return s;
+}
+
+entry function main() returns Int {
+    let mutable xs: Array<Int> = [];
+    xs.push(1);
+    xs.push(2);
+    let b: Box = Box(xs);
+    return sum(b.xs);
+}
+`
+	output := generateFromSource(t, "array_param_field", src)
+
+	// The call site for sum(b.xs) must emit a borrow, not an owned clone.
+	// Acceptable: `sum(&b.xs)` (no clone needed — function only reads it).
+	// Unacceptable: `sum(b.xs.clone())` (owned Vec where &Vec expected).
+	if strings.Contains(output, "sum(b.xs.clone())") {
+		t.Errorf("regression: field-access array arg emitted as owned clone:\n%s", output)
+	}
+	if !strings.Contains(output, "sum(&b.xs)") {
+		t.Errorf("expected borrowed field-access array arg `sum(&b.xs)`, got:\n%s", output)
+	}
+}

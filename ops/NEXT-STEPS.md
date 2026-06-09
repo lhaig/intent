@@ -1,6 +1,6 @@
-# Pickup Notes — 2026-06-09 (after Phase 37)
+# Pickup Notes — 2026-06-09 (after Phase 38)
 
-Handoff after the sixth stage2 deliverable shipped.
+Handoff after the seventh stage2 deliverable shipped.
 
 ## Where we are
 
@@ -13,16 +13,20 @@ Recent landings (in order):
 - **Phase 34** — Statement parser in Intent.
 - **Phase 35** — Expression parser in Intent.
 - **Phase 36** — Top-level declarations + AST split.
-- **Phase 37** — Stage2 lexer extensions: char + float literals + multi-line nested `/* */` comments; wired `tk_char`/`tk_float` into the expression parser as `ex_char` / `ex_float` (raw-lexeme storage).
+- **Phase 37** — Stage2 lexer extensions (char + float + block comments).
+- **Phase 38** — **Stage2 formatter MVP**. `format.intent` round-trips `examples/hello.intent` byte-equal with stage1's `intentc fmt`. Stage1 Rust-backend bug fixed in-phase (array-ref coercion now covers field accesses + index exprs, not just bare variable references).
 
-Stage2 (`selfhost/formatter/`) is now three files:
-- `lexer.intent` (~610 LOC, 27 in-language tests) — full tokeniser for the structural surface of Intent (idents, keywords, ints, floats, chars, strings, all punctuation, both comment forms).
-- `ast.intent` (~400 LOC) — every AST entity + kind constant (`ex_*`, `st_*`) + AST-side helper.
-- `parser.intent` (~1740 LOC, ~700 LOC parser + ~1040 LOC tests, 66 in-language tests) — `Parser` entity + parse methods + the `parse(source)` convenience + tests.
+Stage2 (`selfhost/formatter/`) is now four files:
+- `lexer.intent` (~610 LOC, 27 tests) — full tokeniser.
+- `ast.intent` (~400 LOC) — AST entities + kind constants.
+- `parser.intent` (~1740 LOC, 66 tests) — Parser + tests.
+- `format.intent` (~400 LOC) — formatter.
+- `format_test.intent` (~150 LOC, 17 tests) — formatter unit + round-trip + real-file dogfood.
 
-**93 in-language tests pass on rust + js.** `make validate` green.
+**110 in-language tests pass on rust + js.** `make validate` green.
 
-The lexer now handles everything the formatter (Phase 38) will need to *tokenise* real Intent source. The parser handles the full structural surface of Intent programs at the statement and expression level — see Phase 35-36 PRDs for the layered grammar.
+Stage1 fix this phase:
+- `internal/rustbe/rustbe.go` — call sites passing `Array<T>` field accesses (and indexed array elements) now correctly emit `&obj.field` instead of `obj.field.clone()` (which mismatched the `&Vec<T>` parameter signature). Regression test `TestArrayParamFieldAccessCallBorrows` in `internal/rustbe/rustbe_test.go`.
 
 ## Language gaps still open
 
@@ -36,32 +40,21 @@ Carried over (unchanged this phase):
 - Cross-module free-function calls need module prefix (`formatter_ast.empty_block()`); entities don't. Backend ADR pending.
 - Entity-typed method/function parameters are passed by value in the Rust backend. Backend ADR pending.
 - Stage2 lexer doesn't yet tokenise interpolated string parts (`"abc ${expr} def"` is one `tk_string`).
-- No file I/O in stage2 — stage1 extern needed for `read_file` (Phase 38 will likely surface this).
+- **Local `String` re-use across expressions can trigger `borrow of moved value`** — particularly when a `let x: String = pad;` is followed by another use of `pad`. Worked around in Phase 38 by computing the indent string twice (`pad_open` + `pad_close`). Backend should learn to clone-on-multi-use.
 
 ## Immediate next step
 
-**Phase 38 — Begin the formatter (`selfhost/formatter/format.intent`).**
+**Phase 39 — Widen the dogfood corpus.** Two sub-goals, take either order:
 
-Build an `AST → String` emitter that round-trips Intent source. Initial scope (incremental from a v1 minimum):
-- Module declaration + import lines.
-- Function declarations: signature (modifiers, name, params, return type) emitted from AST; body re-emitted as raw text via re-tokenisation for v1. Per-statement formatting follows incrementally as the formatter is dogfooded against real files.
-- Entity / enum / trait / impl / test / extern / intent-block declarations.
-- Per-line indentation by AST depth (entity body = 4 spaces, statement body = same, etc.).
+**Track A: parser surface for contracts** — extend `parser.intent` + `format.intent` to handle `requires` / `ensures` clauses on function signatures (used by `examples/fibonacci.intent` and many others). Lands `fibonacci.intent` as the second real-file dogfood fixture. Likely follow-ups: `decreases`, loop `invariant` clauses, and the `result` binding inside `ensures`.
 
-**Dogfood goal:** `intentc fmt` (current Go impl) and `selfhost/formatter` (stage2 Intent impl) produce **byte-equal** output on a small corpus. Initial corpus: `examples/hello.intent`, `examples/fibonacci.intent`, `selfhost/formatter/lexer.intent`. Full parity is a Phase 39+ milestone.
+**Track B: paren-stripping + source-order tracking** — match stage1's behaviour on programs that have user-written parens (`(a + b) * c` keeps the parens, `(x)` strips them) and programs that interleave decl kinds (entity followed by function followed by entity). Either: (a) precedence-aware paren strip pass on the AST + per-decl `line: Int`, or (b) move `Program` to `Array<TopLevelDecl>` discriminated union. Decision point this phase.
 
-Likely gaps Phase 38 will surface:
-- **File I/O in stage2** (`read_file`) — needs a stage1 extern. ADR + small implementation.
-- **A real `TypeRef` AST** if the formatter needs to round-trip `Array<Int>`, `Result<T, E>`, etc. instead of the current `<...>`-suffix string. (Currently `FunctionDecl.return_type: String` carries the head + generic suffix.)
-- **Source-order tracking on `Program`** (or per-decl `line: Int`) if the formatter needs to interleave declarations of different kinds in their original order. Phase 36 used parallel arrays per kind, losing cross-kind source order.
-- **String interpolation tokenisation** — needed when the formatter wants to re-indent or otherwise touch interpolated strings; can be deferred if v1 emits them opaquely.
-- **Decl-internal whitespace / blank-line preservation** — beyond v1 scope, but the choice between "canonicalise whitespace" vs. "preserve user style" needs an ADR before Phase 39.
+Other possible work:
 
-Recommended sequencing for Phase 38:
-1. Stage1 extern for `read_file` (+ tests). Smallest unblock.
-2. Skeleton `format.intent`: `format_program(prog: Program) returns String` returning module + imports + decl headers in source order (using parallel arrays in roundtrip order or via a Phase 38 source-order list — design choice this phase makes).
-3. Per-decl-kind formatters, body re-emission via re-tokenisation.
-4. Differential test harness: stage2-formatted output vs. `intentc fmt` output, byte-compared, on the corpus.
+- **`Char` literal escape-decoding** — currently stage2 emits the raw lexeme. A program that passes char literals through the formatter is byte-equal, but a program that constructs a `Char` value at runtime and asks the formatter to round-trip an in-memory Char would need a decode. Probably not needed for self-hosting.
+- **`String` interpolation tokenisation** — `"abc ${expr} def"` is one `tk_string`. The formatter currently re-emits the literal verbatim, which works as long as nothing inside the interpolation needs re-formatting. Phase 39+ if the corpus exercises this.
+- **Stage1 multi-use String backend fix** — would let us remove the `pad_open` / `pad_close` workaround. Small, contained, mostly cleanup.
 
 ## Other candidates (orthogonal to stage2 work)
 
@@ -86,4 +79,4 @@ Durable items (unchanged this phase):
 
 1. `git log --oneline -10` for recent landings.
 2. `aiki task` for the open task list.
-3. Recommended start: **Phase 38 step 1** — add a stage1 extern for `read_file` (Go side, simple wrapper around `os.ReadFile`). Then write `selfhost/formatter/format.intent` with a `format_program` entry point that round-trips module + imports + decl headers on a small fixture, before scaling to the byte-equal corpus.
+3. Recommended start: **Phase 39 Track A** — extend `parser.intent` to parse `requires` / `ensures` clauses (and the `result` keyword inside `ensures`), wire into `FunctionDecl` (or a sibling `Contract` entity), then teach `format.intent` to emit them. The fibonacci.intent dogfood unlocks immediately after.

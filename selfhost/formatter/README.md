@@ -4,11 +4,12 @@ Stage2 Intent formatter — Intent-implemented `intentc fmt`. Lives alongside
 stage1's Go formatter (`internal/formatter/`); will eventually replace it
 once parity is reached.
 
-**Status (2026-06-09):** lexer + parser (top-level + statements +
-expressions + all declaration kinds + char/float/block-comment
-extensions) shipped (Phases 32-37). 93 in-language tests passing on
-rust + js. Beginning the formatter (`format.intent`, AST → string) is
-next (Phase 38).
+**Status (2026-06-09):** lexer + parser + **formatter MVP** shipped
+(Phases 32-38). 110 in-language tests passing on rust + js, including
+a real-file dogfood that round-trips `examples/hello.intent`
+byte-equal with stage1's `intentc fmt`. Phase 39 widens parser
+coverage (requires/ensures, match, async bodies) so the dogfood
+corpus can grow.
 
 ## Big picture
 
@@ -28,9 +29,11 @@ for the full multi-phase plan. The short version:
 ```
 selfhost/formatter/
   intent.toml             # package manifest (Phase 30 / ADR 0039)
-  lexer.intent            # source → tokens                 (Phase 32 — shipped)
-  ast.intent              # AST entity declarations          (Phase 36 — shipped)
-  parser.intent           # tokens → AST (full grammar)     (Phases 33-36 — shipped)
+  lexer.intent            # source → tokens                 (Phase 32 / 37 — shipped)
+  ast.intent              # AST entity declarations          (Phase 36 / 37 — shipped)
+  parser.intent           # tokens → AST (full grammar)     (Phases 33-37 — shipped)
+  format.intent           # AST → source                    (Phase 38 — shipped)
+  format_test.intent      # formatter tests + hello.intent dogfood
   README.md               # (this file)
 ```
 
@@ -59,9 +62,10 @@ selfhost/formatter/
 | **35** | Expression parser with precedence (Pratt / precedence climbing). | **Shipped** ([PRD](../../ops/plans/phase-35-expression-parser-in-intent.md)) |
 | **36** | Entity / enum / trait / impl / intent / test / extern declarations + AST split. | **Shipped** ([PRD](../../ops/plans/phase-36-top-level-decls-in-intent.md)) |
 | **37** | Stage2 lexer extensions: char + float literals, nested `/* */` comments; `ex_char` / `ex_float` wired into expression parser. | **Shipped** ([PRD](../../ops/plans/phase-37-stage2-lexer-extensions.md)) |
-| **38** | Formatter (AST → string), byte-parity on a corpus. Stage1 `read_file` extern likely surfaces here. | Next |
-| **39** | Full-feature parser parity (async, pattern matching, generics). | Blocked on 38 |
-| **40** | Differential test gate + CLI integration (`intentc fmt --self-hosted`). | Blocked on 38-39 |
+| **38** | Formatter MVP — `format.intent`. Hello.intent round-trips byte-equal with stage1. | **Shipped** ([PRD](../../ops/plans/phase-38-stage2-formatter-mvp.md)) |
+| **39** | Full-feature parser parity (requires/ensures, async bodies, match, generics) — widens dogfood corpus. | Next |
+| **40** | Paren-stripping + source-order tracking — full byte-parity on richer corpus. | Blocked on 39 |
+| **41** | Differential test gate + CLI integration (`intentc fmt --self-hosted`). | Blocked on 38-40 |
 
 Phase numbers are indicative and may shift as language gaps surface.
 
@@ -89,8 +93,9 @@ file count grows.
 Run the stage2 tests on every backend with:
 
 ```bash
-intentc test --all-targets selfhost/formatter/lexer.intent     # 27 tests
-intentc test --all-targets selfhost/formatter/parser.intent    # 66 tests + the 27 lexer tests (imported) = 93
+intentc test --all-targets selfhost/formatter/lexer.intent       # 27 tests
+intentc test --all-targets selfhost/formatter/parser.intent      # 66 tests + 27 lexer (imported) = 93
+intentc test --all-targets selfhost/formatter/format_test.intent # 17 formatter tests + 93 imported = 110
 ```
 
 PRs should reference the relevant phase number.

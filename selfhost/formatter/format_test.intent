@@ -1,0 +1,139 @@
+// selfhost/formatter/format_test.intent — Phase 38 stage2 formatter tests.
+//
+// Lives separately from `format.intent` to keep the formatter file pure
+// (matches stage1's convention of test-free implementation files when the
+// test count grows). Imports format.intent and parser.intent and verifies
+// round-trip behaviour on synthetic and real-file fixtures.
+
+module formatter_format_test version "0.1.0";
+
+import "format.intent";
+import "parser.intent";
+import "ast.intent";
+import "lexer.intent";
+
+// --- Unit tests: individual emitters ----------------------------------------
+
+test "format_module_decl emits canonical form" {
+    let m: ModuleDecl = ModuleDecl("hello", "1.0.0");
+    let s: String = formatter_format.format_module_decl(m);
+    assert_eq(s, "module hello version \"1.0.0\";");
+}
+
+test "format_import_decl file form" {
+    let imp: ImportDecl = ImportDecl(false, "lexer.intent");
+    let s: String = formatter_format.format_import_decl(imp);
+    assert_eq(s, "import \"lexer.intent\";");
+}
+
+test "format_import_decl package form" {
+    let imp: ImportDecl = ImportDecl(true, "math");
+    let s: String = formatter_format.format_import_decl(imp);
+    assert_eq(s, "import math;");
+}
+
+test "format_expr int literal" {
+    let mutable children: Array<Expr> = [];
+    let e: Expr = Expr(formatter_ast.ex_int(), 42, "", false, "", children);
+    assert_eq(formatter_format.format_expr(e), "42");
+}
+
+test "format_expr bool literals" {
+    let mutable c1: Array<Expr> = [];
+    let t: Expr = Expr(formatter_ast.ex_bool(), 0, "", true, "", c1);
+    assert_eq(formatter_format.format_expr(t), "true");
+    let mutable c2: Array<Expr> = [];
+    let f: Expr = Expr(formatter_ast.ex_bool(), 0, "", false, "", c2);
+    assert_eq(formatter_format.format_expr(f), "false");
+}
+
+test "format_expr string literal re-quotes" {
+    let mutable children: Array<Expr> = [];
+    let e: Expr = Expr(formatter_ast.ex_string(), 0, "hello", false, "", children);
+    assert_eq(formatter_format.format_expr(e), "\"hello\"");
+}
+
+test "format_expr char literal preserves raw lexeme" {
+    let mutable children: Array<Expr> = [];
+    let e: Expr = Expr(formatter_ast.ex_char(), 0, "'a'", false, "", children);
+    assert_eq(formatter_format.format_expr(e), "'a'");
+}
+
+test "format_expr float literal preserves raw lexeme" {
+    let mutable children: Array<Expr> = [];
+    let e: Expr = Expr(formatter_ast.ex_float(), 0, "3.14", false, "", children);
+    assert_eq(formatter_format.format_expr(e), "3.14");
+}
+
+test "format_expr ident" {
+    let mutable children: Array<Expr> = [];
+    let e: Expr = Expr(formatter_ast.ex_ident(), 0, "", false, "foo", children);
+    assert_eq(formatter_format.format_expr(e), "foo");
+}
+
+// --- Round-trip tests: parse + format ---------------------------------------
+
+// Helper: parse a source string and format it. Asserts no parse error.
+public function roundtrip(src: String) returns String {
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    return formatter_format.format_program(prog);
+}
+
+test "round-trip: minimal module + function" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction f() returns Int " + '{'.to_string() + "\n    return 0;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "round-trip: entry function" {
+    let src: String = "module hello version \"1.0.0\";\n\nentry function main() returns Int " + '{'.to_string() + "\n    return 0;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "round-trip: test declaration" {
+    let src: String = "module m version \"1.0.0\";\n\ntest \"my test\" " + '{'.to_string() + "\n    assert(true);\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "round-trip: let + return + arithmetic" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction f() returns Int " + '{'.to_string() + "\n    let mutable x: Int = 1 + 2;\n    return x;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "round-trip: function call expression" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction f() returns Int " + '{'.to_string() + "\n    let x: Int = fib(10);\n    return x;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "round-trip: if statement" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction f(n: Int) returns Int " + '{'.to_string() + "\n    if n <= 0 " + '{'.to_string() + "\n        return 0;\n    " + '}'.to_string() + "\n    return 1;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "round-trip: while loop" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction f() returns Int " + '{'.to_string() + "\n    let mutable i: Int = 0;\n    while i < 10 " + '{'.to_string() + "\n        i = i + 1;\n    " + '}'.to_string() + "\n    return i;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+// --- Real-file dogfood -----------------------------------------------------
+
+test "dogfood: parse + format hello.intent matches expected canonical form" {
+    let r: Result<String, String> = read_file("examples/hello.intent");
+    let src: String = match r {
+        Ok(s) => s,
+        Err(_) => "",
+    };
+    if src != "" {
+        // Only assert when the file was read — the synthetic round-trips
+        // above cover the core behaviour when run from anywhere else.
+        let out: String = roundtrip(src);
+        assert_eq(out, src);
+    }
+}

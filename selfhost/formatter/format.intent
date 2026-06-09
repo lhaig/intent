@@ -1,0 +1,450 @@
+// selfhost/formatter/format.intent — Phase 38 / ADR 0040 stage2 formatter.
+//
+// AST → canonical Intent source. Round-trips programs the stage2 parser
+// understands: module + imports + functions + entities + enums + traits +
+// impls + intent blocks + tests + externs, plus the statement and
+// expression grammar Phases 34-37 already cover. The dogfood goal is
+// byte-equality with stage1's `intentc fmt` on a small corpus — initially
+// `examples/hello.intent`. Constructs the parser doesn't yet handle
+// (requires/ensures contracts, async functions, pattern matching, etc.)
+// are out of scope.
+//
+// Design notes:
+//   - Decl order in the output: module → imports → functions → entities →
+//     enums → traits → impls → intent_blocks → tests → externs. Stage2's
+//     `Program` uses parallel arrays per kind (Phase 36), so the source
+//     order across kinds is already lost — emitting in a fixed order is
+//     the cleanest match to that. hello.intent's source order happens to
+//     coincide.
+//   - Parens are preserved as-written via `ex_paren`. Stage1's formatter
+//     strips unnecessary parens; matching that exactly is a Phase 39
+//     refinement.
+//   - All emitters return Strings; the caller assembles them. No
+//     stream/buffer abstraction yet — string concat is fine for hello.intent
+//     scale.
+
+module formatter_format version "0.1.0";
+
+import "ast.intent";
+
+// --- Indentation helpers ----------------------------------------------------
+
+public function indent_string(level: Int) returns String {
+    let mutable s: String = "";
+    let mutable i: Int = 0;
+    while i < level {
+        s = s + "    ";
+        i = i + 1;
+    }
+    return s;
+}
+
+// --- Module + imports ------------------------------------------------------
+
+public function format_module_decl(m: ModuleDecl) returns String {
+    return "module " + m.name + " version \"" + m.module_version + "\";";
+}
+
+public function format_import_decl(imp: ImportDecl) returns String {
+    if imp.is_package {
+        return "import " + imp.path + ";";
+    }
+    return "import \"" + imp.path + "\";";
+}
+
+// --- Params ----------------------------------------------------------------
+
+public function format_param(p: Param) returns String {
+    return p.name + ": " + p.type_name;
+}
+
+public function format_param_list(ps: Array<Param>) returns String {
+    let mutable s: String = "";
+    let mutable i: Int = 0;
+    while i < len(ps) {
+        if i > 0 {
+            s = s + ", ";
+        }
+        s = s + format_param(ps[i]);
+        i = i + 1;
+    }
+    return s;
+}
+
+// --- Expressions -----------------------------------------------------------
+
+public function format_expr(e: Expr) returns String {
+    if e.kind == formatter_ast.ex_void() {
+        return "";
+    }
+    if e.kind == formatter_ast.ex_int() {
+        return e.int_value.to_string();
+    }
+    if e.kind == formatter_ast.ex_float() {
+        return e.str_value;
+    }
+    if e.kind == formatter_ast.ex_char() {
+        return e.str_value;
+    }
+    if e.kind == formatter_ast.ex_string() {
+        return "\"" + e.str_value + "\"";
+    }
+    if e.kind == formatter_ast.ex_bool() {
+        if e.bool_value {
+            return "true";
+        }
+        return "false";
+    }
+    if e.kind == formatter_ast.ex_ident() {
+        return e.name;
+    }
+    if e.kind == formatter_ast.ex_unary() {
+        let operand: String = format_expr(e.children[0]);
+        if e.name == "not" {
+            return "not " + operand;
+        }
+        return e.name + operand;
+    }
+    if e.kind == formatter_ast.ex_binop() {
+        let lhs: String = format_expr(e.children[0]);
+        let rhs: String = format_expr(e.children[1]);
+        return lhs + " " + e.name + " " + rhs;
+    }
+    if e.kind == formatter_ast.ex_call() {
+        let callee: String = format_expr(e.children[0]);
+        let mutable args: String = "";
+        let mutable i: Int = 1;
+        while i < len(e.children) {
+            if i > 1 {
+                args = args + ", ";
+            }
+            args = args + format_expr(e.children[i]);
+            i = i + 1;
+        }
+        return callee + "(" + args + ")";
+    }
+    if e.kind == formatter_ast.ex_index() {
+        let obj: String = format_expr(e.children[0]);
+        let idx: String = format_expr(e.children[1]);
+        return obj + "[" + idx + "]";
+    }
+    if e.kind == formatter_ast.ex_field() {
+        let obj: String = format_expr(e.children[0]);
+        return obj + "." + e.name;
+    }
+    if e.kind == formatter_ast.ex_array() {
+        let mutable elems: String = "";
+        let mutable i: Int = 0;
+        while i < len(e.children) {
+            if i > 0 {
+                elems = elems + ", ";
+            }
+            elems = elems + format_expr(e.children[i]);
+            i = i + 1;
+        }
+        return "[" + elems + "]";
+    }
+    if e.kind == formatter_ast.ex_range() {
+        let start: String = format_expr(e.children[0]);
+        let end: String = format_expr(e.children[1]);
+        return start + ".." + end;
+    }
+    if e.kind == formatter_ast.ex_paren() {
+        let inner: String = format_expr(e.children[0]);
+        return "(" + inner + ")";
+    }
+    // Unknown kind — emit a placeholder so the formatter doesn't silently
+    // drop. Phase 39+ will tighten this.
+    return "<unknown_expr>";
+}
+
+// --- Statements ------------------------------------------------------------
+
+public function format_stmt(s: Stmt, level: Int) returns String {
+    let pad: String = indent_string(level);
+    if s.kind == formatter_ast.st_let() {
+        let mutable mut_kw: String = "";
+        if s.is_mutable {
+            mut_kw = "mutable ";
+        }
+        return pad + "let " + mut_kw + s.name + ": " + s.type_name + " = " + format_expr(s.expr) + ";";
+    }
+    if s.kind == formatter_ast.st_return() {
+        if s.expr.kind == formatter_ast.ex_void() {
+            return pad + "return;";
+        }
+        return pad + "return " + format_expr(s.expr) + ";";
+    }
+    if s.kind == formatter_ast.st_expr() {
+        return pad + format_expr(s.expr) + ";";
+    }
+    if s.kind == formatter_ast.st_if() {
+        let mutable out: String = pad + "if " + format_expr(s.expr) + " " + '{'.to_string() + "\n";
+        out = out + format_block_body(s.then_block, level + 1);
+        out = out + pad + '}'.to_string();
+        if s.has_else {
+            out = out + " else " + '{'.to_string() + "\n";
+            out = out + format_block_body(s.else_block, level + 1);
+            out = out + pad + '}'.to_string();
+        }
+        return out;
+    }
+    if s.kind == formatter_ast.st_while() {
+        let mutable out: String = pad + "while " + format_expr(s.expr) + " " + '{'.to_string() + "\n";
+        out = out + format_block_body(s.then_block, level + 1);
+        out = out + pad + '}'.to_string();
+        return out;
+    }
+    return pad + "<unknown_stmt>;";
+}
+
+// Block body (statements only, no braces). Each statement gets a trailing
+// newline; the caller emits the enclosing braces.
+public function format_block_body(b: Block, level: Int) returns String {
+    let mutable out: String = "";
+    let mutable i: Int = 0;
+    while i < len(b.stmts) {
+        out = out + format_stmt(b.stmts[i], level) + "\n";
+        i = i + 1;
+    }
+    return out;
+}
+
+// --- Function declaration --------------------------------------------------
+
+public function format_function_decl(fn_decl: FunctionDecl, level: Int) returns String {
+    // `pad` is built twice (open + close) to avoid moving a single String
+    // into both spots; the stage1 Rust backend doesn't yet auto-clone
+    // multi-use locals.
+    let pad_open: String = indent_string(level);
+    let pad_close: String = indent_string(level);
+    let mutable head: String = "";
+    if fn_decl.is_public {
+        head = head + "public ";
+    }
+    if fn_decl.is_entry {
+        head = head + "entry ";
+    }
+    if fn_decl.is_async {
+        head = head + "async ";
+    }
+    head = head + "function " + fn_decl.name + "(" + format_param_list(fn_decl.params) + ")";
+    if not fn_decl.is_constructor and fn_decl.return_type != "" {
+        head = head + " returns " + fn_decl.return_type;
+    }
+    head = head + " " + '{'.to_string() + "\n";
+    let body: String = format_block_body(fn_decl.body, level + 1);
+    return pad_open + head + body + pad_close + '}'.to_string();
+}
+
+// Constructor: same as a function but no `function` keyword and no return
+// type. Used inside entity bodies.
+public function format_constructor_decl(c: FunctionDecl, level: Int) returns String {
+    let pad_open: String = indent_string(level);
+    let pad_close: String = indent_string(level);
+    let head: String = pad_open + "constructor(" + format_param_list(c.params) + ") " + '{'.to_string() + "\n";
+    let body: String = format_block_body(c.body, level + 1);
+    return head + body + pad_close + '}'.to_string();
+}
+
+// Method: like a function but uses `method` keyword.
+public function format_method_decl(m: FunctionDecl, level: Int) returns String {
+    let pad_open: String = indent_string(level);
+    let pad_close: String = indent_string(level);
+    let mutable head: String = "";
+    if m.is_async {
+        head = head + "async ";
+    }
+    head = head + "method " + m.name + "(" + format_param_list(m.params) + ")";
+    if m.return_type != "" {
+        head = head + " returns " + m.return_type;
+    }
+    head = head + " " + '{'.to_string() + "\n";
+    let body: String = format_block_body(m.body, level + 1);
+    return pad_open + head + body + pad_close + '}'.to_string();
+}
+
+// --- Test declaration ------------------------------------------------------
+
+public function format_test_decl(t: TestDecl) returns String {
+    let mutable out: String = "test \"" + t.name + "\" " + '{'.to_string() + "\n";
+    out = out + format_block_body(t.body, 1);
+    out = out + '}'.to_string();
+    return out;
+}
+
+// --- Entity / enum / trait / impl ------------------------------------------
+
+public function format_entity_decl(e: EntityDecl) returns String {
+    let mutable head: String = "";
+    if e.is_public {
+        head = head + "public ";
+    }
+    head = head + "entity " + e.name + " " + '{'.to_string() + "\n";
+    let mutable body: String = "";
+    let mutable fi: Int = 0;
+    while fi < len(e.fields) {
+        body = body + "    field " + e.fields[fi].name + ": " + e.fields[fi].type_name + ";\n";
+        fi = fi + 1;
+    }
+    if e.has_constructor {
+        body = body + "\n" + format_constructor_decl(e.ctor, 1) + "\n";
+    }
+    let mutable mi: Int = 0;
+    while mi < len(e.methods) {
+        body = body + "\n" + format_method_decl(e.methods[mi], 1) + "\n";
+        mi = mi + 1;
+    }
+    if len(e.invariants) > 0 {
+        body = body + "\n    invariant " + '{'.to_string() + "\n";
+        let mutable ii: Int = 0;
+        while ii < len(e.invariants) {
+            body = body + "        " + format_expr(e.invariants[ii]) + ";\n";
+            ii = ii + 1;
+        }
+        body = body + "    " + '}'.to_string() + "\n";
+    }
+    return head + body + '}'.to_string();
+}
+
+public function format_enum_decl(en: EnumDecl) returns String {
+    let mutable head: String = "";
+    if en.is_public {
+        head = head + "public ";
+    }
+    head = head + "enum " + en.name + " " + '{'.to_string() + "\n";
+    let mutable body: String = "";
+    let mutable i: Int = 0;
+    while i < len(en.variants) {
+        let v: EnumVariant = en.variants[i];
+        if len(v.params) == 0 {
+            body = body + "    " + v.name + ",\n";
+        } else {
+            body = body + "    " + v.name + "(" + format_param_list(v.params) + "),\n";
+        }
+        i = i + 1;
+    }
+    return head + body + '}'.to_string();
+}
+
+public function format_trait_method_sig(sig: TraitMethodSig) returns String {
+    let mutable s: String = "    method " + sig.name + "(" + format_param_list(sig.params) + ")";
+    if sig.return_type != "" {
+        s = s + " returns " + sig.return_type;
+    }
+    s = s + ";";
+    return s;
+}
+
+public function format_trait_decl(tr: TraitDecl) returns String {
+    let mutable head: String = "";
+    if tr.is_public {
+        head = head + "public ";
+    }
+    head = head + "trait " + tr.name + " " + '{'.to_string() + "\n";
+    let mutable body: String = "";
+    let mutable i: Int = 0;
+    while i < len(tr.methods) {
+        body = body + format_trait_method_sig(tr.methods[i]) + "\n";
+        i = i + 1;
+    }
+    return head + body + '}'.to_string();
+}
+
+public function format_impl_decl(im: ImplDecl) returns String {
+    let mutable head: String = "impl " + im.trait_name + " for " + im.entity_name + " " + '{'.to_string() + "\n";
+    let mutable body: String = "";
+    let mutable i: Int = 0;
+    while i < len(im.methods) {
+        if i > 0 {
+            body = body + "\n";
+        }
+        body = body + format_method_decl(im.methods[i], 1) + "\n";
+        i = i + 1;
+    }
+    return head + body + '}'.to_string();
+}
+
+// --- Intent block + extern ------------------------------------------------
+
+public function format_intent_block(ib: IntentBlock) returns String {
+    let mutable s: String = "intent " + '{'.to_string() + "\n";
+    s = s + "    goal: \"" + ib.goal_text + "\";\n";
+    if len(ib.verifications) > 0 {
+        s = s + "    verified_by: ";
+        let mutable i: Int = 0;
+        while i < len(ib.verifications) {
+            if i > 0 {
+                s = s + ", ";
+            }
+            s = s + ib.verifications[i];
+            i = i + 1;
+        }
+        s = s + ";\n";
+    }
+    s = s + '}'.to_string();
+    return s;
+}
+
+public function format_extern_decl(ex: ExternDecl) returns String {
+    let mutable s: String = "extern \"" + ex.target + "\" function " + ex.func_name + "(" + format_param_list(ex.params) + ")";
+    if ex.return_type != "" {
+        s = s + " returns " + ex.return_type;
+    }
+    s = s + ";";
+    return s;
+}
+
+// --- Top-level ------------------------------------------------------------
+
+public function format_program(prog: Program) returns String {
+    let mutable out: String = format_module_decl(prog.module_decl) + "\n\n";
+
+    let mutable i: Int = 0;
+    while i < len(prog.imports) {
+        out = out + format_import_decl(prog.imports[i]) + "\n\n";
+        i = i + 1;
+    }
+    i = 0;
+    while i < len(prog.functions) {
+        out = out + format_function_decl(prog.functions[i], 0) + "\n\n";
+        i = i + 1;
+    }
+    i = 0;
+    while i < len(prog.entities) {
+        out = out + format_entity_decl(prog.entities[i]) + "\n\n";
+        i = i + 1;
+    }
+    i = 0;
+    while i < len(prog.enums) {
+        out = out + format_enum_decl(prog.enums[i]) + "\n\n";
+        i = i + 1;
+    }
+    i = 0;
+    while i < len(prog.traits) {
+        out = out + format_trait_decl(prog.traits[i]) + "\n\n";
+        i = i + 1;
+    }
+    i = 0;
+    while i < len(prog.impls) {
+        out = out + format_impl_decl(prog.impls[i]) + "\n\n";
+        i = i + 1;
+    }
+    i = 0;
+    while i < len(prog.intent_blocks) {
+        out = out + format_intent_block(prog.intent_blocks[i]) + "\n\n";
+        i = i + 1;
+    }
+    i = 0;
+    while i < len(prog.tests) {
+        out = out + format_test_decl(prog.tests[i]) + "\n\n";
+        i = i + 1;
+    }
+    i = 0;
+    while i < len(prog.externs) {
+        out = out + format_extern_decl(prog.externs[i]) + "\n\n";
+        i = i + 1;
+    }
+
+    return out;
+}
