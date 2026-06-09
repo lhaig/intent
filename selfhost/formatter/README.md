@@ -4,11 +4,11 @@ Stage2 Intent formatter — Intent-implemented `intentc fmt`. Lives alongside
 stage1's Go formatter (`internal/formatter/`); will eventually replace it
 once parity is reached.
 
-**Status (2026-06-03):** lexer + parser (top-level + statements +
-expressions + all declaration kinds) shipped (Phases 32-36). 74
-in-language tests passing on rust + js. Stage2 lexer extensions
-(char/float literals, multi-line comments) and the formatter itself
-are next (Phase 37+).
+**Status (2026-06-09):** lexer + parser (top-level + statements +
+expressions + all declaration kinds + char/float/block-comment
+extensions) shipped (Phases 32-37). 93 in-language tests passing on
+rust + js. Beginning the formatter (`format.intent`, AST → string) is
+next (Phase 38).
 
 ## Big picture
 
@@ -58,10 +58,10 @@ selfhost/formatter/
 | **34** | Statement-level parser (`let`, `return`, `if`/`else`, `while`, expression statements, `Block`). | **Shipped** ([PRD](../../ops/plans/phase-34-statement-parser-in-intent.md)) |
 | **35** | Expression parser with precedence (Pratt / precedence climbing). | **Shipped** ([PRD](../../ops/plans/phase-35-expression-parser-in-intent.md)) |
 | **36** | Entity / enum / trait / impl / intent / test / extern declarations + AST split. | **Shipped** ([PRD](../../ops/plans/phase-36-top-level-decls-in-intent.md)) |
-| **37** | Stage2 lexer extensions (char + float literals, multi-line comments) → full self-parse dogfood, then begin Formatter (AST → string). | Next |
-| **37** | Formatter (AST → string), byte-parity on a corpus. | Blocked on 33-36 |
-| **38** | Full-feature parser parity (async, pattern matching, generics). | Blocked on 33-37 |
-| **39** | Differential test gate + CLI integration (`intentc fmt --self-hosted`). | Blocked on 37-38 |
+| **37** | Stage2 lexer extensions: char + float literals, nested `/* */` comments; `ex_char` / `ex_float` wired into expression parser. | **Shipped** ([PRD](../../ops/plans/phase-37-stage2-lexer-extensions.md)) |
+| **38** | Formatter (AST → string), byte-parity on a corpus. Stage1 `read_file` extern likely surfaces here. | Next |
+| **39** | Full-feature parser parity (async, pattern matching, generics). | Blocked on 38 |
+| **40** | Differential test gate + CLI integration (`intentc fmt --self-hosted`). | Blocked on 38-39 |
 
 Phase numbers are indicative and may shift as language gaps surface.
 
@@ -89,8 +89,8 @@ file count grows.
 Run the stage2 tests on every backend with:
 
 ```bash
-intentc test --all-targets selfhost/formatter/lexer.intent     # 13 tests
-intentc test --all-targets selfhost/formatter/parser.intent    # 61 tests + the 13 lexer tests (imported) = 74
+intentc test --all-targets selfhost/formatter/lexer.intent     # 27 tests
+intentc test --all-targets selfhost/formatter/parser.intent    # 66 tests + the 27 lexer tests (imported) = 93
 ```
 
 PRs should reference the relevant phase number.

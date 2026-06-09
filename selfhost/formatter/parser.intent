@@ -370,7 +370,7 @@ public entity Parser {
     //   parse_mul    = parse_unary ( ('*'|'/'|'%') parse_unary )*
     //   parse_unary  = ('-' | 'not') parse_unary | parse_postfix
     //   parse_postfix = parse_primary ( '(' args ')' | '[' expr ']' | '.' ident )*
-    //   parse_primary = INT_LIT | STR_LIT | 'true' | 'false' | IDENT
+    //   parse_primary = INT_LIT | FLOAT_LIT | CHAR_LIT | STR_LIT | 'true' | 'false' | IDENT
     //               | '(' parse_expr ')' | '[' parse_array_literal_body ']'
     //
     // Assignment is parsed as a binop with op "=" at the lowest precedence.
@@ -565,6 +565,16 @@ public entity Parser {
             let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
             return Expr(formatter_ast.ex_string(), 0, self.unquote(tok.text), false, "", children);
+        }
+        if kind == formatter_lexer.tk_float() {
+            let tok: Token = self.advance();
+            let mutable children: Array<Expr> = [];
+            return Expr(formatter_ast.ex_float(), 0, tok.text, false, "", children);
+        }
+        if kind == formatter_lexer.tk_char() {
+            let tok: Token = self.advance();
+            let mutable children: Array<Expr> = [];
+            return Expr(formatter_ast.ex_char(), 0, tok.text, false, "", children);
         }
         if kind == formatter_lexer.kw_true() {
             self.advance();
@@ -1285,6 +1295,38 @@ test "bool literals parse as ex_bool" {
     assert_eq(e_f.bool_value, false);
 }
 
+test "float literal expression" {
+    let prog: Program = parse(wrap_in_let("3.14"));
+    assert_eq(prog.error, "");
+    let e: Expr = single_let_rhs(prog);
+    assert_eq(e.kind, formatter_ast.ex_float());
+    assert_eq(e.str_value, "3.14");
+}
+
+test "float literal with exponent expression" {
+    let prog: Program = parse(wrap_in_let("1.5e-3"));
+    assert_eq(prog.error, "");
+    let e: Expr = single_let_rhs(prog);
+    assert_eq(e.kind, formatter_ast.ex_float());
+    assert_eq(e.str_value, "1.5e-3");
+}
+
+test "char literal expression" {
+    let prog: Program = parse(wrap_in_let("'a'"));
+    assert_eq(prog.error, "");
+    let e: Expr = single_let_rhs(prog);
+    assert_eq(e.kind, formatter_ast.ex_char());
+    assert_eq(e.str_value, "'a'");
+}
+
+test "char escape literal expression" {
+    let prog: Program = parse(wrap_in_let("'\\n'"));
+    assert_eq(prog.error, "");
+    let e: Expr = single_let_rhs(prog);
+    assert_eq(e.kind, formatter_ast.ex_char());
+    assert_eq(e.str_value, "'\\n'");
+}
+
 test "string literal preserves quotes-stripped value" {
     let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string()
         + " let s: String = \"hello\"; return 0; " + '}'.to_string();
@@ -1682,6 +1724,32 @@ test "mixed declarations parse in any order" {
     assert_eq(len(prog.functions), 1);
     assert_eq(len(prog.tests), 1);
     assert_eq(len(prog.enums), 1);
+}
+
+test "phase 37 dogfood: float + char literals + block comments parse end-to-end" {
+    // Exercises the three Phase 37 lexer additions in one program.
+    let src: String = "module sample version \"0.1\"; "
+        + "/* block comment with /* nested */ inside */ "
+        + "function f() returns Int " + '{'.to_string()
+        + " let pi: Float = 3.14; "
+        + " let exp: Float = 1.5e-3; "
+        + " let nl: Char = '\\n'; "
+        + " return 0; "
+        + " " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions), 1);
+    let fn_decl: FunctionDecl = prog.functions[0];
+    assert_eq(fn_decl.name, "f");
+    let stmts: Array<Stmt> = fn_decl.body.stmts;
+    // 3 let stmts + 1 return
+    assert_eq(len(stmts), 4);
+    assert_eq(stmts[0].expr.kind, formatter_ast.ex_float());
+    assert_eq(stmts[0].expr.str_value, "3.14");
+    assert_eq(stmts[1].expr.kind, formatter_ast.ex_float());
+    assert_eq(stmts[1].expr.str_value, "1.5e-3");
+    assert_eq(stmts[2].expr.kind, formatter_ast.ex_char());
+    assert_eq(stmts[2].expr.str_value, "'\\n'");
 }
 
 test "synthetic dogfood: parse a small entity with methods and tests" {

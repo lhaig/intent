@@ -44,6 +44,8 @@ public function ex_field() returns Int { return 9; }       // children=[object],
 public function ex_array() returns Int { return 10; }      // children=[elem1..elemN]
 public function ex_range() returns Int { return 11; }      // children=[start, end]
 public function ex_paren() returns Int { return 12; }      // children=[inner]
+public function ex_float() returns Int { return 13; }      // str_value = raw lexeme (e.g. "3.14", "1.5e-3")
+public function ex_char() returns Int { return 14; }       // str_value = raw lexeme including quotes (e.g. "'a'", "'\\n'")
 
 // --- Shared AST entities ----------------------------------------------------
 
@@ -71,6 +73,8 @@ public entity Param {
 //   ex_array   — children=[elem1..elemN]
 //   ex_range   — children=[start, end]
 //   ex_paren   — children=[inner]
+//   ex_float   — str_value (raw lexeme; formatter round-trips as-is)
+//   ex_char    — str_value (raw lexeme with quotes; formatter round-trips as-is)
 public entity Expr {
     field kind: Int;
     field int_value: Int;

@@ -26,6 +26,8 @@ module formatter_lexer version "0.1.0";
 public function tk_ident() returns Int { return 1; }
 public function tk_int() returns Int { return 2; }
 public function tk_string() returns Int { return 3; }
+public function tk_float() returns Int { return 4; }
+public function tk_char() returns Int { return 5; }
 
 public function tk_lparen() returns Int { return 10; }
 public function tk_rparen() returns Int { return 11; }
@@ -234,7 +236,30 @@ public entity Lexer {
                         self.advance();
                     }
                 } else {
-                    return;
+                    if c == '/' and self.peek2() == '*' {
+                        // Multi-line comment with nesting support.
+                        self.advance();
+                        self.advance();
+                        let mutable depth: Int = 1;
+                        while not self.at_end() and depth > 0 {
+                            let cc: Char = self.peek();
+                            if cc == '/' and self.peek2() == '*' {
+                                self.advance();
+                                self.advance();
+                                depth = depth + 1;
+                            } else {
+                                if cc == '*' and self.peek2() == '/' {
+                                    self.advance();
+                                    self.advance();
+                                    depth = depth - 1;
+                                } else {
+                                    self.advance();
+                                }
+                            }
+                        }
+                    } else {
+                        return;
+                    }
                 }
             }
         }
@@ -250,13 +275,91 @@ public entity Lexer {
         return Token(kind, text, start_line, start_col);
     }
 
+    // Scan a numeric literal. Produces tk_int by default; promotes to tk_float
+    // if a `.` followed by a digit is seen (the `..` range op is preserved as
+    // an int boundary), or an exponent `e`/`E`. Examples: `42`, `3.14`,
+    // `1.5e10`, `2.5e-3`.
     method scan_int_literal(start_line: Int, start_col: Int) returns Token {
         let start: Int = self.position;
         while not self.at_end() and self.peek().is_digit() {
             self.advance();
         }
+        let mutable is_float: Bool = false;
+        // Decimal portion: `.` followed by a digit. `1..5` (range) stays int.
+        if not self.at_end() and self.peek() == '.' and self.peek2().is_digit() {
+            is_float = true;
+            self.advance(); // consume .
+            while not self.at_end() and self.peek().is_digit() {
+                self.advance();
+            }
+        }
+        // Exponent portion: requires a prior `.` to disambiguate from int+ident
+        // (so `1e5` stays as `1` + `e5`, but `1.5e10` is a float).
+        if is_float and not self.at_end() {
+            let e: Char = self.peek();
+            if e == 'e' or e == 'E' {
+                let next: Char = self.peek2();
+                if next.is_digit() or next == '+' or next == '-' {
+                    self.advance(); // consume e/E
+                    if self.peek() == '+' or self.peek() == '-' {
+                        self.advance();
+                    }
+                    while not self.at_end() and self.peek().is_digit() {
+                        self.advance();
+                    }
+                }
+            }
+        }
         let text: String = self.source[start..self.position];
+        if is_float {
+            return Token(tk_float(), text, start_line, start_col);
+        }
         return Token(tk_int(), text, start_line, start_col);
+    }
+
+    // Char literal: `'<one codepoint>'` or `'\<escape>'`. Unicode escape form
+    // `'\u{...}'` consumes everything up to and including `}`. The raw literal
+    // text (including surrounding quotes) is preserved in Token.text so the
+    // parser/formatter can choose whether to decode.
+    method scan_char_literal(start_line: Int, start_col: Int) returns Token {
+        let start: Int = self.position;
+        self.advance(); // consume opening '
+        if self.at_end() {
+            let text_eof: String = self.source[start..self.position];
+            return Token(tk_error(), text_eof, start_line, start_col);
+        }
+        let c: Char = self.peek();
+        if c == '\n' or c == '\'' {
+            let text_err: String = self.source[start..self.position];
+            return Token(tk_error(), text_err, start_line, start_col);
+        }
+        if c == '\\' {
+            self.advance(); // consume backslash
+            if self.at_end() {
+                let text_eof2: String = self.source[start..self.position];
+                return Token(tk_error(), text_eof2, start_line, start_col);
+            }
+            let esc: Char = self.peek();
+            self.advance(); // consume escape char
+            if esc == 'u' and not self.at_end() and self.peek() == '{' {
+                self.advance(); // consume {
+                while not self.at_end() and self.peek() != '}' and self.peek() != '\'' {
+                    self.advance();
+                }
+                if not self.at_end() and self.peek() == '}' {
+                    self.advance(); // consume }
+                }
+            }
+        } else {
+            self.advance(); // consume content char
+        }
+        if self.at_end() or self.peek() != '\'' {
+            let text_unclosed: String = self.source[start..self.position];
+            return Token(tk_error(), text_unclosed, start_line, start_col);
+        }
+        self.advance(); // consume closing '
+        let text: String = self.source[start..self.position];
+        return Token(tk_char(), text, start_line, start_col);
     }
 
     // v1 string literal: matches `"..."` without decoding escapes. The text
@@ -305,6 +408,9 @@ public entity Lexer {
         }
         if c == '"' {
             return self.scan_string_literal(start_line, start_col);
+        }
+        if c == '\'' {
+            return self.scan_char_literal(start_line, start_col);
         }
 
         // Single-char punctuation, with two-char lookahead for == != <= >=
@@ -498,6 +604,114 @@ test "line and column tracking" {
     assert_eq(toks[0].column, 1);
     assert_eq(toks[1].line, 2);
     assert_eq(toks[1].column, 2);
+}
+
+test "char literal basic" {
+    let toks: Array<Token> = lex("'a'");
+    assert_eq(len(toks), 2);
+    assert_eq(toks[0].kind, tk_char());
+    assert_eq(toks[0].text, "'a'");
+    assert_eq(toks[1].kind, tk_eof());
+}
+
+test "char literal escape sequences" {
+    let toks: Array<Token> = lex("'\\n' '\\t' '\\\\' '\\''");
+    assert_eq(toks[0].kind, tk_char());
+    assert_eq(toks[0].text, "'\\n'");
+    assert_eq(toks[1].kind, tk_char());
+    assert_eq(toks[1].text, "'\\t'");
+    assert_eq(toks[2].kind, tk_char());
+    assert_eq(toks[2].text, "'\\\\'");
+    assert_eq(toks[3].kind, tk_char());
+    assert_eq(toks[3].text, "'\\''");
+    assert_eq(toks[4].kind, tk_eof());
+}
+
+test "char literal unicode escape" {
+    // Source built with concatenation: literal `{`/`}` in stage1 string
+    // literals trigger interpolation parsing (known gap).
+    let src: String = "'\\u" + '{'.to_string() + "1F600" + '}'.to_string() + "'";
+    let toks: Array<Token> = lex(src);
+    assert_eq(toks[0].kind, tk_char());
+    let expected: String = "'\\u" + '{'.to_string() + "1F600" + '}'.to_string() + "'";
+    assert_eq(toks[0].text, expected);
+}
+
+test "char literal unterminated is error" {
+    let toks: Array<Token> = lex("'a");
+    assert_eq(toks[0].kind, tk_error());
+}
+
+test "float literal basic" {
+    let toks: Array<Token> = lex("3.14");
+    assert_eq(len(toks), 2);
+    assert_eq(toks[0].kind, tk_float());
+    assert_eq(toks[0].text, "3.14");
+}
+
+test "float literal with positive exponent" {
+    let toks: Array<Token> = lex("1.5e10");
+    assert_eq(toks[0].kind, tk_float());
+    assert_eq(toks[0].text, "1.5e10");
+}
+
+test "float literal with negative exponent" {
+    let toks: Array<Token> = lex("2.5e-3");
+    assert_eq(toks[0].kind, tk_float());
+    assert_eq(toks[0].text, "2.5e-3");
+}
+
+test "float literal with positive sign exponent" {
+    let toks: Array<Token> = lex("1.0E+2");
+    assert_eq(toks[0].kind, tk_float());
+    assert_eq(toks[0].text, "1.0E+2");
+}
+
+test "int followed by range op is not a float" {
+    let toks: Array<Token> = lex("1..5");
+    assert_eq(toks[0].kind, tk_int());
+    assert_eq(toks[0].text, "1");
+    assert_eq(toks[1].kind, tk_dotdot());
+    assert_eq(toks[2].kind, tk_int());
+    assert_eq(toks[2].text, "5");
+}
+
+test "int followed by method call dot stays int" {
+    let toks: Array<Token> = lex("42.foo");
+    assert_eq(toks[0].kind, tk_int());
+    assert_eq(toks[0].text, "42");
+    assert_eq(toks[1].kind, tk_dot());
+    assert_eq(toks[2].kind, tk_ident());
+    assert_eq(toks[2].text, "foo");
+}
+
+test "bare exponent stays int plus ident" {
+    let toks: Array<Token> = lex("1e5");
+    assert_eq(toks[0].kind, tk_int());
+    assert_eq(toks[0].text, "1");
+    assert_eq(toks[1].kind, tk_ident());
+    assert_eq(toks[1].text, "e5");
+}
+
+test "multi-line block comment skipped" {
+    let toks: Array<Token> = lex("/* hello\nworld */ foo");
+    assert_eq(toks[0].kind, tk_ident());
+    assert_eq(toks[0].text, "foo");
+    assert_eq(toks[1].kind, tk_eof());
+}
+
+test "nested block comments" {
+    let toks: Array<Token> = lex("/* outer /* inner */ still outer */ bar");
+    assert_eq(toks[0].kind, tk_ident());
+    assert_eq(toks[0].text, "bar");
+}
+
+test "block comment between tokens" {
+    let toks: Array<Token> = lex("a /* mid */ b");
+    assert_eq(toks[0].kind, tk_ident());
+    assert_eq(toks[0].text, "a");
+    assert_eq(toks[1].kind, tk_ident());
+    assert_eq(toks[1].text, "b");
 }
 
 test "small program token sequence" {
