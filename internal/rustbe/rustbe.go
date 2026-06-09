@@ -1817,27 +1817,33 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr, arrayRefParams map[st
 	case "read_file":
 		if len(expr.Args) == 1 {
 			arg := g.generateExpr(expr.Args[0], arrayRefParams)
+			arg = g.cloneIfNeeded(arg, expr.Args[0])
 			return fmt.Sprintf("std::fs::read_to_string(%s).map_err(|e| e.to_string())", arg)
 		}
 	case "write_file":
 		if len(expr.Args) == 2 {
 			path := g.generateExpr(expr.Args[0], arrayRefParams)
+			path = g.cloneIfNeeded(path, expr.Args[0])
 			content := g.generateExpr(expr.Args[1], arrayRefParams)
+			content = g.cloneIfNeeded(content, expr.Args[1])
 			return fmt.Sprintf("std::fs::write(%s, %s).map_err(|e| e.to_string())", path, content)
 		}
 	case "create_dir":
 		if len(expr.Args) == 1 {
 			arg := g.generateExpr(expr.Args[0], arrayRefParams)
+			arg = g.cloneIfNeeded(arg, expr.Args[0])
 			return fmt.Sprintf("std::fs::create_dir_all(%s).map_err(|e| e.to_string())", arg)
 		}
 	case "file_exists":
 		if len(expr.Args) == 1 {
 			arg := g.generateExpr(expr.Args[0], arrayRefParams)
+			arg = g.cloneIfNeeded(arg, expr.Args[0])
 			return fmt.Sprintf("std::path::Path::new(&%s).exists()", arg)
 		}
 	case "env_get":
 		if len(expr.Args) == 1 {
 			arg := g.generateExpr(expr.Args[0], arrayRefParams)
+			arg = g.cloneIfNeeded(arg, expr.Args[0])
 			return fmt.Sprintf("std::env::var(%s).ok()", arg)
 		}
 	case "http_post":

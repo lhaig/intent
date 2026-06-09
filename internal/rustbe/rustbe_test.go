@@ -1237,3 +1237,29 @@ entry function main() returns Int {
 		t.Errorf("expected borrowed field-access array arg `sum(&b.xs)`, got:\n%s", output)
 	}
 }
+
+// Regression: builtin I/O calls (read_file, write_file, create_dir,
+// file_exists, env_get) passing a String taken from an indexed array
+// element used to emit `read_to_string(files[i])` — which moves out of
+// the Vec and fails with E0507. cloneIfNeeded is now applied to the
+// builtin arg.
+func TestBuiltinIOClonesIndexedStringArg(t *testing.T) {
+	src := `module m version "1.0";
+
+entry function main() returns Int {
+    let mutable paths: Array<String> = [];
+    paths.push("/tmp/a.txt");
+    paths.push("/tmp/b.txt");
+    let r: Result<String, String> = read_file(paths[0]);
+    return 0;
+}
+`
+	output := generateFromSource(t, "builtin_io_clone", src)
+
+	if !strings.Contains(output, "paths[0i64 as usize].clone()") {
+		t.Errorf("expected read_file arg to be cloned out of Vec index, got:\n%s", output)
+	}
+	if strings.Contains(output, "read_to_string(paths[0i64 as usize])") {
+		t.Errorf("regression: read_file arg moved out of indexed array without clone:\n%s", output)
+	}
+}

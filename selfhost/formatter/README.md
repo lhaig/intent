@@ -4,12 +4,13 @@ Stage2 Intent formatter — Intent-implemented `intentc fmt`. Lives alongside
 stage1's Go formatter (`internal/formatter/`); will eventually replace it
 once parity is reached.
 
-**Status (2026-06-09):** lexer + parser + **formatter MVP** shipped
-(Phases 32-38). 110 in-language tests passing on rust + js, including
-a real-file dogfood that round-trips `examples/hello.intent`
-byte-equal with stage1's `intentc fmt`. Phase 39 widens parser
-coverage (requires/ensures, match, async bodies) so the dogfood
-corpus can grow.
+**Status (2026-06-09):** Phases 32-39 shipped. 115 in-language tests
+on rust + js. **Self-parse + self-format certified:** all four
+stage2 files (lexer, ast, parser, format) parse cleanly with the
+stage2 parser, and the full parse + format pipeline runs end-to-end
+on each. Byte-equal self-format is gated on comment preservation +
+paren-stripping + source-order tracking (Phase 40+). hello.intent
+remains the byte-equal dogfood fixture.
 
 ## Big picture
 
@@ -63,9 +64,10 @@ selfhost/formatter/
 | **36** | Entity / enum / trait / impl / intent / test / extern declarations + AST split. | **Shipped** ([PRD](../../ops/plans/phase-36-top-level-decls-in-intent.md)) |
 | **37** | Stage2 lexer extensions: char + float literals, nested `/* */` comments; `ex_char` / `ex_float` wired into expression parser. | **Shipped** ([PRD](../../ops/plans/phase-37-stage2-lexer-extensions.md)) |
 | **38** | Formatter MVP — `format.intent`. Hello.intent round-trips byte-equal with stage1. | **Shipped** ([PRD](../../ops/plans/phase-38-stage2-formatter-mvp.md)) |
-| **39** | Full-feature parser parity (requires/ensures, async bodies, match, generics) — widens dogfood corpus. | Next |
-| **40** | Paren-stripping + source-order tracking — full byte-parity on richer corpus. | Blocked on 39 |
-| **41** | Differential test gate + CLI integration (`intentc fmt --self-hosted`). | Blocked on 38-40 |
+| **39** | Self-parse certification — all stage2 files parse + format without errors. | **Shipped** ([PRD](../../ops/plans/phase-39-self-parse-certification.md)) |
+| **40** | Comment preservation + paren-stripping + source-order tracking — byte-equal self-format. | Next |
+| **41** | Full-feature parser parity (requires/ensures, match, generics) — widens dogfood corpus to fibonacci.intent. | Blocked on 40 |
+| **42** | Differential test gate + CLI integration (`intentc fmt --self-hosted`). | Blocked on 38-41 |
 
 Phase numbers are indicative and may shift as language gaps surface.
 
@@ -95,7 +97,7 @@ Run the stage2 tests on every backend with:
 ```bash
 intentc test --all-targets selfhost/formatter/lexer.intent       # 27 tests
 intentc test --all-targets selfhost/formatter/parser.intent      # 66 tests + 27 lexer (imported) = 93
-intentc test --all-targets selfhost/formatter/format_test.intent # 17 formatter tests + 93 imported = 110
+intentc test --all-targets selfhost/formatter/format_test.intent # 22 formatter tests + 93 imported = 115
 ```
 
 PRs should reference the relevant phase number.

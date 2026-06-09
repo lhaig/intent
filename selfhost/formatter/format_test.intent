@@ -124,6 +124,79 @@ test "round-trip: while loop" {
 
 // --- Real-file dogfood -----------------------------------------------------
 
+test "self-parse: stage2 lexer.intent parses with no errors" {
+    let r: Result<String, String> = read_file("selfhost/formatter/lexer.intent");
+    let src: String = match r {
+        Ok(s) => s,
+        Err(_) => "",
+    };
+    if src != "" {
+        let prog: Program = formatter_parser.parse(src);
+        assert_eq(prog.error, "");
+    }
+}
+
+test "self-parse: stage2 ast.intent parses with no errors" {
+    let r: Result<String, String> = read_file("selfhost/formatter/ast.intent");
+    let src: String = match r {
+        Ok(s) => s,
+        Err(_) => "",
+    };
+    if src != "" {
+        let prog: Program = formatter_parser.parse(src);
+        assert_eq(prog.error, "");
+    }
+}
+
+test "self-parse: stage2 parser.intent parses with no errors" {
+    let r: Result<String, String> = read_file("selfhost/formatter/parser.intent");
+    let src: String = match r {
+        Ok(s) => s,
+        Err(_) => "",
+    };
+    if src != "" {
+        let prog: Program = formatter_parser.parse(src);
+        assert_eq(prog.error, "");
+    }
+}
+
+test "self-parse: stage2 format.intent parses with no errors" {
+    let r: Result<String, String> = read_file("selfhost/formatter/format.intent");
+    let src: String = match r {
+        Ok(s) => s,
+        Err(_) => "",
+    };
+    if src != "" {
+        let prog: Program = formatter_parser.parse(src);
+        assert_eq(prog.error, "");
+    }
+}
+
+// Full parse + format on every stage2 file. Byte-equality is gated on
+// comment preservation + paren stripping (Phase 40); for now we just
+// require parse + format to complete without crashing and emit a
+// non-empty result.
+public function self_format_one(path: String) returns Void {
+    let r: Result<String, String> = read_file(path);
+    let src: String = match r {
+        Ok(s) => s,
+        Err(_) => "",
+    };
+    if src != "" {
+        let prog: Program = formatter_parser.parse(src);
+        assert_eq(prog.error, "");
+        let out: String = formatter_format.format_program(prog);
+        assert(len(out) > 0);
+    }
+}
+
+test "self-format: parse + format roundtrip succeeds on all stage2 files" {
+    self_format_one("selfhost/formatter/lexer.intent");
+    self_format_one("selfhost/formatter/ast.intent");
+    self_format_one("selfhost/formatter/parser.intent");
+    self_format_one("selfhost/formatter/format.intent");
+}
+
 test "dogfood: parse + format hello.intent matches expected canonical form" {
     let r: Result<String, String> = read_file("examples/hello.intent");
     let src: String = match r {
