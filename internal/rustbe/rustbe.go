@@ -1180,6 +1180,15 @@ func (g *generator) generateStmt(s ir.Stmt, arrayRefParams map[string]bool) {
 			}
 		}
 
+		// Clone field accesses for non-Copy types — `let x: Array<T> = self.f`
+		// must clone or it moves out of self. Symmetric with the IndexExpr
+		// case above; surfaced by Phase 40A (ADR 0044) drain_comments.
+		if _, isField := stmt.Value.(*ir.FieldAccessExpr); isField && !isCopyType(stmt.Type) {
+			if !strings.HasSuffix(valueExpr, ".clone()") {
+				valueExpr = valueExpr + ".clone()"
+			}
+		}
+
 		// Fn types use type inference in let bindings (impl Fn not allowed in variable position)
 		if stmt.Type != nil && stmt.Type.IsFunction {
 			if isMut {

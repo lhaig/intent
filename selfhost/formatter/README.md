@@ -4,13 +4,13 @@ Stage2 Intent formatter — Intent-implemented `intentc fmt`. Lives alongside
 stage1's Go formatter (`internal/formatter/`); will eventually replace it
 once parity is reached.
 
-**Status (2026-06-09):** Phases 32-40B shipped. 125 in-language
+**Status (2026-06-09):** Phases 32-40A shipped. 131 in-language
 tests on rust + js. **Self-parse + self-format certified** (Phase
 39); **source-order tracking** (Phase 40C, ADR 0042); **paren
-stripping** (Phase 40B, ADR 0043). Byte-equal self-format on stage2
-files is gated on the remaining Phase 40 sub-piece (40A — comment
-preservation). hello.intent remains the byte-equal dogfood
-fixture.
+stripping** (Phase 40B, ADR 0043); **leading-decl comment
+preservation** (Phase 40A.1, ADR 0044). hello.intent remains the
+byte-equal dogfood fixture. Stage2-source byte-equal needs Phase
+40A.2 (inline + body comments).
 
 ## Big picture
 
@@ -67,7 +67,8 @@ selfhost/formatter/
 | **39** | Self-parse certification — all stage2 files parse + format without errors. | **Shipped** ([PRD](../../ops/plans/phase-39-self-parse-certification.md)) |
 | **40C** | Source-order tracking via per-decl `line: Int` (ADR 0042). | **Shipped** ([PRD](../../ops/plans/phase-40c-source-order-tracking.md)) |
 | **40B** | Paren stripping — precedence-aware emit (ADR 0043). | **Shipped** ([PRD](../../ops/plans/phase-40b-paren-stripping.md)) |
-| **40A** | Comment preservation — lexer emits comments, formatter re-emits them. | Next |
+| **40A.1** | Leading-decl comment preservation (ADR 0044). | **Shipped** ([PRD](../../ops/plans/phase-40a-comment-preservation.md)) |
+| **40A.2** | Inline-after + body comments — finishes stage2-source byte-equal. | Next |
 | **41** | Full-feature parser parity (requires/ensures, match, generics) — widens dogfood corpus to fibonacci.intent. | Blocked on 40 |
 | **42** | Differential test gate + CLI integration (`intentc fmt --self-hosted`). | Blocked on 38-41 |
 
@@ -99,7 +100,7 @@ Run the stage2 tests on every backend with:
 ```bash
 intentc test --all-targets selfhost/formatter/lexer.intent       # 27 tests
 intentc test --all-targets selfhost/formatter/parser.intent      # 66 tests + 27 lexer (imported) = 93
-intentc test --all-targets selfhost/formatter/format_test.intent # 32 formatter tests + 93 imported = 125
+intentc test --all-targets selfhost/formatter/format_test.intent # 38 formatter tests + 93 imported = 131
 ```
 
 PRs should reference the relevant phase number.

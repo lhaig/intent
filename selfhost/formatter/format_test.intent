@@ -21,13 +21,15 @@ test "format_module_decl emits canonical form" {
 }
 
 test "format_import_decl file form" {
-    let imp: ImportDecl = ImportDecl(false, "lexer.intent", 1);
+    let mutable no_cmts: Array<String> = [];
+    let imp: ImportDecl = ImportDecl(false, "lexer.intent", 1, no_cmts);
     let s: String = formatter_format.format_import_decl(imp);
     assert_eq(s, "import \"lexer.intent\";");
 }
 
 test "format_import_decl package form" {
-    let imp: ImportDecl = ImportDecl(true, "math", 1);
+    let mutable no_cmts: Array<String> = [];
+    let imp: ImportDecl = ImportDecl(true, "math", 1, no_cmts);
     let s: String = formatter_format.format_import_decl(imp);
     assert_eq(s, "import math;");
 }
@@ -102,6 +104,63 @@ test "source order: line field populated by parser" {
     // function b is line 5.
     assert_eq(prog.functions[0].line, 3);
     assert_eq(prog.functions[1].line, 5);
+}
+
+// --- Comment preservation tests (ADR 0044) ----------------------------------
+
+test "comments: single-line comment before a function survives roundtrip" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "// Returns zero.\n"
+        + "function f() returns Int " + '{'.to_string() + "\n    return 0;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "comments: multiple single-line comments before a decl" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "// First line of doc.\n"
+        + "// Second line of doc.\n"
+        + "function f() returns Int " + '{'.to_string() + "\n    return 0;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "comments: block comment before a function" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "/* block comment */\n"
+        + "function f() returns Int " + '{'.to_string() + "\n    return 0;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "comments: comments before a public function (post-public consumption)" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "// Documents the public helper.\n"
+        + "public function helper() returns Int " + '{'.to_string() + "\n    return 0;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "comments: comments before an entity decl" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "// A counter.\n"
+        + "entity Counter " + '{'.to_string() + "\n    field n: Int;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "comments: comments between interleaved decls preserved with source order" {
+    // Bodies in canonical multi-line form so the formatter doesn't reflow
+    // them and produce a diff unrelated to comment preservation.
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "// First function.\n"
+        + "function a() returns Int " + '{'.to_string() + "\n    return 1;\n" + '}'.to_string() + "\n\n"
+        + "// First test.\n"
+        + "test \"t1\" " + '{'.to_string() + "\n    assert(true);\n" + '}'.to_string() + "\n\n"
+        + "// Second function.\n"
+        + "function b() returns Int " + '{'.to_string() + "\n    return 2;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
 }
 
 // --- Paren stripping tests (ADR 0043) ---------------------------------------

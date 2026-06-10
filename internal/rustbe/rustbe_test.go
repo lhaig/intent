@@ -1263,3 +1263,40 @@ entry function main() returns Int {
 		t.Errorf("regression: read_file arg moved out of indexed array without clone:\n%s", output)
 	}
 }
+
+// Regression: `let x: Array<T> = self.field;` used to move out of self.
+// Surfaced by Phase 40A (ADR 0044) — drain_comments needed to extract the
+// pending_comments field into a local, swap in an empty array, and return
+// the captured. cloneIfNeeded was applied for IndexExpr but not for
+// FieldAccessExpr.
+func TestLetBindingClonesFieldAccessOfNonCopyType(t *testing.T) {
+	src := `module m version "1.0";
+
+entity Holder {
+    field xs: Array<Int>;
+
+    constructor(xs: Array<Int>) {
+        self.xs = xs;
+    }
+
+    method snapshot() returns Array<Int> {
+        let snap: Array<Int> = self.xs;
+        return snap;
+    }
+}
+
+entry function main() returns Int {
+    let mutable xs: Array<Int> = [];
+    xs.push(1);
+    let h: Holder = Holder(xs);
+    return 0;
+}
+`
+	output := generateFromSource(t, "let_field_clone", src)
+
+	// The let binding must clone the field; otherwise rustc rejects with
+	// "cannot move out of `self.xs` which is behind a mutable reference."
+	if !strings.Contains(output, "let snap: Vec<i64> = self.xs.clone();") {
+		t.Errorf("expected `let snap: Vec<i64> = self.xs.clone();`, got:\n%s", output)
+	}
+}

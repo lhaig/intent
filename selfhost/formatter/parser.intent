@@ -129,14 +129,19 @@ public entity Parser {
         return ModuleDecl(name_tok.text, self.unquote(ver_tok.text));
     }
 
-    method parse_import_decl() returns ImportDecl {
-        // ADR 0042: capture source line from the leading `import` keyword.
+    // ADR 0044: `leading_comments` is passed by parse_program (captured
+    // BEFORE consuming any modifier so `public` lookahead doesn't strand
+    // them). When non-empty it overrides the keyword token's own
+    // comments_before — which is empty in the post-`public` case anyway.
+    method parse_import_decl(leading_comments: Array<String>) returns ImportDecl {
+        // ADR 0042: capture source line from the `import` keyword token.
         let import_tok: Token = self.expect(formatter_lexer.kw_import_marker(), "'import' keyword");
         let line: Int = import_tok.line;
+        let cmts: Array<String> = leading_comments;
         if self.check(formatter_lexer.tk_string()) {
             let path_tok: Token = self.advance();
             self.expect(formatter_lexer.tk_semicolon(), "';' after import");
-            return ImportDecl(false, self.unquote(path_tok.text), line);
+            return ImportDecl(false, self.unquote(path_tok.text), line, cmts);
         }
         if self.check(formatter_lexer.tk_ident()) {
             let pkg_tok: Token = self.advance();
@@ -148,14 +153,14 @@ public entity Parser {
                     path = path + "." + seg.text;
                 } else {
                     self.fail("expected identifier after '.' in import");
-                    return ImportDecl(true, path, line);
+                    return ImportDecl(true, path, line, cmts);
                 }
             }
             self.expect(formatter_lexer.tk_semicolon(), "';' after import");
-            return ImportDecl(true, path, line);
+            return ImportDecl(true, path, line, cmts);
         }
         self.fail("expected string or identifier after 'import'");
-        return ImportDecl(false, "", line);
+        return ImportDecl(false, "", line, cmts);
     }
 
     method parse_param() returns Param {
@@ -191,10 +196,13 @@ public entity Parser {
         return name;
     }
 
-    method parse_function_decl() returns FunctionDecl {
-        // ADR 0042: capture source line from the first token of the decl
-        // (modifier or `function` keyword), before any consumption.
-        let line: Int = self.tokens[self.position].line;
+    method parse_function_decl(leading_comments: Array<String>) returns FunctionDecl {
+        // ADR 0042 / 0044: capture source line from the first token; comments
+        // are passed by the caller (parse_program) so the `public` modifier
+        // path doesn't strand them.
+        let first_tok: Token = self.tokens[self.position];
+        let line: Int = first_tok.line;
+        let cmts: Array<String> = leading_comments;
         let mutable is_public: Bool = false;
         let mutable is_async: Bool = false;
         let mutable is_entry: Bool = false;
@@ -259,7 +267,7 @@ public entity Parser {
         }
 
         let body: Block = self.parse_block();
-        return FunctionDecl(name_tok.text, is_public, is_entry, is_async, false, params, return_type, body, line);
+        return FunctionDecl(name_tok.text, is_public, is_entry, is_async, false, params, return_type, body, line, cmts);
     }
 
     // --- statement-level parse -------------------------------------------
@@ -625,46 +633,53 @@ public entity Parser {
         let mutable prog: Program = formatter_ast.empty_program(module_decl);
 
         while not self.at_end() and self.error == "" {
+            // ADR 0044: capture leading comments from the very first token
+            // of this decl, BEFORE consuming any `public` modifier. The
+            // `public` token (when present) is what carries the comments
+            // in the lexer's attachment model; if we read after consuming
+            // it, the comments would be on a previous, lost token.
+            let cmts: Array<String> = self.tokens[self.position].comments_before;
             if self.check(formatter_lexer.kw_import_marker()) {
-                prog.imports.push(self.parse_import_decl());
+                prog.imports.push(self.parse_import_decl(cmts));
             } else {
                 if self.check(formatter_lexer.kw_entity_marker()) {
-                    prog.entities.push(self.parse_entity_decl(false));
+                    prog.entities.push(self.parse_entity_decl(false, cmts));
                 } else {
                     if self.check(formatter_lexer.kw_enum_marker()) {
-                        prog.enums.push(self.parse_enum_decl(false));
+                        prog.enums.push(self.parse_enum_decl(false, cmts));
                     } else {
                         if self.check(formatter_lexer.kw_trait_marker()) {
-                            prog.traits.push(self.parse_trait_decl(false));
+                            prog.traits.push(self.parse_trait_decl(false, cmts));
                         } else {
                             if self.check(formatter_lexer.kw_impl_marker()) {
-                                prog.impls.push(self.parse_impl_decl());
+                                prog.impls.push(self.parse_impl_decl(cmts));
                             } else {
                                 if self.check(formatter_lexer.kw_test_marker()) {
-                                    prog.tests.push(self.parse_test_decl());
+                                    prog.tests.push(self.parse_test_decl(cmts));
                                 } else {
                                     if self.check(formatter_lexer.kw_extern_marker()) {
-                                        prog.externs.push(self.parse_extern_decl());
+                                        prog.externs.push(self.parse_extern_decl(cmts));
                                     } else {
                                         if self.check(formatter_lexer.kw_intent_marker()) {
-                                            prog.intent_blocks.push(self.parse_intent_block());
+                                            prog.intent_blocks.push(self.parse_intent_block(cmts));
                                         } else {
                                             if self.check(formatter_lexer.kw_public_marker()) {
                                                 // `public` can precede function, entity, enum, trait.
-                                                // Consume `public` and dispatch on what follows.
+                                                // Consume `public` and dispatch on what follows; we
+                                                // already captured `cmts` above so they survive.
                                                 self.advance();
                                                 if self.check(formatter_lexer.kw_entity_marker()) {
-                                                    prog.entities.push(self.parse_entity_decl(true));
+                                                    prog.entities.push(self.parse_entity_decl(true, cmts));
                                                 } else {
                                                     if self.check(formatter_lexer.kw_enum_marker()) {
-                                                        prog.enums.push(self.parse_enum_decl(true));
+                                                        prog.enums.push(self.parse_enum_decl(true, cmts));
                                                     } else {
                                                         if self.check(formatter_lexer.kw_trait_marker()) {
-                                                            prog.traits.push(self.parse_trait_decl(true));
+                                                            prog.traits.push(self.parse_trait_decl(true, cmts));
                                                         } else {
                                                             // `public function ...` — parse the function
                                                             // and mark it public after.
-                                                            let mutable fd: FunctionDecl = self.parse_function_decl();
+                                                            let mutable fd: FunctionDecl = self.parse_function_decl(cmts);
                                                             fd.is_public = true;
                                                             prog.functions.push(fd);
                                                         }
@@ -672,7 +687,7 @@ public entity Parser {
                                                 }
                                             } else {
                                                 if self.is_at_function_start() {
-                                                    prog.functions.push(self.parse_function_decl());
+                                                    prog.functions.push(self.parse_function_decl(cmts));
                                                 } else {
                                                     self.fail("expected a top-level declaration (module / import / function / entity / enum / trait / impl / test / extern / intent)");
                                                     prog.error = self.error;
@@ -707,13 +722,14 @@ public entity Parser {
     // --- Phase 36: top-level declaration parsers --------------------------
 
     // `entity NAME { field*; ctor?; method*; invariant?; }`
-    method parse_entity_decl(is_public: Bool) returns EntityDecl {
+    method parse_entity_decl(is_public: Bool, leading_comments: Array<String>) returns EntityDecl {
         // ADR 0042: capture source line from the `entity` keyword. `public`
         // modifier (if present) is consumed by parse_program before this is
         // called; for typical one-line `public entity Foo {...}` source the
-        // line matches.
+        // line matches. ADR 0044: leading_comments passed by caller.
         let entity_tok: Token = self.expect(formatter_lexer.kw_entity_marker(), "'entity'");
         let line: Int = entity_tok.line;
+        let cmts: Array<String> = leading_comments;
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "entity name");
         self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start entity body");
         let mutable fields: Array<FieldDecl> = [];
@@ -741,14 +757,14 @@ public entity Parser {
                             }
                         } else {
                             self.fail("expected 'field', 'constructor', 'method', or 'invariant' in entity body");
-                            return EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line);
+                            return EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line, cmts);
                         }
                     }
                 }
             }
         }
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close entity body");
-        return EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line);
+        return EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line, cmts);
     }
 
     // `field NAME: TYPE;`
@@ -761,10 +777,12 @@ public entity Parser {
         return FieldDecl(name_tok.text, type_name);
     }
 
-    // `constructor(params) { body }`
+    // `constructor(params) { body }` — constructors live inside entity
+    // bodies so don't accept leading comments (the entity carries them).
     method parse_constructor_decl() returns FunctionDecl {
         let ctor_tok: Token = self.expect(formatter_lexer.kw_constructor_marker(), "'constructor'");
         let line: Int = ctor_tok.line;
+        let mutable no_cmts: Array<String> = [];
         self.expect(formatter_lexer.tk_lparen(), "'(' after 'constructor'");
         let mutable params: Array<Param> = [];
         if not self.check(formatter_lexer.tk_rparen()) {
@@ -775,15 +793,18 @@ public entity Parser {
         }
         self.expect(formatter_lexer.tk_rparen(), "')' to close constructor params");
         let body: Block = self.parse_block();
-        return FunctionDecl("constructor", false, false, false, true, params, "", body, line);
+        return FunctionDecl("constructor", false, false, false, true, params, "", body, line, no_cmts);
     }
 
     // `method NAME(params) returns TYPE { body }` — contract clauses are
     // currently skipped between `returns TYPE` and `{` the same way
-    // parse_function_decl does for top-level functions.
+    // parse_function_decl does for top-level functions. Methods live
+    // inside entity / impl bodies so don't accept leading comments at this
+    // layer (their enclosing decl carries them).
     method parse_method_decl() returns FunctionDecl {
         let method_tok: Token = self.expect(formatter_lexer.kw_method_marker(), "'method'");
         let line: Int = method_tok.line;
+        let mutable no_cmts: Array<String> = [];
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "method name");
         self.expect(formatter_lexer.tk_lparen(), "'(' after method name");
         let mutable params: Array<Param> = [];
@@ -798,7 +819,7 @@ public entity Parser {
         let ret: String = self.parse_type_name();
         self.skip_method_contracts();
         let body: Block = self.parse_block();
-        return FunctionDecl(name_tok.text, false, false, false, false, params, ret, body, line);
+        return FunctionDecl(name_tok.text, false, false, false, false, params, ret, body, line, no_cmts);
     }
 
     // `invariant { EXPR; EXPR; ... }` — collect the bodies as Exprs.
@@ -826,9 +847,10 @@ public entity Parser {
     }
 
     // `enum NAME { VARIANT, VARIANT, ... }`
-    method parse_enum_decl(is_public: Bool) returns EnumDecl {
+    method parse_enum_decl(is_public: Bool, leading_comments: Array<String>) returns EnumDecl {
         let enum_tok: Token = self.expect(formatter_lexer.kw_enum_marker(), "'enum'");
         let line: Int = enum_tok.line;
+        let cmts: Array<String> = leading_comments;
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "enum name");
         self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start enum body");
         let mutable variants: Array<EnumVariant> = [];
@@ -844,7 +866,7 @@ public entity Parser {
             }
         }
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close enum body");
-        return EnumDecl(name_tok.text, is_public, variants, line);
+        return EnumDecl(name_tok.text, is_public, variants, line, cmts);
     }
 
     // Helper used by the trailing-comma branch: a no-op that documents
@@ -871,9 +893,10 @@ public entity Parser {
     }
 
     // `trait NAME { method NAME(params) returns TYPE; ... }`
-    method parse_trait_decl(is_public: Bool) returns TraitDecl {
+    method parse_trait_decl(is_public: Bool, leading_comments: Array<String>) returns TraitDecl {
         let trait_tok: Token = self.expect(formatter_lexer.kw_trait_marker(), "'trait'");
         let line: Int = trait_tok.line;
+        let cmts: Array<String> = leading_comments;
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "trait name");
         self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start trait body");
         let mutable methods: Array<TraitMethodSig> = [];
@@ -881,7 +904,7 @@ public entity Parser {
             methods.push(self.parse_trait_method_sig());
         }
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close trait body");
-        return TraitDecl(name_tok.text, is_public, methods, line);
+        return TraitDecl(name_tok.text, is_public, methods, line, cmts);
     }
 
     method parse_trait_method_sig() returns TraitMethodSig {
@@ -903,9 +926,10 @@ public entity Parser {
     }
 
     // `impl TRAIT for ENTITY { method ... method ... }`
-    method parse_impl_decl() returns ImplDecl {
+    method parse_impl_decl(leading_comments: Array<String>) returns ImplDecl {
         let impl_tok: Token = self.expect(formatter_lexer.kw_impl_marker(), "'impl'");
         let line: Int = impl_tok.line;
+        let cmts: Array<String> = leading_comments;
         let trait_tok: Token = self.expect(formatter_lexer.tk_ident(), "trait name");
         self.expect(formatter_lexer.kw_for_marker(), "'for' in impl declaration");
         let entity_tok: Token = self.expect(formatter_lexer.tk_ident(), "entity name");
@@ -915,22 +939,24 @@ public entity Parser {
             methods.push(self.parse_method_decl());
         }
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close impl body");
-        return ImplDecl(trait_tok.text, entity_tok.text, methods, line);
+        return ImplDecl(trait_tok.text, entity_tok.text, methods, line, cmts);
     }
 
     // `test "name" { body }`
-    method parse_test_decl() returns TestDecl {
+    method parse_test_decl(leading_comments: Array<String>) returns TestDecl {
         let test_tok: Token = self.expect(formatter_lexer.kw_test_marker(), "'test'");
         let line: Int = test_tok.line;
+        let cmts: Array<String> = leading_comments;
         let name_tok: Token = self.expect(formatter_lexer.tk_string(), "test name (string literal)");
         let body: Block = self.parse_block();
-        return TestDecl(self.unquote(name_tok.text), body, line);
+        return TestDecl(self.unquote(name_tok.text), body, line, cmts);
     }
 
     // `extern "target" function NAME(params) returns TYPE;`
-    method parse_extern_decl() returns ExternDecl {
+    method parse_extern_decl(leading_comments: Array<String>) returns ExternDecl {
         let extern_tok: Token = self.expect(formatter_lexer.kw_extern_marker(), "'extern'");
         let line: Int = extern_tok.line;
+        let cmts: Array<String> = leading_comments;
         let target_tok: Token = self.expect(formatter_lexer.tk_string(), "target string literal");
         self.expect(formatter_lexer.kw_function(), "'function' after extern target");
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "extern function name");
@@ -946,13 +972,14 @@ public entity Parser {
         self.expect(formatter_lexer.kw_returns(), "'returns' after extern params");
         let ret: String = self.parse_type_name();
         self.expect(formatter_lexer.tk_semicolon(), "';' to end extern declaration");
-        return ExternDecl(self.unquote(target_tok.text), name_tok.text, params, ret, line);
+        return ExternDecl(self.unquote(target_tok.text), name_tok.text, params, ret, line, cmts);
     }
 
     // `intent "description" { verified_by ident; verified_by ident; ... }`
-    method parse_intent_block() returns IntentBlock {
+    method parse_intent_block(leading_comments: Array<String>) returns IntentBlock {
         let intent_tok: Token = self.expect(formatter_lexer.kw_intent_marker(), "'intent'");
         let line: Int = intent_tok.line;
+        let cmts: Array<String> = leading_comments;
         let goal_tok: Token = self.expect(formatter_lexer.tk_string(), "intent goal (string literal)");
         self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start intent block");
         let mutable verifs: Array<String> = [];
@@ -967,11 +994,11 @@ public entity Parser {
                 verifs.push(ref_tok.text);
             } else {
                 self.fail("expected 'verified_by' clause in intent block");
-                return IntentBlock(self.unquote(goal_tok.text), verifs, line);
+                return IntentBlock(self.unquote(goal_tok.text), verifs, line, cmts);
             }
         }
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close intent block");
-        return IntentBlock(self.unquote(goal_tok.text), verifs, line);
+        return IntentBlock(self.unquote(goal_tok.text), verifs, line, cmts);
     }
 }
 

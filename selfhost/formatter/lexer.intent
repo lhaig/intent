@@ -157,13 +157,32 @@ public entity Token {
     field text: String;
     field line: Int;
     field column: Int;
+    // ADR 0044: leading comments (including `//` or `/* */` delimiters)
+    // captured by the lexer's `skip_whitespace_and_comments` and attached
+    // to the next non-trivia token emitted. Empty by default so the
+    // existing 41 Token construction sites in this file don't need to
+    // pass it; scan_all assigns the drained buffer onto each token after
+    // construction.
+    field comments_before: Array<String>;
 
     constructor(kind: Int, text: String, line: Int, column: Int) {
         self.kind = kind;
         self.text = text;
         self.line = line;
         self.column = column;
+        self.comments_before = empty_string_array();
     }
+}
+
+// Helper to initialise an empty Array<String>. Used by Token and Lexer
+// constructors — the stage1 Rust backend's constructor-field-hoist
+// pre-allocates the struct literal before running constructor body lets,
+// so `let mutable empty: Array<String> = []; self.field = empty;` doesn't
+// compile (the let lands after the struct literal). Calling a helper
+// function side-steps the hoist.
+public function empty_string_array() returns Array<String> {
+    let mutable s: Array<String> = [];
+    return s;
 }
 
 // --- Char predicate helpers -------------------------------------------------
@@ -183,12 +202,17 @@ public entity Lexer {
     field position: Int;
     field line: Int;
     field column: Int;
+    // ADR 0044: comments captured by skip_whitespace_and_comments accumulate
+    // here until the next real token is emitted; scan_all drains them onto
+    // that token's comments_before.
+    field pending_comments: Array<String>;
 
     constructor(source: String) {
         self.source = source;
         self.position = 0;
         self.line = 1;
         self.column = 1;
+        self.pending_comments = empty_string_array();
     }
 
     method at_end() returns Bool {
@@ -224,6 +248,9 @@ public entity Lexer {
         return c;
     }
 
+    // ADR 0044: comments are captured (verbatim, with `//` or `/* */`
+    // delimiters) and pushed onto self.pending_comments. The next non-
+    // trivia token scan_all emits inherits this buffer.
     method skip_whitespace_and_comments() returns Void {
         while not self.at_end() {
             let c: Char = self.peek();
@@ -231,13 +258,19 @@ public entity Lexer {
                 self.advance();
             } else {
                 if c == '/' and self.peek2() == '/' {
-                    // Single-line comment: skip to end of line.
+                    // Single-line comment: capture from `//` through to
+                    // (but not including) the newline.
+                    let start: Int = self.position;
                     while not self.at_end() and self.peek() != '\n' {
                         self.advance();
                     }
+                    let text: String = self.source[start..self.position];
+                    self.pending_comments.push(text);
                 } else {
                     if c == '/' and self.peek2() == '*' {
-                        // Multi-line comment with nesting support.
+                        // Multi-line comment with nesting support. Capture
+                        // verbatim including the outer `/*` and `*/`.
+                        let start: Int = self.position;
                         self.advance();
                         self.advance();
                         let mutable depth: Int = 1;
@@ -257,6 +290,8 @@ public entity Lexer {
                                 }
                             }
                         }
+                        let text: String = self.source[start..self.position];
+                        self.pending_comments.push(text);
                     } else {
                         return;
                     }
@@ -475,6 +510,15 @@ public entity Lexer {
         return Token(tk_error(), c.to_string(), start_line, start_col);
     }
 
+    // Drain self.pending_comments and return them. Called by scan_all to
+    // attach captured leading comments to the next token. ADR 0044.
+    method drain_comments() returns Array<String> {
+        let cmts: Array<String> = self.pending_comments;
+        let mutable empty: Array<String> = [];
+        self.pending_comments = empty;
+        return cmts;
+    }
+
     // Scan the whole input. Emits a synthetic tk_eof() terminator so the
     // parser doesn't need to bounds-check the token stream.
     method scan_all() returns Array<Token> {
@@ -482,12 +526,17 @@ public entity Lexer {
         while true {
             self.skip_whitespace_and_comments();
             if self.at_end() {
-                tokens.push(Token(tk_eof(), "", self.line, self.column));
+                // ADR 0044: trailing comments (at end of file with no
+                // following token) attach to the synthetic EOF token.
+                let mutable eof_tok: Token = Token(tk_eof(), "", self.line, self.column);
+                eof_tok.comments_before = self.drain_comments();
+                tokens.push(eof_tok);
                 return tokens;
             }
             let l: Int = self.line;
             let c: Int = self.column;
-            let tok: Token = self.scan_one(l, c);
+            let mutable tok: Token = self.scan_one(l, c);
+            tok.comments_before = self.drain_comments();
             tokens.push(tok);
         }
         return tokens;

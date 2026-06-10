@@ -148,8 +148,12 @@ public entity FunctionDecl {
     field return_type: String;
     field body: Block;
     field line: Int;
+    // ADR 0044: leading comments captured by the lexer at the decl's first
+    // token. Populated by the parser from `Token.comments_before`. The
+    // formatter emits these on their own lines before each decl.
+    field comments_before: Array<String>;
 
-    constructor(name: String, is_public: Bool, is_entry: Bool, is_async: Bool, is_constructor: Bool, params: Array<Param>, return_type: String, body: Block, line: Int) {
+    constructor(name: String, is_public: Bool, is_entry: Bool, is_async: Bool, is_constructor: Bool, params: Array<Param>, return_type: String, body: Block, line: Int, comments_before: Array<String>) {
         self.name = name;
         self.is_public = is_public;
         self.is_entry = is_entry;
@@ -159,6 +163,7 @@ public entity FunctionDecl {
         self.return_type = return_type;
         self.body = body;
         self.line = line;
+        self.comments_before = comments_before;
     }
 }
 
@@ -166,11 +171,13 @@ public entity ImportDecl {
     field is_package: Bool;
     field path: String;
     field line: Int;
+    field comments_before: Array<String>;
 
-    constructor(is_package: Bool, path: String, line: Int) {
+    constructor(is_package: Bool, path: String, line: Int, comments_before: Array<String>) {
         self.is_package = is_package;
         self.path = path;
         self.line = line;
+        self.comments_before = comments_before;
     }
 }
 
@@ -208,8 +215,9 @@ public entity EntityDecl {
     field ctor: FunctionDecl;
     field invariants: Array<Expr>;
     field line: Int;
+    field comments_before: Array<String>;
 
-    constructor(name: String, is_public: Bool, fields: Array<FieldDecl>, methods: Array<FunctionDecl>, has_constructor: Bool, ctor: FunctionDecl, invariants: Array<Expr>, line: Int) {
+    constructor(name: String, is_public: Bool, fields: Array<FieldDecl>, methods: Array<FunctionDecl>, has_constructor: Bool, ctor: FunctionDecl, invariants: Array<Expr>, line: Int, comments_before: Array<String>) {
         self.name = name;
         self.is_public = is_public;
         self.fields = fields;
@@ -218,6 +226,7 @@ public entity EntityDecl {
         self.ctor = ctor;
         self.invariants = invariants;
         self.line = line;
+        self.comments_before = comments_before;
     }
 }
 
@@ -236,12 +245,14 @@ public entity EnumDecl {
     field is_public: Bool;
     field variants: Array<EnumVariant>;
     field line: Int;
+    field comments_before: Array<String>;
 
-    constructor(name: String, is_public: Bool, variants: Array<EnumVariant>, line: Int) {
+    constructor(name: String, is_public: Bool, variants: Array<EnumVariant>, line: Int, comments_before: Array<String>) {
         self.name = name;
         self.is_public = is_public;
         self.variants = variants;
         self.line = line;
+        self.comments_before = comments_before;
     }
 }
 
@@ -264,12 +275,14 @@ public entity TraitDecl {
     field is_public: Bool;
     field methods: Array<TraitMethodSig>;
     field line: Int;
+    field comments_before: Array<String>;
 
-    constructor(name: String, is_public: Bool, methods: Array<TraitMethodSig>, line: Int) {
+    constructor(name: String, is_public: Bool, methods: Array<TraitMethodSig>, line: Int, comments_before: Array<String>) {
         self.name = name;
         self.is_public = is_public;
         self.methods = methods;
         self.line = line;
+        self.comments_before = comments_before;
     }
 }
 
@@ -278,12 +291,14 @@ public entity ImplDecl {
     field entity_name: String;
     field methods: Array<FunctionDecl>;
     field line: Int;
+    field comments_before: Array<String>;
 
-    constructor(trait_name: String, entity_name: String, methods: Array<FunctionDecl>, line: Int) {
+    constructor(trait_name: String, entity_name: String, methods: Array<FunctionDecl>, line: Int, comments_before: Array<String>) {
         self.trait_name = trait_name;
         self.entity_name = entity_name;
         self.methods = methods;
         self.line = line;
+        self.comments_before = comments_before;
     }
 }
 
@@ -294,11 +309,13 @@ public entity IntentBlock {
     field goal_text: String;
     field verifications: Array<String>;
     field line: Int;
+    field comments_before: Array<String>;
 
-    constructor(goal_text: String, verifications: Array<String>, line: Int) {
+    constructor(goal_text: String, verifications: Array<String>, line: Int, comments_before: Array<String>) {
         self.goal_text = goal_text;
         self.verifications = verifications;
         self.line = line;
+        self.comments_before = comments_before;
     }
 }
 
@@ -306,11 +323,13 @@ public entity TestDecl {
     field name: String;
     field body: Block;
     field line: Int;
+    field comments_before: Array<String>;
 
-    constructor(name: String, body: Block, line: Int) {
+    constructor(name: String, body: Block, line: Int, comments_before: Array<String>) {
         self.name = name;
         self.body = body;
         self.line = line;
+        self.comments_before = comments_before;
     }
 }
 
@@ -320,13 +339,15 @@ public entity ExternDecl {
     field params: Array<Param>;
     field return_type: String;
     field line: Int;
+    field comments_before: Array<String>;
 
-    constructor(target: String, func_name: String, params: Array<Param>, return_type: String, line: Int) {
+    constructor(target: String, func_name: String, params: Array<Param>, return_type: String, line: Int, comments_before: Array<String>) {
         self.target = target;
         self.func_name = func_name;
         self.params = params;
         self.return_type = return_type;
         self.line = line;
+        self.comments_before = comments_before;
     }
 }
 
@@ -382,7 +403,8 @@ public function empty_expr() returns Expr {
 // have a constructor.
 public function empty_function_decl() returns FunctionDecl {
     let mutable params: Array<Param> = [];
-    return FunctionDecl("", false, false, false, false, params, "", empty_block(), 0);
+    let mutable empty_cmts: Array<String> = [];
+    return FunctionDecl("", false, false, false, false, params, "", empty_block(), 0, empty_cmts);
 }
 
 // Parses a decimal integer-literal token's text into an Int. The stage2

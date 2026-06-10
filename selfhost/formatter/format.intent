@@ -39,6 +39,22 @@ public function indent_string(level: Int) returns String {
     return s;
 }
 
+// ADR 0044: format the leading-comments block for a top-level decl.
+// Each comment is emitted on its own line; a trailing newline ensures the
+// decl that follows starts on a fresh line. If no comments, returns "".
+public function format_comments_before(cmts: Array<String>) returns String {
+    if len(cmts) == 0 {
+        return "";
+    }
+    let mutable s: String = "";
+    let mutable i: Int = 0;
+    while i < len(cmts) {
+        s = s + cmts[i] + "\n";
+        i = i + 1;
+    }
+    return s;
+}
+
 // --- Module + imports ------------------------------------------------------
 
 public function format_module_decl(m: ModuleDecl) returns String {
@@ -589,40 +605,51 @@ public function format_program(prog: Program) returns String {
         if best_kind == -1 {
             done = true;
         } else {
+            // ADR 0044: prepend the decl's leading comments. Each comment
+            // gets its own line; the decl follows on the next.
             if best_kind == 0 {
-                out = out + format_import_decl(prog.imports[i_imp]) + "\n\n";
+                let imp: ImportDecl = prog.imports[i_imp];
+                out = out + format_comments_before(imp.comments_before) + format_import_decl(imp) + "\n\n";
                 i_imp = i_imp + 1;
             } else {
                 if best_kind == 1 {
-                    out = out + format_function_decl(prog.functions[i_fn], 0) + "\n\n";
+                    let fn_decl: FunctionDecl = prog.functions[i_fn];
+                    out = out + format_comments_before(fn_decl.comments_before) + format_function_decl(fn_decl, 0) + "\n\n";
                     i_fn = i_fn + 1;
                 } else {
                     if best_kind == 2 {
-                        out = out + format_entity_decl(prog.entities[i_ent]) + "\n\n";
+                        let ent: EntityDecl = prog.entities[i_ent];
+                        out = out + format_comments_before(ent.comments_before) + format_entity_decl(ent) + "\n\n";
                         i_ent = i_ent + 1;
                     } else {
                         if best_kind == 3 {
-                            out = out + format_enum_decl(prog.enums[i_enum]) + "\n\n";
+                            let en: EnumDecl = prog.enums[i_enum];
+                            out = out + format_comments_before(en.comments_before) + format_enum_decl(en) + "\n\n";
                             i_enum = i_enum + 1;
                         } else {
                             if best_kind == 4 {
-                                out = out + format_trait_decl(prog.traits[i_trait]) + "\n\n";
+                                let tr: TraitDecl = prog.traits[i_trait];
+                                out = out + format_comments_before(tr.comments_before) + format_trait_decl(tr) + "\n\n";
                                 i_trait = i_trait + 1;
                             } else {
                                 if best_kind == 5 {
-                                    out = out + format_impl_decl(prog.impls[i_impl]) + "\n\n";
+                                    let im: ImplDecl = prog.impls[i_impl];
+                                    out = out + format_comments_before(im.comments_before) + format_impl_decl(im) + "\n\n";
                                     i_impl = i_impl + 1;
                                 } else {
                                     if best_kind == 6 {
-                                        out = out + format_intent_block(prog.intent_blocks[i_ib]) + "\n\n";
+                                        let ib: IntentBlock = prog.intent_blocks[i_ib];
+                                        out = out + format_comments_before(ib.comments_before) + format_intent_block(ib) + "\n\n";
                                         i_ib = i_ib + 1;
                                     } else {
                                         if best_kind == 7 {
-                                            out = out + format_test_decl(prog.tests[i_test]) + "\n\n";
+                                            let t: TestDecl = prog.tests[i_test];
+                                            out = out + format_comments_before(t.comments_before) + format_test_decl(t) + "\n\n";
                                             i_test = i_test + 1;
                                         } else {
                                             // best_kind == 8
-                                            out = out + format_extern_decl(prog.externs[i_ext]) + "\n\n";
+                                            let ex: ExternDecl = prog.externs[i_ext];
+                                            out = out + format_comments_before(ex.comments_before) + format_extern_decl(ex) + "\n\n";
                                             i_ext = i_ext + 1;
                                         }
                                     }
