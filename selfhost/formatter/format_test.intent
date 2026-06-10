@@ -104,6 +104,62 @@ test "source order: line field populated by parser" {
     assert_eq(prog.functions[1].line, 5);
 }
 
+// --- Paren stripping tests (ADR 0043) ---------------------------------------
+
+// Helper: roundtrip a `let x: Int = RHS;` expression and assert the formatter
+// emits the same `RHS` text we provide. Catches both gain (parser missing
+// something) and loss (formatter dropping something).
+public function expr_roundtrips_to(rhs_in: String, rhs_out: String) returns Void {
+    let src: String = "module m version \"1.0.0\";\n\nfunction f() returns Int " + '{'.to_string()
+        + "\n    let x: Int = " + rhs_in + ";\n    return x;\n" + '}'.to_string() + "\n\n";
+    let expected: String = "module m version \"1.0.0\";\n\nfunction f() returns Int " + '{'.to_string()
+        + "\n    let x: Int = " + rhs_out + ";\n    return x;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, expected);
+}
+
+test "paren strip: redundant parens around a primary disappear" {
+    expr_roundtrips_to("(42)", "42");
+    expr_roundtrips_to("(x)", "x");
+}
+
+test "paren strip: necessary parens around lower-precedence binop kept" {
+    // `*` is prec 8, `+` is prec 7. (a + b) * c requires the parens.
+    expr_roundtrips_to("(a + b) * c", "(a + b) * c");
+}
+
+test "paren strip: redundant parens around higher-precedence binop stripped" {
+    // `1 + (2 * 3)` — `*` already binds tighter, parens unnecessary.
+    expr_roundtrips_to("1 + (2 * 3)", "1 + 2 * 3");
+}
+
+test "paren strip: same-precedence left-associative chain strips left paren" {
+    // `(a + b) + c` is the natural left-assoc grouping for `+`. Strip.
+    expr_roundtrips_to("(a + b) + c", "a + b + c");
+}
+
+test "paren strip: same-precedence right-side paren on left-assoc op kept" {
+    // `a - (b - c)` is right-grouping for left-assoc `-`. Different from
+    // `a - b - c`. Paren stays.
+    expr_roundtrips_to("a - (b - c)", "a - (b - c)");
+}
+
+test "paren strip: logical operators across precedences" {
+    // `or` is 2, `and` is 3, `==` is 4. `(a == b) and (c == d)` — both
+    // parens unnecessary.
+    expr_roundtrips_to("(a == b) and (c == d)", "a == b and c == d");
+}
+
+test "paren strip: parens around unary operand kept when needed" {
+    // `not (a or b)` — `or` is 2, unary is 9. Paren keeps the meaning.
+    expr_roundtrips_to("not (a or b)", "not (a or b)");
+}
+
+test "paren strip: parens inside call args unwrap" {
+    // Function args are a fresh context — `(x + y)` becomes `x + y`.
+    expr_roundtrips_to("f((x + y))", "f(x + y)");
+}
+
 test "round-trip: minimal module + function" {
     let src: String = "module m version \"1.0.0\";\n\nfunction f() returns Int " + '{'.to_string() + "\n    return 0;\n" + '}'.to_string() + "\n\n";
     let out: String = roundtrip(src);

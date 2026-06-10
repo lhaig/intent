@@ -73,7 +73,87 @@ public function format_param_list(ps: Array<Param>) returns String {
 
 // --- Expressions -----------------------------------------------------------
 
+// --- Precedence table (ADR 0043) -------------------------------------------
+//
+// Mirrors the Pratt parser in parser.intent. Higher numbers bind tighter.
+// `min_precedence = 0` is the top-level context (no surrounding operator).
+
+public function binop_precedence(op: String) returns Int {
+    if op == "=" { return 1; }
+    if op == "or" { return 2; }
+    if op == "and" { return 3; }
+    if op == "==" { return 4; }
+    if op == "!=" { return 4; }
+    if op == "<" { return 5; }
+    if op == "<=" { return 5; }
+    if op == ">" { return 5; }
+    if op == ">=" { return 5; }
+    if op == "+" { return 7; }
+    if op == "-" { return 7; }
+    if op == "*" { return 8; }
+    if op == "/" { return 8; }
+    if op == "%" { return 8; }
+    // Unknown operator — treat as primary so it doesn't accidentally trigger
+    // paren stripping at unexpected levels.
+    return 11;
+}
+
+public function binop_is_right_assoc(op: String) returns Bool {
+    return op == "=";
+}
+
+// Intrinsic precedence of an expression. For an `ex_paren`, the value is the
+// precedence of its inner expr — that's the binding strength a reader sees.
+public function expr_precedence(e: Expr) returns Int {
+    if e.kind == formatter_ast.ex_binop() { return binop_precedence(e.name); }
+    if e.kind == formatter_ast.ex_unary() { return 9; }
+    if e.kind == formatter_ast.ex_call() { return 10; }
+    if e.kind == formatter_ast.ex_index() { return 10; }
+    if e.kind == formatter_ast.ex_field() { return 10; }
+    if e.kind == formatter_ast.ex_range() { return 6; }
+    if e.kind == formatter_ast.ex_paren() {
+        // The paren itself is a primary, but for stripping purposes its
+        // effective precedence is what the wrapped expr would be.
+        return expr_precedence(e.children[0]);
+    }
+    // Everything else is a primary (literals, idents, array literals).
+    return 11;
+}
+
+// --- Expressions -----------------------------------------------------------
+//
+// Top-level entry. Callers outside the expression formatter pass no context,
+// which we interpret as `min_precedence = 0` (full re-evaluation — nothing
+// surrounds this expr, so no parens are needed at this layer).
 public function format_expr(e: Expr) returns String {
+    return format_expr_at(e, 0);
+}
+
+// Precedence-aware emitter (ADR 0043). `min_prec` is the binding power
+// required by the surrounding context. When `e`'s intrinsic precedence is
+// below `min_prec`, we wrap it in parens; otherwise we emit unwrapped.
+// `ex_paren` is stripped here — its inner is forwarded with the same
+// `min_prec`, so a redundant paren around a sufficiently-binding inner expr
+// disappears.
+public function format_expr_at(e: Expr, min_prec: Int) returns String {
+    if e.kind == formatter_ast.ex_paren() {
+        // Strip the outer paren — forward min_prec to the inner. If the
+        // inner needs parens to bind at the surrounding context, the inner
+        // call below will re-wrap.
+        return format_expr_at(e.children[0], min_prec);
+    }
+
+    let body: String = format_expr_inner(e);
+    if expr_precedence(e) < min_prec {
+        return "(" + body + ")";
+    }
+    return body;
+}
+
+// Emits `e`'s content using recursive `format_expr_at` calls that pick
+// appropriate min-precedences for each sub-expression. Never wraps the
+// outermost expression — that decision belongs to `format_expr_at`.
+public function format_expr_inner(e: Expr) returns String {
     if e.kind == formatter_ast.ex_void() {
         return "";
     }
@@ -99,37 +179,48 @@ public function format_expr(e: Expr) returns String {
         return e.name;
     }
     if e.kind == formatter_ast.ex_unary() {
-        let operand: String = format_expr(e.children[0]);
+        // Unary prec is 9. Operand needs at least that to avoid surprise
+        // grouping (`-(1 + 2)` keeps parens since `+` is below 9).
+        let operand: String = format_expr_at(e.children[0], 9);
         if e.name == "not" {
             return "not " + operand;
         }
         return e.name + operand;
     }
     if e.kind == formatter_ast.ex_binop() {
-        let lhs: String = format_expr(e.children[0]);
-        let rhs: String = format_expr(e.children[1]);
+        let p: Int = binop_precedence(e.name);
+        let mutable lhs_min: Int = p;
+        let mutable rhs_min: Int = p + 1;
+        if binop_is_right_assoc(e.name) {
+            lhs_min = p + 1;
+            rhs_min = p;
+        }
+        let lhs: String = format_expr_at(e.children[0], lhs_min);
+        let rhs: String = format_expr_at(e.children[1], rhs_min);
         return lhs + " " + e.name + " " + rhs;
     }
     if e.kind == formatter_ast.ex_call() {
-        let callee: String = format_expr(e.children[0]);
+        // Callee position requires postfix-prec (10). Args are in their own
+        // parenthesised context — full re-evaluation (min_prec = 0).
+        let callee: String = format_expr_at(e.children[0], 10);
         let mutable args: String = "";
         let mutable i: Int = 1;
         while i < len(e.children) {
             if i > 1 {
                 args = args + ", ";
             }
-            args = args + format_expr(e.children[i]);
+            args = args + format_expr_at(e.children[i], 0);
             i = i + 1;
         }
         return callee + "(" + args + ")";
     }
     if e.kind == formatter_ast.ex_index() {
-        let obj: String = format_expr(e.children[0]);
-        let idx: String = format_expr(e.children[1]);
+        let obj: String = format_expr_at(e.children[0], 10);
+        let idx: String = format_expr_at(e.children[1], 0);
         return obj + "[" + idx + "]";
     }
     if e.kind == formatter_ast.ex_field() {
-        let obj: String = format_expr(e.children[0]);
+        let obj: String = format_expr_at(e.children[0], 10);
         return obj + "." + e.name;
     }
     if e.kind == formatter_ast.ex_array() {
@@ -139,22 +230,26 @@ public function format_expr(e: Expr) returns String {
             if i > 0 {
                 elems = elems + ", ";
             }
-            elems = elems + format_expr(e.children[i]);
+            elems = elems + format_expr_at(e.children[i], 0);
             i = i + 1;
         }
         return "[" + elems + "]";
     }
     if e.kind == formatter_ast.ex_range() {
-        let start: String = format_expr(e.children[0]);
-        let end: String = format_expr(e.children[1]);
+        // Range is non-associative at prec 6. Both sides need at least 7
+        // to bind tighter — otherwise the user's intent could be lost.
+        let start: String = format_expr_at(e.children[0], 7);
+        let end: String = format_expr_at(e.children[1], 7);
         return start + ".." + end;
     }
     if e.kind == formatter_ast.ex_paren() {
-        let inner: String = format_expr(e.children[0]);
-        return "(" + inner + ")";
+        // Defensive — `format_expr_at` strips paren before reaching here.
+        // If we land in this branch via a direct `format_expr_inner` call,
+        // emit literally to avoid silent loss of grouping.
+        return "(" + format_expr_at(e.children[0], 0) + ")";
     }
     // Unknown kind — emit a placeholder so the formatter doesn't silently
-    // drop. Phase 39+ will tighten this.
+    // drop. Phase 41+ will tighten this.
     return "<unknown_expr>";
 }
 
