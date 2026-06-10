@@ -132,6 +132,12 @@ public entity Block {
 // FunctionDecl is reused for top-level functions, entity methods, entity
 // constructors, and impl methods. The `is_constructor` flag distinguishes
 // constructor bodies (no return type) from methods.
+//
+// `line` is populated by the parser from the leading keyword's source line
+// (1-based). It's used by the formatter to merge declarations across kinds
+// in source order — ADR 0042. For methods / constructors / impl methods,
+// `line` is still populated for consistency but isn't used by the
+// top-level merge (those are emitted as part of their enclosing decl).
 public entity FunctionDecl {
     field name: String;
     field is_public: Bool;
@@ -141,8 +147,9 @@ public entity FunctionDecl {
     field params: Array<Param>;
     field return_type: String;
     field body: Block;
+    field line: Int;
 
-    constructor(name: String, is_public: Bool, is_entry: Bool, is_async: Bool, is_constructor: Bool, params: Array<Param>, return_type: String, body: Block) {
+    constructor(name: String, is_public: Bool, is_entry: Bool, is_async: Bool, is_constructor: Bool, params: Array<Param>, return_type: String, body: Block, line: Int) {
         self.name = name;
         self.is_public = is_public;
         self.is_entry = is_entry;
@@ -151,16 +158,19 @@ public entity FunctionDecl {
         self.params = params;
         self.return_type = return_type;
         self.body = body;
+        self.line = line;
     }
 }
 
 public entity ImportDecl {
     field is_package: Bool;
     field path: String;
+    field line: Int;
 
-    constructor(is_package: Bool, path: String) {
+    constructor(is_package: Bool, path: String, line: Int) {
         self.is_package = is_package;
         self.path = path;
+        self.line = line;
     }
 }
 
@@ -197,8 +207,9 @@ public entity EntityDecl {
     field has_constructor: Bool;
     field ctor: FunctionDecl;
     field invariants: Array<Expr>;
+    field line: Int;
 
-    constructor(name: String, is_public: Bool, fields: Array<FieldDecl>, methods: Array<FunctionDecl>, has_constructor: Bool, ctor: FunctionDecl, invariants: Array<Expr>) {
+    constructor(name: String, is_public: Bool, fields: Array<FieldDecl>, methods: Array<FunctionDecl>, has_constructor: Bool, ctor: FunctionDecl, invariants: Array<Expr>, line: Int) {
         self.name = name;
         self.is_public = is_public;
         self.fields = fields;
@@ -206,6 +217,7 @@ public entity EntityDecl {
         self.has_constructor = has_constructor;
         self.ctor = ctor;
         self.invariants = invariants;
+        self.line = line;
     }
 }
 
@@ -223,11 +235,13 @@ public entity EnumDecl {
     field name: String;
     field is_public: Bool;
     field variants: Array<EnumVariant>;
+    field line: Int;
 
-    constructor(name: String, is_public: Bool, variants: Array<EnumVariant>) {
+    constructor(name: String, is_public: Bool, variants: Array<EnumVariant>, line: Int) {
         self.name = name;
         self.is_public = is_public;
         self.variants = variants;
+        self.line = line;
     }
 }
 
@@ -249,11 +263,13 @@ public entity TraitDecl {
     field name: String;
     field is_public: Bool;
     field methods: Array<TraitMethodSig>;
+    field line: Int;
 
-    constructor(name: String, is_public: Bool, methods: Array<TraitMethodSig>) {
+    constructor(name: String, is_public: Bool, methods: Array<TraitMethodSig>, line: Int) {
         self.name = name;
         self.is_public = is_public;
         self.methods = methods;
+        self.line = line;
     }
 }
 
@@ -261,11 +277,13 @@ public entity ImplDecl {
     field trait_name: String;
     field entity_name: String;
     field methods: Array<FunctionDecl>;
+    field line: Int;
 
-    constructor(trait_name: String, entity_name: String, methods: Array<FunctionDecl>) {
+    constructor(trait_name: String, entity_name: String, methods: Array<FunctionDecl>, line: Int) {
         self.trait_name = trait_name;
         self.entity_name = entity_name;
         self.methods = methods;
+        self.line = line;
     }
 }
 
@@ -275,20 +293,24 @@ public entity IntentBlock {
     // when this file is itself parsed.
     field goal_text: String;
     field verifications: Array<String>;
+    field line: Int;
 
-    constructor(goal_text: String, verifications: Array<String>) {
+    constructor(goal_text: String, verifications: Array<String>, line: Int) {
         self.goal_text = goal_text;
         self.verifications = verifications;
+        self.line = line;
     }
 }
 
 public entity TestDecl {
     field name: String;
     field body: Block;
+    field line: Int;
 
-    constructor(name: String, body: Block) {
+    constructor(name: String, body: Block, line: Int) {
         self.name = name;
         self.body = body;
+        self.line = line;
     }
 }
 
@@ -297,12 +319,14 @@ public entity ExternDecl {
     field func_name: String;
     field params: Array<Param>;
     field return_type: String;
+    field line: Int;
 
-    constructor(target: String, func_name: String, params: Array<Param>, return_type: String) {
+    constructor(target: String, func_name: String, params: Array<Param>, return_type: String, line: Int) {
         self.target = target;
         self.func_name = func_name;
         self.params = params;
         self.return_type = return_type;
+        self.line = line;
     }
 }
 
@@ -358,7 +382,7 @@ public function empty_expr() returns Expr {
 // have a constructor.
 public function empty_function_decl() returns FunctionDecl {
     let mutable params: Array<Param> = [];
-    return FunctionDecl("", false, false, false, false, params, "", empty_block());
+    return FunctionDecl("", false, false, false, false, params, "", empty_block(), 0);
 }
 
 // Parses a decimal integer-literal token's text into an Int. The stage2

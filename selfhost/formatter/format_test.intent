@@ -21,13 +21,13 @@ test "format_module_decl emits canonical form" {
 }
 
 test "format_import_decl file form" {
-    let imp: ImportDecl = ImportDecl(false, "lexer.intent");
+    let imp: ImportDecl = ImportDecl(false, "lexer.intent", 1);
     let s: String = formatter_format.format_import_decl(imp);
     assert_eq(s, "import \"lexer.intent\";");
 }
 
 test "format_import_decl package form" {
-    let imp: ImportDecl = ImportDecl(true, "math");
+    let imp: ImportDecl = ImportDecl(true, "math", 1);
     let s: String = formatter_format.format_import_decl(imp);
     assert_eq(s, "import math;");
 }
@@ -78,6 +78,30 @@ public function roundtrip(src: String) returns String {
     let prog: Program = formatter_parser.parse(src);
     assert_eq(prog.error, "");
     return formatter_format.format_program(prog);
+}
+
+test "source order: interleaved decl kinds preserve user order (ADR 0042)" {
+    // Source order is: function, test, function, test. Without source-order
+    // tracking (per-kind sort), the formatter would emit both functions
+    // first then both tests — breaking byte-equality with stage1 fmt.
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function a() returns Int " + '{'.to_string() + "\n    return 1;\n" + '}'.to_string() + "\n\n"
+        + "test \"first\" " + '{'.to_string() + "\n    assert(true);\n" + '}'.to_string() + "\n\n"
+        + "function b() returns Int " + '{'.to_string() + "\n    return 2;\n" + '}'.to_string() + "\n\n"
+        + "test \"second\" " + '{'.to_string() + "\n    assert(true);\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "source order: line field populated by parser" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction a() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string() + "\n\nfunction b() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions), 2);
+    // Module is line 1, blank line is 2, function a is line 3, blank is 4,
+    // function b is line 5.
+    assert_eq(prog.functions[0].line, 3);
+    assert_eq(prog.functions[1].line, 5);
 }
 
 test "round-trip: minimal module + function" {
