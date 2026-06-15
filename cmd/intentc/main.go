@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -31,7 +33,7 @@ Usage:
   intentc test-gen [--emit] <file.intent>                      Generate Intent test blocks from contracts
   intentc test [--target <t>] [--all-targets] [--filter <s>] [--list] [--quiet] <file.intent>
                                                                Run in-language tests on one or more targets
-  intentc fmt [--check] <file.intent>                          Format source to canonical style
+  intentc fmt [--check] [--self-hosted] <file.intent>          Format source to canonical style
   intentc lint <file.intent>                                   Run lint checks for style/best practices
   intentc pkg init                                             Create intent.toml from module declarations
   intentc pkg add <name> <version>                             Add dependency with version constraint
@@ -77,6 +79,8 @@ Examples:
   intentc test --all-targets hello.intent       Run on rust + js + wasm; flag cross-target divergence
   intentc fmt hello.intent                      Format hello.intent in-place
   intentc fmt --check hello.intent              Check if already formatted (exit 1 if not)
+  intentc fmt --self-hosted hello.intent        Format using stage2 (Intent) formatter
+  intentc fmt --self-hosted --check hello.intent  Check using stage2 formatter
   intentc lint hello.intent                     Lint for style/best practice issues
 `
 
@@ -410,21 +414,32 @@ func handleTest(args []string) {
 	}
 }
 
-func handleFmt(args []string) {
-	checkOnly := false
-	var filePath string
-
+// parseFmtFlags parses the flags for the fmt subcommand and returns
+// (checkOnly, selfHosted, filePath, errorMsg). errorMsg is non-empty on
+// any flag-parsing problem; callers should print it to stderr and exit 1.
+func parseFmtFlags(args []string) (checkOnly, selfHosted bool, filePath, errMsg string) {
 	for _, arg := range args {
 		switch arg {
 		case "--check":
 			checkOnly = true
+		case "--self-hosted":
+			selfHosted = true
 		default:
 			if strings.HasPrefix(arg, "-") {
-				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", arg)
-				os.Exit(1)
+				errMsg = "Unknown option: " + arg
+				return
 			}
 			filePath = arg
 		}
+	}
+	return
+}
+
+func handleFmt(args []string) {
+	checkOnly, selfHosted, filePath, errMsg := parseFmtFlags(args)
+	if errMsg != "" {
+		fmt.Fprintln(os.Stderr, errMsg)
+		os.Exit(1)
 	}
 
 	if filePath == "" {
@@ -432,23 +447,44 @@ func handleFmt(args []string) {
 		os.Exit(1)
 	}
 
-	source, err := os.ReadFile(filePath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
-		os.Exit(1)
+	var formatted string
+
+	if selfHosted {
+		binPath, err := stage2FormatterBinary()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "stage2 formatter: %s\n", err)
+			os.Exit(1)
+		}
+		out, err := runStage2Formatter(binPath, filePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			os.Exit(1)
+		}
+		formatted = out
+	} else {
+		source, err := os.ReadFile(filePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
+			os.Exit(1)
+		}
+
+		p := parser.New(string(source))
+		prog := p.Parse()
+
+		if p.Diagnostics().HasErrors() {
+			fmt.Fprintf(os.Stderr, "%s", p.Diagnostics().Format(filePath))
+			os.Exit(1)
+		}
+
+		formatted = formatter.Format(prog)
 	}
-
-	p := parser.New(string(source))
-	prog := p.Parse()
-
-	if p.Diagnostics().HasErrors() {
-		fmt.Fprintf(os.Stderr, "%s", p.Diagnostics().Format(filePath))
-		os.Exit(1)
-	}
-
-	formatted := formatter.Format(prog)
 
 	if checkOnly {
+		source, err := os.ReadFile(filePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading file: %s\n", err)
+			os.Exit(1)
+		}
 		if formatted != string(source) {
 			fmt.Fprintf(os.Stderr, "%s is not formatted\n", filePath)
 			os.Exit(1)
@@ -460,6 +496,145 @@ func handleFmt(args []string) {
 		fmt.Fprintf(os.Stderr, "Error writing file: %s\n", err)
 		os.Exit(1)
 	}
+}
+
+// runStage2Formatter runs the prebuilt stage2 formatter binary on filePath and
+// returns the canonical formatted source (stdout with one trailing newline
+// trimmed). A non-zero exit is returned as an error including the binary output.
+func runStage2Formatter(binaryPath, filePath string) (string, error) {
+	cmd := exec.Command(binaryPath, filePath)
+	out, err := cmd.Output()
+	if err != nil {
+		// Collect stderr too when available.
+		var stderr []byte
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			stderr = exitErr.Stderr
+		}
+		combined := strings.TrimSpace(string(out) + string(stderr))
+		if combined == "" {
+			return "", fmt.Errorf("stage2 formatter exited with error: %w", err)
+		}
+		return "", fmt.Errorf("%s", combined)
+	}
+	// The stage2 formatter emits one extra trailing newline (print() lowers to
+	// println!/console.log). Strip exactly one trailing newline.
+	result := strings.TrimSuffix(string(out), "\n")
+	return result, nil
+}
+
+// stage2FormatterBinary returns the path to the stage2 formatter binary,
+// either from the INTENT_STAGE2_FMT env override or by auto-building from
+// selfhost/formatter/main.intent (with caching in os.TempDir()).
+func stage2FormatterBinary() (string, error) {
+	// Env override.
+	if envPath := os.Getenv("INTENT_STAGE2_FMT"); envPath != "" {
+		info, err := os.Stat(envPath)
+		if err != nil {
+			return "", fmt.Errorf("INTENT_STAGE2_FMT=%q: %w", envPath, err)
+		}
+		if info.IsDir() || info.Mode()&0111 == 0 {
+			return "", fmt.Errorf("INTENT_STAGE2_FMT=%q is not an executable file", envPath)
+		}
+		return envPath, nil
+	}
+
+	// Source location: relative to cwd.
+	srcDir := filepath.Join("selfhost", "formatter")
+	mainSrc := filepath.Join(srcDir, "main.intent")
+	if _, err := os.Stat(mainSrc); err != nil {
+		return "", fmt.Errorf(
+			"stage2 formatter sources not found at selfhost/formatter/main.intent; run from the repo root or set INTENT_STAGE2_FMT to a prebuilt binary",
+		)
+	}
+
+	cachePath := filepath.Join(os.TempDir(), "intent-stage2-fmt")
+
+	// Staleness check: rebuild if cached binary is missing or any
+	// selfhost/formatter/*.intent file is newer than the cache.
+	needBuild := false
+	cacheInfo, err := os.Stat(cachePath)
+	if err != nil {
+		needBuild = true
+	} else {
+		entries, err := os.ReadDir(srcDir)
+		if err == nil {
+			for _, e := range entries {
+				if !strings.HasSuffix(e.Name(), ".intent") {
+					continue
+				}
+				fi, err := e.Info()
+				if err != nil {
+					continue
+				}
+				if fi.ModTime().After(cacheInfo.ModTime()) {
+					needBuild = true
+					break
+				}
+			}
+		}
+	}
+
+	if !needBuild {
+		return cachePath, nil
+	}
+
+	// Build the stage2 formatter binary.
+	intentc, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("could not determine intentc path: %w", err)
+	}
+
+	absSrc, err := filepath.Abs(mainSrc)
+	if err != nil {
+		return "", fmt.Errorf("could not resolve main.intent path: %w", err)
+	}
+
+	buildDir, err := os.MkdirTemp("", "intent-stage2-build-*")
+	if err != nil {
+		return "", fmt.Errorf("could not create build temp dir: %w", err)
+	}
+	defer os.RemoveAll(buildDir)
+
+	buildCmd := exec.Command(intentc, "build", "--target", "rust", absSrc)
+	buildCmd.Dir = buildDir
+	buildOut, buildErr := buildCmd.CombinedOutput()
+	if buildErr != nil {
+		return "", fmt.Errorf("stage2 formatter build failed: %w\n%s", buildErr, strings.TrimSpace(string(buildOut)))
+	}
+
+	builtBin := filepath.Join(buildDir, "main")
+	if _, err := os.Stat(builtBin); err != nil {
+		return "", fmt.Errorf("stage2 formatter build succeeded but binary not found at %s: %w", builtBin, err)
+	}
+
+	// Move to cache path (try rename first; fall back to copy for cross-device).
+	if err := os.Rename(builtBin, cachePath); err != nil {
+		if copyErr := copyFile(builtBin, cachePath, 0755); copyErr != nil {
+			return "", fmt.Errorf("could not install stage2 formatter binary: %w", copyErr)
+		}
+	}
+
+	return cachePath, nil
+}
+
+// copyFile copies src to dst with the given permissions.
+func copyFile(src, dst string, perm os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 func handleVerify(args []string) {

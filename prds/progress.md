@@ -297,3 +297,34 @@ on disk; there is no stage2 formatter bug.
 PATTERN: [difftest] The correct differential check is stage2-output == stage1-output,
 NOT stage2-output == raw-file. Canonicalize each fixture with `intentc fmt` first,
 then compare — otherwise non-canonical fixtures produce false divergences.
+
+---
+
+## 2026-06-15 — Phase 42.4: intentc fmt --self-hosted shim
+
+Go shim wiring the stage2 formatter into the CLI. handleFmt now parses
+--self-hosted (composes with --check, any order via parseFmtFlags). When set:
+stage2FormatterBinary() resolves the binary (env INTENT_STAGE2_FMT override, else
+auto-build selfhost/formatter/main.intent to $TMPDIR/intent-stage2-fmt, rebuilding
+when any selfhost/formatter/*.intent is newer; build subprocess runs with cmd.Dir
+= temp dir so no stray ./main in the repo). runStage2Formatter() execs it, trims
+exactly one trailing newline (strings.TrimSuffix). Non-zero exit from the binary
+(e.g. parse error, exit 3) is surfaced to stderr and the shim exits non-zero —
+NO silent stage1 fallback. --check re-reads + compares; else writes in place.
+
+Delegated to a golang-pro Sonnet worker; advisor (me) specified the factoring so
+the unit tests use FAKE shell-script binaries (no cargo): runStage2Formatter +
+parseFmtFlags + env-override = 13 tests. Code review PASS. End-to-end verified
+myself: --self-hosted --check on canonical hello → exit 0 (auto-build ran);
+--self-hosted --check async_demo → "parse error: ..." exit 1 (no fallback);
+in-place stage2 output byte-equal to native intentc fmt on hello; no stray ./main.
+make test PASS, gofmt clean.
+
+CLI-wiring half of Phase 42 complete (42.1 args, 42.2 main.intent, 42.3 harness,
+42.4 shim, 42.12 char_string_demo resolved). Remaining: parser-gap closing
+42.5-42.11 (9 examples parse-err; 0 true divergences — emit logic is correct).
+
+PATTERN: [cli-shim-testing] Factor subprocess-exec logic into a function taking a
+binary path, then unit-test with a fake executable (shell script in t.TempDir(),
+0755) that emits fixed bytes + chosen exit code — covers trailing-newline trim and
+non-zero-exit handling without building the real (cargo-dependent) binary.
