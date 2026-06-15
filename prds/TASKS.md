@@ -45,16 +45,16 @@ canonicalized (reformatted by the formatter) so it is a fixpoint on them.
 40B paren-stripping, 40A.1/40A.2/40A.3 comments). Stage2 formatter is a fixpoint on its
 own source.
 
-## Phase 41: Stage2 Parser Surface Widening (active)
+## Phase 41: Stage2 Parser Surface Widening — COMPLETE (2026-06-15)
 
-Widen the stage2 parser beyond its self-hostable subset so it can format arbitrary Intent. Each sub-feature round-trips through parse + format. See [phase-41-parser-surface-widening.md](active/phase-41-parser-surface-widening.md).
+Widened the stage2 parser beyond its self-hostable subset so it can format arbitrary Intent. Each sub-feature round-trips through parse + format; byte-equal self-format on the stage2 files preserved throughout. See [phase-41-parser-surface-widening.md](done/phase-41-parser-surface-widening.md).
 
 | # | Task | PRD | Status | Notes |
 |---|------|-----|--------|-------|
-| 41.1 | Contracts: `requires` / `ensures` / `decreases` on functions + methods | [phase-41-parser-surface-widening.md](active/phase-41-parser-surface-widening.md) | DONE (2026-06-15) | parsed into FunctionDecl.{requires,ensures,decreases}_clauses; formatted between signature and `{`; +4 tests; 162/162; byte-equal preserved |
-| 41.2 | `match` expressions over Result/Option | [phase-41-parser-surface-widening.md](active/phase-41-parser-surface-widening.md) | DONE (2026-06-15) | ex_match + MatchArm; level-aware format_match via format_expr_indented; +3 tests; 165/165; byte-equal preserved |
-| 41.3 | `for ... in ...` loops | [phase-41-parser-surface-widening.md](active/phase-41-parser-surface-widening.md) | TODO | |
-| 41.4 | `try ?` operator | [phase-41-parser-surface-widening.md](active/phase-41-parser-surface-widening.md) | TODO | |
+| 41.1 | Contracts: `requires` / `ensures` / `decreases` on functions + methods | [phase-41-parser-surface-widening.md](done/phase-41-parser-surface-widening.md) | DONE (2026-06-15) | FunctionDecl.{requires,ensures,decreases}_clauses; formatted between signature and `{`; +4 tests |
+| 41.2 | `match` expressions over Result/Option | [phase-41-parser-surface-widening.md](done/phase-41-parser-surface-widening.md) | DONE (2026-06-15) | ex_match + MatchArm; level-aware format_match via format_expr_indented; +3 tests |
+| 41.3 | `for ... in ...` loops | [phase-41-parser-surface-widening.md](done/phase-41-parser-surface-widening.md) | DONE (2026-06-15) | st_for (reuses Stmt name/expr/then_block); +3 tests |
+| 41.4 | `try ?` operator | [phase-41-parser-surface-widening.md](done/phase-41-parser-surface-widening.md) | DONE (2026-06-15) | ex_try postfix; +2 tests; 170/170 rust+js |
 
 ## Backlog
 

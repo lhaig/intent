@@ -577,6 +577,73 @@ test "match: parser populates arms, bindings, and wildcard" {
     assert_eq(rhs.match_arms[1].variant, "Err");
 }
 
+// --- for-in loop tests (Phase 41.3) -----------------------------------------
+
+test "for-in: loop over a collection round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    for x in numbers " + '{'.to_string() + "\n"
+        + "        return x;\n"
+        + "    " + '}'.to_string() + "\n"
+        + "    return 0;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "for-in: loop over a range round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    for i in 0..n " + '{'.to_string() + "\n"
+        + "        return i;\n"
+        + "    " + '}'.to_string() + "\n"
+        + "    return 0;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "for-in: parser populates loop var, iterable, body" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    for x in numbers " + '{'.to_string() + "\n"
+        + "        return x;\n"
+        + "    " + '}'.to_string() + "\n"
+        + "    return 0;\n"
+        + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    let s: Stmt = prog.functions[0].body.stmts[0];
+    assert_eq(s.kind, formatter_ast.st_for());
+    assert_eq(s.name, "x");
+    assert_eq(formatter_format.format_expr(s.expr), "numbers");
+}
+
+// --- try operator tests (Phase 41.4) ----------------------------------------
+
+test "try: postfix ? on a call round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let x: Int = parse(s)?;\n"
+        + "    return x;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "try: parser populates ex_try wrapping the inner expr" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let x: Int = parse(s)?;\n"
+        + "    return x;\n"
+        + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    let rhs: Expr = prog.functions[0].body.stmts[0].expr;
+    assert_eq(rhs.kind, formatter_ast.ex_try());
+    assert_eq(rhs.children[0].kind, formatter_ast.ex_call());
+}
+
 // --- Paren stripping tests (ADR 0043) ---------------------------------------
 
 // Helper: roundtrip a `let x: Int = RHS;` expression and assert the formatter

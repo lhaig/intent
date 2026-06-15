@@ -339,7 +339,23 @@ public entity Parser {
         if self.check(formatter_lexer.kw_while()) {
             return self.parse_while_stmt();
         }
+        if self.check(formatter_lexer.kw_for_marker()) {
+            return self.parse_for_stmt();
+        }
         return self.parse_expr_stmt();
+    }
+
+    // `for IDENT in EXPR { BLOCK }` (Phase 41.3). `for` shares the lexer token
+    // with `impl ... for ...`; statement position disambiguates. `in` lexes as
+    // a plain identifier. The iterable parse stops at `{`. Reuses Stmt fields:
+    // name = loop variable, expr = iterable, then_block = body.
+    method parse_for_stmt() returns Stmt {
+        self.expect(formatter_lexer.kw_for_marker(), "'for'");
+        let var_tok: Token = self.expect(formatter_lexer.tk_ident(), "loop variable");
+        self.expect(formatter_lexer.tk_ident(), "'in' in for loop");
+        let iter: Expr = self.parse_expr();
+        let body: Block = self.parse_block();
+        return Stmt(formatter_ast.st_for(), iter, var_tok.text, "", false, body, formatter_ast.empty_block(), false);
     }
 
     // `let [mutable] IDENT [: TYPE] = EXPR;`
@@ -619,7 +635,14 @@ public entity Parser {
                         children.push(e);
                         e = Expr(formatter_ast.ex_field(), 0, "", false, fld.text, children);
                     } else {
-                        return e;
+                        if self.check_consume(formatter_lexer.tk_question()) {
+                            // Phase 41.4: postfix try operator `inner?`.
+                            let mutable children: Array<Expr> = [];
+                            children.push(e);
+                            e = Expr(formatter_ast.ex_try(), 0, "", false, "", children);
+                        } else {
+                            return e;
+                        }
                     }
                 }
             }

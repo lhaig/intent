@@ -41,6 +41,10 @@ public function st_expr() returns Int {
     return 5;
 }
 
+public function st_for() returns Int {
+    return 6;
+} // Phase 41.3: name=loop var, expr=iterable, then_block=body
+
 // --- Expression kind constants ----------------------------------------------
 public function ex_void() returns Int {
     return 0;
@@ -105,6 +109,10 @@ public function ex_char() returns Int {
 public function ex_match() returns Int {
     return 15;
 } // children=[scrutinee], match_arms=[...] (Phase 41.2)
+
+public function ex_try() returns Int {
+    return 16;
+} // children=[inner]; the try operator `inner?` (Phase 41.4)
 
 // --- Shared AST entities ----------------------------------------------------
 public entity Param {

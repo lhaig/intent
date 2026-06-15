@@ -264,6 +264,15 @@ Implemented in commits 0a4ca14..4999b06.
 - VS Code extension under `editors/vscode/` (.vsix builds via `npm run package`)
 - End-to-end smoke test in `internal/lsp/e2e_test.go`
 
+### Phase 41: Stage2 Parser Surface Widening -- SHIPPED (2026-06-15)
+With byte-equal self-format banked (Phase 40), the stage2 parser still only handled the restricted subset its own source uses. Phase 41 widens it to the constructs it previously skipped or rejected, each round-tripping through parse + format (byte-equal self-format preserved throughout):
+- **41.1 Contracts** — `requires` / `ensures` / `decreases` on functions and methods were *silently discarded* by a crude skip (and `skip_method_contracts`, now removed). `FunctionDecl` gains `requires_clauses` / `ensures_clauses` / `decreases_clauses`; the clauses lex as plain idents with no `;` terminator (parse_expr stops at the next clause keyword or `{`); the formatter emits them between the signature and the body in stage1's canonical layout (signature line, indented clause lines, `{` on its own line). `result` round-trips as an identifier.
+- **41.2 match** — `match <scrutinee> { <pattern> => <body>, ... }`. New `match` keyword; `ex_match` kind + `MatchArm` entity (variant / bindings / is_wildcard / body) + `Expr.match_arms`. Patterns: `_`, `Variant`, `Variant(a, b)`. Because match is multi-line and indent-dependent, the let/return/expr statement formatters route their expression through a new `format_expr_indented(e, level)` that emits matches with arms at `level+1` and the closing brace at `level`; nested matches recurse.
+- **41.3 for-in** — `for <var> in <iter> { ... }`. New `st_for` statement kind reusing `Stmt` fields (name = loop var, expr = iterable, then_block = body); `for` reuses the existing `kw_for_marker` token (shared with `impl ... for ...`, disambiguated by statement position); `in` lexes as a plain ident.
+- **41.4 try** — postfix `inner?`. New `ex_try` kind in the postfix loop; precedence 10; lower-precedence inners keep their parens.
+
+12 new tests (170/170 on rust + js). A stage1 Rust-backend gap surfaced and was worked around: an Intent identifier named `fn` (a Rust keyword) emits invalid Rust — the backend doesn't escape reserved words (renamed the param; noted in `prds/progress.md`). PRD: `prds/done/phase-41-parser-surface-widening.md`.
+
 ### Phase 40 / 40A.2 / 40A.3: Byte-Equal Self-Format -- SHIPPED (2026-06-15)
 The milestone the whole Phase 40 line was building toward: the stage2 formatter **byte-equal self-formats all four of its own source files** (`selfhost/formatter/{lexer,ast,parser,format}.intent`) — `format(parse(src)) == src`. Delivered across two sub-phases after 40A.1.
 

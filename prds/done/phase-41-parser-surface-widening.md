@@ -1,6 +1,6 @@
 # Phase 41: Stage2 Parser Surface Widening
 
-**Status:** In Progress (started 2026-06-15)
+**Status:** Shipped (2026-06-15)
 **Milestone:** Self-hosting (stage2 toolchain in `selfhost/formatter/`)
 **Decision:** extends ADR 0040 (self-hosted formatter strategy)
 
@@ -14,15 +14,15 @@ time, each round-tripping through parse + format.
 
 ## Success Criteria (per sub-feature: parse → AST → format → round-trip test)
 
-- [ ] **41.1 Contracts** — `requires` / `ensures` / `decreases` clauses on
+- [x] **41.1 Contracts** — `requires` / `ensures` / `decreases` clauses on
   functions and methods round-trip. Canonical layout (matches stage1):
   signature line, each clause on its own indented line (no `;`), then `{` on its
   own line. `result` inside an ensures expr round-trips as an identifier.
-  Currently these are SILENTLY DISCARDED by the parser (data-loss risk).
-- [ ] 41.2 `match` expressions over Result/Option round-trip.
-- [ ] 41.3 `for ... in ...` loops round-trip.
-- [ ] 41.4 `try ?` operator round-trips.
-- [ ] No regression: stage2 self-format stays byte-equal; full suite green on rust + js.
+  (Were silently discarded before this phase.)
+- [x] 41.2 `match` expressions over Result/Option round-trip.
+- [x] 41.3 `for ... in ...` loops round-trip.
+- [x] 41.4 `try ?` operator round-trips.
+- [x] No regression: stage2 self-format stays byte-equal; full suite green on rust + js (170/170).
 
 ## Non-Goals
 

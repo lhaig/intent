@@ -185,6 +185,23 @@ format_expr call site.
 
 ---
 
+## 2026-06-15 — Phase 41.3 (for-in) + 41.4 (try); Phase 41 complete
+
+- 41.3 for-in: new st_for statement kind (reuses Stmt name=loop var, expr=iterable,
+  then_block=body). `for` reuses kw_for_marker (shared with `impl ... for ...`; statement
+  position disambiguates); `in` lexes as a plain ident and is consumed positionally. parse
+  dispatched from parse_statement; formatted like while. +3 tests (collection, range,
+  parser-populates).
+- 41.4 try: ex_try postfix kind added to parse_postfix's loop (after `.`); expr_precedence
+  10; format_expr_inner emits `inner?` with inner at postfix precedence so lower-prec inners
+  keep parens. +2 tests.
+- 170/170 rust+js; byte-equal self-format preserved on all 4 stage2 files (probe).
+
+Phase 41 complete: the stage2 parser now handles contracts, match, for-in, and try —
+the constructs it previously skipped or rejected. PRD moved to prds/done/.
+
+---
+
 ## 2026-06-15 — Remove aiki block from CLAUDE.md / AGENTS.md
 
 Replaced the ~500-line `<aiki>` instruction block in `AGENTS.md` (the real target of

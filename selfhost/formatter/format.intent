@@ -158,6 +158,9 @@ public function expr_precedence(e: Expr) returns Int {
     if e.kind == formatter_ast.ex_field() {
         return 10;
     }
+    if e.kind == formatter_ast.ex_try() {
+        return 10;
+    }
     if e.kind == formatter_ast.ex_range() {
         return 6;
     }
@@ -271,6 +274,12 @@ public function format_expr_inner(e: Expr) returns String {
     if e.kind == formatter_ast.ex_field() {
         let obj: String = format_expr_at(e.children[0], 10);
         return obj + "." + e.name;
+    }
+    if e.kind == formatter_ast.ex_try() {
+        // Phase 41.4: postfix `?`. Inner binds at postfix prec (10) so a
+        // lower-precedence inner expression keeps its parens.
+        let inner: String = format_expr_at(e.children[0], 10);
+        return inner + "?";
     }
     if e.kind == formatter_ast.ex_array() {
         let mutable elems: String = "";
@@ -404,6 +413,13 @@ public function format_stmt_inner(s: Stmt, level: Int) returns String {
     }
     if s.kind == formatter_ast.st_while() {
         let mutable out: String = pad + "while " + format_expr(s.expr) + " " + '{'.to_string() + "\n";
+        out = out + format_block_body(s.then_block, level + 1);
+        out = out + pad + '}'.to_string();
+        return out;
+    }
+    if s.kind == formatter_ast.st_for() {
+        // Phase 41.3: `for <var> in <iter> { body }`.
+        let mutable out: String = pad + "for " + s.name + " in " + format_expr(s.expr) + " " + '{'.to_string() + "\n";
         out = out + format_block_body(s.then_block, level + 1);
         out = out + pad + '}'.to_string();
         return out;
