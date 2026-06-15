@@ -1,111 +1,111 @@
-# Pickup Notes — 2026-06-15 (after Phase 40A.2 step 1)
+# Pickup Notes — 2026-06-15 (after Phase 40A.2 complete)
 
-Handoff after trailing-EOF comment preservation shipped.
+Handoff after the comment-preservation phase (40A.2) landed and a byte-equal probe
+re-scoped the remaining work into Phase 40A.3.
 
 ## Where we are
 
 Recent landings:
-- **Phase 30-38** — see prior NEXT-STEPS.
-- **Phase 39** — self-parse certification.
+- **Phase 30-39** — see git history / `prds/done/`.
 - **Phase 40C** — source-order tracking. ADR 0042.
 - **Phase 40B** — precedence-aware paren stripping. ADR 0043.
 - **Phase 40A.1** — leading-decl comment preservation. ADR 0044.
-- **Phase 40A.2 step (1)** — trailing-EOF comment preservation. ADR 0044.
+- **Phase 40A.2 (complete)** — comments now round-trip in four positions:
+  - step (1) trailing-EOF (`Program.trailing_comments`),
+  - step (2) body/between-statement (`Stmt.comments_before` via `parse_block`),
+  - step (3) inline-after on statements (`Token.comment_after` + lexer same-line detection + `Stmt.comment_after`),
+  - step (4) comprehensive synthetic round-trip test (partial gate).
 
-Stage2 (`selfhost/formatter/`):
-- `lexer.intent` (~650 LOC, 27 tests) — comment-capturing tokeniser.
-- `ast.intent` (~440 LOC) — every top-level decl has `line: Int` + `comments_before: Array<String>`.
-- `parser.intent` (~1770 LOC, 66 tests) — `parse_program` captures pre-modifier; each `parse_*_decl` accepts `leading_comments`.
-- `format.intent` (~675 LOC) — k-way merge by `line`, precedence-aware paren stripping, leading- + trailing-comment emission.
-- `format_test.intent` (~385 LOC, 43 tests).
+Tooling: aiki removed; **norman** drives tracking (`prds/`). Full ops/→prds/ migration done.
 
-**136 in-language tests pass on rust + js.** `make validate` green.
+**147 in-language tests pass on rust + js** for `selfhost/formatter/format_test.intent`.
 
 ## Byte-equal self-format gate progress
 
 | Sub-piece | Status |
 |---|---|
-| C — source-order tracking | ✓ Phase 40C |
-| B — paren stripping | ✓ Phase 40B |
-| A.1 — leading-decl comments | ✓ Phase 40A.1 |
-| A.2 step (1) — trailing-EOF comments | ✓ done |
-| A.2 step (2) — body/between-statement comments | next |
-| A.2 step (3) — inline-after comments | after (2) |
+| C — source-order tracking | done (40C) |
+| B — paren stripping | done (40B) |
+| A.1 — leading-decl comments | done (40A.1) |
+| A.2 — trailing / body / inline-after-statement comments | done (40A.2) |
+| A.3 — module-leading, entity field/method, end-of-block, inline-after-field comments + canonicalize | **next (see below)** |
 
-After all of 40A.2: byte-equal self-format on `selfhost/formatter/lexer.intent` / `ast.intent` / `parser.intent` / `format.intent` becomes the dogfood gate test.
+## Probe finding (2026-06-15)
 
-## Phase 40A.2 step (1) — trailing-EOF comments — DONE
+A throwaway probe ran `format(parse(src)) == src` on all four stage2 files. All diverge.
+First divergence is at index 0 on every file: the **file-header comment before `module`
+is dropped**. Length deltas (lexer −2004, ast −2568, parser −6566, format −1112 chars)
+show many comments still dropped, concentrated in non-statement positions. Plus the
+files use **column-aligned** inline comments (`field x: T;       // ...`) which a
+canonical formatter can't reproduce as-is.
 
-Shipped. `Program` gains `trailing_comments: Array<String>` (ast.intent); `parse_program` drains the EOF token's `comments_before` into it after the merge loop (parser.intent); `format_program` appends them via `format_comments_before` after the k-way merge (format.intent). 5 new tests in `format_test.intent` (single / multiple / block trailing comments roundtrip; parser-populates assertion; empty-when-absent guard). 136/136 on rust + js. The lexer already attached trailing comments to the synthetic EOF token (Phase 40A.1), so no lexer change was needed.
+Conclusion: real-file byte-equal is not a single test — it's Phase 40A.3.
 
-## Immediate next step
+## Immediate next step: Phase 40A.3 (real-file byte-equal)
 
-**Phase 40A.2 step (2) — comments inside function/method bodies, between statements.** Each `Stmt` needs `comments_before: Array<String>`. The lexer already attaches comments to tokens; the parser needs to thread comments into stmt nodes the same way `parse_program` does for top-level decls (capture `self.tokens[self.position].comments_before` at the start of each statement parse). The formatter's block emitter then prepends them. This is the biggest remaining piece of divergence on stage2 source.
+Order by impact (all mirror the established add-field / capture-from-token / emit pattern):
 
-Then **step (3) — inline-after comments** (`let x = 1; // ...`). Most involved: Token needs a `comment_after` (or similar); parser captures after consuming the terminating `;`; format hooks emit at end-of-stmt. Includes the design of "where does an inline comment attach."
-
-Once 40A.2 lands, add a byte-equal dogfood test:
+1. **40A.3.1 module-leading comments.** The index-0 diff. Capture comments before the
+   `module` token (e.g. `Program.module_comments` or `ModuleDecl.comments_before`) in
+   `parse_module_decl`; emit before the module line in `format_program`.
+2. **40A.3.3 comments before entity methods/constructor.** Biggest volume
+   (parser.intent's ~30 method-doc comments). `FunctionDecl.comments_before` already
+   exists; populate it for methods/ctor inside entity/impl parsing and emit in
+   `format_entity_decl` / `format_method_decl` / `format_impl_decl`.
+3. **40A.3.2 comments before entity fields.** Add `FieldDecl.comments_before`; capture
+   in entity-field parsing; emit in `format_entity_decl`'s field loop.
+4. **40A.3.4 end-of-block comments.** Comments before a block's closing `}` attach to
+   the rbrace token; capture in `parse_block` (the `expect(tk_rbrace)` token) into a
+   `Block.trailing_comments`; emit after the last statement.
+5. **40A.3.5 inline-after on fields.** Extend the 40A.2.3 `comment_after` mechanism to
+   `FieldDecl`.
+6. **40A.3.6 canonicalize + gate.** Run the formatter over the four stage2 files to
+   normalize them (de-aligns inline comments to single space, etc.); verify the
+   normalized files still compile and self-parse and the suite stays green; commit the
+   reformatted files; then add the real-file gate:
 
 ```intent
-test "byte-equal self-format on stage2 lexer.intent" {
+test "byte-equal self-format on stage2 files" {
     let r = read_file("selfhost/formatter/lexer.intent");
     let src = match r { Ok(s) => s, Err(_) => "" };
     if src != "" {
         let prog = formatter_parser.parse(src);
         assert_eq(prog.error, "");
-        let out = formatter_format.format_program(prog);
-        assert_eq(out, src);
+        assert_eq(formatter_format.format_program(prog), src);
     }
 }
 ```
 
-Anything that still diverges goes into Phase 41 (parser surface widening) — `requires` / `ensures` / `match` / `for-in` / `try ?`.
+Anything still diverging after 40A.3 (structural, not comments) goes to Phase 41.
 
-## Phase 41 outlook
+## Phase 41 outlook (parser surface widening)
 
-Once 40A.2 lands and any structural divergence from comments is closed, Phase 41 widens the parser surface. The most impactful additions (by order they unblock real stage1 examples):
+Independent additions, any order:
+- `requires` / `ensures` + `result` keyword. Unblocks `examples/fibonacci.intent`.
+- `match` over `Result` / `Option`.
+- `for in` loops.
+- `try ?` operator.
 
-- `requires` / `ensures` clauses on function signatures + `result` keyword. Unblocks `examples/fibonacci.intent`.
-- `match` expressions over `Result` / `Option`. Unblocks `examples/io_demo.intent`, `selfhost/formatter/format_test.intent`.
-- `for in` loops. Cleaner stage2 iteration code.
-- `try ?` operator. Result-propagation in stage2.
+## Other candidates (orthogonal)
 
-These are independent — can be picked up in any order.
-
-## Other candidates (orthogonal to stage2 work)
-
-Unchanged:
 - Verify-aware stripping (ADR 0033 deferred).
-- String surface follow-up ADR.
-- Phase 17.G / 17.H — WASM test runner / coverage.
-- Phase 23 — VS Code Marketplace publish.
+- Phase 23 — VS Code Marketplace publish (blocked on credentials; in `prds/backlog/`).
 - Backend ADRs surfaced (cross-module fn qualification, auto-`&mut` for entity params, multi-use String auto-clone).
 
-## Language gaps still open
+## Language / backend gaps still open
 
-- `{` / `}` in stage1 string literals trigger interpolation parsing.
-- `let _:` rejected → expression statements.
-- `version` is a reserved word.
-- Cross-module entity-type qualification rejected.
-- Constructor double-use of a `String` parameter triggers borrow error.
+- Mutating an already-pushed Array element (`arr[i].field = x`) is unreliable in the stage1 Rust backend — hold a local, mutate, push (used in `scan_all`).
+- Local `String` re-use across expressions / loop iterations can trigger `borrow of moved value`; call helpers (e.g. `indent_string`) fresh each iteration.
+- `let _:` rejected → use bare expression statements to discard a Result.
+- Cross-module free-function calls need a module prefix; entity-type qualification across modules rejected.
 - No `String.to_int()` / `parse_float` builtins.
-- Cross-module free-function calls need module prefix.
-- Entity-typed method/function parameters passed by value in the Rust backend.
-- Stage2 lexer doesn't tokenise interpolated string parts; **comments now captured (Phase 40A.1) — leading-decl only**.
-- Local `String` re-use across expressions can trigger `borrow of moved value`.
 - Stage2 parser doesn't handle `requires` / `ensures` / `match` / `for-in` / `try ?` / `break`. Phase 41+.
-
-## Memory state
-
-Durable items (unchanged this phase):
-- `project_intent_is_a_new_language`.
-- `feedback_write_adrs_along_the_way`.
-- `feedback_minimise_mistakes_in_autonomous_runs`.
-- `project_self_hosting_priority`.
-- `feedback_document_and_push_after_each_phase`.
+- Column-aligned inline comments can't survive a canonical formatter without de-aligning the source (40A.3.6).
 
 ## How to resume
 
-1. `git log --oneline -10`.
-2. `prds/TASKS.md` for the open task list (norman; aiki was removed 2026-06-15).
-3. Recommended start: **Phase 40A.2 step (2)** — body/between-statement comments. Add `comments_before: Array<String>` to `Stmt` (ast.intent); capture `self.tokens[self.position].comments_before` at the start of each statement parse and thread it onto the `Stmt`; prepend in the formatter's block emitter. Then (3) — inline-after comments.
+1. `git log --oneline -12`.
+2. `prds/TASKS.md` for the open task list (norman; aiki removed 2026-06-15).
+3. Recommended start: **Phase 40A.3.1** — module-leading comments (the index-0 byte-equal
+   divergence). Then 40A.3.3 (entity method comments, biggest volume). Re-run the probe
+   pattern (a temporary read_file + format + first-diff test) to track shrinking divergence.

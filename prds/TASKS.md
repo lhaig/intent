@@ -19,7 +19,24 @@ self-hosted formatter (`selfhost/formatter/`). Sub-pieces C (source-order) and B
 | 40A.2.1 | Trailing-EOF comments | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | DONE (2026-06-15) | commit 19d766e; +5 tests; 136/136 rust+js |
 | 40A.2.2 | Body / between-statement comments (`Stmt.comments_before`) | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | DONE (2026-06-15) | +5 tests; 141/141 rust+js |
 | 40A.2.3 | Inline-after comments on statements (`let x = 1; // ...`) | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | DONE (2026-06-15) | +5 tests; 146/146 rust+js; statements only |
-| 40A.2.4 | Byte-equal self-format dogfood gate test | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | after .1–.3; assert `format(parse(src)) == src` on all 4 stage2 files |
+| 40A.2.4 | Comprehensive synthetic comment round-trip (partial gate) | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | DONE (2026-06-15) | 1 test exercising all 4 supported positions; 147/147. Real-file byte-equal gate moved to Phase 40A.3 (see below) |
+
+**Phase 40A.2 complete** — comments now round-trip in 4 positions: leading-decl, between-statement, inline-after-statement, trailing-EOF.
+
+## Phase 40A.3: Real-file byte-equal self-format (active/next)
+
+A probe (2026-06-15) measured `format(parse(src)) == src` against the 4 stage2 source files: all diverge. Remaining comment positions to support, then the source files must be canonicalized (the gate is idempotence on canonical source, not on the hand-written originals).
+
+| # | Task | PRD | Status | Notes |
+|---|------|-----|--------|-------|
+| 40A.3.1 | Module-leading comments (before `module`) | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | the index-0 divergence on every file; file-header comment dropped |
+| 40A.3.2 | Comments before entity fields | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | `FieldDecl.comments_before`; ast.intent has many |
+| 40A.3.3 | Comments before entity methods / constructor | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | parser.intent's ~30 method-doc comments (bulk of its 6.5KB delta) |
+| 40A.3.4 | End-of-block comments (before `}`) | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | attach rbrace-token comments to Block |
+| 40A.3.5 | Inline-after on fields | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | extends 40A.2.3 mechanism to FieldDecl |
+| 40A.3.6 | Canonicalize stage2 files + add real-file gate test | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | run formatter to de-align/normalize the 4 files (must still compile + self-parse), commit, then assert `format(parse(src)) == src` |
+
+Note: column-aligned inline comments (e.g. `field x: T;       // ...`) can't survive a canonical formatter as-is; 40A.3.6 resolves this by normalizing the source to single-space (de-alignment), making the formatter a fixpoint.
 
 ## Backlog
 

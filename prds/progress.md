@@ -74,6 +74,29 @@ is unreliable; hold the element in a local, mutate, then push.
 
 ---
 
+## 2026-06-15 — Phase 40A.2 step (4) + byte-equal probe finding; re-scoped 40A.3
+
+Wrote a throwaway probe (compiled by stage1) that ran `format(parse(src)) == src` on
+the four stage2 files. ALL diverge: first diff at index 0 (file-header comment before
+`module` is dropped) and large length deltas (parser −6566 chars) from comments in
+non-statement positions (entity method-docs, fields, end-of-block) plus column-aligned
+inline comments a canonical formatter can't reproduce. So the "byte-equal gate" is a
+mini-phase, not a test.
+
+Delivered the achievable part as step (4): a comprehensive synthetic round-trip test
+exercising all four supported comment positions together (leading-decl + inline-after +
+leading-body + trailing-EOF). 147/147 rust+js. Probe deleted (not committed).
+
+Re-scoped the remaining real-file byte-equal work as **Phase 40A.3** in TASKS.md
+(module-leading, entity field/method, end-of-block, inline-after-field comments, then
+canonicalize the source files + add the real-file gate). Phase 40A.2 is complete.
+
+PATTERN: [stage1-test-io] `intentc test` runs the test binary from a temp cwd, so
+`read_file` needs ABSOLUTE paths (relative paths silently skip); `print` inside a test
+is suppressed — `write_file` to an absolute path to surface diagnostics.
+
+---
+
 ## 2026-06-15 — Remove aiki block from CLAUDE.md / AGENTS.md
 
 Replaced the ~500-line `<aiki>` instruction block in `AGENTS.md` (the real target of

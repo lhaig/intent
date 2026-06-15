@@ -344,6 +344,26 @@ test "inline-after: statement without inline comment has empty comment_after" {
     assert_eq(body.stmts[0].comment_after, "");
 }
 
+// --- Comprehensive comment round-trip (Phase 40A.2 step 4, partial gate) -----
+// Exercises all FOUR comment positions the formatter now preserves in one
+// program: leading-decl, inline-after-statement, leading body comment, and
+// trailing-EOF. Real-file byte-equal self-format on the stage2 sources needs
+// the remaining positions (module-leading, entity fields/methods, end-of-block)
+// plus de-aligning the source — tracked as Phase 40A.3.
+test "comprehensive: all supported comment positions round-trip" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "// A documented function.\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let x: Int = 1; // inline note\n"
+        + "    // a leading body comment\n"
+        + "    let y: Int = 2;\n"
+        + "    return x;\n"
+        + '}'.to_string() + "\n\n"
+        + "// trailing file comment\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
 // --- Paren stripping tests (ADR 0043) ---------------------------------------
 
 // Helper: roundtrip a `let x: Int = RHS;` expression and assert the formatter
