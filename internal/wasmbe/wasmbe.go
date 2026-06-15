@@ -918,6 +918,10 @@ func (fc *funcCompiler) compileBuiltinCall(e *ir.CallExpr) {
 		// Array operations - simplified
 		fc.body = append(fc.body, opI64Const)
 		fc.body = append(fc.body, encodeLEB128S(0)...)
+	case "args":
+		// WASM has no process argv; push 0 as a stub value.
+		fc.body = append(fc.body, opI64Const)
+		fc.body = append(fc.body, encodeLEB128S(0)...)
 	default:
 		// Unknown builtin
 		fc.body = append(fc.body, opI64Const)

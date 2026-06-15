@@ -56,6 +56,30 @@ Widened the stage2 parser beyond its self-hostable subset so it can format arbit
 | 41.3 | `for ... in ...` loops | [phase-41-parser-surface-widening.md](done/phase-41-parser-surface-widening.md) | DONE (2026-06-15) | st_for (reuses Stmt name/expr/then_block); +3 tests |
 | 41.4 | `try ?` operator | [phase-41-parser-surface-widening.md](done/phase-41-parser-surface-widening.md) | DONE (2026-06-15) | ex_try postfix; +2 tests; 170/170 rust+js |
 
+## Phase 42: Stage2 Formatter CLI Wiring + Differential Test — ACTIVE
+
+Make the stage2 formatter a runnable CLI tool, wire it into `intentc fmt
+--self-hosted`, and stand up a committed differential-test harness vs `intentc
+fmt` over `examples/*.intent`. The harness drives gap-closing: each example the
+stage2 parser can't yet handle is a small parse+format task (Phase 41 pattern).
+Baseline: 12/22 examples already byte-equal (= agree with `intentc fmt`). See
+[phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md).
+
+| # | Task | PRD | Status | Notes |
+|---|------|-----|--------|-------|
+| 42.1 | `args()` builtin (Array<String>) + ADR; checker, IR, rust/js/wasm backends | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | DONE (2026-06-15) | ADR 0045; +2 checker tests; rust=env::args, js=process.argv.slice(1), wasm=stub; emit verified rust+js |
+| 42.2 | `main.intent` runnable formatter (reads args()[1], prints format_program) | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | needs 42.1; builds rust+js; hello.intent round-trips |
+| 42.3 | Differential-test harness: `difftest.sh` + `make diff-formatter` | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | independent; absolute-path probe; per-file PASS/DIVERGE/PARSE-ERR |
+| 42.4 | `intentc fmt --self-hosted` Go shim (delegates to stage2 binary) | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | needs 42.2; composes with --check; no silent stage1 fallback |
+| 42.5 | Gap: entity `invariant { }` blocks | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | bank_account, js_demo, task_queue |
+| 42.6 | Gap: `forall`/`exists` quantifier expressions | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | sorted_check |
+| 42.7 | Gap: `implies` operator | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | try_operator |
+| 42.8 | Gap: generic type params on declarations `<T>` | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | generic_stack |
+| 42.9 | Gap: `Fn(...) -> T` types + lambdas | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | closure_demo |
+| 42.10 | Gap: `async` functions + `await` | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | async_demo |
+| 42.11 | Gap: attributes `@name(args)` | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | target_specific_demo |
+| 42.12 | char_string_demo: compare vs stage1 output; confirm or file follow-up | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | non-canonical source; diagnose only |
+
 ## Backlog
 
 | # | Task | PRD | Status | Notes |

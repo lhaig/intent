@@ -1365,6 +1365,8 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr) string {
 		}
 	case "timestamp_ms":
 		return "BigInt(Date.now())"
+	case "args":
+		return "process.argv.slice(1)"
 	}
 	// Fallback
 	args := make([]string, len(expr.Args))

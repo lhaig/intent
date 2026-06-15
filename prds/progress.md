@@ -210,3 +210,29 @@ lives (`prds/`), how to drive norman, and the project conventions (PRD lifecycle
 ADRs, validation harness, commit style). Dropped aiki/JJ-workspace-specific machinery
 (workspace isolation, aiki task IDs, `aiki task run` delegation). Fixed the
 `docs/HARNESS.md` "distinct from" list to note CLAUDE.md/AGENTS.md are the same file.
+
+---
+
+## 2026-06-15 — Phase 42 started: CLI wiring + differential test (42.1 args() builtin)
+
+Phase 42 makes the stage2 formatter a runnable CLI tool + wires it into `intentc
+fmt --self-hosted` + commits a differential-test harness vs `intentc fmt` over
+examples/*.intent. Decisions (user): build the CLI tool up front (main.intent +
+Go shim) then close gaps; harness = shell script + make target; input mechanism =
+new `args()` builtin (not env var). Baseline differential probe: 12/22 examples
+already byte-equal (= agree with stage1 fmt). Gaps: invariant blocks, forall,
+implies, generics-on-decls, Fn/lambdas, async/await, attributes; char_string_demo
+is non-canonical (needs vs-stage1-output compare).
+
+42.1 args() builtin: returns Array<String>, program/script name at index 0 (ADR
+0045, Rust+Go convention). Three-layer plumbing mirroring timestamp_ms: checker
+type rule + arity error, IR resolveCallKind, backends — rust
+`std::env::args().collect::<Vec<String>>()`, js `process.argv.slice(1)` (the
+slice(1) normalizes node's [node,script,...] so script is index 0 matching rust),
+wasm stub (push 0; no argv in pure wasm). +2 checker tests; full make test green;
+emit verified on rust+js (incl args()[i] indexing + len(args())). Code review PASS.
+
+PATTERN: [builtin-plumbing] A new builtin needs all three layers atomically:
+checker (type rule + arity), IR resolveCallKind (add to CallBuiltin list, else it's
+treated as a user call), and each backend's generateBuiltinCall switch. Missing a
+layer = distinct failure (unknown fn / unresolved call kind / fallback sprintf).

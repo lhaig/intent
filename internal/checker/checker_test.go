@@ -4955,3 +4955,42 @@ entry function main() returns Int { return 0; }`
 		t.Error("expected error for unknown Char method")
 	}
 }
+
+// TestArgsBuiltinChecksToArrayString verifies that args() type-checks to Array<String>.
+func TestArgsBuiltinChecksToArrayString(t *testing.T) {
+	source := `module test version "1.0.0";
+
+entry function main() returns Int {
+    let a: Array<String> = args();
+    return 0;
+}`
+	diag := parseAndCheck(t, source)
+	if diag.HasErrors() {
+		t.Errorf("expected no errors for args(), got: %s", diag.Format("test"))
+	}
+}
+
+// TestArgsBuiltinRejectsArguments verifies that args(x) produces an arity error.
+func TestArgsBuiltinRejectsArguments(t *testing.T) {
+	source := `module test version "1.0.0";
+
+entry function main() returns Int {
+    let a: Array<String> = args(42);
+    return 0;
+}`
+	diag := parseAndCheck(t, source)
+	if !diag.HasErrors() {
+		t.Error("expected arity error for args(42), got no errors")
+	}
+
+	found := false
+	for _, d := range diag.All() {
+		if strings.Contains(d.Message, "args() takes no arguments") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'args() takes no arguments' error, got: %s", diag.Format("test"))
+	}
+}

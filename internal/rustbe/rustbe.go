@@ -1912,6 +1912,8 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr, arrayRefParams map[st
 		}
 	case "timestamp_ms":
 		return "{ use std::time::{SystemTime, UNIX_EPOCH}; SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64 }"
+	case "args":
+		return "std::env::args().collect::<Vec<String>>()"
 	}
 	// Fallback
 	args := make([]string, len(expr.Args))

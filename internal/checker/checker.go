@@ -1926,6 +1926,14 @@ func (c *Checker) checkCallExpr(expr *ast.CallExpr, scope *Scope) *Type {
 		return TypeInt
 	}
 
+	// Handle args() built-in: args() -> Array<String>
+	if expr.Function == "args" {
+		if len(expr.Args) != 0 {
+			c.diag.Errorf(line, col, "args() takes no arguments, got %d", len(expr.Args))
+		}
+		return &Type{Name: "Array", IsGeneric: true, TypeParams: []*Type{TypeString}}
+	}
+
 	// Handle sleep() built-in: sleep(Int) -> Future<Void>
 	if expr.Function == "sleep" {
 		if len(expr.Args) != 1 {

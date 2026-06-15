@@ -1701,7 +1701,7 @@ func (l *lowerer) resolveCallKind(expr *ast.CallExpr) (CallKind, string) {
 	// Builtins
 	switch expr.Function {
 	case "print", "len", "read_file", "write_file", "create_dir", "file_exists", "env_get",
-		"http_post", "http_get", "json_get", "json_path", "emit_event", "timestamp_ms":
+		"http_post", "http_get", "json_get", "json_path", "emit_event", "timestamp_ms", "args":
 		return CallBuiltin, ""
 	case "Ok", "Err", "Some":
 		return CallBuiltin, ""
