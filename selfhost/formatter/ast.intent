@@ -18,37 +18,91 @@
 //   - Unused fields per kind are populated with defaults ("" / false /
 //     empty_block() / empty_expr()). Wasteful but uniform; same trade
 //     Token already makes.
-
 module formatter_ast version "0.1.0";
 
 // --- Statement kind constants -----------------------------------------------
+public function st_let() returns Int {
+    return 1;
+}
 
-public function st_let() returns Int { return 1; }
-public function st_return() returns Int { return 2; }
-public function st_if() returns Int { return 3; }
-public function st_while() returns Int { return 4; }
-public function st_expr() returns Int { return 5; }
+public function st_return() returns Int {
+    return 2;
+}
+
+public function st_if() returns Int {
+    return 3;
+}
+
+public function st_while() returns Int {
+    return 4;
+}
+
+public function st_expr() returns Int {
+    return 5;
+}
 
 // --- Expression kind constants ----------------------------------------------
+public function ex_void() returns Int {
+    return 0;
+} // placeholder for absent expr (e.g. `return;`)
 
-public function ex_void() returns Int { return 0; }        // placeholder for absent expr (e.g. `return;`)
-public function ex_int() returns Int { return 1; }
-public function ex_string() returns Int { return 2; }
-public function ex_bool() returns Int { return 3; }
-public function ex_ident() returns Int { return 4; }
-public function ex_unary() returns Int { return 5; }       // children=[operand], name=op
-public function ex_binop() returns Int { return 6; }       // children=[lhs, rhs], name=op
-public function ex_call() returns Int { return 7; }        // children=[callee, arg1..argN]
-public function ex_index() returns Int { return 8; }       // children=[object, index]
-public function ex_field() returns Int { return 9; }       // children=[object], name=field
-public function ex_array() returns Int { return 10; }      // children=[elem1..elemN]
-public function ex_range() returns Int { return 11; }      // children=[start, end]
-public function ex_paren() returns Int { return 12; }      // children=[inner]
-public function ex_float() returns Int { return 13; }      // str_value = raw lexeme (e.g. "3.14", "1.5e-3")
-public function ex_char() returns Int { return 14; }       // str_value = raw lexeme including quotes (e.g. "'a'", "'\\n'")
+public function ex_int() returns Int {
+    return 1;
+}
+
+public function ex_string() returns Int {
+    return 2;
+}
+
+public function ex_bool() returns Int {
+    return 3;
+}
+
+public function ex_ident() returns Int {
+    return 4;
+}
+
+public function ex_unary() returns Int {
+    return 5;
+} // children=[operand], name=op
+
+public function ex_binop() returns Int {
+    return 6;
+} // children=[lhs, rhs], name=op
+
+public function ex_call() returns Int {
+    return 7;
+} // children=[callee, arg1..argN]
+
+public function ex_index() returns Int {
+    return 8;
+} // children=[object, index]
+
+public function ex_field() returns Int {
+    return 9;
+} // children=[object], name=field
+
+public function ex_array() returns Int {
+    return 10;
+} // children=[elem1..elemN]
+
+public function ex_range() returns Int {
+    return 11;
+} // children=[start, end]
+
+public function ex_paren() returns Int {
+    return 12;
+} // children=[inner]
+
+public function ex_float() returns Int {
+    return 13;
+} // str_value = raw lexeme (e.g. "3.14", "1.5e-3")
+
+public function ex_char() returns Int {
+    return 14;
+} // str_value = raw lexeme including quotes (e.g. "'a'", "'\\n'")
 
 // --- Shared AST entities ----------------------------------------------------
-
 public entity Param {
     field name: String;
     field type_name: String;
@@ -136,10 +190,15 @@ public entity Block {
     // closing `}` (they attach to the rbrace token). Defaulted; parse_block
     // assigns from the rbrace token's comments_before.
     field trailing_comments: Array<String>;
+    // ADR 0044 (Phase 40A.3): an inline comment on the same line as the
+    // closing `}` (the rbrace token's comment_after), e.g. a one-liner
+    // `function f() { return 1; } // note`. Empty = none.
+    field brace_comment_after: String;
 
     constructor(stmts: Array<Stmt>) {
         self.stmts = stmts;
         self.trailing_comments = empty_string_array();
+        self.brace_comment_after = "";
     }
 }
 
@@ -211,7 +270,6 @@ public entity ModuleDecl {
 }
 
 // --- Declaration entities added in Phase 36 ---------------------------------
-
 public entity FieldDecl {
     field name: String;
     field type_name: String;
@@ -257,7 +315,7 @@ public entity EntityDecl {
 
 public entity EnumVariant {
     field name: String;
-    field params: Array<Param>;  // empty for unit variants
+    field params: Array<Param>; // empty for unit variants
 
     constructor(name: String, params: Array<Param>) {
         self.name = name;
@@ -359,7 +417,7 @@ public entity TestDecl {
 }
 
 public entity ExternDecl {
-    field target: String;       // unquoted: "rust", "js", etc.
+    field target: String; // unquoted: "rust", "js", etc.
     field func_name: String;
     field params: Array<Param>;
     field return_type: String;
@@ -417,7 +475,6 @@ public entity Program {
 }
 
 // --- Helpers ----------------------------------------------------------------
-
 // Helper to initialise an empty Array<String>. Used by Stmt.comments_before
 // — mirrors the same function in formatter_lexer so that Stmt's constructor
 // body can initialise the field without a module prefix.

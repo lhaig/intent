@@ -22,13 +22,11 @@
 //   - All emitters return Strings; the caller assembles them. No
 //     stream/buffer abstraction yet — string concat is fine for hello.intent
 //     scale.
-
 module formatter_format version "0.1.0";
 
 import "ast.intent";
 
 // --- Indentation helpers ----------------------------------------------------
-
 public function indent_string(level: Int) returns String {
     let mutable s: String = "";
     let mutable i: Int = 0;
@@ -56,7 +54,6 @@ public function format_comments_before(cmts: Array<String>) returns String {
 }
 
 // --- Module + imports ------------------------------------------------------
-
 public function format_module_decl(m: ModuleDecl) returns String {
     return "module " + m.name + " version \"" + m.module_version + "\";";
 }
@@ -69,7 +66,6 @@ public function format_import_decl(imp: ImportDecl) returns String {
 }
 
 // --- Params ----------------------------------------------------------------
-
 public function format_param(p: Param) returns String {
     return p.name + ": " + p.type_name;
 }
@@ -88,27 +84,53 @@ public function format_param_list(ps: Array<Param>) returns String {
 }
 
 // --- Expressions -----------------------------------------------------------
-
 // --- Precedence table (ADR 0043) -------------------------------------------
 //
 // Mirrors the Pratt parser in parser.intent. Higher numbers bind tighter.
 // `min_precedence = 0` is the top-level context (no surrounding operator).
-
 public function binop_precedence(op: String) returns Int {
-    if op == "=" { return 1; }
-    if op == "or" { return 2; }
-    if op == "and" { return 3; }
-    if op == "==" { return 4; }
-    if op == "!=" { return 4; }
-    if op == "<" { return 5; }
-    if op == "<=" { return 5; }
-    if op == ">" { return 5; }
-    if op == ">=" { return 5; }
-    if op == "+" { return 7; }
-    if op == "-" { return 7; }
-    if op == "*" { return 8; }
-    if op == "/" { return 8; }
-    if op == "%" { return 8; }
+    if op == "=" {
+        return 1;
+    }
+    if op == "or" {
+        return 2;
+    }
+    if op == "and" {
+        return 3;
+    }
+    if op == "==" {
+        return 4;
+    }
+    if op == "!=" {
+        return 4;
+    }
+    if op == "<" {
+        return 5;
+    }
+    if op == "<=" {
+        return 5;
+    }
+    if op == ">" {
+        return 5;
+    }
+    if op == ">=" {
+        return 5;
+    }
+    if op == "+" {
+        return 7;
+    }
+    if op == "-" {
+        return 7;
+    }
+    if op == "*" {
+        return 8;
+    }
+    if op == "/" {
+        return 8;
+    }
+    if op == "%" {
+        return 8;
+    }
     // Unknown operator — treat as primary so it doesn't accidentally trigger
     // paren stripping at unexpected levels.
     return 11;
@@ -121,12 +143,24 @@ public function binop_is_right_assoc(op: String) returns Bool {
 // Intrinsic precedence of an expression. For an `ex_paren`, the value is the
 // precedence of its inner expr — that's the binding strength a reader sees.
 public function expr_precedence(e: Expr) returns Int {
-    if e.kind == formatter_ast.ex_binop() { return binop_precedence(e.name); }
-    if e.kind == formatter_ast.ex_unary() { return 9; }
-    if e.kind == formatter_ast.ex_call() { return 10; }
-    if e.kind == formatter_ast.ex_index() { return 10; }
-    if e.kind == formatter_ast.ex_field() { return 10; }
-    if e.kind == formatter_ast.ex_range() { return 6; }
+    if e.kind == formatter_ast.ex_binop() {
+        return binop_precedence(e.name);
+    }
+    if e.kind == formatter_ast.ex_unary() {
+        return 9;
+    }
+    if e.kind == formatter_ast.ex_call() {
+        return 10;
+    }
+    if e.kind == formatter_ast.ex_index() {
+        return 10;
+    }
+    if e.kind == formatter_ast.ex_field() {
+        return 10;
+    }
+    if e.kind == formatter_ast.ex_range() {
+        return 6;
+    }
     if e.kind == formatter_ast.ex_paren() {
         // The paren itself is a primary, but for stripping purposes its
         // effective precedence is what the wrapped expr would be.
@@ -158,7 +192,6 @@ public function format_expr_at(e: Expr, min_prec: Int) returns String {
         // call below will re-wrap.
         return format_expr_at(e.children[0], min_prec);
     }
-
     let body: String = format_expr_inner(e);
     if expr_precedence(e) < min_prec {
         return "(" + body + ")";
@@ -270,7 +303,6 @@ public function format_expr_inner(e: Expr) returns String {
 }
 
 // --- Statements ------------------------------------------------------------
-
 // Emit a statement's leading comments (indented) then the statement itself.
 // All callers go through this wrapper; the inner logic lives in
 // format_stmt_inner so the two concerns are separate.
@@ -345,6 +377,15 @@ public function format_block_body(b: Block, level: Int) returns String {
 }
 
 // --- Function declaration --------------------------------------------------
+// ADR 0044 (Phase 40A.3): an inline comment after a block's closing `}`
+// (e.g. a one-liner `function f() { return 1; } // note`). Returns " // note"
+// or "" — appended by the decl formatters after they emit the closing brace.
+public function brace_trail(b: Block) returns String {
+    if b.brace_comment_after != "" {
+        return " " + b.brace_comment_after;
+    }
+    return "";
+}
 
 public function format_function_decl(fn_decl: FunctionDecl, level: Int) returns String {
     // `pad` is built twice (open + close) to avoid moving a single String
@@ -368,7 +409,7 @@ public function format_function_decl(fn_decl: FunctionDecl, level: Int) returns 
     }
     head = head + " " + '{'.to_string() + "\n";
     let body: String = format_block_body(fn_decl.body, level + 1);
-    return pad_open + head + body + pad_close + '}'.to_string();
+    return pad_open + head + body + pad_close + '}'.to_string() + brace_trail(fn_decl.body);
 }
 
 // Constructor: same as a function but no `function` keyword and no return
@@ -378,7 +419,7 @@ public function format_constructor_decl(c: FunctionDecl, level: Int) returns Str
     let pad_close: String = indent_string(level);
     let head: String = pad_open + "constructor(" + format_param_list(c.params) + ") " + '{'.to_string() + "\n";
     let body: String = format_block_body(c.body, level + 1);
-    return head + body + pad_close + '}'.to_string();
+    return head + body + pad_close + '}'.to_string() + brace_trail(c.body);
 }
 
 // Method: like a function but uses `method` keyword.
@@ -395,20 +436,18 @@ public function format_method_decl(m: FunctionDecl, level: Int) returns String {
     }
     head = head + " " + '{'.to_string() + "\n";
     let body: String = format_block_body(m.body, level + 1);
-    return pad_open + head + body + pad_close + '}'.to_string();
+    return pad_open + head + body + pad_close + '}'.to_string() + brace_trail(m.body);
 }
 
 // --- Test declaration ------------------------------------------------------
-
 public function format_test_decl(t: TestDecl) returns String {
     let mutable out: String = "test \"" + t.name + "\" " + '{'.to_string() + "\n";
     out = out + format_block_body(t.body, 1);
-    out = out + '}'.to_string();
+    out = out + '}'.to_string() + brace_trail(t.body);
     return out;
 }
 
 // --- Entity / enum / trait / impl ------------------------------------------
-
 public function format_entity_decl(e: EntityDecl) returns String {
     let mutable head: String = "";
     if e.is_public {
@@ -529,7 +568,6 @@ public function format_impl_decl(im: ImplDecl) returns String {
 }
 
 // --- Intent block + extern ------------------------------------------------
-
 public function format_intent_block(ib: IntentBlock) returns String {
     let mutable s: String = "intent " + '{'.to_string() + "\n";
     s = s + "    goal: \"" + ib.goal_text + "\";\n";
@@ -559,7 +597,6 @@ public function format_extern_decl(ex: ExternDecl) returns String {
 }
 
 // --- Top-level ------------------------------------------------------------
-
 // Top-level decls are emitted in source order (ADR 0042). The parser
 // populates `line: Int` on every top-level decl entity; this function
 // k-way merges the nine per-kind arrays by line, falling back to a
@@ -573,7 +610,6 @@ public function format_extern_decl(ex: ExternDecl) returns String {
 public function format_program(prog: Program) returns String {
     // ADR 0044 (Phase 40A.3): file-header comments precede the module line.
     let mutable out: String = format_comments_before(prog.module_decl.comments_before) + format_module_decl(prog.module_decl) + "\n\n";
-
     let mutable i_imp: Int = 0;
     let mutable i_fn: Int = 0;
     let mutable i_ent: Int = 0;
@@ -583,14 +619,12 @@ public function format_program(prog: Program) returns String {
     let mutable i_ib: Int = 0;
     let mutable i_test: Int = 0;
     let mutable i_ext: Int = 0;
-
     let mutable done: Bool = false;
     while not done {
         // Find the smallest current line across all non-exhausted kinds.
         // best_kind == -1 means every array is exhausted; we're done.
         let mutable best_kind: Int = -1;
         let mutable best_line: Int = 0;
-
         if i_imp < len(prog.imports) {
             let candidate: Int = prog.imports[i_imp].line;
             if best_kind == -1 or candidate < best_line {
@@ -654,7 +688,6 @@ public function format_program(prog: Program) returns String {
                 best_line = candidate;
             }
         }
-
         if best_kind == -1 {
             done = true;
         } else {
@@ -714,13 +747,12 @@ public function format_program(prog: Program) returns String {
             }
         }
     }
-
     // Phase 40A.2 / ADR 0044: emit comments that trailed the last decl.
     // `out` already ends in the "\n\n" separator from the final decl
     // (or from the module decl when the program has no decls), so the
     // comments start on their own line after a blank line — matching the
     // leading-comment spacing produced by the merge above.
     out = out + format_comments_before(prog.trailing_comments);
-
     return out;
 }
+

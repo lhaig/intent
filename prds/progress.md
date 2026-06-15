@@ -113,6 +113,36 @@ the 4 stage2 files + add the real-file byte-equal gate).
 
 ---
 
+## 2026-06-15 — Phase 40A.3 complete: byte-equal self-format achieved
+
+- 40A.3.4 end-of-block comments: Block.trailing_comments from the rbrace token's
+  comments_before; format_block_body emits them. 155/155. Commit e0fdc03.
+- 40A.3.7 inline-after on declaration closing `}`: a probe revealed the formatter was
+  DROPPING inline doc-comments on one-liner functions (`ex_void() ... } // placeholder`).
+  Added Block.brace_comment_after (from rbrace.comment_after); brace_trail() helper
+  appended by the 4 decl-body formatters.
+- 40A.3.8 generic type round-trip: the REAL byte-equal blocker. parse_type_name discarded
+  generic args and emitted the placeholder `Array<...>` (a Phase 33 shortcut). The first
+  canonicalization attempt OVERWROTE the files with `Array<...>` as actual type syntax →
+  broke compilation. Caught it before committing (validated the reformatted files compile),
+  reverted via git checkout, fixed parse_type_name to reconstruct args verbatim with
+  canonical spacing (`, ` after commas; nested `<>` via depth counter; `>>` = two `>`),
+  re-applied brace_trail.
+- 40A.3.6 canonicalize + gate: reran the formatter over all 4 files, confirmed comment-
+  losslessness (zero dropped // comments) and idempotence, then overwrote the sources with
+  their canonical form. Full suite 158/158 on the reformatted files. Probe confirms
+  `format(parse(src)) == src` (firstdiff -1) on all 4. self_format_one upgraded from
+  len>0 to assert_eq(out, src). Throwaway probe deleted.
+
+PATTERN: [formatter] Idempotence (format(format(x))==format(x)) does NOT imply losslessness
+— a stable drop is still a drop. Verify losslessness separately (compare extracted comments;
+confirm reformatted files still compile + pass the suite) BEFORE canonicalizing committed source.
+
+PATTERN: [stage2] The stage2 parser stored generic types as a `<...>` placeholder; any
+formatter round-trip needs parse_type_name to reconstruct the real args.
+
+---
+
 ## 2026-06-15 — Remove aiki block from CLAUDE.md / AGENTS.md
 
 Replaced the ~500-line `<aiki>` instruction block in `AGENTS.md` (the real target of

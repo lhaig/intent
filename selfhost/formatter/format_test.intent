@@ -459,6 +459,23 @@ test "end-of-block: parser populates Block.trailing_comments" {
     assert_eq(body.trailing_comments[0], "// tail");
 }
 
+// --- Trailing-brace inline comment tests (Phase 40A.3 / ADR 0044) -----------
+
+test "brace-after: inline comment after a function's closing brace round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n    return 1;\n" + '}'.to_string() + " // note\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "brace-after: parser populates Block.brace_comment_after" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + " return 1; " + '}'.to_string() + " // note\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(prog.functions[0].body.brace_comment_after, "// note");
+}
+
 // --- Paren stripping tests (ADR 0043) ---------------------------------------
 
 // Helper: roundtrip a `let x: Int = RHS;` expression and assert the formatter
@@ -607,10 +624,12 @@ test "self-parse: stage2 format.intent parses with no errors" {
     }
 }
 
-// Full parse + format on every stage2 file. Byte-equality is gated on
-// comment preservation + paren stripping (Phase 40); for now we just
-// require parse + format to complete without crashing and emit a
-// non-empty result.
+// Byte-equal self-format gate (Phase 40A.3): parsing then formatting a
+// stage2 source file reproduces it exactly. The stage2 files were
+// canonicalized in 40A.3.6 so the formatter is a fixpoint on them.
+// Reads via a repo-root-relative path; when run from elsewhere (e.g. the
+// `intentc test` temp cwd) read_file fails and the check is skipped — the
+// always-on synthetic gates above cover behaviour in that case.
 public function self_format_one(path: String) returns Void {
     let r: Result<String, String> = read_file(path);
     let src: String = match r {
@@ -621,7 +640,7 @@ public function self_format_one(path: String) returns Void {
         let prog: Program = formatter_parser.parse(src);
         assert_eq(prog.error, "");
         let out: String = formatter_format.format_program(prog);
-        assert(len(out) > 0);
+        assert_eq(out, src);
     }
 }
 

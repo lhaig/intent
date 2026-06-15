@@ -11,9 +11,9 @@
 //     field/method access, indexing, ranges, array literals, unary +
 //     binary operators with full precedence — Phase 35.
 //
-// Out of scope (deferred to Phase 37+):
-//   - type-argument lists (Array<T>, Result<T,E>, etc.) — captures a
-//     primitive type or bare identifier with a "<...>" suffix marker.
+// Type-argument lists (Array<T>, Result<T, E>, Map<K, Array<V>>) are
+// reconstructed verbatim with canonical spacing by parse_type_name (Phase
+// 40A.3). Out of scope (deferred to later phases):
 //   - match expressions / for / break / continue / try / await.
 //   - lambdas (`(x) => expr`), interpolated strings (`${expr}`), char
 //     literals (`'a'`), float literals — stage2 lexer doesn't tokenise
@@ -29,14 +29,13 @@
 // File layout: AST entities + kind constants + AST helpers live in
 // `ast.intent`. This file holds the `Parser` entity, parse methods,
 // the top-level `parse(source)` convenience, and the in-language tests.
-
 module formatter_parser version "0.1.0";
 
 import "lexer.intent";
+
 import "ast.intent";
 
 // --- Parser -----------------------------------------------------------------
-
 public entity Parser {
     field tokens: Array<Token>;
     field position: Int;
@@ -119,7 +118,6 @@ public entity Parser {
     }
 
     // --- top-level parse entry points -------------------------------------
-
     method parse_module_decl() returns ModuleDecl {
         // ADR 0044 (Phase 40A.3): the module token carries any file-header
         // comments in its comments_before.
@@ -178,24 +176,42 @@ public entity Parser {
     // bare identifier. Generic arguments (Array<T>, Result<T, E>) are
     // consumed but not modelled — Phase 33 stores the head only and
     // discards the args. Phase 34+ will replace this with a real TypeRef.
+    // Parses a type name, reconstructing any generic argument list verbatim
+    // with canonical spacing (`, ` after commas, no other spaces). ADR 0044
+    // (Phase 40A.3): the args used to be discarded and replaced with the
+    // placeholder `<...>`, which made the formatter unable to round-trip
+    // `Array<String>` etc. Nesting (`Map<K, Array<V>>`) is handled via a
+    // depth counter; `>>` is two `>` tokens in this lexer.
     method parse_type_name() returns String {
         let tok: Token = self.advance();
         let mutable name: String = tok.text;
-        // Skip a single optional <...> generic-arg list (no nesting in v1).
         if self.check_consume(formatter_lexer.tk_lt()) {
+            name = name + "<";
             let mutable depth: Int = 1;
             while depth > 0 and not self.at_end() {
-                if self.check_consume(formatter_lexer.tk_lt()) {
+                if self.check(formatter_lexer.tk_lt()) {
+                    self.advance();
+                    name = name + "<";
                     depth = depth + 1;
                 } else {
-                    if self.check_consume(formatter_lexer.tk_gt()) {
-                        depth = depth - 1;
-                    } else {
+                    if self.check(formatter_lexer.tk_gt()) {
                         self.advance();
+                        depth = depth - 1;
+                        if depth > 0 {
+                            name = name + ">";
+                        }
+                    } else {
+                        if self.check(formatter_lexer.tk_comma()) {
+                            self.advance();
+                            name = name + ", ";
+                        } else {
+                            let inner: Token = self.advance();
+                            name = name + inner.text;
+                        }
                     }
                 }
             }
-            name = name + "<...>";
+            name = name + ">";
         }
         return name;
     }
@@ -210,7 +226,6 @@ public entity Parser {
         let mutable is_public: Bool = false;
         let mutable is_async: Bool = false;
         let mutable is_entry: Bool = false;
-
         // Optional modifiers in any order before `function`.
         // (The full grammar restricts ordering more tightly; v1 parser
         // accepts any.)
@@ -233,10 +248,8 @@ public entity Parser {
                 }
             }
         }
-
         self.expect(formatter_lexer.kw_function(), "'function' keyword");
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "function name");
-
         self.expect(formatter_lexer.tk_lparen(), "'(' after function name");
         let mutable params: Array<Param> = [];
         if not self.check(formatter_lexer.tk_rparen()) {
@@ -246,15 +259,12 @@ public entity Parser {
             }
         }
         self.expect(formatter_lexer.tk_rparen(), "')' to close parameter list");
-
         // Contracts on top-level functions are part of the surface (`requires`
         // / `ensures` / `decreases`) but they aren't tokenised as keywords
         // in v1's lexer. Skip them by scanning identifiers/expressions until
         // we hit `returns` or `{`.
-
         self.expect(formatter_lexer.kw_returns(), "'returns' after parameter list");
         let return_type: String = self.parse_type_name();
-
         // Skip optional contract clauses (requires/ensures/decreases). Each
         // starts with an identifier and runs to end-of-line-ish. v1 just
         // bails out when we see `{` or EOF.
@@ -269,13 +279,11 @@ public entity Parser {
                 self.advance();
             }
         }
-
         let body: Block = self.parse_block();
         return FunctionDecl(name_tok.text, is_public, is_entry, is_async, false, params, return_type, body, line, cmts);
     }
 
     // --- statement-level parse -------------------------------------------
-
     // Parses a brace-delimited `{ ... }` block: consumes opening `{`, then
     // dispatches into statement parsers until it sees a `}` at this level.
     // Records (but does not propagate via panic) any error via self.fail.
@@ -293,6 +301,7 @@ public entity Parser {
         let rbrace: Token = self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close block");
         let mutable blk: Block = Block(stmts);
         blk.trailing_comments = rbrace.comments_before;
+        blk.brace_comment_after = rbrace.comment_after;
         return blk;
     }
 
@@ -406,7 +415,6 @@ public entity Parser {
     // Assignment is parsed as a binop with op "=" at the lowest precedence.
     // The surface language reserves it for statement contexts; treating it
     // as an expression here keeps the AST uniform.
-
     method parse_expr() returns Expr {
         return self.parse_assign();
     }
@@ -477,10 +485,18 @@ public entity Parser {
     }
 
     method is_cmp_op() returns Bool {
-        if self.check(formatter_lexer.tk_lt()) { return true; }
-        if self.check(formatter_lexer.tk_gt()) { return true; }
-        if self.check(formatter_lexer.tk_leq()) { return true; }
-        if self.check(formatter_lexer.tk_geq()) { return true; }
+        if self.check(formatter_lexer.tk_lt()) {
+            return true;
+        }
+        if self.check(formatter_lexer.tk_gt()) {
+            return true;
+        }
+        if self.check(formatter_lexer.tk_leq()) {
+            return true;
+        }
+        if self.check(formatter_lexer.tk_geq()) {
+            return true;
+        }
         return false;
     }
 
@@ -523,9 +539,15 @@ public entity Parser {
     }
 
     method is_mul_op() returns Bool {
-        if self.check(formatter_lexer.tk_star()) { return true; }
-        if self.check(formatter_lexer.tk_slash()) { return true; }
-        if self.check(formatter_lexer.tk_percent()) { return true; }
+        if self.check(formatter_lexer.tk_star()) {
+            return true;
+        }
+        if self.check(formatter_lexer.tk_slash()) {
+            return true;
+        }
+        if self.check(formatter_lexer.tk_percent()) {
+            return true;
+        }
         return false;
     }
 
@@ -648,7 +670,6 @@ public entity Parser {
     method parse_program() returns Program {
         let module_decl: ModuleDecl = self.parse_module_decl();
         let mutable prog: Program = formatter_ast.empty_program(module_decl);
-
         while not self.at_end() and self.error == "" {
             // ADR 0044: capture leading comments from the very first token
             // of this decl, BEFORE consuming any `public` modifier. The
@@ -720,7 +741,6 @@ public entity Parser {
                 }
             }
         }
-
         // Phase 40A.2 / ADR 0044: trailing comments after the last decl are
         // attached by the lexer to the EOF token. The loop exits with
         // `self.position` on that token (when no error stopped us early), so
@@ -728,7 +748,6 @@ public entity Parser {
         if self.at_end() {
             prog.trailing_comments = self.tokens[self.position].comments_before;
         }
-
         prog.error = self.error;
         return prog;
     }
@@ -738,14 +757,19 @@ public entity Parser {
     // entity mutation across a helper call doesn't propagate in the Rust
     // backend (entities are passed by value / cloned).
     method is_at_function_start() returns Bool {
-        if self.check(formatter_lexer.kw_function()) { return true; }
-        if self.check(formatter_lexer.kw_entry()) { return true; }
-        if self.check(formatter_lexer.kw_async_marker()) { return true; }
+        if self.check(formatter_lexer.kw_function()) {
+            return true;
+        }
+        if self.check(formatter_lexer.kw_entry()) {
+            return true;
+        }
+        if self.check(formatter_lexer.kw_async_marker()) {
+            return true;
+        }
         return false;
     }
 
     // --- Phase 36: top-level declaration parsers --------------------------
-
     // `entity NAME { field*; ctor?; method*; invariant?; }`
     method parse_entity_decl(is_public: Bool, leading_comments: Array<String>) returns EntityDecl {
         // ADR 0042: capture source line from the `entity` keyword. `public`
@@ -1043,16 +1067,16 @@ public entity Parser {
 
 // AST helpers (empty_block, empty_expr, parse_int) moved to ast.intent in
 // Phase 36 along with the entity declarations.
-
 public function parse(source: String) returns Program {
     let mutable p: Parser = Parser(source);
     return p.parse_program();
 }
 
-entry function main() returns Int { return 0; }
+entry function main() returns Int {
+    return 0;
+}
 
 // --- In-language tests ------------------------------------------------------
-
 test "parse minimal module declaration" {
     let prog: Program = parse("module foo version \"1.0\";");
     assert_eq(prog.error, "");
@@ -1133,11 +1157,18 @@ test "parse multiple functions" {
     assert_eq(prog.functions[1].name, "b");
 }
 
-test "function with generic return type captures head" {
+test "function with generic return type round-trips generic args" {
     let src: String = "module m version \"1.0\"; function get_items() returns Array<Int> " + '{'.to_string() + " " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
-    assert_eq(prog.functions[0].return_type, "Array<...>");
+    assert_eq(prog.functions[0].return_type, "Array<Int>");
+}
+
+test "parser reconstructs nested + multi-arg generics" {
+    let src: String = "module m version \"1.0\"; function f() returns Map<String, Array<Int>> " + '{'.to_string() + " " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(prog.functions[0].return_type, "Map<String, Array<Int>>");
 }
 
 test "parser reports unexpected token at top level" {
@@ -1154,7 +1185,6 @@ test "missing semicolon after module records error" {
 }
 
 // --- Phase 34: statement parser tests ---------------------------------------
-
 test "empty function body produces empty block" {
     let src: String = "module m version \"1.0\"; function f() returns Void " + '{'.to_string() + " " + '}'.to_string();
     let prog: Program = parse(src);
@@ -1265,11 +1295,7 @@ test "if-else statement" {
 }
 
 test "else if chains into nested if in else_block" {
-    let src: String = "module m version \"1.0\"; function f(x: Int) returns Int " + '{'.to_string()
-        + " if x > 0 " + '{'.to_string() + " return 1; " + '}'.to_string()
-        + " else if x < 0 " + '{'.to_string() + " return 0 - 1; " + '}'.to_string()
-        + " else " + '{'.to_string() + " return 0; " + '}'.to_string()
-        + " " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; function f(x: Int) returns Int " + '{'.to_string() + " if x > 0 " + '{'.to_string() + " return 1; " + '}'.to_string() + " else if x < 0 " + '{'.to_string() + " return 0 - 1; " + '}'.to_string() + " else " + '{'.to_string() + " return 0; " + '}'.to_string() + " " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let outer: Stmt = prog.functions[0].body.stmts[0];
@@ -1285,9 +1311,7 @@ test "else if chains into nested if in else_block" {
 }
 
 test "while statement" {
-    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string()
-        + " let mutable i: Int = 0; while i < 10 " + '{'.to_string() + " i = i + 1; " + '}'.to_string()
-        + " return i; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let mutable i: Int = 0; while i < 10 " + '{'.to_string() + " i = i + 1; " + '}'.to_string() + " return i; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let w: Stmt = prog.functions[0].body.stmts[1];
@@ -1304,8 +1328,7 @@ test "while statement" {
 }
 
 test "call expression with arguments parses as ex_call" {
-    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string()
-        + " let x: Int = add(1, 2); return x; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let x: Int = add(1, 2); return x; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let l: Stmt = prog.functions[0].body.stmts[0];
@@ -1318,11 +1341,7 @@ test "call expression with arguments parses as ex_call" {
 }
 
 test "nested if inside if then-block" {
-    let src: String = "module m version \"1.0\"; function f(x: Int, y: Int) returns Int " + '{'.to_string()
-        + " if x > 0 " + '{'.to_string()
-        + " if y > 0 " + '{'.to_string() + " return 1; " + '}'.to_string()
-        + " " + '}'.to_string()
-        + " return 0; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; function f(x: Int, y: Int) returns Int " + '{'.to_string() + " if x > 0 " + '{'.to_string() + " if y > 0 " + '{'.to_string() + " return 1; " + '}'.to_string() + " " + '}'.to_string() + " return 0; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let outer: Stmt = prog.functions[0].body.stmts[0];
@@ -1341,7 +1360,6 @@ test "missing semicolon after return is reported" {
 }
 
 // --- Phase 35: expression parser tests --------------------------------------
-
 // Small helper: extract the RHS Expr of the let-binding in `let x = E;`
 // from a one-statement function body. Keeps test fixtures terse.
 public function single_let_rhs(prog: Program) returns Expr {
@@ -1349,8 +1367,7 @@ public function single_let_rhs(prog: Program) returns Expr {
 }
 
 public function wrap_in_let(rhs_text: String) returns String {
-    return "module m version \"1.0\"; function f() returns Int " + '{'.to_string()
-         + " let x: Int = " + rhs_text + "; return x; " + '}'.to_string();
+    return "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let x: Int = " + rhs_text + "; return x; " + '}'.to_string();
 }
 
 test "parse_int converts decimal token text" {
@@ -1412,8 +1429,7 @@ test "char escape literal expression" {
 }
 
 test "string literal preserves quotes-stripped value" {
-    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string()
-        + " let s: String = \"hello\"; return 0; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let s: String = \"hello\"; return 0; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
@@ -1432,8 +1448,7 @@ test "unary minus on int literal" {
 }
 
 test "unary not on bool" {
-    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string()
-        + " let b: Bool = not true; return 0; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let b: Bool = not true; return 0; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
@@ -1458,8 +1473,7 @@ test "operator precedence: 1 + 2 * 3 binds * tighter" {
 }
 
 test "operator precedence: comparison binds tighter than and" {
-    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string()
-        + " let b: Bool = 1 < 2 and 3 > 4; return 0; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let b: Bool = 1 < 2 and 3 > 4; return 0; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let root: Expr = single_let_rhs(prog);
@@ -1482,8 +1496,7 @@ test "parens override precedence" {
 }
 
 test "assignment is right-associative" {
-    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string()
-        + " a = b = c; return 0; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " a = b = c; return 0; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let s: Stmt = prog.functions[0].body.stmts[0];
@@ -1498,8 +1511,7 @@ test "assignment is right-associative" {
 }
 
 test "field access via dot" {
-    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string()
-        + " let n: Int = self.position; return n; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let n: Int = self.position; return n; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
@@ -1510,8 +1522,7 @@ test "field access via dot" {
 }
 
 test "method call: x.to_string()" {
-    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string()
-        + " let s: String = x.to_string(); return 0; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let s: String = x.to_string(); return 0; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
@@ -1533,8 +1544,7 @@ test "indexing: arr[0]" {
 }
 
 test "slice: s[i..j] parses as index of range" {
-    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string()
-        + " let sub: String = s[1..5]; return 0; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let sub: String = s[1..5]; return 0; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
@@ -1626,17 +1636,14 @@ test "equality and comparison both parse" {
 }
 
 test "missing expression after = reports error" {
-    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string()
-        + " let x: Int = ; return 0; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let x: Int = ; return 0; " + '}'.to_string();
     let prog: Program = parse(src);
     assert(prog.error != "");
 }
 
 // --- Phase 36: top-level declaration tests ----------------------------------
-
 test "entity with two fields and no methods" {
-    let src: String = "module m version \"1.0\"; entity Point " + '{'.to_string()
-        + " field x: Int; field y: Int; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; entity Point " + '{'.to_string() + " field x: Int; field y: Int; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.entities), 1);
@@ -1651,8 +1658,7 @@ test "entity with two fields and no methods" {
 }
 
 test "public entity is marked public" {
-    let src: String = "module m version \"1.0\"; public entity Token " + '{'.to_string()
-        + " field kind: Int; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; public entity Token " + '{'.to_string() + " field kind: Int; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.entities), 1);
@@ -1661,10 +1667,7 @@ test "public entity is marked public" {
 }
 
 test "entity with constructor" {
-    let src: String = "module m version \"1.0\"; entity Pair " + '{'.to_string()
-        + " field a: Int; field b: Int; "
-        + " constructor(a: Int, b: Int) " + '{'.to_string() + " self.a = a; self.b = b; " + '}'.to_string()
-        + " " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; entity Pair " + '{'.to_string() + " field a: Int; field b: Int; " + " constructor(a: Int, b: Int) " + '{'.to_string() + " self.a = a; self.b = b; " + '}'.to_string() + " " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: EntityDecl = prog.entities[0];
@@ -1676,10 +1679,7 @@ test "entity with constructor" {
 }
 
 test "entity with method" {
-    let src: String = "module m version \"1.0\"; entity Counter " + '{'.to_string()
-        + " field n: Int; "
-        + " method get() returns Int " + '{'.to_string() + " return self.n; " + '}'.to_string()
-        + " " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; entity Counter " + '{'.to_string() + " field n: Int; " + " method get() returns Int " + '{'.to_string() + " return self.n; " + '}'.to_string() + " " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: EntityDecl = prog.entities[0];
@@ -1690,10 +1690,7 @@ test "entity with method" {
 }
 
 test "entity with invariant block" {
-    let src: String = "module m version \"1.0\"; entity Bounded " + '{'.to_string()
-        + " field n: Int; "
-        + " invariant " + '{'.to_string() + " self.n >= 0; self.n < 100; " + '}'.to_string()
-        + " " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; entity Bounded " + '{'.to_string() + " field n: Int; " + " invariant " + '{'.to_string() + " self.n >= 0; self.n < 100; " + '}'.to_string() + " " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: EntityDecl = prog.entities[0];
@@ -1703,8 +1700,7 @@ test "entity with invariant block" {
 }
 
 test "enum with unit variants" {
-    let src: String = "module m version \"1.0\"; enum Status " + '{'.to_string()
-        + " Pending, Running, Complete " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; enum Status " + '{'.to_string() + " Pending, Running, Complete " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.enums), 1);
@@ -1716,8 +1712,7 @@ test "enum with unit variants" {
 }
 
 test "enum with data-carrying variants" {
-    let src: String = "module m version \"1.0\"; enum Shape " + '{'.to_string()
-        + " Circle(radius: Int), Square(side: Int), Point " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; enum Shape " + '{'.to_string() + " Circle(radius: Int), Square(side: Int), Point " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: EnumDecl = prog.enums[0];
@@ -1732,8 +1727,7 @@ test "enum with data-carrying variants" {
 }
 
 test "trait with method signatures" {
-    let src: String = "module m version \"1.0\"; trait Drawable " + '{'.to_string()
-        + " method draw() returns Void; method area() returns Int; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; trait Drawable " + '{'.to_string() + " method draw() returns Void; method area() returns Int; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.traits), 1);
@@ -1746,10 +1740,7 @@ test "trait with method signatures" {
 }
 
 test "impl Trait for Entity with methods" {
-    let src: String = "module m version \"1.0\"; impl Drawable for Circle " + '{'.to_string()
-        + " method draw() returns Void " + '{'.to_string() + " " + '}'.to_string()
-        + " method area() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string()
-        + " " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; impl Drawable for Circle " + '{'.to_string() + " method draw() returns Void " + '{'.to_string() + " " + '}'.to_string() + " method area() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string() + " " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.impls), 1);
@@ -1760,8 +1751,7 @@ test "impl Trait for Entity with methods" {
 }
 
 test "test declaration captures name and body" {
-    let src: String = "module m version \"1.0\"; test \"sanity\" " + '{'.to_string()
-        + " let x: Int = 1; assert_eq(x, 1); " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; test \"sanity\" " + '{'.to_string() + " let x: Int = 1; assert_eq(x, 1); " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.tests), 1);
@@ -1784,8 +1774,7 @@ test "extern declaration captures target + signature" {
 }
 
 test "intent block captures goal and verified_by refs" {
-    let src: String = "module m version \"1.0\"; intent \"non-negative balance\" " + '{'.to_string()
-        + " verified_by ensures_positive; verified_by no_overdraft; " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; intent \"non-negative balance\" " + '{'.to_string() + " verified_by ensures_positive; verified_by no_overdraft; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.intent_blocks), 1);
@@ -1797,11 +1786,7 @@ test "intent block captures goal and verified_by refs" {
 }
 
 test "mixed declarations parse in any order" {
-    let src: String = "module m version \"1.0\"; "
-        + "entity E " + '{'.to_string() + " field a: Int; " + '}'.to_string()
-        + " function f() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string()
-        + " test \"t\" " + '{'.to_string() + " " + '}'.to_string()
-        + " enum K " + '{'.to_string() + " A " + '}'.to_string();
+    let src: String = "module m version \"1.0\"; " + "entity E " + '{'.to_string() + " field a: Int; " + '}'.to_string() + " function f() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string() + " test \"t\" " + '{'.to_string() + " " + '}'.to_string() + " enum K " + '{'.to_string() + " A " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.entities), 1);
@@ -1812,14 +1797,7 @@ test "mixed declarations parse in any order" {
 
 test "phase 37 dogfood: float + char literals + block comments parse end-to-end" {
     // Exercises the three Phase 37 lexer additions in one program.
-    let src: String = "module sample version \"0.1\"; "
-        + "/* block comment with /* nested */ inside */ "
-        + "function f() returns Int " + '{'.to_string()
-        + " let pi: Float = 3.14; "
-        + " let exp: Float = 1.5e-3; "
-        + " let nl: Char = '\\n'; "
-        + " return 0; "
-        + " " + '}'.to_string();
+    let src: String = "module sample version \"0.1\"; " + "/* block comment with /* nested */ inside */ " + "function f() returns Int " + '{'.to_string() + " let pi: Float = 3.14; " + " let exp: Float = 1.5e-3; " + " let nl: Char = '\\n'; " + " return 0; " + " " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.functions), 1);
@@ -1837,15 +1815,7 @@ test "phase 37 dogfood: float + char literals + block comments parse end-to-end"
 }
 
 test "synthetic dogfood: parse a small entity with methods and tests" {
-    let src: String = "module sample version \"0.1\"; "
-        + "public entity Counter " + '{'.to_string()
-        + " field n: Int; "
-        + " constructor(initial: Int) " + '{'.to_string() + " self.n = initial; " + '}'.to_string()
-        + " method increment() returns Int " + '{'.to_string()
-        + " self.n = self.n + 1; return self.n; " + '}'.to_string()
-        + " " + '}'.to_string()
-        + " test \"counter increments\" " + '{'.to_string()
-        + " let c: Counter = Counter(0); let n: Int = c.increment(); assert_eq(n, 1); " + '}'.to_string();
+    let src: String = "module sample version \"0.1\"; " + "public entity Counter " + '{'.to_string() + " field n: Int; " + " constructor(initial: Int) " + '{'.to_string() + " self.n = initial; " + '}'.to_string() + " method increment() returns Int " + '{'.to_string() + " self.n = self.n + 1; return self.n; " + '}'.to_string() + " " + '}'.to_string() + " test \"counter increments\" " + '{'.to_string() + " let c: Counter = Counter(0); let n: Int = c.increment(); assert_eq(n, 1); " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.entities), 1);
@@ -1857,3 +1827,4 @@ test "synthetic dogfood: parse a small entity with methods and tests" {
     assert_eq(len(prog.tests), 1);
     assert_eq(prog.tests[0].name, "counter increments");
 }
+
