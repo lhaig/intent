@@ -269,3 +269,31 @@ stubs) must have it demoted to a regular prefixed function, else multi-file buil
 emit a duplicate main. Gate entry-wrapper emission on f.IsEntry && g.isEntryFile;
 single-file Generate sets isEntryFile=true. Relevant as the self-hosted compiler
 will import many modules.
+
+---
+
+## 2026-06-15 — Phase 42.3: differential-test harness (+ 42.12 resolved)
+
+selfhost/formatter/difftest.sh + `make diff-formatter`. Canonicalize-first design:
+for each examples/*.intent it (1) copies + runs stage1 `intentc fmt` on the copy
+(producing intentc fmt's canonical output), (2) runs the stage2 formatter
+format_program(parse(canon)) via an absolute-path in-language probe, (3) PASS iff
+stage2 reproduces the canonical form byte-for-byte = agrees with intentc fmt.
+Per-file table + summary; exits 1 on any non-allowed divergence/parse-err (it's a
+gate, NOT wired into make test/validate while gaps are open). bash-3.2 compatible
+(replaced `mapfile` with a read-loop; macOS ships bash 3.2). Temp dir auto-cleaned
+via trap.
+
+Baseline: 13/22 PASS, 0 DIVERGE, 9 PARSE-ERR. KEY FINDING: zero true divergences —
+whenever the stage2 parser accepts a file, the formatter emits byte-identical
+output to stage1. All remaining work is PARSER COVERAGE (the 9 parse-errs =
+gap buckets 42.5-42.11). The formatter's emit logic needs no corpus-driven fixes.
+
+42.12 (char_string_demo) RESOLVED by this design: comparing vs stage1's *output*
+(not the raw, non-canonical fixture) makes it PASS. The earlier standalone-probe
+"DIVERGE" was only because examples/char_string_demo.intent isn't stage1-canonical
+on disk; there is no stage2 formatter bug.
+
+PATTERN: [difftest] The correct differential check is stage2-output == stage1-output,
+NOT stage2-output == raw-file. Canonicalize each fixture with `intentc fmt` first,
+then compare — otherwise non-canonical fixtures produce false divergences.

@@ -69,7 +69,7 @@ Baseline: 12/22 examples already byte-equal (= agree with `intentc fmt`). See
 |---|------|-----|--------|-------|
 | 42.1 | `args()` builtin (Array<String>) + ADR; checker, IR, rust/js/wasm backends | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | DONE (2026-06-15) | ADR 0045; +2 checker tests; rust=env::args, js=process.argv.slice(1), wasm=stub; emit verified rust+js |
 | 42.2 | `main.intent` runnable formatter (reads args()[1], prints format_program) | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | DONE (2026-06-15) | builds+runs rust+js; hello byte-equal modulo 1 trailing newline; exit codes 0/1/2/3. Fixed stage1 bug: entry fn in imported module no longer dupes main (rustbe+jsbe; +2 tests) |
-| 42.3 | Differential-test harness: `difftest.sh` + `make diff-formatter` | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | independent; absolute-path probe; per-file PASS/DIVERGE/PARSE-ERR |
+| 42.3 | Differential-test harness: `difftest.sh` + `make diff-formatter` | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | DONE (2026-06-15) | canonicalize-first (compares vs intentc fmt output); 13/22 PASS, 0 diverge, 9 parse-err; exits 1 as gate; bash 3.2 compatible |
 | 42.4 | `intentc fmt --self-hosted` Go shim (delegates to stage2 binary) | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | needs 42.2; composes with --check; no silent stage1 fallback |
 | 42.5 | Gap: entity `invariant { }` blocks | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | bank_account, js_demo, task_queue |
 | 42.6 | Gap: `forall`/`exists` quantifier expressions | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | sorted_check |
@@ -78,7 +78,7 @@ Baseline: 12/22 examples already byte-equal (= agree with `intentc fmt`). See
 | 42.9 | Gap: `Fn(...) -> T` types + lambdas | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | closure_demo |
 | 42.10 | Gap: `async` functions + `await` | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | async_demo |
 | 42.11 | Gap: attributes `@name(args)` | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | target_specific_demo |
-| 42.12 | char_string_demo: compare vs stage1 output; confirm or file follow-up | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | non-canonical source; diagnose only |
+| 42.12 | char_string_demo: compare vs stage1 output; confirm or file follow-up | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | DONE (2026-06-15) | RESOLVED by 42.3 harness design: canonicalize-first comparison makes char_string_demo PASS — no real stage2 divergence (the raw fixture was simply non-canonical) |
 
 ## Backlog
 

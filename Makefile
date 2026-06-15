@@ -1,4 +1,4 @@
-.PHONY: build test test-v clean install check-examples lint-examples fmt-check-examples emit-examples test-gen-examples test-examples gofmt-check validate
+.PHONY: build test test-v clean install check-examples lint-examples fmt-check-examples emit-examples test-gen-examples test-examples gofmt-check validate diff-formatter
 
 # Flat examples (single-file). Subdirectory examples (attractor, multi_file, packages, ffi_blake3)
 # are exercised via their own entry points.
@@ -76,6 +76,12 @@ emit-examples: build
 		echo "emit:  $$f"; \
 		./intentc build --emit $$f || exit 1; \
 	done
+
+# Differential test: stage2 (Intent) formatter vs stage1 `intentc fmt` over the
+# examples corpus (Phase 42). Reports per-file PASS/DIVERGE/PARSE-ERR; exits
+# non-zero on any non-allowed divergence. Drives stage2 formatter gap-closing.
+diff-formatter: build
+	@./selfhost/formatter/difftest.sh
 
 # Generate sibling _test.intent files from contracts (Phase 29 / ADR 0038:
 # this used to emit Rust property tests; now emits Intent test blocks).
