@@ -102,6 +102,10 @@ public function ex_char() returns Int {
     return 14;
 } // str_value = raw lexeme including quotes (e.g. "'a'", "'\\n'")
 
+public function ex_match() returns Int {
+    return 15;
+} // children=[scrutinee], match_arms=[...] (Phase 41.2)
+
 // --- Shared AST entities ----------------------------------------------------
 public entity Param {
     field name: String;
@@ -136,6 +140,10 @@ public entity Expr {
     field bool_value: Bool;
     field name: String;
     field children: Array<Expr>;
+    // Phase 41.2: arms of an `ex_match` expression (children[0] is the
+    // scrutinee). Empty for every other kind; defaulted in the constructor
+    // body so the existing Expr(...) call sites don't change.
+    field match_arms: Array<MatchArm>;
 
     constructor(kind: Int, int_value: Int, str_value: String, bool_value: Bool, name: String, children: Array<Expr>) {
         self.kind = kind;
@@ -144,6 +152,24 @@ public entity Expr {
         self.bool_value = bool_value;
         self.name = name;
         self.children = children;
+        self.match_arms = empty_matcharm_array();
+    }
+}
+
+// One arm of a match expression: `<pattern> => <body>`. The pattern is either
+// the wildcard `_` (is_wildcard), a bare variant (`Ok` / `None`), or a variant
+// with bindings (`Ok(value)`, `Pair(a, b)`).
+public entity MatchArm {
+    field variant: String;
+    field bindings: Array<String>;
+    field is_wildcard: Bool;
+    field body: Expr;
+
+    constructor(variant: String, bindings: Array<String>, is_wildcard: Bool, body: Expr) {
+        self.variant = variant;
+        self.bindings = bindings;
+        self.is_wildcard = is_wildcard;
+        self.body = body;
     }
 }
 
@@ -498,6 +524,12 @@ public function empty_string_array() returns Array<String> {
 // inferred at the assignment site.
 public function empty_expr_array() returns Array<Expr> {
     let mutable a: Array<Expr> = [];
+    return a;
+}
+
+// Empty Array<MatchArm> — defaults Expr.match_arms (Phase 41.2).
+public function empty_matcharm_array() returns Array<MatchArm> {
+    let mutable a: Array<MatchArm> = [];
     return a;
 }
 

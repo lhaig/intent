@@ -297,9 +297,62 @@ public function format_expr_inner(e: Expr) returns String {
         // emit literally to avoid silent loss of grouping.
         return "(" + format_expr_at(e.children[0], 0) + ")";
     }
+    if e.kind == formatter_ast.ex_match() {
+        // Match is multi-line and indent-sensitive. At statement level the
+        // caller uses format_expr_indented with the real level; reaching here
+        // means a match in a non-statement position (e.g. a call arg) — fall
+        // back to level 0.
+        return format_match(e, 0);
+    }
     // Unknown kind — emit a placeholder so the formatter doesn't silently
     // drop. Phase 41+ will tighten this.
     return "<unknown_expr>";
+}
+
+// Phase 41.2: a match arm's pattern: `_`, `Variant`, or `Variant(a, b)`.
+public function format_match_pattern(arm: MatchArm) returns String {
+    if arm.is_wildcard {
+        return "_";
+    }
+    if len(arm.bindings) == 0 {
+        return arm.variant;
+    }
+    let mutable s: String = arm.variant + "(";
+    let mutable i: Int = 0;
+    while i < len(arm.bindings) {
+        if i > 0 {
+            s = s + ", ";
+        }
+        s = s + arm.bindings[i];
+        i = i + 1;
+    }
+    return s + ")";
+}
+
+// Phase 41.2: a match expression. `level` is the indent of the line the match
+// starts on; arms are emitted one level deeper, the closing `}` at `level`.
+// Each arm body recurses through format_expr_indented so nested matches indent
+// correctly.
+public function format_match(e: Expr, level: Int) returns String {
+    let mutable s: String = "match " + format_expr(e.children[0]) + " " + '{'.to_string() + "\n";
+    let mutable i: Int = 0;
+    while i < len(e.match_arms) {
+        let arm: MatchArm = e.match_arms[i];
+        s = s + indent_string(level + 1) + format_match_pattern(arm) + " => " + format_expr_indented(arm.body, level + 1) + ",\n";
+        i = i + 1;
+    }
+    return s + indent_string(level) + '}'.to_string();
+}
+
+// Phase 41.2: format an expression that may be a multi-line match, given the
+// indent level of the line it sits on. Non-match expressions are single-line
+// and ignore the level (delegating to format_expr). Statement formatters call
+// this for their main expression.
+public function format_expr_indented(e: Expr, level: Int) returns String {
+    if e.kind == formatter_ast.ex_match() {
+        return format_match(e, level);
+    }
+    return format_expr(e);
 }
 
 // --- Statements ------------------------------------------------------------
@@ -327,16 +380,16 @@ public function format_stmt_inner(s: Stmt, level: Int) returns String {
         if s.is_mutable {
             mut_kw = "mutable ";
         }
-        return pad + "let " + mut_kw + s.name + ": " + s.type_name + " = " + format_expr(s.expr) + ";";
+        return pad + "let " + mut_kw + s.name + ": " + s.type_name + " = " + format_expr_indented(s.expr, level) + ";";
     }
     if s.kind == formatter_ast.st_return() {
         if s.expr.kind == formatter_ast.ex_void() {
             return pad + "return;";
         }
-        return pad + "return " + format_expr(s.expr) + ";";
+        return pad + "return " + format_expr_indented(s.expr, level) + ";";
     }
     if s.kind == formatter_ast.st_expr() {
-        return pad + format_expr(s.expr) + ";";
+        return pad + format_expr_indented(s.expr, level) + ";";
     }
     if s.kind == formatter_ast.st_if() {
         let mutable out: String = pad + "if " + format_expr(s.expr) + " " + '{'.to_string() + "\n";

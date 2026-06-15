@@ -528,6 +528,55 @@ test "contracts: parser populates requires/ensures clauses" {
     assert_eq(formatter_format.format_expr(decl.ensures_clauses[0]), "result >= 0");
 }
 
+// --- Match expression tests (Phase 41.2) ------------------------------------
+
+test "match: let with variant-binding + wildcard arms round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let recovered: Int = match back " + '{'.to_string() + "\n"
+        + "        Ok(c) => c,\n"
+        + "        Err(_) => 0,\n"
+        + "    " + '}'.to_string() + ";\n"
+        + "    return recovered;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "match: return with bare-variant + wildcard arms round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    return match color " + '{'.to_string() + "\n"
+        + "        Red => 1,\n"
+        + "        Green => 2,\n"
+        + "        _ => 0,\n"
+        + "    " + '}'.to_string() + ";\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "match: parser populates arms, bindings, and wildcard" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let recovered: Int = match back " + '{'.to_string() + "\n"
+        + "        Ok(c) => c,\n"
+        + "        Err(_) => 0,\n"
+        + "    " + '}'.to_string() + ";\n"
+        + "    return recovered;\n"
+        + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    let body: Block = prog.functions[0].body;
+    let rhs: Expr = body.stmts[0].expr;
+    assert_eq(rhs.kind, formatter_ast.ex_match());
+    assert_eq(len(rhs.match_arms), 2);
+    assert_eq(rhs.match_arms[0].variant, "Ok");
+    assert_eq(len(rhs.match_arms[0].bindings), 1);
+    assert_eq(rhs.match_arms[0].bindings[0], "c");
+    assert_eq(rhs.match_arms[1].variant, "Err");
+}
+
 // --- Paren stripping tests (ADR 0043) ---------------------------------------
 
 // Helper: roundtrip a `let x: Int = RHS;` expression and assert the formatter

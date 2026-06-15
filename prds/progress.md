@@ -164,6 +164,27 @@ backend does NOT escape reserved words; avoid Rust keywords as identifier names 
 
 ---
 
+## 2026-06-15 — Phase 41.2: match expressions
+
+Added `match <scrutinee> { <pattern> => <body>, ... }`. Lexer: `match` keyword
+(kw_match_marker = 75). AST: `ex_match` kind, `MatchArm` entity (variant / bindings /
+is_wildcard / body), `Expr.match_arms` (defaulted via empty_matcharm_array). Parser:
+parse_match_expr + parse_match_arm dispatched from parse_primary; scrutinee parse stops
+at `{`; patterns are `_` / `Variant` / `Variant(a, b)`; trailing comma optional.
+Formatter: match is multi-line and indent-sensitive, so a new format_expr_indented(e,
+level) is used by the let/return/expr statement formatters — it delegates to format_match
+(level-aware: arms at level+1, `}` at level) for matches and to format_expr otherwise;
+nested matches recurse through it. Non-statement matches (e.g. call args) fall back to
+level 0 in format_expr_inner. 3 new tests; 165/165 rust+js; byte-equal self-format
+preserved (stage2 files contain no match).
+
+PATTERN: [formatter] Multi-line, indent-dependent expressions (match) don't fit the
+level-agnostic format_expr. Thread level only where needed via a parallel
+format_expr_indented(e, level) at statement boundaries, rather than refactoring every
+format_expr call site.
+
+---
+
 ## 2026-06-15 — Remove aiki block from CLAUDE.md / AGENTS.md
 
 Replaced the ~500-line `<aiki>` instruction block in `AGENTS.md` (the real target of

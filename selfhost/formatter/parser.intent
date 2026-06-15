@@ -629,6 +629,9 @@ public entity Parser {
 
     method parse_primary() returns Expr {
         let kind: Int = self.peek_kind();
+        if kind == formatter_lexer.kw_match_marker() {
+            return self.parse_match_expr();
+        }
         if kind == formatter_lexer.tk_int() {
             let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
@@ -686,6 +689,53 @@ public entity Parser {
         }
         self.fail("expected expression");
         return formatter_ast.empty_expr();
+    }
+
+    // Phase 41.2: `match <scrutinee> { <pattern> => <expr> , ... }`. The
+    // scrutinee parse stops at `{` (a brace isn't an operator/postfix token).
+    method parse_match_expr() returns Expr {
+        self.expect(formatter_lexer.kw_match_marker(), "'match'");
+        let scrutinee: Expr = self.parse_expr();
+        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start match arms");
+        let mutable arms: Array<MatchArm> = [];
+        while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
+            arms.push(self.parse_match_arm());
+        }
+        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close match");
+        let mutable children: Array<Expr> = [];
+        children.push(scrutinee);
+        let mutable e: Expr = Expr(formatter_ast.ex_match(), 0, "", false, "", children);
+        e.match_arms = arms;
+        return e;
+    }
+
+    // One arm: `_ => expr` | `Variant => expr` | `Variant(a, b) => expr`,
+    // followed by an optional trailing comma.
+    method parse_match_arm() returns MatchArm {
+        let mutable is_wild: Bool = false;
+        let mutable variant: String = "";
+        let mutable bindings: Array<String> = [];
+        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "match pattern");
+        if name_tok.text == "_" {
+            is_wild = true;
+        } else {
+            variant = name_tok.text;
+            if self.check_consume(formatter_lexer.tk_lparen()) {
+                if not self.check(formatter_lexer.tk_rparen()) {
+                    let b0: Token = self.expect(formatter_lexer.tk_ident(), "pattern binding");
+                    bindings.push(b0.text);
+                    while self.check_consume(formatter_lexer.tk_comma()) {
+                        let bn: Token = self.expect(formatter_lexer.tk_ident(), "pattern binding");
+                        bindings.push(bn.text);
+                    }
+                }
+                self.expect(formatter_lexer.tk_rparen(), "')' to close pattern bindings");
+            }
+        }
+        self.expect(formatter_lexer.tk_arrow(), "'=>' in match arm");
+        let body: Expr = self.parse_expr();
+        self.check_consume(formatter_lexer.tk_comma());
+        return MatchArm(variant, bindings, is_wild, body);
     }
 
     method parse_program() returns Program {

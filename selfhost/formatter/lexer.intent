@@ -299,6 +299,11 @@ public function kw_for_marker() returns Int {
     return 74;
 }
 
+// Phase 41.2: `match` expression keyword.
+public function kw_match_marker() returns Int {
+    return 75;
+}
+
 public function tk_eof() returns Int {
     return 98;
 }
@@ -343,6 +348,9 @@ public function keyword_kind(text: String) returns Int {
     }
     if text == "while" {
         return kw_while();
+    }
+    if text == "match" {
+        return kw_match_marker();
     }
     if text == "true" {
         return kw_true();

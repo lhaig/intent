@@ -52,7 +52,7 @@ Widen the stage2 parser beyond its self-hostable subset so it can format arbitra
 | # | Task | PRD | Status | Notes |
 |---|------|-----|--------|-------|
 | 41.1 | Contracts: `requires` / `ensures` / `decreases` on functions + methods | [phase-41-parser-surface-widening.md](active/phase-41-parser-surface-widening.md) | DONE (2026-06-15) | parsed into FunctionDecl.{requires,ensures,decreases}_clauses; formatted between signature and `{`; +4 tests; 162/162; byte-equal preserved |
-| 41.2 | `match` expressions over Result/Option | [phase-41-parser-surface-widening.md](active/phase-41-parser-surface-widening.md) | TODO | |
+| 41.2 | `match` expressions over Result/Option | [phase-41-parser-surface-widening.md](active/phase-41-parser-surface-widening.md) | DONE (2026-06-15) | ex_match + MatchArm; level-aware format_match via format_expr_indented; +3 tests; 165/165; byte-equal preserved |
 | 41.3 | `for ... in ...` loops | [phase-41-parser-surface-widening.md](active/phase-41-parser-surface-widening.md) | TODO | |
 | 41.4 | `try ?` operator | [phase-41-parser-surface-widening.md](active/phase-41-parser-surface-widening.md) | TODO | |
 
