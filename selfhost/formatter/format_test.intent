@@ -364,6 +364,25 @@ test "comprehensive: all supported comment positions round-trip" {
     assert_eq(out, src);
 }
 
+// --- Module-leading comment tests (Phase 40A.3 / ADR 0044) ------------------
+
+test "module-leading: comments before module survive roundtrip" {
+    let src: String = "// File header line one.\n"
+        + "// File header line two.\n"
+        + "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n    return 0;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "module-leading: parser populates ModuleDecl.comments_before" {
+    let src: String = "// Header.\nmodule m version \"1.0.0\";\n\nfunction f() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.module_decl.comments_before), 1);
+    assert_eq(prog.module_decl.comments_before[0], "// Header.");
+}
+
 // --- Paren stripping tests (ADR 0043) ---------------------------------------
 
 // Helper: roundtrip a `let x: Int = RHS;` expression and assert the formatter

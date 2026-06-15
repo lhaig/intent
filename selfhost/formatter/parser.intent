@@ -121,12 +121,16 @@ public entity Parser {
     // --- top-level parse entry points -------------------------------------
 
     method parse_module_decl() returns ModuleDecl {
-        self.expect(formatter_lexer.kw_module(), "'module' keyword");
+        // ADR 0044 (Phase 40A.3): the module token carries any file-header
+        // comments in its comments_before.
+        let module_tok: Token = self.expect(formatter_lexer.kw_module(), "'module' keyword");
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "module name");
         self.expect(formatter_lexer.kw_version(), "'version' keyword");
         let ver_tok: Token = self.expect(formatter_lexer.tk_string(), "version string literal");
         self.expect(formatter_lexer.tk_semicolon(), "';' after module declaration");
-        return ModuleDecl(name_tok.text, self.unquote(ver_tok.text));
+        let mutable md: ModuleDecl = ModuleDecl(name_tok.text, self.unquote(ver_tok.text));
+        md.comments_before = module_tok.comments_before;
+        return md;
     }
 
     // ADR 0044: `leading_comments` is passed by parse_program (captured

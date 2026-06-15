@@ -536,7 +536,8 @@ public function format_extern_decl(ex: ExternDecl) returns String {
 //   0 = imports, 1 = functions, 2 = entities, 3 = enums, 4 = traits,
 //   5 = impls, 6 = intent_blocks, 7 = tests, 8 = externs
 public function format_program(prog: Program) returns String {
-    let mutable out: String = format_module_decl(prog.module_decl) + "\n\n";
+    // ADR 0044 (Phase 40A.3): file-header comments precede the module line.
+    let mutable out: String = format_comments_before(prog.module_decl.comments_before) + format_module_decl(prog.module_decl) + "\n\n";
 
     let mutable i_imp: Int = 0;
     let mutable i_fn: Int = 0;

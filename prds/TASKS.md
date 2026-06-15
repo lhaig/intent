@@ -29,7 +29,7 @@ A probe (2026-06-15) measured `format(parse(src)) == src` against the 4 stage2 s
 
 | # | Task | PRD | Status | Notes |
 |---|------|-----|--------|-------|
-| 40A.3.1 | Module-leading comments (before `module`) | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | the index-0 divergence on every file; file-header comment dropped |
+| 40A.3.1 | Module-leading comments (before `module`) | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | DONE (2026-06-15) | ModuleDecl.comments_before; +2 tests; 149/149 |
 | 40A.3.2 | Comments before entity fields | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | `FieldDecl.comments_before`; ast.intent has many |
 | 40A.3.3 | Comments before entity methods / constructor | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | parser.intent's ~30 method-doc comments (bulk of its 6.5KB delta) |
 | 40A.3.4 | End-of-block comments (before `}`) | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | attach rbrace-token comments to Block |

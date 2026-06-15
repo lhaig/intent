@@ -193,10 +193,15 @@ public entity ImportDecl {
 public entity ModuleDecl {
     field name: String;
     field module_version: String;
+    // ADR 0044 (Phase 40A.3): file-header comments before the `module`
+    // keyword. Defaulted empty; parse_module_decl assigns from the module
+    // token's comments_before. Emitted before the module line by the formatter.
+    field comments_before: Array<String>;
 
     constructor(name: String, module_version: String) {
         self.name = name;
         self.module_version = module_version;
+        self.comments_before = empty_string_array();
     }
 }
 
