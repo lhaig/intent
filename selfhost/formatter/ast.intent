@@ -367,9 +367,15 @@ public entity Program {
     field intent_blocks: Array<IntentBlock>;
     field tests: Array<TestDecl>;
     field externs: Array<ExternDecl>;
+    // ADR 0044 (Phase 40A.2): comments that follow the last declaration,
+    // before end-of-file. The lexer attaches these to the synthetic EOF
+    // token's `comments_before`; the parser drains them here. The formatter
+    // emits them after the k-way merge so a file that ends in a comment
+    // round-trips.
+    field trailing_comments: Array<String>;
     field error: String;
 
-    constructor(module_decl: ModuleDecl, imports: Array<ImportDecl>, functions: Array<FunctionDecl>, entities: Array<EntityDecl>, enums: Array<EnumDecl>, traits: Array<TraitDecl>, impls: Array<ImplDecl>, intent_blocks: Array<IntentBlock>, tests: Array<TestDecl>, externs: Array<ExternDecl>, error: String) {
+    constructor(module_decl: ModuleDecl, imports: Array<ImportDecl>, functions: Array<FunctionDecl>, entities: Array<EntityDecl>, enums: Array<EnumDecl>, traits: Array<TraitDecl>, impls: Array<ImplDecl>, intent_blocks: Array<IntentBlock>, tests: Array<TestDecl>, externs: Array<ExternDecl>, trailing_comments: Array<String>, error: String) {
         self.module_decl = module_decl;
         self.imports = imports;
         self.functions = functions;
@@ -380,6 +386,7 @@ public entity Program {
         self.intent_blocks = intent_blocks;
         self.tests = tests;
         self.externs = externs;
+        self.trailing_comments = trailing_comments;
         self.error = error;
     }
 }
@@ -437,7 +444,8 @@ public function empty_program(module_decl: ModuleDecl) returns Program {
     let mutable ibs: Array<IntentBlock> = [];
     let mutable tsts: Array<TestDecl> = [];
     let mutable exts: Array<ExternDecl> = [];
-    return Program(module_decl, imps, fns, ents, enums_a, traits_a, impls_a, ibs, tsts, exts, "");
+    let mutable trailing: Array<String> = [];
+    return Program(module_decl, imps, fns, ents, enums_a, traits_a, impls_a, ibs, tsts, exts, trailing, "");
 }
 
 // No entry function here — when this file is itself the entry of

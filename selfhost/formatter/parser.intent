@@ -704,6 +704,14 @@ public entity Parser {
             }
         }
 
+        // Phase 40A.2 / ADR 0044: trailing comments after the last decl are
+        // attached by the lexer to the EOF token. The loop exits with
+        // `self.position` on that token (when no error stopped us early), so
+        // drain its leading comments into the Program.
+        if self.at_end() {
+            prog.trailing_comments = self.tokens[self.position].comments_before;
+        }
+
         prog.error = self.error;
         return prog;
     }

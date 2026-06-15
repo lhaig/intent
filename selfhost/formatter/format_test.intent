@@ -163,6 +163,51 @@ test "comments: comments between interleaved decls preserved with source order" 
     assert_eq(out, src);
 }
 
+// --- Trailing comment tests (Phase 40A.2 / ADR 0044) ------------------------
+
+test "trailing: single comment after the last decl survives roundtrip" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n    return 0;\n" + '}'.to_string() + "\n\n"
+        + "// Trailing note.\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "trailing: multiple comments after the last decl" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n    return 0;\n" + '}'.to_string() + "\n\n"
+        + "// First trailing line.\n"
+        + "// Second trailing line.\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "trailing: block comment after the last decl" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n    return 0;\n" + '}'.to_string() + "\n\n"
+        + "/* trailing block */\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "trailing: parser populates Program.trailing_comments from EOF token" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string() + "\n\n"
+        + "// Trailing note.\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.trailing_comments), 1);
+    assert_eq(prog.trailing_comments[0], "// Trailing note.");
+}
+
+test "trailing: no trailing comment leaves trailing_comments empty" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.trailing_comments), 0);
+}
+
 // --- Paren stripping tests (ADR 0043) ---------------------------------------
 
 // Helper: roundtrip a `let x: Int = RHS;` expression and assert the formatter

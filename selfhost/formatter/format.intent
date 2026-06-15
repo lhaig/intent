@@ -662,5 +662,12 @@ public function format_program(prog: Program) returns String {
         }
     }
 
+    // Phase 40A.2 / ADR 0044: emit comments that trailed the last decl.
+    // `out` already ends in the "\n\n" separator from the final decl
+    // (or from the module decl when the program has no decls), so the
+    // comments start on their own line after a blank line — matching the
+    // leading-comment spacing produced by the merge above.
+    out = out + format_comments_before(prog.trailing_comments);
+
     return out;
 }

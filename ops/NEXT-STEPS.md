@@ -1,6 +1,6 @@
-# Pickup Notes — 2026-06-09 (after Phase 40A.1)
+# Pickup Notes — 2026-06-15 (after Phase 40A.2 step 1)
 
-Handoff after leading-decl comment preservation shipped.
+Handoff after trailing-EOF comment preservation shipped.
 
 ## Where we are
 
@@ -10,15 +10,16 @@ Recent landings:
 - **Phase 40C** — source-order tracking. ADR 0042.
 - **Phase 40B** — precedence-aware paren stripping. ADR 0043.
 - **Phase 40A.1** — leading-decl comment preservation. ADR 0044.
+- **Phase 40A.2 step (1)** — trailing-EOF comment preservation. ADR 0044.
 
 Stage2 (`selfhost/formatter/`):
 - `lexer.intent` (~650 LOC, 27 tests) — comment-capturing tokeniser.
 - `ast.intent` (~440 LOC) — every top-level decl has `line: Int` + `comments_before: Array<String>`.
 - `parser.intent` (~1770 LOC, 66 tests) — `parse_program` captures pre-modifier; each `parse_*_decl` accepts `leading_comments`.
-- `format.intent` (~660 LOC) — k-way merge by `line`, precedence-aware paren stripping, leading-comment emission.
-- `format_test.intent` (~340 LOC, 38 tests).
+- `format.intent` (~675 LOC) — k-way merge by `line`, precedence-aware paren stripping, leading- + trailing-comment emission.
+- `format_test.intent` (~385 LOC, 43 tests).
 
-**131 in-language tests pass on rust + js.** `make validate` green.
+**136 in-language tests pass on rust + js.** `make validate` green.
 
 ## Byte-equal self-format gate progress
 
@@ -27,22 +28,21 @@ Stage2 (`selfhost/formatter/`):
 | C — source-order tracking | ✓ Phase 40C |
 | B — paren stripping | ✓ Phase 40B |
 | A.1 — leading-decl comments | ✓ Phase 40A.1 |
-| A.2 — inline + body comments | next |
+| A.2 step (1) — trailing-EOF comments | ✓ done |
+| A.2 step (2) — body/between-statement comments | next |
+| A.2 step (3) — inline-after comments | after (2) |
 
-After 40A.2: byte-equal self-format on `selfhost/formatter/lexer.intent` / `ast.intent` / `parser.intent` / `format.intent` becomes the dogfood gate test.
+After all of 40A.2: byte-equal self-format on `selfhost/formatter/lexer.intent` / `ast.intent` / `parser.intent` / `format.intent` becomes the dogfood gate test.
+
+## Phase 40A.2 step (1) — trailing-EOF comments — DONE
+
+Shipped. `Program` gains `trailing_comments: Array<String>` (ast.intent); `parse_program` drains the EOF token's `comments_before` into it after the merge loop (parser.intent); `format_program` appends them via `format_comments_before` after the k-way merge (format.intent). 5 new tests in `format_test.intent` (single / multiple / block trailing comments roundtrip; parser-populates assertion; empty-when-absent guard). 136/136 on rust + js. The lexer already attached trailing comments to the synthetic EOF token (Phase 40A.1), so no lexer change was needed.
 
 ## Immediate next step
 
-**Phase 40A.2 — finish comment preservation.** Three remaining sub-problems, each with a small surface:
+**Phase 40A.2 step (2) — comments inside function/method bodies, between statements.** Each `Stmt` needs `comments_before: Array<String>`. The lexer already attaches comments to tokens; the parser needs to thread comments into stmt nodes the same way `parse_program` does for top-level decls (capture `self.tokens[self.position].comments_before` at the start of each statement parse). The formatter's block emitter then prepends them. This is the biggest remaining piece of divergence on stage2 source.
 
-1. **Trailing-EOF comments.** The lexer already captures them onto the synthetic EOF token's `comments_before`. The formatter doesn't emit them yet. Add a "trailing block" to `format_program`: after the k-way merge, if `prog` carried trailing comments (could go on a new `Program.trailing_comments: Array<String>` field populated by parser from the EOF token), emit them.
-2. **Comments inside function/method bodies, between statements.** Each `Stmt` needs `comments_before: Array<String>`. Lexer already attaches to tokens; parser needs to thread comments into stmt nodes the same way it does for top-level decls.
-3. **Inline-after comments** (`let x = 1; // ...`). Trickier — Token needs a `comment_after: Option<String>` (or similar); parser captures after consuming the terminating `;`. Format hooks emit at end-of-stmt.
-
-Recommended sequencing inside 40A.2:
-- (1) first — smallest diff, immediate win on stage2 files that end with a trailing comment.
-- (2) second — moderate diff, statement-comment is the biggest piece of remaining divergence on stage2 source.
-- (3) third — most involved, includes the design of "where does an inline comment attach."
+Then **step (3) — inline-after comments** (`let x = 1; // ...`). Most involved: Token needs a `comment_after` (or similar); parser captures after consuming the terminating `;`; format hooks emit at end-of-stmt. Includes the design of "where does an inline comment attach."
 
 Once 40A.2 lands, add a byte-equal dogfood test:
 
@@ -108,4 +108,4 @@ Durable items (unchanged this phase):
 
 1. `git log --oneline -10`.
 2. `aiki task` for the open task list.
-3. Recommended start: **Phase 40A.2 sub-step (1)** — trailing-EOF comments. Smallest diff. Add `Program.trailing_comments: Array<String>`; populate in `parse_program` after the loop from the EOF token's `comments_before`; emit at the end of `format_program`. Then (2) — statement-level comments — and (3) — inline-after.
+3. Recommended start: **Phase 40A.2 step (2)** — body/between-statement comments. Add `comments_before: Array<String>` to `Stmt` (ast.intent); capture `self.tokens[self.position].comments_before` at the start of each statement parse and thread it onto the `Stmt`; prepend in the formatter's block emitter. Then (3) — inline-after comments.
