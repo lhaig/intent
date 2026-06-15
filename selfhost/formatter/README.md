@@ -67,10 +67,10 @@ selfhost/formatter/
 | **39** | Self-parse certification — all stage2 files parse + format without errors. | **Shipped** ([PRD](../../prds/done/phase-39-self-parse-certification.md)) |
 | **40C** | Source-order tracking via per-decl `line: Int` (ADR 0042). | **Shipped** ([PRD](../../prds/done/phase-40c-source-order-tracking.md)) |
 | **40B** | Paren stripping — precedence-aware emit (ADR 0043). | **Shipped** ([PRD](../../prds/done/phase-40b-paren-stripping.md)) |
-| **40A.1** | Leading-decl comment preservation (ADR 0044). | **Shipped** ([PRD](../../prds/active/phase-40a-comment-preservation.md)) |
-| **40A.2** | Inline-after + body comments — finishes stage2-source byte-equal. | Next |
-| **41** | Full-feature parser parity (requires/ensures, match, generics) — widens dogfood corpus to fibonacci.intent. | Blocked on 40 |
-| **42** | Differential test gate + CLI integration (`intentc fmt --self-hosted`). | Blocked on 38-41 |
+| **40A.1** | Leading-decl comment preservation (ADR 0044). | **Shipped** ([PRD](../../prds/done/phase-40a-comment-preservation.md)) |
+| **40A.2 / 40A.3** | Inline-after + body + real-file comments; byte-equal self-format on all 4 stage2 files. | **Shipped** ([PRD](../../prds/done/phase-40a-comment-preservation.md)) |
+| **41** | Parser surface widening: contracts (`requires`/`ensures`/`decreases`), `match`, `for`-in, `try`. | **Shipped** ([PRD](../../prds/done/phase-41-parser-surface-widening.md)) |
+| **42** | CLI wiring (`args()` builtin, `main.intent`, `intentc fmt --self-hosted`) + differential harness (`make diff-formatter`) vs `intentc fmt`. Corpus 16/22, 0 divergences; gap-closing ongoing. | **In progress** ([PRD](../../prds/active/phase-42-formatter-cli-differential.md)) |
 
 Phase numbers are indicative and may shift as language gaps surface.
 
