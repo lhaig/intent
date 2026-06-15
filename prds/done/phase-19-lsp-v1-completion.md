@@ -51,7 +51,7 @@ Phase 18 shipped end-to-end; commits and ADR status are locked in. Reopening the
 ## Reference
 
 - Phase 18 design: `docs/decisions/0032-lsp-v1-surface.md`
-- Phase 18 PRD: `ops/plans/phase-18-lsp-server.md`
+- Phase 18 PRD: `prds/done/phase-18-lsp-server.md`
 - Existing LSP package: `internal/lsp/`
 - Existing symbol resolver (name-based, top-level-only): `internal/lsp/symbol.go`
 - Formatter to wire into LSP: `internal/formatter/`
@@ -177,7 +177,7 @@ Add capability `completionProvider: { triggerCharacters: [], resolveProvider: fa
 
 ### 19.8 Docs + ADR revision + roadmap + INTENT.md
 
-**Files:** `docs/decisions/0032-lsp-v1-surface.md`, `docs/decisions/README.md`, `docs/ROADMAP.md`, `INTENT.md`, `ops/plans/phase-19-lsp-v1-completion.md`, `editors/vscode/README.md`
+**Files:** `docs/decisions/0032-lsp-v1-surface.md`, `docs/decisions/README.md`, `docs/ROADMAP.md`, `INTENT.md`, `prds/done/phase-19-lsp-v1-completion.md`, `editors/vscode/README.md`
 
 - ADR 0032: add a `## Revised — 2026-05-30 (Phase 19)` section listing the expanded surface. Status line: `accepted; revised in Phase 19; implemented in <range>`.
 - Decisions README: update the 0032 row.

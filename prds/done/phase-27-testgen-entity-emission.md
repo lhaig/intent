@@ -35,7 +35,7 @@ This closes Phase 17.A.1 — one of the two blockers (the other is 17.A.2 multi-
 - Existing standalone-function logic: `internal/testgen/intentgen.go` — `generateIntentTestForFunction`
 - Default-arg table: `internal/testgen/intentgen.go` — `defaultArgFor`
 - Bank-account example: `examples/bank_account.intent` (canonical test target)
-- Phase 17 PRD: `ops/plans/phase-17-testing-polish.md` §17.A.1
+- Phase 17 PRD: `prds/done/phase-17-testing-polish.md` §17.A.1
 - Existing intentgen tests: `internal/testgen/intentgen_test.go`
 
 ## Tasks
@@ -140,7 +140,7 @@ End-to-end: load `examples/bank_account.intent`, run `GenerateIntent`, parse the
 
 ### 27.8 Docs
 
-**Files:** `docs/ROADMAP.md`, `INTENT.md`, `ops/plans/phase-27-testgen-entity-emission.md`, `ops/plans/phase-17-testing-polish.md` (note 17.A.1 satisfied)
+**Files:** `docs/ROADMAP.md`, `INTENT.md`, `prds/done/phase-27-testgen-entity-emission.md`, `prds/done/phase-17-testing-polish.md` (note 17.A.1 satisfied)
 
 - ROADMAP: `### Phase 27: testgen Entity/Method Emission -- SHIPPED (date)` under v1.2.
 - INTENT.md (test-gen section, if present): drop the "entities / methods not emitted by --target intent" caveat.

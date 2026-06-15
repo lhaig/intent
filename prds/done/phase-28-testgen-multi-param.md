@@ -122,7 +122,7 @@ End-to-end: define a small multi-Int function inline, run `GenerateIntent`, pars
 
 ### 28.6 Docs
 
-**Files:** `docs/ROADMAP.md`, `ops/plans/phase-17-testing-polish.md` (note 17.A.2 satisfied), `ops/plans/phase-28-testgen-multi-param.md` (status flip), `INTENT.md` (if it mentions test-gen scope)
+**Files:** `docs/ROADMAP.md`, `prds/done/phase-17-testing-polish.md` (note 17.A.2 satisfied), `prds/done/phase-28-testgen-multi-param.md` (status flip), `INTENT.md` (if it mentions test-gen scope)
 
 - ROADMAP: `### Phase 28: testgen Multi-Param Iteration -- SHIPPED (date)` under v1.2.
 - Phase 17 PRD: update 17.A.2 status; note that 17.A.1 + 17.A.2 are both in place; 17.A.4 (Rust path retirement) is now deliverable.

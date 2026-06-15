@@ -104,7 +104,7 @@ If the existing E2E test is unstable around Z3 availability, gate the new assert
 
 ### 24.5 Docs
 
-**Files:** `docs/ROADMAP.md`, `INTENT.md` (editor support section), `ops/plans/phase-24-verify-source-positions.md`
+**Files:** `docs/ROADMAP.md`, `INTENT.md` (editor support section), `prds/done/phase-24-verify-source-positions.md`
 
 - `docs/ROADMAP.md`: add `### Phase 24: Per-Contract Verify Source Positions -- SHIPPED (date)` under v1.2 with commit range; cross-reference ADR 0034.
 - `INTENT.md` "Editor support" — remove or update the "Z3 anchors at (1,1)" caveat (currently lives in ADR 0032's deferred list; INTENT.md may or may not echo it — check and update).

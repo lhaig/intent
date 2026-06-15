@@ -220,7 +220,15 @@ All four options use **unmodified compiler output** -- no hand-edited generated 
 ├── examples/             Example .intent programs (including in-language tests)
 ├── showcase/             Multi-target demos
 ├── testdata/             Test fixtures
-├── ops/plans/            Phase PRDs (the source of truth for in-progress work)
+├── prds/                 Norman project tracking (migrated from ops/)
+│   ├── TASKS.md          Live task list — active phase + completed index
+│   ├── TASKS-archive.md  Collapsed completed-phase index
+│   ├── config.md         Norman config (commands, model strategy)
+│   ├── progress.md       Append-only execution log (crash recovery)
+│   ├── active/           PRDs for in-flight phases
+│   ├── done/             PRDs for shipped phases (source of truth, per phase)
+│   ├── backlog/          PRDs ready to start
+│   └── research/         PRDs being drafted
 ├── docs/
 │   ├── DESIGN.md         Full language design document
 │   ├── HARNESS.md        Agent self-improve harness contract

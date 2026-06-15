@@ -12,7 +12,7 @@ The compiler's internals are already structured to support an LSP server cheaply
 
 What's contested is the **scope** of v1. The LSP specification is large; shipping a maximal v1 trades calendar time against marginal benefit, and the smallest useful subset is dramatically smaller than the maximal subset. This ADR scopes v1, names what is deliberately deferred, and sets the editor extension model. No code is written until this ADR is approved.
 
-Milestone 8 in the roadmap (`docs/ROADMAP.md`) is gated on this ADR. The downstream PRD will be `ops/plans/phase-18-lsp-server.md` (numbering tentative; Phase 18 currently holds Phase 17 deferrals — the LSP phase number may shift).
+Milestone 8 in the roadmap (`docs/ROADMAP.md`) is gated on this ADR. The downstream PRD will be `prds/done/phase-18-lsp-server.md` (numbering tentative; Phase 18 currently holds Phase 17 deferrals — the LSP phase number may shift).
 
 ## Options
 

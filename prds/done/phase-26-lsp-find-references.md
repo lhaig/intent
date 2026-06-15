@@ -131,7 +131,7 @@ Extend the E2E test to issue a `textDocument/references` request for a top-level
 
 ### 26.7 PRD status flip
 
-**Files:** `ops/plans/phase-26-lsp-find-references.md`
+**Files:** `prds/done/phase-26-lsp-find-references.md`
 
 `Status: In Progress` → `Status: Shipped (date; commits XXXX..HEAD)`. Tick the success-criteria boxes.
 

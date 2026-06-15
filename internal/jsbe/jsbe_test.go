@@ -1127,7 +1127,7 @@ async function main() returns Future<Int> {
 	}
 }
 
-// Regression for ops/plans/phase-14-phase11-13-gaps.md item 14.2: when a
+// Regression for prds/done/phase-14-phase11-13-gaps.md item 14.2: when a
 // function has an `ensures` clause and the body uses an explicit `return X;`,
 // the previous JS codegen placed the postcondition checks AFTER the return,
 // making them dead code. The labeled-block pattern (mirroring Rust's 'body)
@@ -1167,7 +1167,7 @@ entry function main() returns Int {
 	}
 }
 
-// Regression for ops/plans/phase-14-phase11-13-gaps.md item 14.1: when the
+// Regression for prds/done/phase-14-phase11-13-gaps.md item 14.1: when the
 // entry function is async, the generated JS must mark __intent_main as async
 // and await it at the top-level invocation; otherwise `await` inside the body
 // raises SyntaxError at runtime and the returned Promise is never resolved.
@@ -1224,7 +1224,7 @@ func makeJSProgram(t *testing.T, src string) *ast.Program {
 	return prog
 }
 
-// Regression for ops/plans/phase-14-phase11-13-gaps.md item 14.6: when a
+// Regression for prds/done/phase-14-phase11-13-gaps.md item 14.6: when a
 // package alias differs from the module name, both the entity definition and
 // the constructor/function call site must agree on the mangled name.
 func TestGenerateCrossPackageJSNameMangling(t *testing.T) {

@@ -158,7 +158,7 @@ entry function main() returns Int {
 	}
 }
 
-// Regression for ops/plans/phase-14-phase11-13-gaps.md item 14.5: the WASM
+// Regression for prds/done/phase-14-phase11-13-gaps.md item 14.5: the WASM
 // backend has no async runtime and previously emitted invalid bytecode when
 // the input contained async functions. EmitToTarget must reject async
 // programs targeting wasm with a clear error instead of producing broken

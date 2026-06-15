@@ -141,7 +141,7 @@ async function fetch(url: String) returns Result<String, String>
 
 ## Implementation Notes (Phase 14)
 
-Phase 12 implemented this ADR but several codegen choices were ambiguous and produced uncompilable output. Phase 14 (`ops/plans/phase-14-phase11-13-gaps.md`) locked in the following decisions:
+Phase 12 implemented this ADR but several codegen choices were ambiguous and produced uncompilable output. Phase 14 (`prds/done/phase-14-phase11-13-gaps.md`) locked in the following decisions:
 
 ### Rust target: source-aware `Future<T>` lowering (revised by Phase 10 Attractor work)
 

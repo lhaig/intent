@@ -126,12 +126,12 @@ Add the minimum viable set of string and `Char` operations to stage1 so a hand-r
 
 ### 31.9 Docs
 
-**Files:** `INTENT.md`, `docs/DESIGN.md`, `docs/grammar.ebnf`, `ops/NEXT-STEPS.md`
+**Files:** `INTENT.md`, `docs/DESIGN.md`, `docs/grammar.ebnf`, `prds/NEXT-STEPS.md`
 
 - `INTENT.md`: add a Strings & Chars section covering literals, indexing, slicing, predicates; document the codepoint-indexed model and the v1 ASCII-only predicate caveat.
 - `docs/DESIGN.md`: add `Char` to the type-system table; document `s[i]` and `s[i..j]` semantics.
 - `docs/grammar.ebnf`: char-literal production and the slice-expression production.
-- `ops/NEXT-STEPS.md`: mark Phase 31 shipped; Phase 32 lexer becomes the next move.
+- `prds/NEXT-STEPS.md`: mark Phase 31 shipped; Phase 32 lexer becomes the next move.
 
 **Acceptance:** Docs reflect Phase 31 reality; no dangling claims about strings being opaque.
 

@@ -37,7 +37,7 @@ Concretely, after Phase 21:
 ## Reference
 
 - ADR 0032 (LSP v1 surface): `docs/decisions/0032-lsp-v1-surface.md`
-- Phase 19 PRD: `ops/plans/phase-19-lsp-v1-completion.md` (member completion called out as deferred)
+- Phase 19 PRD: `prds/done/phase-19-lsp-v1-completion.md` (member completion called out as deferred)
 - Existing completion handler: `internal/lsp/completion.go`
 - Existing receiver-type infrastructure: `internal/lsp/symbol.go` — `receiverBeforeMember`, `resolveMemberOnReceiver`, `localTypeName`, `findEntityByName`
 - Field / method lookup helpers: `internal/lsp/scope.go` — `findFieldOnEntity`, `findMethodOnEntity`
@@ -109,7 +109,7 @@ Open a file containing `entity Foo { field x: Int; method bar() returns Int { re
 
 ### 21.6 Docs + ADR revision + roadmap
 
-**Files:** `docs/decisions/0032-lsp-v1-surface.md`, `docs/decisions/README.md`, `docs/ROADMAP.md`, `INTENT.md`, `editors/vscode/README.md`, `ops/plans/phase-19-lsp-v1-completion.md`, `ops/plans/phase-21-lsp-member-completion.md`
+**Files:** `docs/decisions/0032-lsp-v1-surface.md`, `docs/decisions/README.md`, `docs/ROADMAP.md`, `INTENT.md`, `editors/vscode/README.md`, `prds/done/phase-19-lsp-v1-completion.md`, `prds/done/phase-21-lsp-member-completion.md`
 
 - ADR 0032: add `## Revised — 2026-05-31 (Phase 21)` mentioning member completion landed and updating the status line.
 - Decisions README: re-touch the 0032 row with the latest revision date.

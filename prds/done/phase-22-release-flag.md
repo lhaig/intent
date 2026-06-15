@@ -138,7 +138,7 @@ warning: --strip-contracts removes runtime contract checks; run 'intentc verify'
 
 ### 22.8 PRD status flip
 
-**Files:** `ops/plans/phase-22-release-flag.md`
+**Files:** `prds/done/phase-22-release-flag.md`
 
 `Status: In Progress` → `Status: Shipped (YYYY-MM-DD; commits XXXXXX..HEAD)`. Tick all the success-criteria checkboxes once tasks land.
 

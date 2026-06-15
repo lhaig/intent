@@ -300,7 +300,7 @@ A full WASM test runner is filed as a Phase 17 candidate.
 
 ### 16.10 PRD retro-validation
 
-**Files:** `ops/plans/phase-11-generics.md`, `ops/plans/phase-12-async.md`, `ops/plans/phase-13-packages.md`, `ops/plans/phase-14-phase11-13-gaps.md`, `ops/plans/phase-15-rust-ffi.md`
+**Files:** `prds/done/phase-11-generics.md`, `prds/done/phase-12-async.md`, `prds/done/phase-13-packages.md`, `prds/done/phase-14-phase11-13-gaps.md`, `prds/done/phase-15-rust-ffi.md`
 
 - For each prior PRD's example program, write at least one Intent test that exercises the headline behaviour.
 - Run all under `intentc test`; record pass/fail in a checkpoint note on each PRD.

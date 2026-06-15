@@ -7,7 +7,7 @@ import "encoding/json"
 // json.RawMessage so the wire format survives without us having to track
 // every spec change.
 //
-// See ADR 0032 and ops/plans/phase-18-lsp-server.md for the v1 surface.
+// See ADR 0032 and prds/done/phase-18-lsp-server.md for the v1 surface.
 
 // JSON-RPC 2.0 envelope.
 type rpcMessage struct {
@@ -39,7 +39,7 @@ type DocumentURI string
 
 // Position is 0-indexed line + 0-indexed UTF-16 character. V1 treats the
 // character field as a byte offset; this is correct for ASCII content and
-// documented as a limitation in ops/plans/phase-18-lsp-server.md.
+// documented as a limitation in prds/done/phase-18-lsp-server.md.
 type Position struct {
 	Line      int `json:"line"`
 	Character int `json:"character"`

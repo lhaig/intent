@@ -30,7 +30,7 @@ Close the gaps found by a code-vs-PRD audit of Phases 11-13. Phases 11 (generics
 
 ## Reference
 
-- `ops/plans/phase-11-generics.md`, `ops/plans/phase-12-async.md`, `ops/plans/phase-13-packages.md`
+- `prds/done/phase-11-generics.md`, `prds/done/phase-12-async.md`, `prds/done/phase-13-packages.md`
 - ADR 0024 (`docs/decisions/0024-js-multifile-codegen-fix.md`) — prior cross-module name resolution work in JS backend
 - ADR 0026 (`docs/decisions/0026-concurrency-async-design.md`) — async design
 
@@ -178,7 +178,7 @@ Decide and act:
 
 ### 14.8 Verify Phase 11-13 PRD checklists (P2)
 
-**Files:** `ops/plans/phase-11-generics.md`, `ops/plans/phase-12-async.md`, `ops/plans/phase-13-packages.md`
+**Files:** `prds/done/phase-11-generics.md`, `prds/done/phase-12-async.md`, `prds/done/phase-13-packages.md`
 
 Once 14.1-14.7 are landed, walk the success-criteria checkboxes in each of the three prior PRDs and mark them. For criteria that are not satisfied (e.g. Phase 12 "Attractor example can be updated with async handlers" stretch goal), explicitly note "deferred" with a link to a follow-up issue or this phase's PRD.
 

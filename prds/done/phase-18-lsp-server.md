@@ -172,7 +172,7 @@ Use an in-memory pipe (`net.Pipe()` or `io.Pipe()`) for the transport — no ext
 
 ### 18.10 Docs + ADR status flip + roadmap
 
-**Files:** `docs/decisions/0032-lsp-v1-surface.md`, `docs/decisions/README.md`, `docs/ROADMAP.md`, `INTENT.md`, `editors/vscode/README.md`, `ops/plans/phase-18-lsp-server.md`
+**Files:** `docs/decisions/0032-lsp-v1-surface.md`, `docs/decisions/README.md`, `docs/ROADMAP.md`, `INTENT.md`, `editors/vscode/README.md`, `prds/done/phase-18-lsp-server.md`
 
 - ADR 0032 status: from `accepted (design); implementation pending Milestone 8` to `accepted; implemented in <commit>`.
 - Decisions README index: update the row.

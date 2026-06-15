@@ -4,7 +4,8 @@ This document is the entry point for an AI agent (or returning human) who wants 
 
 This is distinct from:
 - `INTENT.md` — how to **write** programs in Intent.
-- `AGENTS.md` — how **aiki** tracks tasks (workflow tooling, not project-specific).
+- `AGENTS.md` — multi-agent workflow notes (tooling, not project-specific).
+- **norman** — task tracking and execution lives in `prds/` (driven by the norman skill; see `prds/config.md`). It replaced the earlier aiki tooling.
 - `CLAUDE.md` — global plus project conventions for Claude Code specifically.
 
 If you are an agent reading this for the first time: skim section 1, then keep this open as a reference. The mechanical-validation commands in section 3 are non-negotiable.
@@ -22,17 +23,17 @@ Decision worth recording?  ─yes→  Write ADR  ─→  Add to docs/decisions/R
         │                                                    │
         no                                                   │
         ↓                                                    ↓
-Feature/fix scoped > 1 file?  ─yes→  Write PRD in ops/plans/phase-NN-<slug>.md
+Feature/fix scoped > 1 file?  ─yes→  Write PRD in prds/ (research→backlog), add row to prds/TASKS.md
         │                                    │
         no                                   ↓
-        ↓                          Execute PRD task-by-task
+        ↓                          Execute PRD task-by-task (PRD moves backlog→active)
 Make change directly                         │
         ↓                                    ↓
 Run validation (section 3)  ←──────────────  Run validation after each task
         ↓
 Commit (conventional commit, no Claude co-author)
         ↓
-Update PRD checklist; add Status block when complete
+Flip TASKS.md row to DONE; move PRD active→done; add Status block when complete
 ```
 
 Critical rule: **iterate the harness, not the prompt or the agent**. When an agent makes the same mistake twice, the answer is a lint rule, an ADR clarification, or a doc update — not "try a different model."
@@ -43,11 +44,12 @@ Critical rule: **iterate the harness, not the prompt or the agent**. When an age
 
 In order of priority:
 
-1. **`docs/ROADMAP.md`** — current milestone view (v1.0 shipped, v1.1 shipped, Milestone 7 shipped, v1.2 proposed).
-2. **`.planning/ROADMAP.md`** — phase-level tracker with completion dates.
-3. **`ops/plans/`** — open PRDs. Any with `Status: Draft` or `Status: In Progress` is candidate work.
-4. **`docs/decisions/`** — ADRs with `Status: accepted` that have deferred items (e.g. ADR 0027's remote registry fetch).
-5. **Mechanical signals**: lint warnings on `examples/`, failing examples, TODO comments, gaps surfaced by running validation.
+1. **`prds/TASKS.md`** — live task list. The active phase is expanded into steps; anything `TODO`/`ACTIVE` is candidate work.
+2. **`docs/ROADMAP.md`** — current milestone view (v1.0 shipped, v1.1 shipped, Milestone 7 shipped, v1.2 in progress).
+3. **`prds/active/` and `prds/backlog/`** — open PRDs. Active is in-flight; backlog is scoped and ready.
+4. **`prds/NEXT-STEPS.md`** — handoff notes for resuming the current work stream.
+5. **`docs/decisions/`** — ADRs with `Status: accepted` that have deferred items (e.g. ADR 0027's remote registry fetch).
+6. **Mechanical signals**: lint warnings on `examples/`, failing examples, TODO comments, gaps surfaced by running validation.
 
 If multiple options exist and you can't decide, prefer:
 - Foundational over feature (testing > new builtin)
@@ -127,7 +129,7 @@ Write one when:
 
 Don't write one for: typo fixes, single-line bug fixes, doc nudges, dependency upgrades, formatter runs.
 
-**PRD template (match `ops/plans/phase-15-rust-ffi.md`):**
+**PRD template (match `prds/done/phase-15-rust-ffi.md`):**
 
 ```markdown
 # Phase N: Title
@@ -161,7 +163,7 @@ Description of work.
 Things explicitly deferred or rejected.
 ```
 
-After writing: PRD is now the source of truth for that work. Update the checklist as you go. When complete, change `Status:` to `Shipped (date)` and update `docs/ROADMAP.md`.
+After writing: the PRD is the source of truth for that work, tracked by a row in `prds/TASKS.md`. Move it `prds/backlog/` → `prds/active/` when you start and `prds/active/` → `prds/done/` when it ships. Update the checklist as you go. When complete, change `Status:` to `Shipped (date)`, flip the TASKS.md row to `DONE`, and update `docs/ROADMAP.md`.
 
 ---
 

@@ -131,5 +131,5 @@ This phase is a step toward the user's stated goal of bootstrapping Intent with 
 - [ADR 0029](0029-in-language-testing.md) — In-language testing (introduced `--target intent`)
 - [ADR 0036](0036-testgen-entity-method-emission.md) — Entity / method emission (Phase 27 / 17.A.1)
 - [ADR 0037](0037-testgen-multi-param-iteration.md) — Multi-param iteration (Phase 28 / 17.A.2)
-- Phase 17 PRD: `ops/plans/phase-17-testing-polish.md`
-- Pickup notes: `ops/NEXT-STEPS.md` (2026-06-01) — recommended hard retirement once both prerequisites landed
+- Phase 17 PRD: `prds/done/phase-17-testing-polish.md`
+- Pickup notes: `prds/NEXT-STEPS.md` (2026-06-01) — recommended hard retirement once both prerequisites landed

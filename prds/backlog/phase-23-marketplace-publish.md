@@ -36,7 +36,7 @@ This PRD documents what needs to happen and in what order, so the user can drive
 - Existing extension: `editors/vscode/`
 - Extension package metadata: `editors/vscode/package.json`
 - CHANGELOG: `editors/vscode/CHANGELOG.md`
-- Phase 20 PRD (where marketplace publish-readiness landed): `ops/plans/phase-20-lsp-polish-production.md`
+- Phase 20 PRD (where marketplace publish-readiness landed): `prds/done/phase-20-lsp-polish-production.md`
 - ADR 0032 §Revised — 2026-05-31 (Phase 20): "Publishing is now blocked only on credentials (publisher account, PAT) and a branded icon — engineering side is publish-ready."
 - VS Code marketplace publish docs: <https://code.visualstudio.com/api/working-with-extensions/publishing-extension>
 - `vsce` CLI: <https://github.com/microsoft/vscode-vsce>
@@ -157,7 +157,7 @@ This is **optional for v1.2** — manual publishes work fine while the project h
 
 ### 23.8 Status flip + roadmap
 
-**Files:** `ops/plans/phase-23-marketplace-publish.md`, `docs/ROADMAP.md`
+**Files:** `prds/backlog/phase-23-marketplace-publish.md`, `docs/ROADMAP.md`
 
 Once the manual publish in 23.5 succeeds, flip this PRD's Status to `Shipped (date)` and add an entry to `docs/ROADMAP.md` under v1.2 referencing the marketplace URL.
 

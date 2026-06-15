@@ -272,4 +272,4 @@ This is the design that lets Phase 31+ start moving tooling into Intent.
 - Go modules reference: go.dev/ref/mod
 - Cargo book: doc.rust-lang.org/cargo
 - Bundler manual: bundler.io/v2.5/man/bundle-install.1.html
-- `ops/NEXT-STEPS.md` (2026-06-02) — design-space notes for this ADR
+- `prds/NEXT-STEPS.md` (2026-06-02) — design-space notes for this ADR

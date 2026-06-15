@@ -10,7 +10,7 @@ Close the explicit scope reductions taken during Phase 16 and add the obvious de
 
 ## Why now (or not)
 
-Phase 16 shipped a working in-language testing framework with **six documented scope reductions** (recorded in `ops/plans/phase-16-testing-framework.md`). Without a successor PRD, those reductions drift into "we said we'd do that someday" territory; with this Draft on file, they're discoverable and prioritisable when capacity opens up.
+Phase 16 shipped a working in-language testing framework with **six documented scope reductions** (recorded in `prds/done/phase-16-testing-framework.md`). Without a successor PRD, those reductions drift into "we said we'd do that someday" territory; with this Draft on file, they're discoverable and prioritisable when capacity opens up.
 
 Phase 17 is **not urgent**. Phase 16's framework is operational end-to-end on rust+js, six examples carry tests, `make validate` includes `intentc test`, and agents have a real assertion surface to verify their own work. Phase 17 turns that "operational" into "complete."
 
@@ -73,7 +73,7 @@ Some examples (io_demo, js_demo) have side effects (file I/O, JS-specific demos)
 
 ### 17.D — Cross-package test discovery
 
-**Source:** Phase 13 / Phase 16 deferred (validation footer in `ops/plans/phase-13-packages.md`).
+**Source:** Phase 13 / Phase 16 deferred (validation footer in `prds/done/phase-13-packages.md`).
 
 **State today:** `intentc test foo.intent` works for single-file or contiguous-multi-file inputs (the runner already handles `isMulti` via `NewModuleRegistry`). But test blocks across multiple packages — e.g. tests in `examples/packages/types_pkg/` that exercise `examples/packages/app_pkg/` — aren't discovered together.
 
@@ -87,7 +87,7 @@ Some examples (io_demo, js_demo) have side effects (file I/O, JS-specific demos)
 
 ### 17.E — FFI test automation
 
-**Source:** Phase 15 deferred (validation footer in `ops/plans/phase-15-rust-ffi.md`).
+**Source:** Phase 15 deferred (validation footer in `prds/done/phase-15-rust-ffi.md`).
 
 **State today:** `examples/ffi_blake3/` uses an extern crate (the `blake3_intent` shim) and is manually verified ("run it, observe the 64-char hex digest"). No automated test exists.
 

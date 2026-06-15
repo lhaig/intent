@@ -57,17 +57,17 @@ selfhost/formatter/
 | Phase | Scope | Status |
 |---|---|---|
 | **31** | Stage1 adds `Char` type, `s[i]`, `s[i..j]`, `len(s)`, char predicates ([ADR 0041](../../docs/decisions/0041-string-indexing-and-char-type.md)). | **Shipped** (commit `54f05b4`) |
-| **32** | Lexer in Intent: tokenise a useful subset of source. | **Shipped** (commit `859998f`; [PRD](../../ops/plans/phase-32-lexer-in-intent.md)) |
-| **33** | AST entity layout + parser for top-level decls (module / imports / function signatures). | **Shipped** (commit `3d3fdef`; [PRD](../../ops/plans/phase-33-parser-toplevel-in-intent.md)) |
-| **34** | Statement-level parser (`let`, `return`, `if`/`else`, `while`, expression statements, `Block`). | **Shipped** ([PRD](../../ops/plans/phase-34-statement-parser-in-intent.md)) |
-| **35** | Expression parser with precedence (Pratt / precedence climbing). | **Shipped** ([PRD](../../ops/plans/phase-35-expression-parser-in-intent.md)) |
-| **36** | Entity / enum / trait / impl / intent / test / extern declarations + AST split. | **Shipped** ([PRD](../../ops/plans/phase-36-top-level-decls-in-intent.md)) |
-| **37** | Stage2 lexer extensions: char + float literals, nested `/* */` comments; `ex_char` / `ex_float` wired into expression parser. | **Shipped** ([PRD](../../ops/plans/phase-37-stage2-lexer-extensions.md)) |
-| **38** | Formatter MVP — `format.intent`. Hello.intent round-trips byte-equal with stage1. | **Shipped** ([PRD](../../ops/plans/phase-38-stage2-formatter-mvp.md)) |
-| **39** | Self-parse certification — all stage2 files parse + format without errors. | **Shipped** ([PRD](../../ops/plans/phase-39-self-parse-certification.md)) |
-| **40C** | Source-order tracking via per-decl `line: Int` (ADR 0042). | **Shipped** ([PRD](../../ops/plans/phase-40c-source-order-tracking.md)) |
-| **40B** | Paren stripping — precedence-aware emit (ADR 0043). | **Shipped** ([PRD](../../ops/plans/phase-40b-paren-stripping.md)) |
-| **40A.1** | Leading-decl comment preservation (ADR 0044). | **Shipped** ([PRD](../../ops/plans/phase-40a-comment-preservation.md)) |
+| **32** | Lexer in Intent: tokenise a useful subset of source. | **Shipped** (commit `859998f`; [PRD](../../prds/done/phase-32-lexer-in-intent.md)) |
+| **33** | AST entity layout + parser for top-level decls (module / imports / function signatures). | **Shipped** (commit `3d3fdef`; [PRD](../../prds/done/phase-33-parser-toplevel-in-intent.md)) |
+| **34** | Statement-level parser (`let`, `return`, `if`/`else`, `while`, expression statements, `Block`). | **Shipped** ([PRD](../../prds/done/phase-34-statement-parser-in-intent.md)) |
+| **35** | Expression parser with precedence (Pratt / precedence climbing). | **Shipped** ([PRD](../../prds/done/phase-35-expression-parser-in-intent.md)) |
+| **36** | Entity / enum / trait / impl / intent / test / extern declarations + AST split. | **Shipped** ([PRD](../../prds/done/phase-36-top-level-decls-in-intent.md)) |
+| **37** | Stage2 lexer extensions: char + float literals, nested `/* */` comments; `ex_char` / `ex_float` wired into expression parser. | **Shipped** ([PRD](../../prds/done/phase-37-stage2-lexer-extensions.md)) |
+| **38** | Formatter MVP — `format.intent`. Hello.intent round-trips byte-equal with stage1. | **Shipped** ([PRD](../../prds/done/phase-38-stage2-formatter-mvp.md)) |
+| **39** | Self-parse certification — all stage2 files parse + format without errors. | **Shipped** ([PRD](../../prds/done/phase-39-self-parse-certification.md)) |
+| **40C** | Source-order tracking via per-decl `line: Int` (ADR 0042). | **Shipped** ([PRD](../../prds/done/phase-40c-source-order-tracking.md)) |
+| **40B** | Paren stripping — precedence-aware emit (ADR 0043). | **Shipped** ([PRD](../../prds/done/phase-40b-paren-stripping.md)) |
+| **40A.1** | Leading-decl comment preservation (ADR 0044). | **Shipped** ([PRD](../../prds/active/phase-40a-comment-preservation.md)) |
 | **40A.2** | Inline-after + body comments — finishes stage2-source byte-equal. | Next |
 | **41** | Full-feature parser parity (requires/ensures, match, generics) — widens dogfood corpus to fibonacci.intent. | Blocked on 40 |
 | **42** | Differential test gate + CLI integration (`intentc fmt --self-hosted`). | Blocked on 38-41 |
@@ -90,7 +90,7 @@ Phase 39 once parity holds.
 
 ## How to develop
 
-Each phase has its own PRD in `ops/plans/phase-N-*.md` and a ROADMAP entry
+Each phase has its own PRD in `prds/done/phase-N-*.md` and a ROADMAP entry
 in `docs/ROADMAP.md`. In-language tests live alongside the code in
 `lexer.intent` / `parser.intent` for now; will move to `tests/` once the
 file count grows.

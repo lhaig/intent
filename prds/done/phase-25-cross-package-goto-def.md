@@ -26,7 +26,7 @@ So the resolver already searches cross-package siblings. The only thing missing 
 
 ## Reference
 
-- Phase 19 PRD: `ops/plans/phase-19-lsp-v1-completion.md` (where the deferral was claimed)
+- Phase 19 PRD: `prds/done/phase-19-lsp-v1-completion.md` (where the deferral was claimed)
 - ADR 0032: `docs/decisions/0032-lsp-v1-surface.md` (deferred lists updated)
 - LSP resolver: `internal/lsp/symbol.go` — `resolveAcrossWorkspace`
 - LSP workspace: `internal/lsp/workspace.go` — `siblingModules`

@@ -661,7 +661,7 @@ async entry function main() returns Future<Int> {
 	}
 }
 
-// Regression for ops/plans/phase-14-phase11-13-gaps.md item 14.4 (revised
+// Regression for prds/done/phase-14-phase11-13-gaps.md item 14.4 (revised
 // follow-up): async-fn signatures emit `-> T` so a direct call returns
 // `impl Future<Output = T>`. `spawn` passes that future straight to
 // tokio::spawn (no `async move {...}` wrapper) — wrapping would force a
@@ -699,7 +699,7 @@ async entry function main() returns Future<Int> {
 	}
 }
 
-// Regression for ops/plans/phase-14-phase11-13-gaps.md item 14.3: per ADR
+// Regression for prds/done/phase-14-phase11-13-gaps.md item 14.3: per ADR
 // 0026, sleep(ms) returns Future<Void>. The source-level `await` adds the
 // `.await`; the sleep builtin must NOT add its own `.await` or the emitted
 // Rust contains `sleep(...).await.await` which does not compile.

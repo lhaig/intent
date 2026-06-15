@@ -103,7 +103,7 @@ This is the headline value: Intent users get to consume the Rust ecosystem *with
 
 ## Implementation Notes (Phase 15)
 
-Implemented as `ops/plans/phase-15-rust-ffi.md`. Adjustments from the original design:
+Implemented as `prds/done/phase-15-rust-ffi.md`. Adjustments from the original design:
 
 - `from` is a contextual identifier in the parser, not a global keyword — too common a name to reserve everywhere.
 - `[rust_dependencies]` learned a `path = "..."` form alongside `version = "..."`. Required for the `examples/ffi_blake3/` demo because Intent's bridge does not accept `blake3::Hash` and a tiny wrapper crate (vendored at `examples/ffi_blake3/blake3_intent/`) exposes a `String -> String` shim. Relative paths in the manifest are resolved to absolute paths anchored at the intent.toml directory before being written into the generated `Cargo.toml`.

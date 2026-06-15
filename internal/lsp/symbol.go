@@ -17,7 +17,7 @@ import (
 //   - Distinguishing call sites from declarations (hover on a declaration
 //     and a call return the same info — acceptable)
 //
-// These are tracked as v1.1 follow-ups in ops/plans/phase-18-lsp-server.md.
+// These are tracked as v1.1 follow-ups in prds/done/phase-18-lsp-server.md.
 
 // declKind enumerates the top-level declaration kinds the resolver knows
 // how to find and render.

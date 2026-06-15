@@ -188,7 +188,7 @@ The following are *not* in Phase 31 — each gets its own ADR when its phase nee
 
 ## Follow-ups
 
-- **Phase 31 PRD** (`ops/plans/phase-31-string-primitives.md`) — implementation tasks for this ADR.
+- **Phase 31 PRD** (`prds/done/phase-31-string-primitives.md`) — implementation tasks for this ADR.
 - **ADR 004x — String search & manipulation.** Deferred until a parser phase surfaces the need; likely Phase 33+.
 - **ADR 004x — Stdin/stdout streaming for stage2 binaries.** `selfhost/formatter/main.intent` will want to read source from stdin. Not blocking Phase 31 but on the list.
 - **Standard library positioning.** As Phase 31, 33+, and beyond accumulate string ops, file I/O, stdin/stdout, etc., they become a de facto Intent stdlib. A meta-ADR may be worth writing once 3-4 of these have landed.

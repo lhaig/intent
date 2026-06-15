@@ -343,7 +343,7 @@ func handleTestGen(args []string) {
 
 // Phase 16 / ADR 0029: `intentc test` runs in-language tests on one or more
 // targets, reports per-test pass/fail, and (with --all-targets) flags
-// cross-backend divergence. See ops/plans/phase-16-testing-framework.md.
+// cross-backend divergence. See prds/done/phase-16-testing-framework.md.
 func handleTest(args []string) {
 	opts := compiler.TestRunOptions{}
 	var filePath string

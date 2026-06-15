@@ -119,7 +119,7 @@ Deliver a working git-based package registry with MVS resolution, a committed `i
 
 ### 30.8 Docs + ADR 0027 update
 
-**Files:** `docs/decisions/0027-package-management-design.md`, `docs/ROADMAP.md`, `README.md`, `INTENT.md`, `ops/NEXT-STEPS.md`
+**Files:** `docs/decisions/0027-package-management-design.md`, `docs/ROADMAP.md`, `README.md`, `INTENT.md`, `prds/NEXT-STEPS.md`
 
 - ADR 0027 status line — already updated by this ADR commit; verify final wording.
 - ROADMAP — add Phase 30 entry above Phase 29.
