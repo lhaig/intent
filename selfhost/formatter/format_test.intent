@@ -279,6 +279,71 @@ test "body comments: parser populates Stmt.comments_before" {
     assert_eq(body.stmts[1].comments_before[0], "// annotated");
 }
 
+// --- Inline-after comment tests (Phase 40A.2 / ADR 0044) -------------------
+
+// AC1: a `let` statement with an inline-after comment round-trips.
+test "inline-after: let statement with inline comment survives roundtrip" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let x: Int = 1; // note\n"
+        + "    return x;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+// AC2: an expression statement with an inline-after comment round-trips.
+test "inline-after: expr statement with inline comment survives roundtrip" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Void " + '{'.to_string() + "\n"
+        + "    print(x); // show\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+// AC3: a statement with both a leading comment and an inline-after comment
+// round-trips.
+test "inline-after: leading comment plus inline comment survives roundtrip" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    // leading\n"
+        + "    let x: Int = 1; // trailing\n"
+        + "    return x;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+// AC4: parser populates Stmt.comment_after for a let statement.
+test "inline-after: parser populates Stmt.comment_after" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let x: Int = 1; // note\n"
+        + "    return x;\n"
+        + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions), 1);
+    let body: Block = prog.functions[0].body;
+    assert_eq(len(body.stmts), 2);
+    assert_eq(body.stmts[0].comment_after, "// note");
+}
+
+// AC5: a statement with no inline comment has comment_after == "".
+test "inline-after: statement without inline comment has empty comment_after" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let x: Int = 1;\n"
+        + "    return x;\n"
+        + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions), 1);
+    let body: Block = prog.functions[0].body;
+    assert_eq(body.stmts[0].comment_after, "");
+}
+
 // --- Paren stripping tests (ADR 0043) ---------------------------------------
 
 // Helper: roundtrip a `let x: Int = RHS;` expression and assert the formatter

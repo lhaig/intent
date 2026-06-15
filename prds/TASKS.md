@@ -18,7 +18,7 @@ self-hosted formatter (`selfhost/formatter/`). Sub-pieces C (source-order) and B
 |---|------|-----|--------|-------|
 | 40A.2.1 | Trailing-EOF comments | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | DONE (2026-06-15) | commit 19d766e; +5 tests; 136/136 rust+js |
 | 40A.2.2 | Body / between-statement comments (`Stmt.comments_before`) | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | DONE (2026-06-15) | +5 tests; 141/141 rust+js |
-| 40A.2.3 | Inline-after comments (`let x = 1; // ...`) | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | most involved; needs `Token.comment_after` |
+| 40A.2.3 | Inline-after comments on statements (`let x = 1; // ...`) | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | DONE (2026-06-15) | +5 tests; 146/146 rust+js; statements only |
 | 40A.2.4 | Byte-equal self-format dogfood gate test | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | after .1–.3; assert `format(parse(src)) == src` on all 4 stage2 files |
 
 ## Backlog

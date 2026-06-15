@@ -112,6 +112,9 @@ public entity Stmt {
     // first token. Populated by parse_block from Token.comments_before.
     // The formatter emits these on their own lines before each statement.
     field comments_before: Array<String>;
+    // ADR 0044 (Phase 40A.2): inline comment after this statement's `;`
+    // (same line). Empty = none.
+    field comment_after: String;
 
     constructor(kind: Int, expr: Expr, name: String, type_name: String, is_mutable: Bool, then_block: Block, else_block: Block, has_else: Bool) {
         self.kind = kind;
@@ -123,6 +126,7 @@ public entity Stmt {
         self.else_block = else_block;
         self.has_else = has_else;
         self.comments_before = empty_string_array();
+        self.comment_after = "";
     }
 }
 

@@ -318,8 +318,10 @@ public entity Parser {
         }
         self.expect(formatter_lexer.tk_assign(), "'=' in let binding");
         let rhs: Expr = self.parse_expr();
-        self.expect(formatter_lexer.tk_semicolon(), "';' to end let statement");
-        return Stmt(formatter_ast.st_let(), rhs, name_tok.text, type_name, is_mut, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
+        let semi: Token = self.expect(formatter_lexer.tk_semicolon(), "';' to end let statement");
+        let mutable st: Stmt = Stmt(formatter_ast.st_let(), rhs, name_tok.text, type_name, is_mut, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
+        st.comment_after = semi.comment_after;
+        return st;
     }
 
     // `return [EXPR];`
@@ -329,8 +331,10 @@ public entity Parser {
         if not self.check(formatter_lexer.tk_semicolon()) {
             rhs = self.parse_expr();
         }
-        self.expect(formatter_lexer.tk_semicolon(), "';' to end return statement");
-        return Stmt(formatter_ast.st_return(), rhs, "", "", false, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
+        let semi: Token = self.expect(formatter_lexer.tk_semicolon(), "';' to end return statement");
+        let mutable st: Stmt = Stmt(formatter_ast.st_return(), rhs, "", "", false, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
+        st.comment_after = semi.comment_after;
+        return st;
     }
 
     // `if EXPR { BLOCK } [else (if-stmt | { BLOCK })]`. `else if` chains
@@ -367,8 +371,10 @@ public entity Parser {
     // and require a trailing `;`.
     method parse_expr_stmt() returns Stmt {
         let e: Expr = self.parse_expr();
-        self.expect(formatter_lexer.tk_semicolon(), "';' to end expression statement");
-        return Stmt(formatter_ast.st_expr(), e, "", "", false, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
+        let semi: Token = self.expect(formatter_lexer.tk_semicolon(), "';' to end expression statement");
+        let mutable st: Stmt = Stmt(formatter_ast.st_expr(), e, "", "", false, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
+        st.comment_after = semi.comment_after;
+        return st;
     }
 
     // --- expression parser (Pratt / precedence climbing) ------------------

@@ -281,7 +281,11 @@ public function format_stmt(s: Stmt, level: Int) returns String {
         lead = lead + indent_string(level) + s.comments_before[ci] + "\n";
         ci = ci + 1;
     }
-    return lead + format_stmt_inner(s, level);
+    let mutable trail: String = "";
+    if s.comment_after != "" {
+        trail = " " + s.comment_after;
+    }
+    return lead + format_stmt_inner(s, level) + trail;
 }
 
 public function format_stmt_inner(s: Stmt, level: Int) returns String {

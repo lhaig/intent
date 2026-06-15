@@ -164,6 +164,9 @@ public entity Token {
     // pass it; scan_all assigns the drained buffer onto each token after
     // construction.
     field comments_before: Array<String>;
+    // ADR 0044 (Phase 40A.2): an inline comment on the same line as this
+    // token (e.g. after the `;` ending a statement). Empty = none.
+    field comment_after: String;
 
     constructor(kind: Int, text: String, line: Int, column: Int) {
         self.kind = kind;
@@ -171,6 +174,7 @@ public entity Token {
         self.line = line;
         self.column = column;
         self.comments_before = empty_string_array();
+        self.comment_after = "";
     }
 }
 
@@ -206,6 +210,14 @@ public entity Lexer {
     // here until the next real token is emitted; scan_all drains them onto
     // that token's comments_before.
     field pending_comments: Array<String>;
+    // True when a newline has been seen since the last emitted token. Used
+    // to classify a comment as inline-after (same line as previous token,
+    // flag false) vs leading (flag true). Starts true so a comment before
+    // the very first token is leading.
+    field saw_newline_since_token: Bool;
+    // Holds an inline-after comment until scan_all attaches it to the
+    // previously emitted token. Empty = none.
+    field pending_inline_after: String;
 
     constructor(source: String) {
         self.source = source;
@@ -213,6 +225,8 @@ public entity Lexer {
         self.line = 1;
         self.column = 1;
         self.pending_comments = empty_string_array();
+        self.saw_newline_since_token = true;
+        self.pending_inline_after = "";
     }
 
     method at_end() returns Bool {
@@ -242,6 +256,7 @@ public entity Lexer {
         if c == '\n' {
             self.line = self.line + 1;
             self.column = 1;
+            self.saw_newline_since_token = true;
         } else {
             self.column = self.column + 1;
         }
@@ -265,7 +280,11 @@ public entity Lexer {
                         self.advance();
                     }
                     let text: String = self.source[start..self.position];
-                    self.pending_comments.push(text);
+                    if not self.saw_newline_since_token and self.pending_inline_after == "" {
+                        self.pending_inline_after = text;
+                    } else {
+                        self.pending_comments.push(text);
+                    }
                 } else {
                     if c == '/' and self.peek2() == '*' {
                         // Multi-line comment with nesting support. Capture
@@ -291,7 +310,11 @@ public entity Lexer {
                             }
                         }
                         let text: String = self.source[start..self.position];
-                        self.pending_comments.push(text);
+                        if not self.saw_newline_since_token and self.pending_inline_after == "" {
+                            self.pending_inline_after = text;
+                        } else {
+                            self.pending_comments.push(text);
+                        }
                     } else {
                         return;
                     }
@@ -523,11 +546,19 @@ public entity Lexer {
     // parser doesn't need to bounds-check the token stream.
     method scan_all() returns Array<Token> {
         let mutable tokens: Array<Token> = [];
+        let mutable have_prev: Bool = false;
+        let mutable prev: Token = Token(tk_eof(), "", 1, 1);
         while true {
             self.skip_whitespace_and_comments();
+            if have_prev {
+                if self.pending_inline_after != "" {
+                    prev.comment_after = self.pending_inline_after;
+                    self.pending_inline_after = "";
+                }
+                tokens.push(prev);
+                have_prev = false;
+            }
             if self.at_end() {
-                // ADR 0044: trailing comments (at end of file with no
-                // following token) attach to the synthetic EOF token.
                 let mutable eof_tok: Token = Token(tk_eof(), "", self.line, self.column);
                 eof_tok.comments_before = self.drain_comments();
                 tokens.push(eof_tok);
@@ -537,7 +568,9 @@ public entity Lexer {
             let c: Int = self.column;
             let mutable tok: Token = self.scan_one(l, c);
             tok.comments_before = self.drain_comments();
-            tokens.push(tok);
+            prev = tok;
+            have_prev = true;
+            self.saw_newline_since_token = false;
         }
         return tokens;
     }

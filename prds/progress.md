@@ -58,6 +58,22 @@ review PASS — edits match the step-1 template exactly.
 
 ---
 
+## 2026-06-15 — Phase 40A.2 step (3): inline-after comments on statements
+
+Delegated to a Sonnet worker; advisor designed the lexer same-line-detection
+mechanism, reviewed the diff, re-verified tests. Token gains `comment_after`;
+Lexer gains `saw_newline_since_token` + `pending_inline_after`; `scan_all` rewritten
+to hold the previous token in a local (so `comment_after` is set before push —
+array-element mutation post-push is unreliable in the stage1 backend) and attach the
+same-line comment to it. Stmt gains `comment_after`, captured from the `;` token in
+parse_let/return/expr; the format_stmt wrapper appends ` <comment>` (canonical single
+space). 5 new tests. 146/146 rust+js, independently re-verified. Code review PASS.
+
+PATTERN: [stage1-backend] Mutating an already-pushed Array element (`arr[i].field = x`)
+is unreliable; hold the element in a local, mutate, then push.
+
+---
+
 ## 2026-06-15 — Remove aiki block from CLAUDE.md / AGENTS.md
 
 Replaced the ~500-line `<aiki>` instruction block in `AGENTS.md` (the real target of
