@@ -40,3 +40,17 @@ trailing comments to the synthetic EOF token), so no lexer change is usually nee
 PATTERN: [shell] - This environment's Bash tool runs under zsh, which does NOT
 word-split unquoted `$var`. Use `... | while read -r f; do ...; done` for file-list
 loops, not `for f in $files`.
+
+PATTERN: [repo] - `intent/CLAUDE.md` is a symlink to `intent/AGENTS.md` — edit the
+real target (AGENTS.md); writing through the symlink is refused.
+
+---
+
+## 2026-06-15 — Remove aiki block from CLAUDE.md / AGENTS.md
+
+Replaced the ~500-line `<aiki>` instruction block in `AGENTS.md` (the real target of
+the `CLAUDE.md` symlink) with concise norman-oriented project guidance: where state
+lives (`prds/`), how to drive norman, and the project conventions (PRD lifecycle,
+ADRs, validation harness, commit style). Dropped aiki/JJ-workspace-specific machinery
+(workspace isolation, aiki task IDs, `aiki task run` delegation). Fixed the
+`docs/HARNESS.md` "distinct from" list to note CLAUDE.md/AGENTS.md are the same file.

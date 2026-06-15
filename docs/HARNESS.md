@@ -4,9 +4,8 @@ This document is the entry point for an AI agent (or returning human) who wants 
 
 This is distinct from:
 - `INTENT.md` — how to **write** programs in Intent.
-- `AGENTS.md` — multi-agent workflow notes (tooling, not project-specific).
-- **norman** — task tracking and execution lives in `prds/` (driven by the norman skill; see `prds/config.md`). It replaced the earlier aiki tooling.
-- `CLAUDE.md` — global plus project conventions for Claude Code specifically.
+- `CLAUDE.md` / `AGENTS.md` (same file via symlink) — project conventions and how task tracking works: the **norman** skill, with state in `prds/` (see `prds/config.md`). Replaced the earlier aiki tooling.
+- `~/.claude/CLAUDE.md` — global Claude Code conventions (commits, code style).
 
 If you are an agent reading this for the first time: skim section 1, then keep this open as a reference. The mechanical-validation commands in section 3 are non-negotiable.
 

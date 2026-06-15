@@ -107,5 +107,5 @@ Durable items (unchanged this phase):
 ## How to resume
 
 1. `git log --oneline -10`.
-2. `aiki task` for the open task list.
+2. `prds/TASKS.md` for the open task list (norman; aiki was removed 2026-06-15).
 3. Recommended start: **Phase 40A.2 step (2)** — body/between-statement comments. Add `comments_before: Array<String>` to `Stmt` (ast.intent); capture `self.tokens[self.position].comments_before` at the start of each statement parse and thread it onto the `Stmt`; prepend in the formatter's block emitter. Then (3) — inline-after comments.
