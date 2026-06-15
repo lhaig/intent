@@ -73,3 +73,11 @@ What follows from this decision? Trade-offs accepted.
 | 0039 | [Package registry — git-based + MVS](0039-package-registry-git-mvs.md) | 2026-06-03 | accepted (PRD pending) |
 | 0040 | [Self-hosted formatter strategy](0040-self-hosted-formatter-strategy.md) | 2026-06-03 | accepted (strategic; per-phase ADRs follow) |
 | 0041 | [String indexing and `Char` type](0041-string-indexing-and-char-type.md) | 2026-06-03 | accepted (Phase 31 shipped 2026-06-03) |
+| 0042 | [Stage2 source-order tracking](0042-stage2-source-order-tracking.md) | 2026-06-09 | accepted |
+| 0043 | [Stage2 formatter paren stripping](0043-stage2-paren-stripping.md) | 2026-06-09 | accepted |
+| 0044 | [Stage2 comment preservation](0044-stage2-comment-preservation.md) | 2026-06-09 | accepted |
+| 0045 | [`args()` builtin](0045-args-builtin.md) | 2026-06-15 | accepted |
+| 0046 | [Counterexample-driven self-repair](0046-counterexample-driven-repair.md) | 2026-06-15 | proposed (research) |
+| 0047 | [Contract integrity (vacuity, intent-agreement, cross-target)](0047-contract-integrity.md) | 2026-06-15 | proposed (research) |
+| 0048 | [Verification trust manifest](0048-verification-trust-manifest.md) | 2026-06-15 | proposed (research) |
+| 0049 | [Agent interface (MCP / structured tool API)](0049-agent-interface.md) | 2026-06-15 | proposed (research) |
