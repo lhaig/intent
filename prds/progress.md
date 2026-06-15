@@ -46,6 +46,18 @@ real target (AGENTS.md); writing through the symlink is refused.
 
 ---
 
+## 2026-06-15 — Phase 40A.2 step (2): body/between-statement comments
+
+Delegated to a Sonnet worker (first real norman worker run); advisor (Opus) wrote the
+brief, reviewed the diff, and re-ran tests independently before committing. `Stmt`
+gains `comments_before` (defaulted via a new module-local `empty_string_array()` in
+ast.intent); `parse_block` captures each statement's first-token comments and assigns
+them onto the Stmt; `format_stmt` is split into a comment-emitting wrapper +
+`format_stmt_inner`. 5 new tests. 141/141 rust+js, independently re-verified. Code
+review PASS — edits match the step-1 template exactly.
+
+---
+
 ## 2026-06-15 — Remove aiki block from CLAUDE.md / AGENTS.md
 
 Replaced the ~500-line `<aiki>` instruction block in `AGENTS.md` (the real target of

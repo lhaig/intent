@@ -279,7 +279,10 @@ public entity Parser {
         self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start block");
         let mutable stmts: Array<Stmt> = [];
         while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
-            stmts.push(self.parse_statement());
+            let cmts: Array<String> = self.tokens[self.position].comments_before;
+            let mutable st: Stmt = self.parse_statement();
+            st.comments_before = cmts;
+            stmts.push(st);
         }
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close block");
         return Block(stmts);

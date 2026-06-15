@@ -208,6 +208,77 @@ test "trailing: no trailing comment leaves trailing_comments empty" {
     assert_eq(len(prog.trailing_comments), 0);
 }
 
+// --- Body / between-statement comment tests (Phase 40A.2 / ADR 0044) -------
+
+// AC1: a single `//` comment between two statements in a function body
+// round-trips byte-equal.
+test "body comments: single comment between two statements survives roundtrip" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let x: Int = 1;\n"
+        + "    // a comment\n"
+        + "    let y: Int = 2;\n"
+        + "    return x;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+// AC2: two consecutive `//` comment lines between statements round-trip.
+test "body comments: two comment lines between statements survive roundtrip" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let x: Int = 1;\n"
+        + "    // first comment\n"
+        + "    // second comment\n"
+        + "    return x;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+// AC3: a comment before the FIRST statement in a body round-trips.
+test "body comments: comment before first statement survives roundtrip" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    // leading body comment\n"
+        + "    return 0;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+// AC4: a `/* block */` comment between statements round-trips.
+test "body comments: block comment between statements survives roundtrip" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let x: Int = 1;\n"
+        + "    /* block comment */\n"
+        + "    return x;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+// AC5: assert that the parser populates Stmt.comments_before correctly.
+test "body comments: parser populates Stmt.comments_before" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let x: Int = 1;\n"
+        + "    // annotated\n"
+        + "    return x;\n"
+        + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions), 1);
+    let body: Block = prog.functions[0].body;
+    // body has two stmts: `let x` and `return x`
+    assert_eq(len(body.stmts), 2);
+    // the `return x` statement should carry the comment
+    assert_eq(len(body.stmts[1].comments_before), 1);
+    assert_eq(body.stmts[1].comments_before[0], "// annotated");
+}
+
 // --- Paren stripping tests (ADR 0043) ---------------------------------------
 
 // Helper: roundtrip a `let x: Int = RHS;` expression and assert the formatter

@@ -108,6 +108,10 @@ public entity Stmt {
     field then_block: Block;
     field else_block: Block;
     field has_else: Bool;
+    // ADR 0044: leading comments captured by the lexer at the statement's
+    // first token. Populated by parse_block from Token.comments_before.
+    // The formatter emits these on their own lines before each statement.
+    field comments_before: Array<String>;
 
     constructor(kind: Int, expr: Expr, name: String, type_name: String, is_mutable: Bool, then_block: Block, else_block: Block, has_else: Bool) {
         self.kind = kind;
@@ -118,6 +122,7 @@ public entity Stmt {
         self.then_block = then_block;
         self.else_block = else_block;
         self.has_else = has_else;
+        self.comments_before = empty_string_array();
     }
 }
 
@@ -392,6 +397,14 @@ public entity Program {
 }
 
 // --- Helpers ----------------------------------------------------------------
+
+// Helper to initialise an empty Array<String>. Used by Stmt.comments_before
+// — mirrors the same function in formatter_lexer so that Stmt's constructor
+// body can initialise the field without a module prefix.
+public function empty_string_array() returns Array<String> {
+    let mutable a: Array<String> = [];
+    return a;
+}
 
 // Empty Block constructor (avoids a bare `Block([])` literal where the
 // element type cannot be inferred at the call site).

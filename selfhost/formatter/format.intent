@@ -271,7 +271,20 @@ public function format_expr_inner(e: Expr) returns String {
 
 // --- Statements ------------------------------------------------------------
 
+// Emit a statement's leading comments (indented) then the statement itself.
+// All callers go through this wrapper; the inner logic lives in
+// format_stmt_inner so the two concerns are separate.
 public function format_stmt(s: Stmt, level: Int) returns String {
+    let mutable lead: String = "";
+    let mutable ci: Int = 0;
+    while ci < len(s.comments_before) {
+        lead = lead + indent_string(level) + s.comments_before[ci] + "\n";
+        ci = ci + 1;
+    }
+    return lead + format_stmt_inner(s, level);
+}
+
+public function format_stmt_inner(s: Stmt, level: Int) returns String {
     let pad: String = indent_string(level);
     if s.kind == formatter_ast.st_let() {
         let mutable mut_kw: String = "";
