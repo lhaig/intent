@@ -288,8 +288,12 @@ public entity Parser {
             st.comments_before = cmts;
             stmts.push(st);
         }
-        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close block");
-        return Block(stmts);
+        // ADR 0044 (Phase 40A.3): comments before the closing `}` attach to
+        // the rbrace token; carry them on the Block as trailing comments.
+        let rbrace: Token = self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close block");
+        let mutable blk: Block = Block(stmts);
+        blk.trailing_comments = rbrace.comments_before;
+        return blk;
     }
 
     method parse_statement() returns Stmt {

@@ -32,7 +32,7 @@ A probe (2026-06-15) measured `format(parse(src)) == src` against the 4 stage2 s
 | 40A.3.1 | Module-leading comments (before `module`) | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | DONE (2026-06-15) | ModuleDecl.comments_before; +2 tests; 149/149 |
 | 40A.3.2 | Comments before entity fields | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | DONE (2026-06-15) | FieldDecl.comments_before |
 | 40A.3.3 | Comments before entity methods / constructor | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | DONE (2026-06-15) | + impl methods; FunctionDecl.comments_before |
-| 40A.3.4 | End-of-block comments (before `}`) | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | attach rbrace-token comments to Block |
+| 40A.3.4 | End-of-block comments (before `}`) | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | DONE (2026-06-15) | Block.trailing_comments from rbrace token; +2 tests; 155/155 |
 | 40A.3.5 | Inline-after on fields | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | DONE (2026-06-15) | FieldDecl.comment_after; +4 tests total; 153/153 |
 | 40A.3.6 | Canonicalize stage2 files + add real-file gate test | [phase-40a-comment-preservation.md](active/phase-40a-comment-preservation.md) | TODO | run formatter to de-align/normalize the 4 files (must still compile + self-parse), commit, then assert `format(parse(src)) == src` |
 

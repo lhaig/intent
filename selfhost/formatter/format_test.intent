@@ -434,6 +434,31 @@ test "entity comments: parser populates FieldDecl comments_before and comment_af
     assert_eq(prog.entities[0].fields[0].comment_after, "// inline");
 }
 
+// --- End-of-block comment tests (Phase 40A.3 / ADR 0044) --------------------
+
+test "end-of-block: comment before closing brace survives roundtrip" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    return 0;\n"
+        + "    // end of block\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "end-of-block: parser populates Block.trailing_comments" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    return 0;\n"
+        + "    // tail\n"
+        + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    let body: Block = prog.functions[0].body;
+    assert_eq(len(body.trailing_comments), 1);
+    assert_eq(body.trailing_comments[0], "// tail");
+}
+
 // --- Paren stripping tests (ADR 0043) ---------------------------------------
 
 // Helper: roundtrip a `let x: Int = RHS;` expression and assert the formatter

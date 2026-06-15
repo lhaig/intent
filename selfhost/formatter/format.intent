@@ -335,6 +335,12 @@ public function format_block_body(b: Block, level: Int) returns String {
         out = out + format_stmt(b.stmts[i], level) + "\n";
         i = i + 1;
     }
+    // ADR 0044 (Phase 40A.3): comments at the end of the block (before `}`).
+    let mutable ti: Int = 0;
+    while ti < len(b.trailing_comments) {
+        out = out + indent_string(level) + b.trailing_comments[ti] + "\n";
+        ti = ti + 1;
+    }
     return out;
 }
 
