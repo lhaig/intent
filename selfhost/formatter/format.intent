@@ -387,6 +387,31 @@ public function brace_trail(b: Block) returns String {
     return "";
 }
 
+// Phase 41.1: contract clauses between a signature and its body. Each clause
+// is emitted on its own line, indented at `level`, prefixed with a newline so
+// it follows the signature line. Order: requires, ensures, decreases (matches
+// stage1's formatter). Returns "" when there are no clauses. `indent_string`
+// is called fresh per clause to avoid reusing a moved String local.
+public function format_contract_clauses(decl: FunctionDecl, level: Int) returns String {
+    let mutable s: String = "";
+    let mutable i: Int = 0;
+    while i < len(decl.requires_clauses) {
+        s = s + "\n" + indent_string(level) + "requires " + format_expr(decl.requires_clauses[i]);
+        i = i + 1;
+    }
+    let mutable j: Int = 0;
+    while j < len(decl.ensures_clauses) {
+        s = s + "\n" + indent_string(level) + "ensures " + format_expr(decl.ensures_clauses[j]);
+        j = j + 1;
+    }
+    let mutable k: Int = 0;
+    while k < len(decl.decreases_clauses) {
+        s = s + "\n" + indent_string(level) + "decreases " + format_expr(decl.decreases_clauses[k]);
+        k = k + 1;
+    }
+    return s;
+}
+
 public function format_function_decl(fn_decl: FunctionDecl, level: Int) returns String {
     // `pad` is built twice (open + close) to avoid moving a single String
     // into both spots; the stage1 Rust backend doesn't yet auto-clone
@@ -407,7 +432,14 @@ public function format_function_decl(fn_decl: FunctionDecl, level: Int) returns 
     if not fn_decl.is_constructor and fn_decl.return_type != "" {
         head = head + " returns " + fn_decl.return_type;
     }
-    head = head + " " + '{'.to_string() + "\n";
+    // Phase 41.1: contracts go between the signature and the `{`, which then
+    // moves onto its own line at the decl's indent level.
+    let contracts: String = format_contract_clauses(fn_decl, level + 1);
+    if contracts != "" {
+        head = head + contracts + "\n" + indent_string(level) + '{'.to_string() + "\n";
+    } else {
+        head = head + " " + '{'.to_string() + "\n";
+    }
     let body: String = format_block_body(fn_decl.body, level + 1);
     return pad_open + head + body + pad_close + '}'.to_string() + brace_trail(fn_decl.body);
 }
@@ -434,7 +466,13 @@ public function format_method_decl(m: FunctionDecl, level: Int) returns String {
     if m.return_type != "" {
         head = head + " returns " + m.return_type;
     }
-    head = head + " " + '{'.to_string() + "\n";
+    // Phase 41.1: contracts between signature and `{` (same as functions).
+    let contracts: String = format_contract_clauses(m, level + 1);
+    if contracts != "" {
+        head = head + contracts + "\n" + indent_string(level) + '{'.to_string() + "\n";
+    } else {
+        head = head + " " + '{'.to_string() + "\n";
+    }
     let body: String = format_block_body(m.body, level + 1);
     return pad_open + head + body + pad_close + '}'.to_string() + brace_trail(m.body);
 }

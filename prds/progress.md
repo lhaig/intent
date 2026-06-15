@@ -143,6 +143,27 @@ formatter round-trip needs parse_type_name to reconstruct the real args.
 
 ---
 
+## 2026-06-15 — Phase 41.1: contract clauses (requires/ensures/decreases)
+
+Started Phase 41 (parser surface widening). 41.1: contracts were silently DISCARDED by
+the parser (crude skip + skip_method_contracts, now removed). FunctionDecl gains
+requires_clauses / ensures_clauses / decreases_clauses (Array<Expr>, defaulted via new
+empty_expr_array()); parse_function_decl and parse_method_decl parse `<kw> <expr>` clauses
+(idents, not keywords; no `;` — parse_expr stops at the next clause kw or `{`) into those
+fields; an `is_contract_kw()` helper gates the loop. The formatter emits them between the
+signature and the `{` (which moves to its own line at the decl's indent), via
+format_contract_clauses, matching stage1's canonical layout (fibonacci.intent). `result`
+in an ensures round-trips as a plain ident. 4 new tests; 162/162 rust+js; byte-equal
+self-format preserved (verified with a throwaway probe).
+
+PATTERN: [stage1-rust-backend] An Intent parameter/local named `fn` (or any Rust keyword)
+generates invalid Rust (`fn.field` → "expected expression, found keyword fn") — JS is
+unaffected, so it shows up as a rust-only "build or harness failure" / divergence. The
+backend does NOT escape reserved words; avoid Rust keywords as identifier names in stage2.
+(Renamed the offending param `fn` → `decl`.)
+
+---
+
 ## 2026-06-15 — Remove aiki block from CLAUDE.md / AGENTS.md
 
 Replaced the ~500-line `<aiki>` instruction block in `AGENTS.md` (the real target of

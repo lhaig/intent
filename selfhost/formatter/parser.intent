@@ -265,22 +265,43 @@ public entity Parser {
         // we hit `returns` or `{`.
         self.expect(formatter_lexer.kw_returns(), "'returns' after parameter list");
         let return_type: String = self.parse_type_name();
-        // Skip optional contract clauses (requires/ensures/decreases). Each
-        // starts with an identifier and runs to end-of-line-ish. v1 just
-        // bails out when we see `{` or EOF.
-        while self.check(formatter_lexer.tk_ident()) {
-            // Skip the contract keyword + its predicate up to the next
-            // top-level boundary. Heuristic: consume until newline-ish — we
-            // approximate by skipping tokens until { or end of function.
-            self.advance();
-            // crude scan: keep going until we hit `{` or another contract-
-            // looking ident at column 1 — Phase 34 will replace this.
-            while not self.at_end() and not self.check(formatter_lexer.tk_lbrace()) and not self.check(formatter_lexer.tk_ident()) {
-                self.advance();
+        // Phase 41.1: parse contract clauses (requires/ensures/decreases) that
+        // sit between the signature and the body. They lex as plain idents
+        // (not keywords); each is `<kw> <expr>` with no `;` — parse_expr stops
+        // at the next clause keyword or `{`.
+        let mutable reqs: Array<Expr> = [];
+        let mutable enss: Array<Expr> = [];
+        let mutable decs: Array<Expr> = [];
+        while self.is_contract_kw() and self.error == "" {
+            let kw_tok: Token = self.advance();
+            let kw: String = kw_tok.text;
+            let pred: Expr = self.parse_expr();
+            if kw == "requires" {
+                reqs.push(pred);
+            } else {
+                if kw == "ensures" {
+                    enss.push(pred);
+                } else {
+                    decs.push(pred);
+                }
             }
         }
         let body: Block = self.parse_block();
-        return FunctionDecl(name_tok.text, is_public, is_entry, is_async, false, params, return_type, body, line, cmts);
+        let mutable fd: FunctionDecl = FunctionDecl(name_tok.text, is_public, is_entry, is_async, false, params, return_type, body, line, cmts);
+        fd.requires_clauses = reqs;
+        fd.ensures_clauses = enss;
+        fd.decreases_clauses = decs;
+        return fd;
+    }
+
+    // True when the current token is a contract keyword (`requires` /
+    // `ensures` / `decreases`). They lex as plain identifiers, not keywords.
+    method is_contract_kw() returns Bool {
+        if not self.check(formatter_lexer.tk_ident()) {
+            return false;
+        }
+        let t: String = self.peek_text();
+        return t == "requires" or t == "ensures" or t == "decreases";
     }
 
     // --- statement-level parse -------------------------------------------
@@ -856,11 +877,10 @@ public entity Parser {
         return FunctionDecl("constructor", false, false, false, true, params, "", body, line, no_cmts);
     }
 
-    // `method NAME(params) returns TYPE { body }` — contract clauses are
-    // currently skipped between `returns TYPE` and `{` the same way
-    // parse_function_decl does for top-level functions. Methods live
+    // `method NAME(params) returns TYPE [contracts] { body }`. Methods live
     // inside entity / impl bodies so don't accept leading comments at this
-    // layer (their enclosing decl carries them).
+    // layer (their enclosing decl carries them). Contract clauses (Phase 41.1)
+    // are parsed the same way parse_function_decl does at the top level.
     method parse_method_decl() returns FunctionDecl {
         let method_tok: Token = self.expect(formatter_lexer.kw_method_marker(), "'method'");
         let line: Int = method_tok.line;
@@ -877,9 +897,29 @@ public entity Parser {
         self.expect(formatter_lexer.tk_rparen(), "')' to close method params");
         self.expect(formatter_lexer.kw_returns(), "'returns' after method params");
         let ret: String = self.parse_type_name();
-        self.skip_method_contracts();
+        let mutable reqs: Array<Expr> = [];
+        let mutable enss: Array<Expr> = [];
+        let mutable decs: Array<Expr> = [];
+        while self.is_contract_kw() and self.error == "" {
+            let kw_tok: Token = self.advance();
+            let kw: String = kw_tok.text;
+            let pred: Expr = self.parse_expr();
+            if kw == "requires" {
+                reqs.push(pred);
+            } else {
+                if kw == "ensures" {
+                    enss.push(pred);
+                } else {
+                    decs.push(pred);
+                }
+            }
+        }
         let body: Block = self.parse_block();
-        return FunctionDecl(name_tok.text, false, false, false, false, params, ret, body, line, no_cmts);
+        let mutable md: FunctionDecl = FunctionDecl(name_tok.text, false, false, false, false, params, ret, body, line, no_cmts);
+        md.requires_clauses = reqs;
+        md.ensures_clauses = enss;
+        md.decreases_clauses = decs;
+        return md;
     }
 
     // `invariant { EXPR; EXPR; ... }` — collect the bodies as Exprs.
@@ -893,17 +933,6 @@ public entity Parser {
         }
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close invariant block");
         return exprs;
-    }
-
-    // Crude contract-clause skip — same heuristic as parse_function_decl
-    // uses at the top level. Replaced by a real contract parser in Phase 38+.
-    method skip_method_contracts() returns Void {
-        while self.check(formatter_lexer.tk_ident()) {
-            self.advance();
-            while not self.at_end() and not self.check(formatter_lexer.tk_lbrace()) and not self.check(formatter_lexer.tk_ident()) {
-                self.advance();
-            }
-        }
     }
 
     // `enum NAME { VARIANT, VARIANT, ... }`

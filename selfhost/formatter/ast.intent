@@ -225,6 +225,13 @@ public entity FunctionDecl {
     // token. Populated by the parser from `Token.comments_before`. The
     // formatter emits these on their own lines before each decl.
     field comments_before: Array<String>;
+    // Phase 41.1: contract clauses on functions / methods. Each is the
+    // predicate Expr of a `requires` / `ensures` / `decreases` clause.
+    // Defaulted empty; the parser assigns them after construction. The
+    // formatter emits them between the signature and the opening `{`.
+    field requires_clauses: Array<Expr>;
+    field ensures_clauses: Array<Expr>;
+    field decreases_clauses: Array<Expr>;
 
     constructor(name: String, is_public: Bool, is_entry: Bool, is_async: Bool, is_constructor: Bool, params: Array<Param>, return_type: String, body: Block, line: Int, comments_before: Array<String>) {
         self.name = name;
@@ -237,6 +244,9 @@ public entity FunctionDecl {
         self.body = body;
         self.line = line;
         self.comments_before = comments_before;
+        self.requires_clauses = empty_expr_array();
+        self.ensures_clauses = empty_expr_array();
+        self.decreases_clauses = empty_expr_array();
     }
 }
 
@@ -480,6 +490,14 @@ public entity Program {
 // body can initialise the field without a module prefix.
 public function empty_string_array() returns Array<String> {
     let mutable a: Array<String> = [];
+    return a;
+}
+
+// Empty Array<Expr> — used to default FunctionDecl's contract-clause fields
+// (Phase 41.1) without a bare `[]` literal whose element type can't be
+// inferred at the assignment site.
+public function empty_expr_array() returns Array<Expr> {
+    let mutable a: Array<Expr> = [];
     return a;
 }
 

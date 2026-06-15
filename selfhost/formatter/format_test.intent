@@ -476,6 +476,58 @@ test "brace-after: parser populates Block.brace_comment_after" {
     assert_eq(prog.functions[0].body.brace_comment_after, "// note");
 }
 
+// --- Contract clause tests (Phase 41.1) -------------------------------------
+
+test "contracts: function requires + ensures round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function fib(n: Int) returns Int\n"
+        + "    requires n >= 0\n"
+        + "    ensures result >= 0\n"
+        + '{'.to_string() + "\n    return n;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "contracts: function decreases round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f(n: Int) returns Int\n"
+        + "    decreases n\n"
+        + '{'.to_string() + "\n    return n;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "contracts: method requires + ensures round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "entity E " + '{'.to_string() + "\n"
+        + "    field n: Int;\n"
+        + "\n"
+        + "    method get() returns Int\n"
+        + "        requires self.n >= 0\n"
+        + "        ensures result >= 0\n"
+        + "    " + '{'.to_string() + "\n"
+        + "        return self.n;\n"
+        + "    " + '}'.to_string() + "\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "contracts: parser populates requires/ensures clauses" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function fib(n: Int) returns Int\n"
+        + "    requires n >= 0\n"
+        + "    ensures result >= 0\n"
+        + '{'.to_string() + "\n    return n;\n" + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    let decl: FunctionDecl = prog.functions[0];
+    assert_eq(len(decl.requires_clauses), 1);
+    assert_eq(len(decl.ensures_clauses), 1);
+    assert_eq(formatter_format.format_expr(decl.requires_clauses[0]), "n >= 0");
+    assert_eq(formatter_format.format_expr(decl.ensures_clauses[0]), "result >= 0");
+}
+
 // --- Paren stripping tests (ADR 0043) ---------------------------------------
 
 // Helper: roundtrip a `let x: Int = RHS;` expression and assert the formatter
