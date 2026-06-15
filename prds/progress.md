@@ -328,3 +328,42 @@ PATTERN: [cli-shim-testing] Factor subprocess-exec logic into a function taking 
 binary path, then unit-test with a fake executable (shell script in t.TempDir(),
 0755) that emits fixed bytes + chosen exit code — covers trailing-newline trim and
 non-zero-exit handling without building the real (cargo-dependent) binary.
+
+---
+
+## 2026-06-15 — Phase 42.5: entity invariants (+ constructor contracts + intent blocks)
+
+First harness-driven gap-closing task. The stage2 parser/formatter had a WRONG
+invariant model: a block form `invariant { e; e; }` emitted at the END of the
+entity body. Real Intent (grammar.ebnf:140) is `invariant <expr>;` per clause,
+positioned BETWEEN fields and constructor (stage1 formatter.go formatEntityDecl).
+Fixed: parser parse_invariant_block -> parse_invariant_decl (single expr + `;`);
+formatter emits invariants after fields (blank line if fields existed), one
+`    invariant <expr>;` per line, before the constructor.
+
+To make the 3 target files (bank_account, js_demo, task_queue) FULLY pass, the
+worker also folded in two adjacent constructs those files use (each was the NEXT
+parse error after invariants):
+- Constructor contract clauses: format_constructor_decl now emits
+  requires/ensures/decreases via the existing format_contract_clauses helper
+  (same layout as methods), parser parses them on constructors.
+- Intent blocks: corrected IntentBlock AST (goal_text -> description + goals +
+  constraints + guarantees) and format_intent_block to the real surface form
+  `intent "desc" { goal: ...; constraint: ...; guarantee: ...; verified_by: [...]; }`.
+
+Verified: differential harness 16/22 PASS (was 13), 0 diverged; byte-equal
+self-format EQUAL on all 4 stage2 files (clean single-run probe); stage2 suite
+171/171 on rust AND js. Diff is clean/idiomatic (reuses format_contract_clauses).
+
+PATTERN: [verify-probe-reliability] A hand-written probe that round-trips MULTIPLE
+large stage2 files (format.intent + parser.intent) in ONE `intentc test` process
+gave a spurious partial/abort result (one file stuck pre-format). Single-file
+byte-equal checks were reliable and all returned EQUAL. When a multi-file probe
+shows an anomaly, re-check each file in its OWN test run before concluding a
+regression — don't trust one combined probe.
+
+PATTERN: [gap-closing-scope] Closing one parser gap on a real example often
+unblocks the NEXT construct in the same file (invariant -> constructor contract ->
+intent block). Expect to fold in adjacent constructs to make a target example go
+green; the differential harness's per-file PASS is the true done-signal, not the
+single named construct.

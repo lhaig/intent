@@ -819,6 +819,25 @@ test "self-format: parse + format roundtrip succeeds on all stage2 files" {
     self_format_one("selfhost/formatter/format.intent");
 }
 
+// --- Entity invariant round-trip (Phase 42.5) --------------------------------
+
+// Single-expression `invariant <expr>;` clauses appear between fields and
+// constructor, matching stage1's layout exactly (grammar.ebnf:140).
+test "entity invariant: fields + invariant + constructor round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "entity BankAccount " + '{'.to_string() + "\n"
+        + "    field owner: String;\n"
+        + "    field balance: Int;\n"
+        + "\n"
+        + "    invariant self.balance >= 0;\n"
+        + "\n"
+        + "    constructor(owner: String, initial_balance: Int) " + '{'.to_string() + "\n"
+        + "    " + '}'.to_string() + "\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
 test "dogfood: parse + format hello.intent matches expected canonical form" {
     let r: Result<String, String> = read_file("examples/hello.intent");
     let src: String = match r {

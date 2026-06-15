@@ -518,7 +518,14 @@ public function format_function_decl(fn_decl: FunctionDecl, level: Int) returns 
 public function format_constructor_decl(c: FunctionDecl, level: Int) returns String {
     let pad_open: String = indent_string(level);
     let pad_close: String = indent_string(level);
-    let head: String = pad_open + "constructor(" + format_param_list(c.params) + ") " + '{'.to_string() + "\n";
+    let mutable head: String = pad_open + "constructor(" + format_param_list(c.params) + ")";
+    // Phase 42.5: contract clauses between signature and `{` (same as methods).
+    let contracts: String = format_contract_clauses(c, level + 1);
+    if contracts != "" {
+        head = head + contracts + "\n" + indent_string(level) + '{'.to_string() + "\n";
+    } else {
+        head = head + " " + '{'.to_string() + "\n";
+    }
     let body: String = format_block_body(c.body, level + 1);
     return head + body + pad_close + '}'.to_string() + brace_trail(c.body);
 }
@@ -577,6 +584,16 @@ public function format_entity_decl(e: EntityDecl) returns String {
         body = body + "\n";
         fi = fi + 1;
     }
+    if len(e.invariants) > 0 {
+        if len(e.fields) > 0 {
+            body = body + "\n";
+        }
+        let mutable ii: Int = 0;
+        while ii < len(e.invariants) {
+            body = body + "    invariant " + format_expr(e.invariants[ii]) + ";\n";
+            ii = ii + 1;
+        }
+    }
     if e.has_constructor {
         body = body + "\n";
         let mutable cci: Int = 0;
@@ -597,15 +614,6 @@ public function format_entity_decl(e: EntityDecl) returns String {
         }
         body = body + format_method_decl(m, 1) + "\n";
         mi = mi + 1;
-    }
-    if len(e.invariants) > 0 {
-        body = body + "\n    invariant " + '{'.to_string() + "\n";
-        let mutable ii: Int = 0;
-        while ii < len(e.invariants) {
-            body = body + "        " + format_expr(e.invariants[ii]) + ";\n";
-            ii = ii + 1;
-        }
-        body = body + "    " + '}'.to_string() + "\n";
     }
     return head + body + '}'.to_string();
 }
@@ -676,10 +684,24 @@ public function format_impl_decl(im: ImplDecl) returns String {
 
 // --- Intent block + extern ------------------------------------------------
 public function format_intent_block(ib: IntentBlock) returns String {
-    let mutable s: String = "intent " + '{'.to_string() + "\n";
-    s = s + "    goal: \"" + ib.goal_text + "\";\n";
+    let mutable s: String = "intent \"" + ib.description + "\" " + '{'.to_string() + "\n";
+    let mutable gi: Int = 0;
+    while gi < len(ib.goals) {
+        s = s + "    goal: \"" + ib.goals[gi] + "\";\n";
+        gi = gi + 1;
+    }
+    let mutable ci: Int = 0;
+    while ci < len(ib.constraints) {
+        s = s + "    constraint: \"" + ib.constraints[ci] + "\";\n";
+        ci = ci + 1;
+    }
+    let mutable gti: Int = 0;
+    while gti < len(ib.guarantees) {
+        s = s + "    guarantee: \"" + ib.guarantees[gti] + "\";\n";
+        gti = gti + 1;
+    }
     if len(ib.verifications) > 0 {
-        s = s + "    verified_by: ";
+        s = s + "    verified_by: [";
         let mutable i: Int = 0;
         while i < len(ib.verifications) {
             if i > 0 {
@@ -688,7 +710,7 @@ public function format_intent_block(ib: IntentBlock) returns String {
             s = s + ib.verifications[i];
             i = i + 1;
         }
-        s = s + ";\n";
+        s = s + "];\n";
     }
     s = s + '}'.to_string();
     return s;

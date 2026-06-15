@@ -433,13 +433,19 @@ public entity IntentBlock {
     // `goal` / `verified_by` are Intent reserved words inside the surface
     // grammar's `intent { ... }` block; renamed here to avoid collision
     // when this file is itself parsed.
-    field goal_text: String;
+    field description: String;
+    field goals: Array<String>;
+    field constraints: Array<String>;
+    field guarantees: Array<String>;
     field verifications: Array<String>;
     field line: Int;
     field comments_before: Array<String>;
 
-    constructor(goal_text: String, verifications: Array<String>, line: Int, comments_before: Array<String>) {
-        self.goal_text = goal_text;
+    constructor(description: String, goals: Array<String>, constraints: Array<String>, guarantees: Array<String>, verifications: Array<String>, line: Int, comments_before: Array<String>) {
+        self.description = description;
+        self.goals = goals;
+        self.constraints = constraints;
+        self.guarantees = guarantees;
         self.verifications = verifications;
         self.line = line;
         self.comments_before = comments_before;

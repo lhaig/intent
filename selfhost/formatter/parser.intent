@@ -901,12 +901,7 @@ public entity Parser {
                         methods.push(md);
                     } else {
                         if self.check(formatter_lexer.kw_invariant_marker()) {
-                            let invs: Array<Expr> = self.parse_invariant_block();
-                            let mutable j: Int = 0;
-                            while j < len(invs) {
-                                invariants.push(invs[j]);
-                                j = j + 1;
-                            }
+                            invariants.push(self.parse_invariant_decl());
                         } else {
                             self.fail("expected 'field', 'constructor', 'method', or 'invariant' in entity body");
                             return EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line, cmts);
@@ -931,8 +926,10 @@ public entity Parser {
         return fd;
     }
 
-    // `constructor(params) { body }` — constructors live inside entity
-    // bodies so don't accept leading comments (the entity carries them).
+    // `constructor(params) [requires/ensures] { body }` — constructors live
+    // inside entity bodies so don't accept leading comments (the entity
+    // carries them). Contract clauses (Phase 41.1) are parsed the same way
+    // parse_method_decl does.
     method parse_constructor_decl() returns FunctionDecl {
         let ctor_tok: Token = self.expect(formatter_lexer.kw_constructor_marker(), "'constructor'");
         let line: Int = ctor_tok.line;
@@ -946,8 +943,29 @@ public entity Parser {
             }
         }
         self.expect(formatter_lexer.tk_rparen(), "')' to close constructor params");
+        let mutable reqs: Array<Expr> = [];
+        let mutable enss: Array<Expr> = [];
+        let mutable decs: Array<Expr> = [];
+        while self.is_contract_kw() and self.error == "" {
+            let kw_tok: Token = self.advance();
+            let kw: String = kw_tok.text;
+            let pred: Expr = self.parse_expr();
+            if kw == "requires" {
+                reqs.push(pred);
+            } else {
+                if kw == "ensures" {
+                    enss.push(pred);
+                } else {
+                    decs.push(pred);
+                }
+            }
+        }
         let body: Block = self.parse_block();
-        return FunctionDecl("constructor", false, false, false, true, params, "", body, line, no_cmts);
+        let mutable fd: FunctionDecl = FunctionDecl("constructor", false, false, false, true, params, "", body, line, no_cmts);
+        fd.requires_clauses = reqs;
+        fd.ensures_clauses = enss;
+        fd.decreases_clauses = decs;
+        return fd;
     }
 
     // `method NAME(params) returns TYPE [contracts] { body }`. Methods live
@@ -995,17 +1013,12 @@ public entity Parser {
         return md;
     }
 
-    // `invariant { EXPR; EXPR; ... }` — collect the bodies as Exprs.
-    method parse_invariant_block() returns Array<Expr> {
+    // `invariant EXPR;` — one boolean invariant clause (grammar.ebnf:140).
+    method parse_invariant_decl() returns Expr {
         self.expect(formatter_lexer.kw_invariant_marker(), "'invariant'");
-        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start invariant block");
-        let mutable exprs: Array<Expr> = [];
-        while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
-            exprs.push(self.parse_expr());
-            self.expect(formatter_lexer.tk_semicolon(), "';' after invariant expression");
-        }
-        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close invariant block");
-        return exprs;
+        let e: Expr = self.parse_expr();
+        self.expect(formatter_lexer.tk_semicolon(), "';' after invariant expression");
+        return e;
     }
 
     // `enum NAME { VARIANT, VARIANT, ... }`
@@ -1140,30 +1153,90 @@ public entity Parser {
         return ExternDecl(self.unquote(target_tok.text), name_tok.text, params, ret, line, cmts);
     }
 
-    // `intent "description" { verified_by ident; verified_by ident; ... }`
+    // Parse one dot-separated identifier path in a `verified_by` clause.
+    // Accepts idents and any keyword token whose text can appear in a path
+    // (e.g. `invariant`, `constructor`, `requires`, `ensures`).
+    method parse_intent_ref() returns String {
+        let mutable ref_s: String = "";
+        let first: Token = self.advance();
+        ref_s = ref_s + first.text;
+        while self.check_consume(formatter_lexer.tk_dot()) {
+            let part: Token = self.advance();
+            ref_s = ref_s + "." + part.text;
+        }
+        return ref_s;
+    }
+
+    // `intent "description" { goal: "..."; guarantee: "..."; verified_by: [...]; }`
+    // Handles the full intent block surface grammar (grammar.ebnf:158-173):
+    // clauses are goal / constraint / guarantee / verified_by, each followed by
+    // a colon and terminated with a semicolon. `verified_by` takes a
+    // bracket-delimited comma-separated list of dot-path references.
     method parse_intent_block(leading_comments: Array<String>) returns IntentBlock {
         let intent_tok: Token = self.expect(formatter_lexer.kw_intent_marker(), "'intent'");
         let line: Int = intent_tok.line;
         let cmts: Array<String> = leading_comments;
-        let goal_tok: Token = self.expect(formatter_lexer.tk_string(), "intent goal (string literal)");
+        let desc_tok: Token = self.expect(formatter_lexer.tk_string(), "intent description (string literal)");
         self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start intent block");
+        let mutable goals: Array<String> = [];
+        let mutable constraints: Array<String> = [];
+        let mutable guarantees: Array<String> = [];
         let mutable verifs: Array<String> = [];
         while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
-            // `verified_by` isn't a lexer keyword — it's a regular ident
-            // that we consume by text match. Anything else here is a
-            // parse error.
-            if self.check(formatter_lexer.tk_ident()) and self.peek_text() == "verified_by" {
-                self.advance();
-                let ref_tok: Token = self.expect(formatter_lexer.tk_ident(), "contract identifier after 'verified_by'");
-                self.expect(formatter_lexer.tk_semicolon(), "';' after verified_by clause");
-                verifs.push(ref_tok.text);
+            if self.check(formatter_lexer.tk_ident()) {
+                let kw: String = self.peek_text();
+                if kw == "goal" {
+                    self.advance();
+                    self.check_consume(formatter_lexer.tk_colon());
+                    let s: Token = self.expect(formatter_lexer.tk_string(), "string after 'goal'");
+                    self.expect(formatter_lexer.tk_semicolon(), "';' after goal clause");
+                    goals.push(self.unquote(s.text));
+                } else {
+                    if kw == "constraint" {
+                        self.advance();
+                        self.check_consume(formatter_lexer.tk_colon());
+                        let s: Token = self.expect(formatter_lexer.tk_string(), "string after 'constraint'");
+                        self.expect(formatter_lexer.tk_semicolon(), "';' after constraint clause");
+                        constraints.push(self.unquote(s.text));
+                    } else {
+                        if kw == "guarantee" {
+                            self.advance();
+                            self.check_consume(formatter_lexer.tk_colon());
+                            let s: Token = self.expect(formatter_lexer.tk_string(), "string after 'guarantee'");
+                            self.expect(formatter_lexer.tk_semicolon(), "';' after guarantee clause");
+                            guarantees.push(self.unquote(s.text));
+                        } else {
+                            if kw == "verified_by" {
+                                self.advance();
+                                self.check_consume(formatter_lexer.tk_colon());
+                                if self.check_consume(formatter_lexer.tk_lbracket()) {
+                                    if not self.check(formatter_lexer.tk_rbracket()) {
+                                        verifs.push(self.parse_intent_ref());
+                                        while self.check_consume(formatter_lexer.tk_comma()) {
+                                            if not self.check(formatter_lexer.tk_rbracket()) {
+                                                verifs.push(self.parse_intent_ref());
+                                            }
+                                        }
+                                    }
+                                    self.expect(formatter_lexer.tk_rbracket(), "']' to close verified_by list");
+                                } else {
+                                    verifs.push(self.parse_intent_ref());
+                                }
+                                self.expect(formatter_lexer.tk_semicolon(), "';' after verified_by clause");
+                            } else {
+                                self.fail("unexpected identifier '" + kw + "' in intent block");
+                                return IntentBlock(self.unquote(desc_tok.text), goals, constraints, guarantees, verifs, line, cmts);
+                            }
+                        }
+                    }
+                }
             } else {
-                self.fail("expected 'verified_by' clause in intent block");
-                return IntentBlock(self.unquote(goal_tok.text), verifs, line, cmts);
+                self.fail("expected clause keyword in intent block");
+                return IntentBlock(self.unquote(desc_tok.text), goals, constraints, guarantees, verifs, line, cmts);
             }
         }
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close intent block");
-        return IntentBlock(self.unquote(goal_tok.text), verifs, line, cmts);
+        return IntentBlock(self.unquote(desc_tok.text), goals, constraints, guarantees, verifs, line, cmts);
     }
 }
 
@@ -1791,8 +1864,8 @@ test "entity with method" {
     assert_eq(e.methods[0].is_constructor, false);
 }
 
-test "entity with invariant block" {
-    let src: String = "module m version \"1.0\"; entity Bounded " + '{'.to_string() + " field n: Int; " + " invariant " + '{'.to_string() + " self.n >= 0; self.n < 100; " + '}'.to_string() + " " + '}'.to_string();
+test "entity with invariant clauses" {
+    let src: String = "module m version \"1.0\"; entity Bounded " + '{'.to_string() + " field n: Int; invariant self.n >= 0; invariant self.n < 100; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: EntityDecl = prog.entities[0];
@@ -1875,13 +1948,17 @@ test "extern declaration captures target + signature" {
     assert_eq(e.return_type, "Void");
 }
 
-test "intent block captures goal and verified_by refs" {
-    let src: String = "module m version \"1.0\"; intent \"non-negative balance\" " + '{'.to_string() + " verified_by ensures_positive; verified_by no_overdraft; " + '}'.to_string();
+test "intent block captures description, goal, guarantee, and verified_by refs" {
+    let src: String = "module m version \"1.0\"; intent \"non-negative balance\" " + '{'.to_string() + " goal: \"balance is always >= 0\"; guarantee: \"no overdraft possible\"; verified_by: [ensures_positive, no_overdraft]; " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.intent_blocks), 1);
     let ib: IntentBlock = prog.intent_blocks[0];
-    assert_eq(ib.goal_text, "non-negative balance");
+    assert_eq(ib.description, "non-negative balance");
+    assert_eq(len(ib.goals), 1);
+    assert_eq(ib.goals[0], "balance is always >= 0");
+    assert_eq(len(ib.guarantees), 1);
+    assert_eq(ib.guarantees[0], "no overdraft possible");
     assert_eq(len(ib.verifications), 2);
     assert_eq(ib.verifications[0], "ensures_positive");
     assert_eq(ib.verifications[1], "no_overdraft");
