@@ -1,0 +1,47 @@
+// selfhost/formatter/main.intent — Phase 42 / ADR 0040 stage2 runnable formatter.
+//
+// The stage2 formatter as an invokable CLI tool. Reads a single file path from
+// args()[1] (ADR 0045), reads the file, parses it, and prints the canonical
+// formatted source to stdout.
+//
+// Output note: print() lowers to println!/console.log, which append a trailing
+// newline. So stdout is exactly `format_program(...) + "\n"`. Callers that need
+// byte-exact output (intentc fmt --self-hosted) strip one trailing newline.
+//
+// Exit codes:
+//   0  formatted output printed
+//   1  usage error (no file argument)
+//   2  file could not be read
+//   3  parse error (the source is not valid Intent the stage2 parser accepts)
+module formatter_main version "0.1.0";
+
+import "format.intent";
+import "parser.intent";
+import "ast.intent";
+import "lexer.intent";
+
+entry function main() returns Int {
+    let argv: Array<String> = args();
+    if len(argv) < 2 {
+        print("usage: intent-fmt <file.intent>");
+        return 1;
+    }
+    let path: String = argv[1];
+    let r: Result<String, String> = read_file(path);
+    if r.is_err() {
+        print("error: cannot read file: " + path);
+        return 2;
+    }
+    let src: String = match r {
+        Ok(s) => s,
+        Err(_) => "",
+    };
+    let prog: Program = formatter_parser.parse(src);
+    if prog.error != "" {
+        print("parse error: " + prog.error);
+        return 3;
+    }
+    let out: String = formatter_format.format_program(prog);
+    print(out);
+    return 0;
+}

@@ -853,6 +853,59 @@ entry function main() returns Int {
 	}
 }
 
+// TestEntryFunctionInImportedModuleNoDuplicateMain guards against a multi-file
+// build emitting two `fn main`/`__intent_main` when an imported (non-entry)
+// module declares an `entry` function (e.g. selfhost/formatter/parser.intent's
+// standalone entry stub). The imported entry function must be demoted to an
+// ordinary prefixed function; only the entry module produces the program main.
+func TestEntryFunctionInImportedModuleNoDuplicateMain(t *testing.T) {
+	prog := &ir.Program{
+		Modules: []*ir.Module{
+			{
+				Name:    "helper",
+				IsEntry: false,
+				Functions: []*ir.Function{
+					{
+						Name:       "main",
+						IsEntry:    true, // imported module's standalone entry stub
+						ReturnType: &checker.Type{Name: "Int"},
+						Body: []ir.Stmt{
+							&ir.ReturnStmt{Value: &ir.IntLit{Value: 0, Type: &checker.Type{Name: "Int"}}},
+						},
+					},
+				},
+			},
+			{
+				Name:    "main",
+				IsEntry: true,
+				Functions: []*ir.Function{
+					{
+						Name:       "__intent_main",
+						IsEntry:    true,
+						ReturnType: &checker.Type{Name: "Int"},
+						Body: []ir.Stmt{
+							&ir.ReturnStmt{Value: &ir.IntLit{Value: 0, Type: &checker.Type{Name: "Int"}}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	output := GenerateAll(prog, Options{})
+
+	if got := strings.Count(output, "fn main()"); got != 1 {
+		t.Errorf("expected exactly one `fn main()`, got %d:\n%s", got, output)
+	}
+	if got := strings.Count(output, "fn __intent_main()"); got != 1 {
+		t.Errorf("expected exactly one `fn __intent_main()`, got %d:\n%s", got, output)
+	}
+	// The imported module's entry function must be demoted to a prefixed fn.
+	if !strings.Contains(output, "helper_main(") {
+		t.Errorf("expected imported entry function demoted to `helper_main`, got:\n%s", output)
+	}
+}
+
 func TestGenerateModuleManglingNoCollision(t *testing.T) {
 	// Collision scenario: package named "math" contains module "math"
 	// (math/math.intent), AND a separate package named "strings_pkg"

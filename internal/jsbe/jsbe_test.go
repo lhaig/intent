@@ -340,6 +340,54 @@ func TestGenerateAll(t *testing.T) {
 	}
 }
 
+// TestEntryFunctionInImportedModuleNoDuplicateMainJS is the JS counterpart of
+// the rustbe test: an imported (non-entry) module that declares an `entry`
+// function must not emit a second __intent_main definition.
+func TestEntryFunctionInImportedModuleNoDuplicateMainJS(t *testing.T) {
+	prog := &ir.Program{
+		Modules: []*ir.Module{
+			{
+				Name:    "helper",
+				IsEntry: false,
+				Functions: []*ir.Function{
+					{
+						Name:       "main",
+						IsEntry:    true, // imported module's standalone entry stub
+						ReturnType: &checker.Type{Name: "Int"},
+						Body: []ir.Stmt{
+							&ir.ReturnStmt{Value: &ir.IntLit{Value: 0, Type: &checker.Type{Name: "Int"}}},
+						},
+					},
+				},
+			},
+			{
+				Name:    "main",
+				IsEntry: true,
+				Functions: []*ir.Function{
+					{
+						Name:       "__intent_main",
+						IsEntry:    true,
+						ReturnType: &checker.Type{Name: "Int"},
+						Body: []ir.Stmt{
+							&ir.ReturnStmt{Value: &ir.IntLit{Value: 0, Type: &checker.Type{Name: "Int"}}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := GenerateAll(prog, Options{})
+
+	if got := strings.Count(result, "function __intent_main()"); got != 1 {
+		t.Errorf("expected exactly one `function __intent_main()`, got %d:\n%s", got, result)
+	}
+	// The imported module's entry function must be demoted to a prefixed fn.
+	if !strings.Contains(result, "function helper_main(") {
+		t.Errorf("expected imported entry function demoted to `helper_main`, got:\n%s", result)
+	}
+}
+
 func TestGenerateStringInterp(t *testing.T) {
 	mod := &ir.Module{
 		Name:    "test",

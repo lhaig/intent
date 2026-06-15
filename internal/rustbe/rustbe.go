@@ -28,6 +28,9 @@ func Generate(mod *ir.Module, opts Options) string {
 		functions:      make(map[string]*ir.Function),
 		externs:        make(map[string]*ir.ExternFunction),
 		stripContracts: opts.StripContracts,
+		// Single-file generation: the sole module is the program entry, so an
+		// `entry` function here becomes the program main.
+		isEntryFile: true,
 	}
 
 	for _, e := range mod.Entities {
@@ -562,7 +565,11 @@ func (g *generator) mangledEnumName(name string) string {
 
 func (g *generator) generateFunction(f *ir.Function) {
 	g.mutatedVars = collectMutatedVars(f.Body)
-	if f.IsEntry {
+	// An `entry` function only becomes the program entry point (fn main) in the
+	// entry module. When an imported (non-entry) module declares an entry
+	// function, emit it as an ordinary prefixed function so multi-file builds
+	// don't produce a duplicate `main`/`__intent_main`.
+	if f.IsEntry && g.isEntryFile {
 		if f.IsAsync {
 			g.needsTokio = true
 			g.emitLine("async fn __intent_main() -> i64 {")

@@ -26,6 +26,11 @@ func Generate(mod *ir.Module, opts Options) string {
 		enums:          make(map[string]*ir.Enum),
 		functions:      make(map[string]*ir.Function),
 		stripContracts: opts.StripContracts,
+		// Single-file generation: the sole module is the program entry, so an
+		// `entry` function here becomes the program main definition. (The entry
+		// *invocation* remains gated on mod.IsEntry below, so GenerateForTest —
+		// which clears IsEntry — still suppresses the call.)
+		isEntryFile: true,
 	}
 
 	for _, e := range mod.Entities {
@@ -465,7 +470,11 @@ func (g *generator) generateTest(t *ir.Test) {
 }
 
 func (g *generator) generateFunction(f *ir.Function) {
-	if f.IsEntry {
+	// An `entry` function only becomes the program entry point (__intent_main)
+	// in the entry module. When an imported (non-entry) module declares an entry
+	// function, emit it as an ordinary prefixed function so multi-file builds
+	// don't produce a duplicate __intent_main.
+	if f.IsEntry && g.isEntryFile {
 		g.emitLine("/**")
 		g.emitLine(" * Entry function")
 		g.emitLine(" * @returns {number}")

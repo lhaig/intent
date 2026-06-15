@@ -236,3 +236,36 @@ PATTERN: [builtin-plumbing] A new builtin needs all three layers atomically:
 checker (type rule + arity), IR resolveCallKind (add to CallBuiltin list, else it's
 treated as a user call), and each backend's generateBuiltinCall switch. Missing a
 layer = distinct failure (unknown fn / unresolved call kind / fallback sprintf).
+
+---
+
+## 2026-06-15 — Phase 42.2: runnable main.intent + stage1 entry-dedup fix
+
+selfhost/formatter/main.intent: entry function main() reads args()[1], read_file,
+parse, format_program, print. Exit codes 0 ok / 1 usage / 2 read-error / 3 parse-
+error. print lowers to println!/console.log (adds one trailing newline), so stdout
+= format_program(...) + "\n"; callers strip one trailing newline. Verified: built
+on rust AND js, run on examples/hello.intent → byte-equal modulo one trailing
+newline (140 vs 139 bytes); missing-file → exit 2, no-arg → exit 1.
+
+Discovered + fixed a latent stage1 multi-file bug: rustbe/jsbe generateFunction
+emitted the `fn main`/`__intent_main` wrapper for ANY function marked `entry`,
+even in an imported (non-entry) module — so importing parser.intent (which carries
+a standalone `entry function main` stub) produced a DUPLICATE main and the build
+failed (rust E0428). Fix: gate the entry wrapper on `f.IsEntry && g.isEntryFile`,
+so an entry fn in an imported module is demoted to an ordinary prefixed function
+(e.g. formatter_parser_main); only the entry module's entry fn becomes the program
+main. Single-file Generate() now sets isEntryFile:true (a single-file program is
+its own entry); jsbe GenerateForTest clears mod.IsEntry so the invocation stays
+suppressed in test mode (definition still emitted, unchanged). +1 regression test
+each in rustbe/jsbe (TestEntryFunctionInImportedModuleNoDuplicateMain[JS]).
+
+Verified no regression: full `go test ./...` green; stage2 suite 170/170 on rust
+AND js; byte-equal self-format EQUAL on all 4 stage2 files (absolute-path probe).
+
+PATTERN: [stage1-multifile] An `entry` function only becomes the program entry in
+the ENTRY module. Imported modules that declare `entry function main` (standalone
+stubs) must have it demoted to a regular prefixed function, else multi-file builds
+emit a duplicate main. Gate entry-wrapper emission on f.IsEntry && g.isEntryFile;
+single-file Generate sets isEntryFile=true. Relevant as the self-hosted compiler
+will import many modules.
