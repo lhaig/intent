@@ -97,6 +97,22 @@ is suppressed — `write_file` to an absolute path to surface diagnostics.
 
 ---
 
+## 2026-06-15 — Phase 40A.3 (real-file byte-equal): 40A.3.1, .2, .3, .5
+
+- 40A.3.1 (module-leading comments): ModuleDecl.comments_before from the module token;
+  format_program emits before the module line. Done myself; 149/149. Commit ada3c4d.
+- 40A.3.2/.3/.5 (entity field + method/ctor comments, inline-after on fields): delegated
+  to a Sonnet worker; advisor designed + reviewed + re-verified. FieldDecl gains
+  comments_before + comment_after; entity/impl parse loops capture leading comments per
+  member from the current token; format_entity_decl/format_impl_decl emit them (4-space
+  indent) and field comment_after (single space). FunctionDecl.comments_before reused for
+  methods/ctor. 4 new tests; 153/153 rust+js. Code review PASS.
+
+Remaining in 40A.3: 40A.3.4 (end-of-block comments before `}`) and 40A.3.6 (canonicalize
+the 4 stage2 files + add the real-file byte-equal gate).
+
+---
+
 ## 2026-06-15 — Remove aiki block from CLAUDE.md / AGENTS.md
 
 Replaced the ~500-line `<aiki>` instruction block in `AGENTS.md` (the real target of

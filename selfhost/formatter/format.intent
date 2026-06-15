@@ -412,15 +412,38 @@ public function format_entity_decl(e: EntityDecl) returns String {
     let mutable body: String = "";
     let mutable fi: Int = 0;
     while fi < len(e.fields) {
-        body = body + "    field " + e.fields[fi].name + ": " + e.fields[fi].type_name + ";\n";
+        let f: FieldDecl = e.fields[fi];
+        let mutable fci: Int = 0;
+        while fci < len(f.comments_before) {
+            body = body + "    " + f.comments_before[fci] + "\n";
+            fci = fci + 1;
+        }
+        body = body + "    field " + f.name + ": " + f.type_name + ";";
+        if f.comment_after != "" {
+            body = body + " " + f.comment_after;
+        }
+        body = body + "\n";
         fi = fi + 1;
     }
     if e.has_constructor {
-        body = body + "\n" + format_constructor_decl(e.ctor, 1) + "\n";
+        body = body + "\n";
+        let mutable cci: Int = 0;
+        while cci < len(e.ctor.comments_before) {
+            body = body + "    " + e.ctor.comments_before[cci] + "\n";
+            cci = cci + 1;
+        }
+        body = body + format_constructor_decl(e.ctor, 1) + "\n";
     }
     let mutable mi: Int = 0;
     while mi < len(e.methods) {
-        body = body + "\n" + format_method_decl(e.methods[mi], 1) + "\n";
+        body = body + "\n";
+        let m: FunctionDecl = e.methods[mi];
+        let mutable mci: Int = 0;
+        while mci < len(m.comments_before) {
+            body = body + "    " + m.comments_before[mci] + "\n";
+            mci = mci + 1;
+        }
+        body = body + format_method_decl(m, 1) + "\n";
         mi = mi + 1;
     }
     if len(e.invariants) > 0 {
@@ -487,7 +510,13 @@ public function format_impl_decl(im: ImplDecl) returns String {
         if i > 0 {
             body = body + "\n";
         }
-        body = body + format_method_decl(im.methods[i], 1) + "\n";
+        let m: FunctionDecl = im.methods[i];
+        let mutable mci: Int = 0;
+        while mci < len(m.comments_before) {
+            body = body + "    " + m.comments_before[mci] + "\n";
+            mci = mci + 1;
+        }
+        body = body + format_method_decl(m, 1) + "\n";
         i = i + 1;
     }
     return head + body + '}'.to_string();

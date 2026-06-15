@@ -210,10 +210,16 @@ public entity ModuleDecl {
 public entity FieldDecl {
     field name: String;
     field type_name: String;
+    // ADR 0044 (Phase 40A.3): leading comments before this field, and an
+    // inline comment after its `;`. Defaulted; the parser assigns them.
+    field comments_before: Array<String>;
+    field comment_after: String;
 
     constructor(name: String, type_name: String) {
         self.name = name;
         self.type_name = type_name;
+        self.comments_before = empty_string_array();
+        self.comment_after = "";
     }
 }
 

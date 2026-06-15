@@ -383,6 +383,57 @@ test "module-leading: parser populates ModuleDecl.comments_before" {
     assert_eq(prog.module_decl.comments_before[0], "// Header.");
 }
 
+// --- Entity field / method comment tests (Phase 40A.3 / ADR 0044) -----------
+
+// AC1: a leading comment before a field survives roundtrip.
+test "entity comments: leading comment before field survives roundtrip" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "entity E " + '{'.to_string() + "\n"
+        + "    // count\n"
+        + "    field n: Int;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+// AC2: an inline-after comment on a field survives roundtrip.
+test "entity comments: inline-after comment on field survives roundtrip" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "entity E " + '{'.to_string() + "\n"
+        + "    field n: Int; // the count\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+// AC3: a leading comment before a method survives roundtrip.
+test "entity comments: leading comment before method survives roundtrip" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "entity E " + '{'.to_string() + "\n"
+        + "    field n: Int;\n\n"
+        + "    // doc\n"
+        + "    method get() returns Int " + '{'.to_string() + "\n"
+        + "        return self.n;\n"
+        + "    " + '}'.to_string() + "\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+// AC4: parser populates FieldDecl.comments_before and FieldDecl.comment_after.
+test "entity comments: parser populates FieldDecl comments_before and comment_after" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "entity E " + '{'.to_string() + "\n"
+        + "    // count\n"
+        + "    field n: Int; // inline\n"
+        + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.entities[0].fields[0].comments_before), 1);
+    assert_eq(prog.entities[0].fields[0].comments_before[0], "// count");
+    assert_eq(prog.entities[0].fields[0].comment_after, "// inline");
+}
+
 // --- Paren stripping tests (ADR 0043) ---------------------------------------
 
 // Helper: roundtrip a `let x: Int = RHS;` expression and assert the formatter

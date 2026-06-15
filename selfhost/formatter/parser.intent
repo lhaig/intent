@@ -760,14 +760,23 @@ public entity Parser {
         let mutable invariants: Array<Expr> = [];
         while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
             if self.check(formatter_lexer.kw_field_marker()) {
-                fields.push(self.parse_field_decl());
+                let fcmts: Array<String> = self.tokens[self.position].comments_before;
+                let mutable fd: FieldDecl = self.parse_field_decl();
+                fd.comments_before = fcmts;
+                fields.push(fd);
             } else {
                 if self.check(formatter_lexer.kw_constructor_marker()) {
-                    ctor = self.parse_constructor_decl();
+                    let ccmts: Array<String> = self.tokens[self.position].comments_before;
+                    let mutable cd: FunctionDecl = self.parse_constructor_decl();
+                    cd.comments_before = ccmts;
+                    ctor = cd;
                     has_ctor = true;
                 } else {
                     if self.check(formatter_lexer.kw_method_marker()) {
-                        methods.push(self.parse_method_decl());
+                        let mcmts: Array<String> = self.tokens[self.position].comments_before;
+                        let mutable md: FunctionDecl = self.parse_method_decl();
+                        md.comments_before = mcmts;
+                        methods.push(md);
                     } else {
                         if self.check(formatter_lexer.kw_invariant_marker()) {
                             let invs: Array<Expr> = self.parse_invariant_block();
@@ -794,8 +803,10 @@ public entity Parser {
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "field name");
         self.expect(formatter_lexer.tk_colon(), "':' after field name");
         let type_name: String = self.parse_type_name();
-        self.expect(formatter_lexer.tk_semicolon(), "';' after field declaration");
-        return FieldDecl(name_tok.text, type_name);
+        let semi: Token = self.expect(formatter_lexer.tk_semicolon(), "';' after field declaration");
+        let mutable fd: FieldDecl = FieldDecl(name_tok.text, type_name);
+        fd.comment_after = semi.comment_after;
+        return fd;
     }
 
     // `constructor(params) { body }` — constructors live inside entity
@@ -957,7 +968,10 @@ public entity Parser {
         self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start impl body");
         let mutable methods: Array<FunctionDecl> = [];
         while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
-            methods.push(self.parse_method_decl());
+            let mcmts: Array<String> = self.tokens[self.position].comments_before;
+            let mutable md: FunctionDecl = self.parse_method_decl();
+            md.comments_before = mcmts;
+            methods.push(md);
         }
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close impl body");
         return ImplDecl(trait_tok.text, entity_tok.text, methods, line, cmts);
