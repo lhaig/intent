@@ -317,6 +317,15 @@ public function kw_spawn_marker() returns Int {
     return 78;
 }
 
+// Phase 43: `forall` / `exists` quantifier expressions.
+public function kw_forall_marker() returns Int {
+    return 79;
+}
+
+public function kw_exists_marker() returns Int {
+    return 80;
+}
+
 public function tk_eof() returns Int {
     return 98;
 }
@@ -409,6 +418,12 @@ public function keyword_kind(text: String) returns Int {
     }
     if text == "spawn" {
         return kw_spawn_marker();
+    }
+    if text == "forall" {
+        return kw_forall_marker();
+    }
+    if text == "exists" {
+        return kw_exists_marker();
     }
     if text == "entity" {
         return kw_entity_marker();

@@ -399,3 +399,14 @@ newline, diff), NOT via an in-language `intentc test` probe — libtest's small
 per-test thread stack overflows on the 95KB parser.intent and aborts. The earlier
 "stack overflow blocker" was an artifact of this verification method, not the
 formatter. Real usage (`intentc fmt --self-hosted`) is fine.
+
+---
+
+## 2026-06-16 — Phase 42.6: forall/exists quantifiers
+
+ex_forall/ex_exists expression kinds (name=loop var, children=[domain, body]).
+parse_quantifier in parse_primary: `forall <id> in <range>: <expr>` (`in` consumed
+as a plain ident, matching for-loops; domain via parse_range; `:` = tk_colon).
+format_expr_inner emits `forall <v> in <domain>: <body>`; expr_precedence=1.
++3 round-trip tests. sorted_check PASS → 19/22, 0 diverged. Stage2 suite 178/178
+rust+js. selfcheck-formatter: all 4 EQUAL. Clean (no scope expansion).

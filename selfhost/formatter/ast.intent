@@ -122,6 +122,14 @@ public function ex_spawn() returns Int {
     return 18;
 } // children=[inner]; prefix `spawn <inner>` (Phase 42)
 
+public function ex_forall() returns Int {
+    return 19;
+} // name=var, children=[domain, body]; `forall var in domain: body` (Phase 43)
+
+public function ex_exists() returns Int {
+    return 20;
+} // name=var, children=[domain, body]; `exists var in domain: body` (Phase 43)
+
 // --- Shared AST entities ----------------------------------------------------
 public entity Param {
     field name: String;

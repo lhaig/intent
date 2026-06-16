@@ -179,6 +179,12 @@ public function expr_precedence(e: Expr) returns Int {
     if e.kind == formatter_ast.ex_range() {
         return 6;
     }
+    if e.kind == formatter_ast.ex_forall() {
+        return 1;
+    }
+    if e.kind == formatter_ast.ex_exists() {
+        return 1;
+    }
     if e.kind == formatter_ast.ex_paren() {
         // The paren itself is a primary, but for stripping purposes its
         // effective precedence is what the wrapped expr would be.
@@ -338,6 +344,15 @@ public function format_expr_inner(e: Expr) returns String {
         // means a match in a non-statement position (e.g. a call arg) — fall
         // back to level 0.
         return format_match(e, 0);
+    }
+    if e.kind == formatter_ast.ex_forall() {
+        // Phase 43: `forall VAR in DOMAIN: BODY`.
+        // domain (children[0]) is a range; body (children[1]) is an expr.
+        return "forall " + e.name + " in " + format_expr(e.children[0]) + ": " + format_expr(e.children[1]);
+    }
+    if e.kind == formatter_ast.ex_exists() {
+        // Phase 43: `exists VAR in DOMAIN: BODY`.
+        return "exists " + e.name + " in " + format_expr(e.children[0]) + ": " + format_expr(e.children[1]);
     }
     // Unknown kind — emit a placeholder so the formatter doesn't silently
     // drop. Phase 41+ will tighten this.

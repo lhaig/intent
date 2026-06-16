@@ -685,6 +685,12 @@ public entity Parser {
         if kind == formatter_lexer.kw_match_marker() {
             return self.parse_match_expr();
         }
+        if kind == formatter_lexer.kw_forall_marker() {
+            return self.parse_quantifier(formatter_ast.ex_forall());
+        }
+        if kind == formatter_lexer.kw_exists_marker() {
+            return self.parse_quantifier(formatter_ast.ex_exists());
+        }
         if kind == formatter_lexer.tk_int() {
             let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
@@ -789,6 +795,24 @@ public entity Parser {
         let body: Expr = self.parse_expr();
         self.check_consume(formatter_lexer.tk_comma());
         return MatchArm(variant, bindings, is_wild, body);
+    }
+
+    // Phase 43: `forall VAR in LO..HI: BODY` and `exists VAR in LO..HI: BODY`.
+    // `forall`/`exists` are keywords (kw_forall_marker/kw_exists_marker); `in`
+    // lexes as a plain identifier (tk_ident); `..` is tk_dotdot; `:` is tk_colon.
+    // domain is parsed via parse_range (lo..hi); body is a full parse_expr.
+    // Stored in Expr.name (loop variable) and Expr.children = [domain, body].
+    method parse_quantifier(kind: Int) returns Expr {
+        self.advance();
+        let var_tok: Token = self.expect(formatter_lexer.tk_ident(), "quantifier variable");
+        self.expect(formatter_lexer.tk_ident(), "'in' in quantifier");
+        let domain: Expr = self.parse_range();
+        self.expect(formatter_lexer.tk_colon(), "':' in quantifier");
+        let body: Expr = self.parse_expr();
+        let mutable children: Array<Expr> = [];
+        children.push(domain);
+        children.push(body);
+        return Expr(kind, 0, "", false, var_tok.text, children);
     }
 
     method parse_program() returns Program {

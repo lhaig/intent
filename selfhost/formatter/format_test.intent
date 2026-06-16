@@ -885,6 +885,47 @@ test "await: parser produces ex_await wrapping inner expr" {
     assert_eq(rhs.children[0].kind, formatter_ast.ex_call());
 }
 
+// --- forall / exists quantifier tests (Phase 43) ----------------------------
+
+test "forall: round-trip in requires clause" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f(arr: Array<Int>) returns Bool\n"
+        + "    requires forall i in 0..n: arr[i] > 0\n"
+        + '{'.to_string() + "\n"
+        + "    return true;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "exists: round-trip in requires clause" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f(arr: Array<Int>) returns Bool\n"
+        + "    requires exists i in 0..n: arr[i] > 0\n"
+        + '{'.to_string() + "\n"
+        + "    return true;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "forall: parser produces ex_forall with correct variable name" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f(arr: Array<Int>) returns Bool\n"
+        + "    requires forall i in 0..n: arr[i] > 0\n"
+        + '{'.to_string() + "\n"
+        + "    return true;\n"
+        + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    let decl: FunctionDecl = prog.functions[0];
+    assert_eq(len(decl.requires_clauses), 1);
+    let e: Expr = decl.requires_clauses[0];
+    assert_eq(e.kind, formatter_ast.ex_forall());
+    assert_eq(e.name, "i");
+    assert_eq(len(e.children), 2);
+}
+
 test "dogfood: parse + format hello.intent matches expected canonical form" {
     let r: Result<String, String> = read_file("examples/hello.intent");
     let src: String = match r {
