@@ -448,3 +448,23 @@ Array<Param> field (defaulted in ctor body via empty_param_array(), no signature
 change); parse_lambda parses `|name: type, ...| [-> Ret] => body`; format_expr_inner
 emits it. +6 tests (+2 lexer). closure_demo PASS → 21/22, 0 diverged. Stage2 suite
 198/198 rust+js. selfcheck: all 4 EQUAL.
+
+---
+
+## 2026-06-16 — Phase 42.11: test attributes; CORPUS 22/22 COMPLETE
+
+TestDecl.annotations: Array<String> (defaulted via empty_string_array() in ctor
+body). parse_program handles leading `@` (tk_at already lexed): parse_test_annotations
+loops `@name("a", ...)` building canonical strings, then dispatches to the (async)
+test and sets annotations. format_test_decl emits each annotation on its own line
+before the header (empty list = no-op, byte-equal preserved). +5 tests.
+
+MILESTONE: differential harness 22/22 PASS, 0 diverged, 0 parse-err — the ENTIRE
+examples corpus now formats byte-identically to stage1 `intentc fmt`. Stage2 suite
+203/203 rust+js. selfcheck-formatter: all 4 stage2 files EQUAL. Phase 42 parser-gap
+closing complete (42.5-42.11).
+
+PATTERN: [intent-ctor-field-init] In stage2 Intent, initialize a non-primitive
+field in a constructor body with a direct helper CALL (= empty_string_array()), not
+a local variable — the rust backend emits the struct literal before constructor body
+statements, so a local referenced in a field init isn't in scope yet.

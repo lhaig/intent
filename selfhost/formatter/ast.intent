@@ -494,6 +494,9 @@ public entity TestDecl {
     field comments_before: Array<String>;
     // Phase 42: `async test "..." { ... }` — the async modifier.
     field is_async: Bool;
+    // Phase 44: `@name("arg", ...)` annotations before the test keyword.
+    // Each element is the full canonical annotation string, e.g. `@target_specific("rust", "js")`.
+    field annotations: Array<String>;
 
     constructor(name: String, body: Block, line: Int, comments_before: Array<String>) {
         self.name = name;
@@ -501,6 +504,7 @@ public entity TestDecl {
         self.line = line;
         self.comments_before = comments_before;
         self.is_async = false;
+        self.annotations = empty_string_array();
     }
 }
 

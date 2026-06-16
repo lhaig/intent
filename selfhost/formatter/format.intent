@@ -513,11 +513,17 @@ public function format_method_decl(m: FunctionDecl, level: Int) returns String {
 }
 
 public function format_test_decl(t: TestDecl) returns String {
+    let mutable out: String = "";
+    let mutable ai: Int = 0;
+    while ai < len(t.annotations) {
+        out = out + t.annotations[ai] + "\n";
+        ai = ai + 1;
+    }
     let mutable prefix: String = "";
     if t.is_async {
         prefix = "async ";
     }
-    let mutable out: String = prefix + "test \"" + t.name + "\" " + '{'.to_string() + "\n";
+    out = out + prefix + "test \"" + t.name + "\" " + '{'.to_string() + "\n";
     out = out + format_block_body(t.body, 1);
     out = out + '}'.to_string() + brace_trail(t.body);
     return out;

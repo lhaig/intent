@@ -1070,3 +1070,63 @@ test "lambda: dogfood closure_demo.intent round-trips byte-equal" {
         assert_eq(out, src);
     }
 }
+
+// --- Test annotation tests (Phase 44) ----------------------------------------
+
+test "annotations: single-arg @target_specific round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "@target_specific(\"rust\")\n"
+        + "test \"rust-only\" " + '{'.to_string() + "\n"
+        + "    assert(true);\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "annotations: two-arg @target_specific round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "@target_specific(\"rust\", \"js\")\n"
+        + "test \"rust or js\" " + '{'.to_string() + "\n"
+        + "    assert(true);\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "annotations: parser captures annotation string on TestDecl" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "@target_specific(\"rust\", \"js\")\n"
+        + "test \"annotated\" " + '{'.to_string() + "\n"
+        + "    assert(true);\n"
+        + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.tests), 1);
+    let t: TestDecl = prog.tests[0];
+    assert_eq(len(t.annotations), 1);
+    assert_eq(t.annotations[0], "@target_specific(\"rust\", \"js\")");
+}
+
+test "annotations: test without annotation has empty annotations list" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "test \"plain\" " + '{'.to_string() + "\n"
+        + "    assert(true);\n"
+        + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.tests), 1);
+    let t: TestDecl = prog.tests[0];
+    assert_eq(len(t.annotations), 0);
+}
+
+test "annotations: dogfood target_specific_demo.intent round-trips byte-equal" {
+    let r: Result<String, String> = read_file("examples/target_specific_demo.intent");
+    let src: String = match r {
+        Ok(s) => s,
+        Err(_) => "",
+    };
+    if src != "" {
+        let out: String = roundtrip(src);
+        assert_eq(out, src);
+    }
+}

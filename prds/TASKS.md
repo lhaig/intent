@@ -77,7 +77,7 @@ Baseline: 12/22 examples already byte-equal (= agree with `intentc fmt`). See
 | 42.8 | Gap: generic type params on declarations `<T>` + generic instantiation | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | DONE (2026-06-16) | EntityDecl/FunctionDecl type_params (defaulted in ctor body, no call-site churn); Ident<Args>( disambiguation via lookahead; generic_stack PASS; 20/22 |
 | 42.9 | Gap: `Fn(...) -> T` types + lambdas | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | DONE (2026-06-16) | tk_thin_arrow `->`; Fn type in parse_type_name; ex_lambda (lambda_params field); closure_demo PASS; 21/22 |
 | 42.10 | Gap: `await` (+`spawn`, `async test`, async-modifier order) | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | DONE (2026-06-16) | ex_await/ex_spawn; async test in parse_program; fixed modifier order; async_demo PASS |
-| 42.11 | Gap: attributes `@name(args)` | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | TODO | target_specific_demo |
+| 42.11 | Gap: attributes `@name(args)` | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | DONE (2026-06-16) | TestDecl.annotations; parse before test in parse_program; target_specific_demo PASS; 22/22 corpus |
 | 42.12 | char_string_demo: compare vs stage1 output; confirm or file follow-up | [phase-42-formatter-cli-differential.md](active/phase-42-formatter-cli-differential.md) | DONE (2026-06-15) | RESOLVED by 42.3 harness design: canonicalize-first comparison makes char_string_demo PASS — no real stage2 divergence (the raw fixture was simply non-canonical) |
 
 ## Backlog

@@ -875,18 +875,22 @@ public entity Parser {
                                                     }
                                                 }
                                             } else {
-                                                if self.check(formatter_lexer.kw_async_marker()) and self.peek_n(1) == formatter_lexer.kw_test_marker() {
-                                                    self.advance();
-                                                    let mutable td: TestDecl = self.parse_test_decl(cmts);
-                                                    td.is_async = true;
-                                                    prog.tests.push(td);
+                                                if self.check(formatter_lexer.tk_at()) {
+                                                    prog.tests.push(self.parse_annotated_test_decl(cmts));
                                                 } else {
-                                                    if self.is_at_function_start() {
-                                                        prog.functions.push(self.parse_function_decl(cmts));
+                                                    if self.check(formatter_lexer.kw_async_marker()) and self.peek_n(1) == formatter_lexer.kw_test_marker() {
+                                                        self.advance();
+                                                        let mutable td: TestDecl = self.parse_test_decl(cmts);
+                                                        td.is_async = true;
+                                                        prog.tests.push(td);
                                                     } else {
-                                                        self.fail("expected a top-level declaration (module / import / function / entity / enum / trait / impl / test / extern / intent)");
-                                                        prog.error = self.error;
-                                                        return prog;
+                                                        if self.is_at_function_start() {
+                                                            prog.functions.push(self.parse_function_decl(cmts));
+                                                        } else {
+                                                            self.fail("expected a top-level declaration (module / import / function / entity / enum / trait / impl / test / extern / intent)");
+                                                            prog.error = self.error;
+                                                            return prog;
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1164,6 +1168,56 @@ public entity Parser {
         let name_tok: Token = self.expect(formatter_lexer.tk_string(), "test name (string literal)");
         let body: Block = self.parse_block();
         return TestDecl(self.unquote(name_tok.text), body, line, cmts);
+    }
+
+    // parse_test_annotations parses one or more `@name("arg", ...)` annotations
+    // that precede a test declaration. Returns a list of canonical annotation strings,
+    // e.g. `@target_specific("rust", "js")`. Each arg is stored with double quotes.
+    method parse_test_annotations() returns Array<String> {
+        let mutable anns: Array<String> = [];
+        while self.check(formatter_lexer.tk_at()) {
+            self.advance();
+            let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "annotation name after '@'");
+            self.expect(formatter_lexer.tk_lparen(), "'(' after annotation name");
+            let mutable args: Array<String> = [];
+            if not self.check(formatter_lexer.tk_rparen()) {
+                let arg0: Token = self.expect(formatter_lexer.tk_string(), "annotation argument (string literal)");
+                args.push("\"" + self.unquote(arg0.text) + "\"");
+                while self.check_consume(formatter_lexer.tk_comma()) {
+                    let argn: Token = self.expect(formatter_lexer.tk_string(), "annotation argument (string literal)");
+                    args.push("\"" + self.unquote(argn.text) + "\"");
+                }
+            }
+            self.expect(formatter_lexer.tk_rparen(), "')' to close annotation");
+            let mutable ann: String = "@" + name_tok.text + "(";
+            let mutable argi: Int = 0;
+            while argi < len(args) {
+                if argi > 0 {
+                    ann = ann + ", ";
+                }
+                ann = ann + args[argi];
+                argi = argi + 1;
+            }
+            ann = ann + ")";
+            anns.push(ann);
+        }
+        return anns;
+    }
+
+    // parse_annotated_test_decl parses one or more `@name(...)` annotations followed
+    // by an optional `async` modifier and a test declaration. Annotations are attached
+    // to the resulting TestDecl. Called when the current token is `@`.
+    method parse_annotated_test_decl(leading_comments: Array<String>) returns TestDecl {
+        let mutable anns: Array<String> = self.parse_test_annotations();
+        let mutable is_async: Bool = false;
+        if self.check(formatter_lexer.kw_async_marker()) and self.peek_n(1) == formatter_lexer.kw_test_marker() {
+            self.advance();
+            is_async = true;
+        }
+        let mutable td: TestDecl = self.parse_test_decl(leading_comments);
+        td.is_async = is_async;
+        td.annotations = anns;
+        return td;
     }
 
     method parse_extern_decl(leading_comments: Array<String>) returns ExternDecl {
