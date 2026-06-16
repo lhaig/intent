@@ -70,7 +70,7 @@ selfhost/formatter/
 | **40A.1** | Leading-decl comment preservation (ADR 0044). | **Shipped** ([PRD](../../prds/done/phase-40a-comment-preservation.md)) |
 | **40A.2 / 40A.3** | Inline-after + body + real-file comments; byte-equal self-format on all 4 stage2 files. | **Shipped** ([PRD](../../prds/done/phase-40a-comment-preservation.md)) |
 | **41** | Parser surface widening: contracts (`requires`/`ensures`/`decreases`), `match`, `for`-in, `try`. | **Shipped** ([PRD](../../prds/done/phase-41-parser-surface-widening.md)) |
-| **42** | CLI wiring (`args()` builtin, `main.intent`, `intentc fmt --self-hosted`) + differential harness (`make diff-formatter`) vs `intentc fmt`. Corpus 16/22, 0 divergences; gap-closing ongoing. | **In progress** ([PRD](../../prds/active/phase-42-formatter-cli-differential.md)) |
+| **42** | CLI wiring (`args()` builtin, `main.intent`, `intentc fmt --self-hosted`) + differential harness (`make diff-formatter`) vs `intentc fmt` + parser-gap closing (invariants, contracts, intent blocks, implies, await, forall/exists, generics, Fn/lambdas, attributes). **Corpus 22/22, 0 divergences.** Self-format gate via built binary (`make selfcheck-formatter`). | **Shipped** ([PRD](../../prds/done/phase-42-formatter-cli-differential.md)) |
 
 Phase numbers are indicative and may shift as language gaps surface.
 

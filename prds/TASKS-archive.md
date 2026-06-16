@@ -41,3 +41,27 @@ summaries (rationale, prior-art, surfaced gaps) remain in
 | 40C | Source-order tracking (per-decl `line: Int`) | DONE (2026-06-09) | [phase-40c-source-order-tracking.md](done/phase-40c-source-order-tracking.md) |
 
 Phase 40A (comment preservation) is still active — see [TASKS.md](TASKS.md).
+
+## Phase 42: Stage2 Formatter CLI Wiring + Differential Test — COMPLETE (2026-06-16)
+
+Make the stage2 formatter a runnable CLI tool, wire it into `intentc fmt
+--self-hosted`, and stand up a committed differential-test harness vs `intentc
+fmt` over `examples/*.intent`. The harness drives gap-closing: each example the
+stage2 parser can't yet handle is a small parse+format task (Phase 41 pattern).
+Baseline: 12/22 examples already byte-equal (= agree with `intentc fmt`). See
+[phase-42-formatter-cli-differential.md](done/phase-42-formatter-cli-differential.md).
+
+| # | Task | PRD | Status | Notes |
+|---|------|-----|--------|-------|
+| 42.1 | `args()` builtin (Array<String>) + ADR; checker, IR, rust/js/wasm backends | [phase-42-formatter-cli-differential.md](done/phase-42-formatter-cli-differential.md) | DONE (2026-06-15) | ADR 0045; +2 checker tests; rust=env::args, js=process.argv.slice(1), wasm=stub; emit verified rust+js |
+| 42.2 | `main.intent` runnable formatter (reads args()[1], prints format_program) | [phase-42-formatter-cli-differential.md](done/phase-42-formatter-cli-differential.md) | DONE (2026-06-15) | builds+runs rust+js; hello byte-equal modulo 1 trailing newline; exit codes 0/1/2/3. Fixed stage1 bug: entry fn in imported module no longer dupes main (rustbe+jsbe; +2 tests) |
+| 42.3 | Differential-test harness: `difftest.sh` + `make diff-formatter` | [phase-42-formatter-cli-differential.md](done/phase-42-formatter-cli-differential.md) | DONE (2026-06-15) | canonicalize-first (compares vs intentc fmt output); 13/22 PASS, 0 diverge, 9 parse-err; exits 1 as gate; bash 3.2 compatible |
+| 42.4 | `intentc fmt --self-hosted` Go shim (delegates to stage2 binary) | [phase-42-formatter-cli-differential.md](done/phase-42-formatter-cli-differential.md) | DONE (2026-06-15) | env override INTENT_STAGE2_FMT + auto-build-with-cache; composes with --check; parse error exits non-zero, no fallback; +13 tests (fake-binary, no cargo); byte-equal w/ native fmt verified e2e |
+| 42.5 | Gap: entity `invariant <expr>;` (+ constructor contracts + intent blocks) | [phase-42-formatter-cli-differential.md](done/phase-42-formatter-cli-differential.md) | DONE (2026-06-15) | fixed invariant form+position (was wrong block form); folded in constructor contracts + intent-block `intent "d" {...verified_by:[...]}` (needed by the 3 files); bank_account/js_demo/task_queue PASS; 16/22; byte-equal preserved; 171/171 rust+js |
+| 42.6 | Gap: `forall`/`exists` quantifier expressions | [phase-42-formatter-cli-differential.md](done/phase-42-formatter-cli-differential.md) | DONE (2026-06-16) | ex_forall/ex_exists primaries; `in` as ident; sorted_check PASS; 19/22 |
+| 42.7 | Gap: `implies` operator | [phase-42-formatter-cli-differential.md](done/phase-42-formatter-cli-differential.md) | DONE (2026-06-16) | folded into parse_assign (no new parse-chain frame); try_operator PASS |
+| 42.8 | Gap: generic type params on declarations `<T>` + generic instantiation | [phase-42-formatter-cli-differential.md](done/phase-42-formatter-cli-differential.md) | DONE (2026-06-16) | EntityDecl/FunctionDecl type_params (defaulted in ctor body, no call-site churn); Ident<Args>( disambiguation via lookahead; generic_stack PASS; 20/22 |
+| 42.9 | Gap: `Fn(...) -> T` types + lambdas | [phase-42-formatter-cli-differential.md](done/phase-42-formatter-cli-differential.md) | DONE (2026-06-16) | tk_thin_arrow `->`; Fn type in parse_type_name; ex_lambda (lambda_params field); closure_demo PASS; 21/22 |
+| 42.10 | Gap: `await` (+`spawn`, `async test`, async-modifier order) | [phase-42-formatter-cli-differential.md](done/phase-42-formatter-cli-differential.md) | DONE (2026-06-16) | ex_await/ex_spawn; async test in parse_program; fixed modifier order; async_demo PASS |
+| 42.11 | Gap: attributes `@name(args)` | [phase-42-formatter-cli-differential.md](done/phase-42-formatter-cli-differential.md) | DONE (2026-06-16) | TestDecl.annotations; parse before test in parse_program; target_specific_demo PASS; 22/22 corpus |
+| 42.12 | char_string_demo: compare vs stage1 output; confirm or file follow-up | [phase-42-formatter-cli-differential.md](done/phase-42-formatter-cli-differential.md) | DONE (2026-06-15) | RESOLVED by 42.3 harness design: canonicalize-first comparison makes char_string_demo PASS — no real stage2 divergence (the raw fixture was simply non-canonical) |
