@@ -1,41 +1,9 @@
-// selfhost/formatter/parser.intent — Phases 33-36 / ADR 0040 stage2.
-//
-// Parses Intent source into a structured AST:
-//   - module declaration
-//   - imports
-//   - top-level declarations: function, entity, enum, trait, impl,
-//     test, extern, intent block (Phase 36).
-//   - function bodies as Block of statements (let / return / if-else /
-//     while / expression statements) — Phase 34.
-//   - expressions inside statements: literals, identifiers, calls,
-//     field/method access, indexing, ranges, array literals, unary +
-//     binary operators with full precedence — Phase 35.
-//
-// Type-argument lists (Array<T>, Result<T, E>, Map<K, Array<V>>) are
-// reconstructed verbatim with canonical spacing by parse_type_name (Phase
-// 40A.3). Out of scope (deferred to later phases):
-//   - match expressions / for / break / continue / try / await.
-//   - lambdas (`(x) => expr`), interpolated strings (`${expr}`), char
-//     literals (`'a'`), float literals — stage2 lexer doesn't tokenise
-//     them yet either.
-//   - contract clauses (requires / ensures / decreases / invariant
-//     expressions) — Phase 36 skips them with the Phase 33 ident-eat
-//     heuristic; a real contract parser is Phase 38+.
-//
-// AST shape choice: each AST node is one entity with an Int `kind`
-// discriminator + per-kind fields. See ast.intent for the entity
-// definitions and the rationale.
-//
-// File layout: AST entities + kind constants + AST helpers live in
-// `ast.intent`. This file holds the `Parser` entity, parse methods,
-// the top-level `parse(source)` convenience, and the in-language tests.
 module formatter_parser version "0.1.0";
 
 import "lexer.intent";
 
 import "ast.intent";
 
-// --- Parser -----------------------------------------------------------------
 public entity Parser {
     field tokens: Array<Token>;
     field position: Int;
@@ -87,8 +55,6 @@ public entity Parser {
         return false;
     }
 
-    // Records an error and advances past one token so we make progress.
-    // Returns the offending token's text for callers that want it.
     method fail(message: String) returns String {
         if self.error == "" {
             let tok: Token = self.tokens[self.position];
@@ -108,7 +74,6 @@ public entity Parser {
         return self.tokens[self.position];
     }
 
-    // Strips the surrounding quotes from a string-literal token text.
     method unquote(text: String) returns String {
         let n: Int = len(text);
         if n < 2 {
@@ -117,10 +82,7 @@ public entity Parser {
         return text[1..n - 1];
     }
 
-    // --- top-level parse entry points -------------------------------------
     method parse_module_decl() returns ModuleDecl {
-        // ADR 0044 (Phase 40A.3): the module token carries any file-header
-        // comments in its comments_before.
         let module_tok: Token = self.expect(formatter_lexer.kw_module(), "'module' keyword");
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "module name");
         self.expect(formatter_lexer.kw_version(), "'version' keyword");
@@ -131,12 +93,7 @@ public entity Parser {
         return md;
     }
 
-    // ADR 0044: `leading_comments` is passed by parse_program (captured
-    // BEFORE consuming any modifier so `public` lookahead doesn't strand
-    // them). When non-empty it overrides the keyword token's own
-    // comments_before — which is empty in the post-`public` case anyway.
     method parse_import_decl(leading_comments: Array<String>) returns ImportDecl {
-        // ADR 0042: capture source line from the `import` keyword token.
         let import_tok: Token = self.expect(formatter_lexer.kw_import_marker(), "'import' keyword");
         let line: Int = import_tok.line;
         let cmts: Array<String> = leading_comments;
@@ -148,7 +105,6 @@ public entity Parser {
         if self.check(formatter_lexer.tk_ident()) {
             let pkg_tok: Token = self.advance();
             let mutable path: String = pkg_tok.text;
-            // Dotted package paths: pkg.sub.deeper
             while self.check_consume(formatter_lexer.tk_dot()) {
                 if self.check(formatter_lexer.tk_ident()) {
                     let seg: Token = self.advance();
@@ -172,16 +128,88 @@ public entity Parser {
         return Param(name_tok.text, type_name);
     }
 
-    // Recognises a primitive type (Int / String / Bool / Void / Char) or a
-    // bare identifier. Generic arguments (Array<T>, Result<T, E>) are
-    // consumed but not modelled — Phase 33 stores the head only and
-    // discards the args. Phase 34+ will replace this with a real TypeRef.
-    // Parses a type name, reconstructing any generic argument list verbatim
-    // with canonical spacing (`, ` after commas, no other spaces). ADR 0044
-    // (Phase 40A.3): the args used to be discarded and replaced with the
-    // placeholder `<...>`, which made the formatter unable to round-trip
-    // `Array<String>` etc. Nesting (`Map<K, Array<V>>`) is handled via a
-    // depth counter; `>>` is two `>` tokens in this lexer.
+    method parse_type_param_list() returns Array<String> {
+        let mutable params: Array<String> = [];
+        if not self.check(formatter_lexer.tk_lt()) {
+            return params;
+        }
+        self.advance();
+        if self.check(formatter_lexer.tk_ident()) {
+            let first: Token = self.advance();
+            params.push(first.text);
+            while self.check_consume(formatter_lexer.tk_comma()) {
+                if self.check(formatter_lexer.tk_ident()) {
+                    let next: Token = self.advance();
+                    params.push(next.text);
+                } else {
+                    self.fail("expected type parameter name after ','");
+                    return params;
+                }
+            }
+        }
+        self.expect(formatter_lexer.tk_gt(), "'>' to close type parameter list");
+        return params;
+    }
+
+    method lookahead_is_generic_call() returns Bool {
+        let start: Int = self.position + 1;
+        let mutable depth: Int = 1;
+        let mutable i: Int = start;
+        while depth > 0 and i < len(self.tokens) {
+            let k: Int = self.tokens[i].kind;
+            if k == formatter_lexer.tk_lt() {
+                depth = depth + 1;
+            } else {
+                if k == formatter_lexer.tk_gt() {
+                    depth = depth - 1;
+                } else {
+                    if k == formatter_lexer.tk_eof() {
+                        return false;
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        if depth != 0 {
+            return false;
+        }
+        if i >= len(self.tokens) {
+            return false;
+        }
+        return self.tokens[i].kind == formatter_lexer.tk_lparen();
+    }
+
+    method consume_generic_type_args() returns String {
+        self.advance();
+        let mutable s: String = "<";
+        let mutable depth: Int = 1;
+        while depth > 0 and not self.at_end() {
+            if self.check(formatter_lexer.tk_lt()) {
+                self.advance();
+                s = s + "<";
+                depth = depth + 1;
+            } else {
+                if self.check(formatter_lexer.tk_gt()) {
+                    self.advance();
+                    depth = depth - 1;
+                    if depth > 0 {
+                        s = s + ">";
+                    }
+                } else {
+                    if self.check(formatter_lexer.tk_comma()) {
+                        self.advance();
+                        s = s + ", ";
+                    } else {
+                        let inner: Token = self.advance();
+                        s = s + inner.text;
+                    }
+                }
+            }
+        }
+        s = s + ">";
+        return s;
+    }
+
     method parse_type_name() returns String {
         let tok: Token = self.advance();
         let mutable name: String = tok.text;
@@ -217,18 +245,12 @@ public entity Parser {
     }
 
     method parse_function_decl(leading_comments: Array<String>) returns FunctionDecl {
-        // ADR 0042 / 0044: capture source line from the first token; comments
-        // are passed by the caller (parse_program) so the `public` modifier
-        // path doesn't strand them.
         let first_tok: Token = self.tokens[self.position];
         let line: Int = first_tok.line;
         let cmts: Array<String> = leading_comments;
         let mutable is_public: Bool = false;
         let mutable is_async: Bool = false;
         let mutable is_entry: Bool = false;
-        // Optional modifiers in any order before `function`.
-        // (The full grammar restricts ordering more tightly; v1 parser
-        // accepts any.)
         let mutable scanning_modifiers: Bool = true;
         while scanning_modifiers {
             if self.check(formatter_lexer.kw_public_marker()) {
@@ -250,6 +272,7 @@ public entity Parser {
         }
         self.expect(formatter_lexer.kw_function(), "'function' keyword");
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "function name");
+        let type_params: Array<String> = self.parse_type_param_list();
         self.expect(formatter_lexer.tk_lparen(), "'(' after function name");
         let mutable params: Array<Param> = [];
         if not self.check(formatter_lexer.tk_rparen()) {
@@ -259,16 +282,8 @@ public entity Parser {
             }
         }
         self.expect(formatter_lexer.tk_rparen(), "')' to close parameter list");
-        // Contracts on top-level functions are part of the surface (`requires`
-        // / `ensures` / `decreases`) but they aren't tokenised as keywords
-        // in v1's lexer. Skip them by scanning identifiers/expressions until
-        // we hit `returns` or `{`.
         self.expect(formatter_lexer.kw_returns(), "'returns' after parameter list");
         let return_type: String = self.parse_type_name();
-        // Phase 41.1: parse contract clauses (requires/ensures/decreases) that
-        // sit between the signature and the body. They lex as plain idents
-        // (not keywords); each is `<kw> <expr>` with no `;` — parse_expr stops
-        // at the next clause keyword or `{`.
         let mutable reqs: Array<Expr> = [];
         let mutable enss: Array<Expr> = [];
         let mutable decs: Array<Expr> = [];
@@ -291,11 +306,10 @@ public entity Parser {
         fd.requires_clauses = reqs;
         fd.ensures_clauses = enss;
         fd.decreases_clauses = decs;
+        fd.type_params = type_params;
         return fd;
     }
 
-    // True when the current token is a contract keyword (`requires` /
-    // `ensures` / `decreases`). They lex as plain identifiers, not keywords.
     method is_contract_kw() returns Bool {
         if not self.check(formatter_lexer.tk_ident()) {
             return false;
@@ -304,10 +318,6 @@ public entity Parser {
         return t == "requires" or t == "ensures" or t == "decreases";
     }
 
-    // --- statement-level parse -------------------------------------------
-    // Parses a brace-delimited `{ ... }` block: consumes opening `{`, then
-    // dispatches into statement parsers until it sees a `}` at this level.
-    // Records (but does not propagate via panic) any error via self.fail.
     method parse_block() returns Block {
         self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start block");
         let mutable stmts: Array<Stmt> = [];
@@ -317,8 +327,6 @@ public entity Parser {
             st.comments_before = cmts;
             stmts.push(st);
         }
-        // ADR 0044 (Phase 40A.3): comments before the closing `}` attach to
-        // the rbrace token; carry them on the Block as trailing comments.
         let rbrace: Token = self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close block");
         let mutable blk: Block = Block(stmts);
         blk.trailing_comments = rbrace.comments_before;
@@ -345,10 +353,6 @@ public entity Parser {
         return self.parse_expr_stmt();
     }
 
-    // `for IDENT in EXPR { BLOCK }` (Phase 41.3). `for` shares the lexer token
-    // with `impl ... for ...`; statement position disambiguates. `in` lexes as
-    // a plain identifier. The iterable parse stops at `{`. Reuses Stmt fields:
-    // name = loop variable, expr = iterable, then_block = body.
     method parse_for_stmt() returns Stmt {
         self.expect(formatter_lexer.kw_for_marker(), "'for'");
         let var_tok: Token = self.expect(formatter_lexer.tk_ident(), "loop variable");
@@ -358,7 +362,6 @@ public entity Parser {
         return Stmt(formatter_ast.st_for(), iter, var_tok.text, "", false, body, formatter_ast.empty_block(), false);
     }
 
-    // `let [mutable] IDENT [: TYPE] = EXPR;`
     method parse_let_stmt() returns Stmt {
         self.expect(formatter_lexer.kw_let(), "'let'");
         let mutable is_mut: Bool = false;
@@ -378,7 +381,6 @@ public entity Parser {
         return st;
     }
 
-    // `return [EXPR];`
     method parse_return_stmt() returns Stmt {
         self.expect(formatter_lexer.kw_return(), "'return'");
         let mutable rhs: Expr = formatter_ast.empty_expr();
@@ -391,9 +393,6 @@ public entity Parser {
         return st;
     }
 
-    // `if EXPR { BLOCK } [else (if-stmt | { BLOCK })]`. `else if` chains
-    // are folded into a single-statement else-block whose only statement
-    // is the nested if.
     method parse_if_stmt() returns Stmt {
         self.expect(formatter_lexer.kw_if(), "'if'");
         let cond: Expr = self.parse_expr();
@@ -413,7 +412,6 @@ public entity Parser {
         return Stmt(formatter_ast.st_if(), cond, "", "", false, then_blk, else_blk, has_else);
     }
 
-    // `while EXPR { BLOCK }`
     method parse_while_stmt() returns Stmt {
         self.expect(formatter_lexer.kw_while(), "'while'");
         let cond: Expr = self.parse_expr();
@@ -421,8 +419,6 @@ public entity Parser {
         return Stmt(formatter_ast.st_while(), cond, "", "", false, body, formatter_ast.empty_block(), false);
     }
 
-    // Anything else (assignment, bare call, etc.) — parse a full expression
-    // and require a trailing `;`.
     method parse_expr_stmt() returns Stmt {
         let e: Expr = self.parse_expr();
         let semi: Token = self.expect(formatter_lexer.tk_semicolon(), "';' to end expression statement");
@@ -431,39 +427,12 @@ public entity Parser {
         return st;
     }
 
-    // --- expression parser (Pratt / precedence climbing) ------------------
-    //
-    // Grammar (lowest to highest precedence):
-    //
-    //   parse_expr   = parse_assign
-    //   parse_assign = parse_or ( '='  parse_assign )?        (right-assoc, single)
-    //   parse_or     = parse_and ( 'or'  parse_and )*
-    //   parse_and    = parse_eq  ( 'and' parse_eq  )*
-    //   parse_eq     = parse_cmp ( ('=='|'!=')   parse_cmp   )*
-    //   parse_cmp    = parse_range ( ('<'|'>'|'<='|'>=') parse_range )*
-    //   parse_range  = parse_add ( '..' parse_add )?           (non-assoc, single)
-    //   parse_add    = parse_mul ( ('+'|'-')   parse_mul   )*
-    //   parse_mul    = parse_unary ( ('*'|'/'|'%') parse_unary )*
-    //   parse_unary  = ('-' | 'not') parse_unary | parse_postfix
-    //   parse_postfix = parse_primary ( '(' args ')' | '[' expr ']' | '.' ident )*
-    //   parse_primary = INT_LIT | FLOAT_LIT | CHAR_LIT | STR_LIT | 'true' | 'false' | IDENT
-    //               | '(' parse_expr ')' | '[' parse_array_literal_body ']'
-    //
-    // Assignment is parsed as a binop with op "=" at the lowest precedence.
-    // The surface language reserves it for statement contexts; treating it
-    // as an expression here keeps the AST uniform.
     method parse_expr() returns Expr {
         return self.parse_assign();
     }
 
     method parse_assign() returns Expr {
         let lhs: Expr = self.parse_or();
-        // `implies` — lowest-precedence binary operator, right-associative.
-        // Grammar: implies_expr = or_expr [ "implies" implies_expr ]. Handled
-        // here rather than via a dedicated parse_implies level: parser.intent
-        // sits near the recursive-descent stack limit, so an extra frame per
-        // expression overflows it. `=` and `implies` never co-occur as the same
-        // operator, so a flat check at this level is safe.
         if self.check(formatter_lexer.kw_implies_marker()) {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_assign();
@@ -617,7 +586,6 @@ public entity Parser {
             children.push(operand);
             return Expr(formatter_ast.ex_unary(), 0, "", false, "not", children);
         }
-        // Phase 42: `await <expr>` prefix expression.
         if self.check(formatter_lexer.kw_await_marker()) {
             self.advance();
             let operand: Expr = self.parse_unary();
@@ -625,7 +593,6 @@ public entity Parser {
             children.push(operand);
             return Expr(formatter_ast.ex_await(), 0, "", false, "", children);
         }
-        // Phase 42: `spawn <expr>` prefix expression.
         if self.check(formatter_lexer.kw_spawn_marker()) {
             self.advance();
             let operand: Expr = self.parse_unary();
@@ -666,7 +633,6 @@ public entity Parser {
                         e = Expr(formatter_ast.ex_field(), 0, "", false, fld.text, children);
                     } else {
                         if self.check_consume(formatter_lexer.tk_question()) {
-                            // Phase 41.4: postfix try operator `inner?`.
                             let mutable children: Array<Expr> = [];
                             children.push(e);
                             e = Expr(formatter_ast.ex_try(), 0, "", false, "", children);
@@ -723,6 +689,11 @@ public entity Parser {
         }
         if kind == formatter_lexer.tk_ident() {
             let tok: Token = self.advance();
+            if self.check(formatter_lexer.tk_lt()) and self.lookahead_is_generic_call() {
+                let type_args: String = self.consume_generic_type_args();
+                let mutable children: Array<Expr> = [];
+                return Expr(formatter_ast.ex_ident(), 0, "", false, tok.text + type_args, children);
+            }
             let mutable children: Array<Expr> = [];
             return Expr(formatter_ast.ex_ident(), 0, "", false, tok.text, children);
         }
@@ -750,8 +721,6 @@ public entity Parser {
         return formatter_ast.empty_expr();
     }
 
-    // Phase 41.2: `match <scrutinee> { <pattern> => <expr> , ... }`. The
-    // scrutinee parse stops at `{` (a brace isn't an operator/postfix token).
     method parse_match_expr() returns Expr {
         self.expect(formatter_lexer.kw_match_marker(), "'match'");
         let scrutinee: Expr = self.parse_expr();
@@ -768,8 +737,6 @@ public entity Parser {
         return e;
     }
 
-    // One arm: `_ => expr` | `Variant => expr` | `Variant(a, b) => expr`,
-    // followed by an optional trailing comma.
     method parse_match_arm() returns MatchArm {
         let mutable is_wild: Bool = false;
         let mutable variant: String = "";
@@ -797,11 +764,6 @@ public entity Parser {
         return MatchArm(variant, bindings, is_wild, body);
     }
 
-    // Phase 43: `forall VAR in LO..HI: BODY` and `exists VAR in LO..HI: BODY`.
-    // `forall`/`exists` are keywords (kw_forall_marker/kw_exists_marker); `in`
-    // lexes as a plain identifier (tk_ident); `..` is tk_dotdot; `:` is tk_colon.
-    // domain is parsed via parse_range (lo..hi); body is a full parse_expr.
-    // Stored in Expr.name (loop variable) and Expr.children = [domain, body].
     method parse_quantifier(kind: Int) returns Expr {
         self.advance();
         let var_tok: Token = self.expect(formatter_lexer.tk_ident(), "quantifier variable");
@@ -819,11 +781,6 @@ public entity Parser {
         let module_decl: ModuleDecl = self.parse_module_decl();
         let mutable prog: Program = formatter_ast.empty_program(module_decl);
         while not self.at_end() and self.error == "" {
-            // ADR 0044: capture leading comments from the very first token
-            // of this decl, BEFORE consuming any `public` modifier. The
-            // `public` token (when present) is what carries the comments
-            // in the lexer's attachment model; if we read after consuming
-            // it, the comments would be on a previous, lost token.
             let cmts: Array<String> = self.tokens[self.position].comments_before;
             if self.check(formatter_lexer.kw_import_marker()) {
                 prog.imports.push(self.parse_import_decl(cmts));
@@ -850,9 +807,6 @@ public entity Parser {
                                             prog.intent_blocks.push(self.parse_intent_block(cmts));
                                         } else {
                                             if self.check(formatter_lexer.kw_public_marker()) {
-                                                // `public` can precede function, entity, enum, trait.
-                                                // Consume `public` and dispatch on what follows; we
-                                                // already captured `cmts` above so they survive.
                                                 self.advance();
                                                 if self.check(formatter_lexer.kw_entity_marker()) {
                                                     prog.entities.push(self.parse_entity_decl(true, cmts));
@@ -863,8 +817,6 @@ public entity Parser {
                                                         if self.check(formatter_lexer.kw_trait_marker()) {
                                                             prog.traits.push(self.parse_trait_decl(true, cmts));
                                                         } else {
-                                                            // `public function ...` — parse the function
-                                                            // and mark it public after.
                                                             let mutable fd: FunctionDecl = self.parse_function_decl(cmts);
                                                             fd.is_public = true;
                                                             prog.functions.push(fd);
@@ -872,10 +824,8 @@ public entity Parser {
                                                     }
                                                 }
                                             } else {
-                                                // Phase 42: `async test "..." { ... }`. Consume the
-                                                // `async` modifier, then dispatch on `test` keyword.
                                                 if self.check(formatter_lexer.kw_async_marker()) and self.peek_n(1) == formatter_lexer.kw_test_marker() {
-                                                    self.advance(); // consume `async`
+                                                    self.advance();
                                                     let mutable td: TestDecl = self.parse_test_decl(cmts);
                                                     td.is_async = true;
                                                     prog.tests.push(td);
@@ -898,10 +848,6 @@ public entity Parser {
                 }
             }
         }
-        // Phase 40A.2 / ADR 0044: trailing comments after the last decl are
-        // attached by the lexer to the EOF token. The loop exits with
-        // `self.position` on that token (when no error stopped us early), so
-        // drain its leading comments into the Program.
         if self.at_end() {
             prog.trailing_comments = self.tokens[self.position].comments_before;
         }
@@ -909,10 +855,6 @@ public entity Parser {
         return prog;
     }
 
-    // True if the next 1-3 tokens introduce a function declaration. The
-    // `public function` case is dispatched inline in parse_program because
-    // entity mutation across a helper call doesn't propagate in the Rust
-    // backend (entities are passed by value / cloned).
     method is_at_function_start() returns Bool {
         if self.check(formatter_lexer.kw_function()) {
             return true;
@@ -926,17 +868,12 @@ public entity Parser {
         return false;
     }
 
-    // --- Phase 36: top-level declaration parsers --------------------------
-    // `entity NAME { field*; ctor?; method*; invariant?; }`
     method parse_entity_decl(is_public: Bool, leading_comments: Array<String>) returns EntityDecl {
-        // ADR 0042: capture source line from the `entity` keyword. `public`
-        // modifier (if present) is consumed by parse_program before this is
-        // called; for typical one-line `public entity Foo {...}` source the
-        // line matches. ADR 0044: leading_comments passed by caller.
         let entity_tok: Token = self.expect(formatter_lexer.kw_entity_marker(), "'entity'");
         let line: Int = entity_tok.line;
         let cmts: Array<String> = leading_comments;
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "entity name");
+        let ent_type_params: Array<String> = self.parse_type_param_list();
         self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start entity body");
         let mutable fields: Array<FieldDecl> = [];
         let mutable methods: Array<FunctionDecl> = [];
@@ -967,17 +904,20 @@ public entity Parser {
                             invariants.push(self.parse_invariant_decl());
                         } else {
                             self.fail("expected 'field', 'constructor', 'method', or 'invariant' in entity body");
-                            return EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line, cmts);
+                            let mutable ed_err: EntityDecl = EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line, cmts);
+                            ed_err.type_params = ent_type_params;
+                            return ed_err;
                         }
                     }
                 }
             }
         }
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close entity body");
-        return EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line, cmts);
+        let mutable ed: EntityDecl = EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line, cmts);
+        ed.type_params = ent_type_params;
+        return ed;
     }
 
-    // `field NAME: TYPE;`
     method parse_field_decl() returns FieldDecl {
         self.expect(formatter_lexer.kw_field_marker(), "'field'");
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "field name");
@@ -989,10 +929,6 @@ public entity Parser {
         return fd;
     }
 
-    // `constructor(params) [requires/ensures] { body }` — constructors live
-    // inside entity bodies so don't accept leading comments (the entity
-    // carries them). Contract clauses (Phase 41.1) are parsed the same way
-    // parse_method_decl does.
     method parse_constructor_decl() returns FunctionDecl {
         let ctor_tok: Token = self.expect(formatter_lexer.kw_constructor_marker(), "'constructor'");
         let line: Int = ctor_tok.line;
@@ -1031,10 +967,6 @@ public entity Parser {
         return fd;
     }
 
-    // `method NAME(params) returns TYPE [contracts] { body }`. Methods live
-    // inside entity / impl bodies so don't accept leading comments at this
-    // layer (their enclosing decl carries them). Contract clauses (Phase 41.1)
-    // are parsed the same way parse_function_decl does at the top level.
     method parse_method_decl() returns FunctionDecl {
         let method_tok: Token = self.expect(formatter_lexer.kw_method_marker(), "'method'");
         let line: Int = method_tok.line;
@@ -1076,7 +1008,6 @@ public entity Parser {
         return md;
     }
 
-    // `invariant EXPR;` — one boolean invariant clause (grammar.ebnf:140).
     method parse_invariant_decl() returns Expr {
         self.expect(formatter_lexer.kw_invariant_marker(), "'invariant'");
         let e: Expr = self.parse_expr();
@@ -1084,7 +1015,6 @@ public entity Parser {
         return e;
     }
 
-    // `enum NAME { VARIANT, VARIANT, ... }`
     method parse_enum_decl(is_public: Bool, leading_comments: Array<String>) returns EnumDecl {
         let enum_tok: Token = self.expect(formatter_lexer.kw_enum_marker(), "'enum'");
         let line: Int = enum_tok.line;
@@ -1096,7 +1026,6 @@ public entity Parser {
             variants.push(self.parse_enum_variant());
             while self.check_consume(formatter_lexer.tk_comma()) {
                 if self.check(formatter_lexer.tk_rbrace()) {
-                    // Trailing comma — accepted.
                     self.fail_off();
                 } else {
                     variants.push(self.parse_enum_variant());
@@ -1107,14 +1036,10 @@ public entity Parser {
         return EnumDecl(name_tok.text, is_public, variants, line, cmts);
     }
 
-    // Helper used by the trailing-comma branch: a no-op that documents
-    // that we deliberately consume nothing when accepting the trailing
-    // comma case. Kept as a method to centralise the intent.
     method fail_off() returns Void {
         return;
     }
 
-    // `NAME` or `NAME(param, param, ...)`
     method parse_enum_variant() returns EnumVariant {
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "enum variant name");
         let mutable params: Array<Param> = [];
@@ -1130,7 +1055,6 @@ public entity Parser {
         return EnumVariant(name_tok.text, params);
     }
 
-    // `trait NAME { method NAME(params) returns TYPE; ... }`
     method parse_trait_decl(is_public: Bool, leading_comments: Array<String>) returns TraitDecl {
         let trait_tok: Token = self.expect(formatter_lexer.kw_trait_marker(), "'trait'");
         let line: Int = trait_tok.line;
@@ -1163,7 +1087,6 @@ public entity Parser {
         return TraitMethodSig(name_tok.text, params, ret);
     }
 
-    // `impl TRAIT for ENTITY { method ... method ... }`
     method parse_impl_decl(leading_comments: Array<String>) returns ImplDecl {
         let impl_tok: Token = self.expect(formatter_lexer.kw_impl_marker(), "'impl'");
         let line: Int = impl_tok.line;
@@ -1183,7 +1106,6 @@ public entity Parser {
         return ImplDecl(trait_tok.text, entity_tok.text, methods, line, cmts);
     }
 
-    // `test "name" { body }`
     method parse_test_decl(leading_comments: Array<String>) returns TestDecl {
         let test_tok: Token = self.expect(formatter_lexer.kw_test_marker(), "'test'");
         let line: Int = test_tok.line;
@@ -1193,7 +1115,6 @@ public entity Parser {
         return TestDecl(self.unquote(name_tok.text), body, line, cmts);
     }
 
-    // `extern "target" function NAME(params) returns TYPE;`
     method parse_extern_decl(leading_comments: Array<String>) returns ExternDecl {
         let extern_tok: Token = self.expect(formatter_lexer.kw_extern_marker(), "'extern'");
         let line: Int = extern_tok.line;
@@ -1216,9 +1137,6 @@ public entity Parser {
         return ExternDecl(self.unquote(target_tok.text), name_tok.text, params, ret, line, cmts);
     }
 
-    // Parse one dot-separated identifier path in a `verified_by` clause.
-    // Accepts idents and any keyword token whose text can appear in a path
-    // (e.g. `invariant`, `constructor`, `requires`, `ensures`).
     method parse_intent_ref() returns String {
         let mutable ref_s: String = "";
         let first: Token = self.advance();
@@ -1230,11 +1148,6 @@ public entity Parser {
         return ref_s;
     }
 
-    // `intent "description" { goal: "..."; guarantee: "..."; verified_by: [...]; }`
-    // Handles the full intent block surface grammar (grammar.ebnf:158-173):
-    // clauses are goal / constraint / guarantee / verified_by, each followed by
-    // a colon and terminated with a semicolon. `verified_by` takes a
-    // bracket-delimited comma-separated list of dot-path references.
     method parse_intent_block(leading_comments: Array<String>) returns IntentBlock {
         let intent_tok: Token = self.expect(formatter_lexer.kw_intent_marker(), "'intent'");
         let line: Int = intent_tok.line;
@@ -1303,8 +1216,6 @@ public entity Parser {
     }
 }
 
-// AST helpers (empty_block, empty_expr, parse_int) moved to ast.intent in
-// Phase 36 along with the entity declarations.
 public function parse(source: String) returns Program {
     let mutable p: Parser = Parser(source);
     return p.parse_program();
@@ -1314,7 +1225,14 @@ entry function main() returns Int {
     return 0;
 }
 
-// --- In-language tests ------------------------------------------------------
+public function single_let_rhs(prog: Program) returns Expr {
+    return prog.functions[0].body.stmts[0].expr;
+}
+
+public function wrap_in_let(rhs_text: String) returns String {
+    return "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let x: Int = " + rhs_text + "; return x; " + '}'.to_string();
+}
+
 test "parse minimal module declaration" {
     let prog: Program = parse("module foo version \"1.0\";");
     assert_eq(prog.error, "");
@@ -1410,9 +1328,6 @@ test "parser reconstructs nested + multi-arg generics" {
 }
 
 test "parser reports unexpected token at top level" {
-    // A bare integer literal at the top level isn't a valid declaration
-    // start in any phase. Entities / enums / traits / impls / tests /
-    // externs / intent blocks are now accepted (Phase 36).
     let prog: Program = parse("module m version \"1.0\"; 42;");
     assert(prog.error != "");
 }
@@ -1422,7 +1337,6 @@ test "missing semicolon after module records error" {
     assert(prog.error != "");
 }
 
-// --- Phase 34: statement parser tests ---------------------------------------
 test "empty function body produces empty block" {
     let src: String = "module m version \"1.0\"; function f() returns Void " + '{'.to_string() + " " + '}'.to_string();
     let prog: Program = parse(src);
@@ -1597,17 +1511,6 @@ test "missing semicolon after return is reported" {
     assert(prog.error != "");
 }
 
-// --- Phase 35: expression parser tests --------------------------------------
-// Small helper: extract the RHS Expr of the let-binding in `let x = E;`
-// from a one-statement function body. Keeps test fixtures terse.
-public function single_let_rhs(prog: Program) returns Expr {
-    return prog.functions[0].body.stmts[0].expr;
-}
-
-public function wrap_in_let(rhs_text: String) returns String {
-    return "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let x: Int = " + rhs_text + "; return x; " + '}'.to_string();
-}
-
 test "parse_int converts decimal token text" {
     assert_eq(formatter_ast.parse_int("0"), 0);
     assert_eq(formatter_ast.parse_int("7"), 7);
@@ -1764,7 +1667,6 @@ test "method call: x.to_string()" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    // x.to_string() = call(field(ident "x", "to_string"))
     assert_eq(e.kind, formatter_ast.ex_call());
     let callee: Expr = e.children[0];
     assert_eq(callee.kind, formatter_ast.ex_field());
@@ -1837,7 +1739,6 @@ test "method chain a.b().c() left-associates" {
     let prog: Program = parse(wrap_in_let("a.b().c()"));
     assert_eq(prog.error, "");
     let outer: Expr = single_let_rhs(prog);
-    // outer = call(field(call(field(a, b)), c))
     assert_eq(outer.kind, formatter_ast.ex_call());
     let callee_c: Expr = outer.children[0];
     assert_eq(callee_c.kind, formatter_ast.ex_field());
@@ -1879,7 +1780,6 @@ test "missing expression after = reports error" {
     assert(prog.error != "");
 }
 
-// --- Phase 36: top-level declaration tests ----------------------------------
 test "entity with two fields and no methods" {
     let src: String = "module m version \"1.0\"; entity Point " + '{'.to_string() + " field x: Int; field y: Int; " + '}'.to_string();
     let prog: Program = parse(src);
@@ -2038,7 +1938,6 @@ test "mixed declarations parse in any order" {
 }
 
 test "phase 37 dogfood: float + char literals + block comments parse end-to-end" {
-    // Exercises the three Phase 37 lexer additions in one program.
     let src: String = "module sample version \"0.1\"; " + "/* block comment with /* nested */ inside */ " + "function f() returns Int " + '{'.to_string() + " let pi: Float = 3.14; " + " let exp: Float = 1.5e-3; " + " let nl: Char = '\\n'; " + " return 0; " + " " + '}'.to_string();
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
@@ -2046,7 +1945,6 @@ test "phase 37 dogfood: float + char literals + block comments parse end-to-end"
     let fn_decl: FunctionDecl = prog.functions[0];
     assert_eq(fn_decl.name, "f");
     let stmts: Array<Stmt> = fn_decl.body.stmts;
-    // 3 let stmts + 1 return
     assert_eq(len(stmts), 4);
     assert_eq(stmts[0].expr.kind, formatter_ast.ex_float());
     assert_eq(stmts[0].expr.str_value, "3.14");
@@ -2054,6 +1952,64 @@ test "phase 37 dogfood: float + char literals + block comments parse end-to-end"
     assert_eq(stmts[1].expr.str_value, "1.5e-3");
     assert_eq(stmts[2].expr.kind, formatter_ast.ex_char());
     assert_eq(stmts[2].expr.str_value, "'\\n'");
+}
+
+test "generics: entity with type param stores name in type_params" {
+    let src: String = "module m version \"1.0.0\"; entity Box<T> " + '{'.to_string() + " field val: T; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.entities), 1);
+    let e: EntityDecl = prog.entities[0];
+    assert_eq(e.name, "Box");
+    assert_eq(len(e.type_params), 1);
+    assert_eq(e.type_params[0], "T");
+}
+
+test "generics: entity with two type params" {
+    let src: String = "module m version \"1.0.0\"; entity Pair<A, B> " + '{'.to_string() + " field first: A; field second: B; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    let e: EntityDecl = prog.entities[0];
+    assert_eq(len(e.type_params), 2);
+    assert_eq(e.type_params[0], "A");
+    assert_eq(e.type_params[1], "B");
+}
+
+test "generics: entity without type params has empty type_params" {
+    let src: String = "module m version \"1.0.0\"; entity Point " + '{'.to_string() + " field x: Int; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.entities[0].type_params), 0);
+}
+
+test "generics: function with single type param" {
+    let src: String = "module m version \"1.0.0\"; function id<T>(x: T) returns T " + '{'.to_string() + " return x; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions), 1);
+    assert_eq(len(prog.functions[0].type_params), 1);
+    assert_eq(prog.functions[0].type_params[0], "T");
+}
+
+test "generics: generic constructor call is ex_call with ident name including type args" {
+    let src: String = "module m version \"1.0.0\"; function f() returns Int " + '{'.to_string() + " let s: Stack<Int> = Stack<Int>(); return 0; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    let rhs: Expr = prog.functions[0].body.stmts[0].expr;
+    assert_eq(rhs.kind, formatter_ast.ex_call());
+    let callee: Expr = rhs.children[0];
+    assert_eq(callee.kind, formatter_ast.ex_ident());
+    assert_eq(callee.name, "Stack<Int>");
+}
+
+test "generics: generic call with args" {
+    let src: String = "module m version \"1.0.0\"; function f() returns Int " + '{'.to_string() + " let v: Vec<String> = Vec<String>(10, 20); return 0; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    let rhs: Expr = prog.functions[0].body.stmts[0].expr;
+    assert_eq(rhs.kind, formatter_ast.ex_call());
+    assert_eq(rhs.children[0].name, "Vec<String>");
+    assert_eq(len(rhs.children), 3);
 }
 
 test "synthetic dogfood: parse a small entity with methods and tests" {

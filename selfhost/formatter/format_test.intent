@@ -939,3 +939,71 @@ test "dogfood: parse + format hello.intent matches expected canonical form" {
         assert_eq(out, src);
     }
 }
+
+// --- Generic type parameter tests (Phase 44) ---------------------------------
+
+test "generics: entity with single type param round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "entity Box<T> " + '{'.to_string() + "\n"
+        + "    field val: T;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "generics: entity type param stored in type_params array" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "entity Box<T> " + '{'.to_string() + "\n"
+        + "    field val: T;\n"
+        + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.entities), 1);
+    assert_eq(len(prog.entities[0].type_params), 1);
+    assert_eq(prog.entities[0].type_params[0], "T");
+}
+
+test "generics: function with single type param round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function id<T>(x: T) returns T " + '{'.to_string() + "\n"
+        + "    return x;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "generics: generic constructor call round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let s: Stack<Int> = Stack<Int>();\n"
+        + "    return 0;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "generics: generic constructor call parsed as ex_call with generic callee" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let s: Stack<Int> = Stack<Int>();\n"
+        + "    return 0;\n"
+        + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    let rhs: Expr = prog.functions[0].body.stmts[0].expr;
+    assert_eq(rhs.kind, formatter_ast.ex_call());
+    assert_eq(rhs.children[0].kind, formatter_ast.ex_ident());
+    assert_eq(rhs.children[0].name, "Stack<Int>");
+}
+
+test "generics: dogfood generic_stack.intent round-trips byte-equal" {
+    let r: Result<String, String> = read_file("examples/generic_stack.intent");
+    let src: String = match r {
+        Ok(s) => s,
+        Err(_) => "",
+    };
+    if src != "" {
+        let out: String = roundtrip(src);
+        assert_eq(out, src);
+    }
+}

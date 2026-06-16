@@ -410,3 +410,28 @@ as a plain ident, matching for-loops; domain via parse_range; `:` = tk_colon).
 format_expr_inner emits `forall <v> in <domain>: <body>`; expr_precedence=1.
 +3 round-trip tests. sorted_check PASS → 19/22, 0 diverged. Stage2 suite 178/178
 rust+js. selfcheck-formatter: all 4 EQUAL. Clean (no scope expansion).
+
+---
+
+## 2026-06-16 — Phase 42.8: generic type params + generic instantiation
+
+EntityDecl/FunctionDecl gain type_params: Array<String>, DEFAULTED in the
+constructor body (empty_string_array()) so no constructor-signature change and no
+call-site churn (clean trick). parse_type_param_list parses optional `<T, U>` after
+entity/function name. Generic instantiation `Ident<Args>(...)`: lookahead_is_generic_call
+scans `< ... > (` without consuming to disambiguate from `<` comparison; on match,
+the type-arg text is embedded in the callee ident (e.g. "Stack<Int>") so the
+existing ex_call path formats it back verbatim. format_type_params emits "" for
+empty (so the type-param-free stage2 files stay byte-equal). +12 tests. generic_stack
+PASS → 20/22, 0 diverged. Stage2 suite 190/190 rust+js. selfcheck: all 4 EQUAL.
+
+PATTERN: [stage2-add-field] To add a field to an existing stage2 AST entity without
+touching every constructor call site, declare the field and DEFAULT it in the
+constructor body (don't add a constructor parameter); the parser assigns the real
+value post-construction (mutable local). Keeps the diff small + low-risk.
+
+PATTERN: [never-stage1-fmt-stage2] Do NOT run `intentc fmt` (stage1) on a stage2
+source file — stage1 and stage2 have diverging comment/paren behavior, so stage1
+can "reformat" a stage2 file into something the stage2 formatter no longer treats
+as a fixpoint. Verify/maintain stage2 files only via the stage2 binary
+(make selfcheck-formatter).

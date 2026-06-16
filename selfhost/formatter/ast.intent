@@ -282,6 +282,11 @@ public entity FunctionDecl {
     field requires_clauses: Array<Expr>;
     field ensures_clauses: Array<Expr>;
     field decreases_clauses: Array<Expr>;
+    // Phase 44: generic type parameters on the declaration, e.g. `<T>` in
+    // `function id<T>(x: T) returns T`. Defaulted empty; the parser assigns
+    // them after the name token when a `<` follows. Methods do NOT carry type
+    // params (only top-level functions and entity decls do).
+    field type_params: Array<String>;
 
     constructor(name: String, is_public: Bool, is_entry: Bool, is_async: Bool, is_constructor: Bool, params: Array<Param>, return_type: String, body: Block, line: Int, comments_before: Array<String>) {
         self.name = name;
@@ -297,6 +302,7 @@ public entity FunctionDecl {
         self.requires_clauses = empty_expr_array();
         self.ensures_clauses = empty_expr_array();
         self.decreases_clauses = empty_expr_array();
+        self.type_params = empty_string_array();
     }
 }
 
@@ -359,6 +365,10 @@ public entity EntityDecl {
     field invariants: Array<Expr>;
     field line: Int;
     field comments_before: Array<String>;
+    // Phase 44: generic type parameters on the entity declaration, e.g. `<T>`
+    // in `entity Stack<T> { ... }`. Defaulted empty; the parser assigns them
+    // after the name token when a `<` follows.
+    field type_params: Array<String>;
 
     constructor(name: String, is_public: Bool, fields: Array<FieldDecl>, methods: Array<FunctionDecl>, has_constructor: Bool, ctor: FunctionDecl, invariants: Array<Expr>, line: Int, comments_before: Array<String>) {
         self.name = name;
@@ -370,6 +380,7 @@ public entity EntityDecl {
         self.invariants = invariants;
         self.line = line;
         self.comments_before = comments_before;
+        self.type_params = empty_string_array();
     }
 }
 
