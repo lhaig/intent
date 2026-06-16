@@ -838,6 +838,53 @@ test "entity invariant: fields + invariant + constructor round-trips" {
     assert_eq(out, src);
 }
 
+// --- implies operator tests (Phase 42) --------------------------------------
+
+test "implies: round-trip in ensures clause" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f(b: Int) returns Int\n"
+        + "    ensures result > 0 implies b != 0\n"
+        + '{'.to_string() + "\n"
+        + "    return 1;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "implies: parser produces right-associative ex_binop" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction f() returns Int " + '{'.to_string() + "\n    let b: Bool = a implies b implies c;\n    return 0;\n" + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    let e: Expr = prog.functions[0].body.stmts[0].expr;
+    assert_eq(e.kind, formatter_ast.ex_binop());
+    assert_eq(e.name, "implies");
+    // Right-assoc: lhs=a, rhs=(b implies c).
+    assert_eq(e.children[0].name, "a");
+    assert_eq(e.children[1].kind, formatter_ast.ex_binop());
+    assert_eq(e.children[1].name, "implies");
+}
+
+// --- await expression tests (Phase 42) --------------------------------------
+
+test "await: round-trip in async function body" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "async function f() returns Int " + '{'.to_string() + "\n"
+        + "    let x: Int = await g();\n"
+        + "    return x;\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "await: parser produces ex_await wrapping inner expr" {
+    let src: String = "module m version \"1.0.0\";\n\nasync function f() returns Int " + '{'.to_string() + "\n    let x: Int = await g();\n    return x;\n" + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    let rhs: Expr = prog.functions[0].body.stmts[0].expr;
+    assert_eq(rhs.kind, formatter_ast.ex_await());
+    assert_eq(rhs.children[0].kind, formatter_ast.ex_call());
+}
+
 test "dogfood: parse + format hello.intent matches expected canonical form" {
     let r: Result<String, String> = read_file("examples/hello.intent");
     let src: String = match r {

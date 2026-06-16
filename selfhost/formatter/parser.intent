@@ -458,6 +458,20 @@ public entity Parser {
 
     method parse_assign() returns Expr {
         let lhs: Expr = self.parse_or();
+        // `implies` — lowest-precedence binary operator, right-associative.
+        // Grammar: implies_expr = or_expr [ "implies" implies_expr ]. Handled
+        // here rather than via a dedicated parse_implies level: parser.intent
+        // sits near the recursive-descent stack limit, so an extra frame per
+        // expression overflows it. `=` and `implies` never co-occur as the same
+        // operator, so a flat check at this level is safe.
+        if self.check(formatter_lexer.kw_implies_marker()) {
+            let op_tok: Token = self.advance();
+            let rhs: Expr = self.parse_assign();
+            let mutable children: Array<Expr> = [];
+            children.push(lhs);
+            children.push(rhs);
+            return Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
+        }
         if self.check(formatter_lexer.tk_assign()) {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_assign();
@@ -602,6 +616,22 @@ public entity Parser {
             let mutable children: Array<Expr> = [];
             children.push(operand);
             return Expr(formatter_ast.ex_unary(), 0, "", false, "not", children);
+        }
+        // Phase 42: `await <expr>` prefix expression.
+        if self.check(formatter_lexer.kw_await_marker()) {
+            self.advance();
+            let operand: Expr = self.parse_unary();
+            let mutable children: Array<Expr> = [];
+            children.push(operand);
+            return Expr(formatter_ast.ex_await(), 0, "", false, "", children);
+        }
+        // Phase 42: `spawn <expr>` prefix expression.
+        if self.check(formatter_lexer.kw_spawn_marker()) {
+            self.advance();
+            let operand: Expr = self.parse_unary();
+            let mutable children: Array<Expr> = [];
+            children.push(operand);
+            return Expr(formatter_ast.ex_spawn(), 0, "", false, "", children);
         }
         return self.parse_postfix();
     }
@@ -818,12 +848,21 @@ public entity Parser {
                                                     }
                                                 }
                                             } else {
-                                                if self.is_at_function_start() {
-                                                    prog.functions.push(self.parse_function_decl(cmts));
+                                                // Phase 42: `async test "..." { ... }`. Consume the
+                                                // `async` modifier, then dispatch on `test` keyword.
+                                                if self.check(formatter_lexer.kw_async_marker()) and self.peek_n(1) == formatter_lexer.kw_test_marker() {
+                                                    self.advance(); // consume `async`
+                                                    let mutable td: TestDecl = self.parse_test_decl(cmts);
+                                                    td.is_async = true;
+                                                    prog.tests.push(td);
                                                 } else {
-                                                    self.fail("expected a top-level declaration (module / import / function / entity / enum / trait / impl / test / extern / intent)");
-                                                    prog.error = self.error;
-                                                    return prog;
+                                                    if self.is_at_function_start() {
+                                                        prog.functions.push(self.parse_function_decl(cmts));
+                                                    } else {
+                                                        self.fail("expected a top-level declaration (module / import / function / entity / enum / trait / impl / test / extern / intent)");
+                                                        prog.error = self.error;
+                                                        return prog;
+                                                    }
                                                 }
                                             }
                                         }

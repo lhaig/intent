@@ -114,6 +114,14 @@ public function ex_try() returns Int {
     return 16;
 } // children=[inner]; the try operator `inner?` (Phase 41.4)
 
+public function ex_await() returns Int {
+    return 17;
+} // children=[inner]; prefix `await <inner>` (Phase 42)
+
+public function ex_spawn() returns Int {
+    return 18;
+} // children=[inner]; prefix `spawn <inner>` (Phase 42)
+
 // --- Shared AST entities ----------------------------------------------------
 public entity Param {
     field name: String;
@@ -457,12 +465,15 @@ public entity TestDecl {
     field body: Block;
     field line: Int;
     field comments_before: Array<String>;
+    // Phase 42: `async test "..." { ... }` — the async modifier.
+    field is_async: Bool;
 
     constructor(name: String, body: Block, line: Int, comments_before: Array<String>) {
         self.name = name;
         self.body = body;
         self.line = line;
         self.comments_before = comments_before;
+        self.is_async = false;
     }
 }
 

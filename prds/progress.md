@@ -367,3 +367,35 @@ unblocks the NEXT construct in the same file (invariant -> constructor contract 
 intent block). Expect to fold in adjacent constructs to make a target example go
 green; the differential harness's per-file PASS is the true done-signal, not the
 single named construct.
+
+---
+
+## 2026-06-16 — Phase 42.7 + 42.10: implies + await (and a key verification finding)
+
+implies: binary operator, lowest precedence, right-associative. IMPORTANT: handled
+inside parse_assign (after parse_or) rather than a dedicated parse_implies level,
+to avoid deepening the recursive-descent chain (see stack finding below). await:
+ex_await prefix in parse_unary; format_expr_inner emits "await " + inner;
+expr_precedence(ex_await)=10. Also folded in (needed by async_demo): ex_spawn,
+`async test` dispatch in parse_program, and fixed function modifier order to
+stage1's public->async->entry. +4 round-trip tests. Harness 18/22 (try_operator +
+async_demo now PASS), 0 diverged. Stage2 suite 175/175 rust+js.
+
+KEY FINDING (corrected a wrong diagnosis): byte-equal self-format on the LARGE
+stage2 files (parser.intent ~95KB, lexer.intent) CANNOT be reliably verified via an
+in-language `intentc test` probe. `intentc test` runs rust tests through `cargo
+test`/libtest, which executes each test on a SMALL (~2MB) thread stack; the deep
+recursive-descent parse of a 95KB file overflows that thread stack and the test
+binary aborts (no graceful error; non-deterministic because env/arg size shifts the
+stack base). This is NOT a formatter bug: the BUILT stage2 binary (entry main, 8MB
+main thread) self-formats all 4 files byte-equal with no problem — verified
+directly. RUST_MIN_STACK did not help (the relevant frames are on a thread libtest
+controls / or main thread, not std-spawned).
+
+PATTERN: [verify-selfformat-via-binary] Verify byte-equal self-format on the large
+stage2 files with the BUILT binary (`intentc build --target rust
+selfhost/formatter/main.intent` then run it on each file, strip one trailing
+newline, diff), NOT via an in-language `intentc test` probe — libtest's small
+per-test thread stack overflows on the 95KB parser.intent and aborts. The earlier
+"stack overflow blocker" was an artifact of this verification method, not the
+formatter. Real usage (`intentc fmt --self-hosted`) is fine.

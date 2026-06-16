@@ -304,6 +304,19 @@ public function kw_match_marker() returns Int {
     return 75;
 }
 
+// Phase 42: `implies` binary operator and `await` / `spawn` prefix expressions.
+public function kw_implies_marker() returns Int {
+    return 76;
+}
+
+public function kw_await_marker() returns Int {
+    return 77;
+}
+
+public function kw_spawn_marker() returns Int {
+    return 78;
+}
+
 public function tk_eof() returns Int {
     return 98;
 }
@@ -387,6 +400,15 @@ public function keyword_kind(text: String) returns Int {
     }
     if text == "async" {
         return kw_async_marker();
+    }
+    if text == "implies" {
+        return kw_implies_marker();
+    }
+    if text == "await" {
+        return kw_await_marker();
+    }
+    if text == "spawn" {
+        return kw_spawn_marker();
     }
     if text == "entity" {
         return kw_entity_marker();

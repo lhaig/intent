@@ -92,6 +92,9 @@ public function binop_precedence(op: String) returns Int {
     if op == "=" {
         return 1;
     }
+    if op == "implies" {
+        return 1;
+    }
     if op == "or" {
         return 2;
     }
@@ -137,7 +140,13 @@ public function binop_precedence(op: String) returns Int {
 }
 
 public function binop_is_right_assoc(op: String) returns Bool {
-    return op == "=";
+    if op == "=" {
+        return true;
+    }
+    if op == "implies" {
+        return true;
+    }
+    return false;
 }
 
 // Intrinsic precedence of an expression. For an `ex_paren`, the value is the
@@ -159,6 +168,12 @@ public function expr_precedence(e: Expr) returns Int {
         return 10;
     }
     if e.kind == formatter_ast.ex_try() {
+        return 10;
+    }
+    if e.kind == formatter_ast.ex_await() {
+        return 10;
+    }
+    if e.kind == formatter_ast.ex_spawn() {
         return 10;
     }
     if e.kind == formatter_ast.ex_range() {
@@ -280,6 +295,17 @@ public function format_expr_inner(e: Expr) returns String {
         // lower-precedence inner expression keeps its parens.
         let inner: String = format_expr_at(e.children[0], 10);
         return inner + "?";
+    }
+    if e.kind == formatter_ast.ex_await() {
+        // Phase 42: prefix `await <expr>`. Inner treated as unary-prec (9)
+        // so lower-prec expressions keep their parens.
+        let inner: String = format_expr_at(e.children[0], 9);
+        return "await " + inner;
+    }
+    if e.kind == formatter_ast.ex_spawn() {
+        // Phase 42: prefix `spawn <expr>`. Same prec convention as await.
+        let inner: String = format_expr_at(e.children[0], 9);
+        return "spawn " + inner;
     }
     if e.kind == formatter_ast.ex_array() {
         let mutable elems: String = "";
@@ -491,11 +517,11 @@ public function format_function_decl(fn_decl: FunctionDecl, level: Int) returns 
     if fn_decl.is_public {
         head = head + "public ";
     }
-    if fn_decl.is_entry {
-        head = head + "entry ";
-    }
     if fn_decl.is_async {
         head = head + "async ";
+    }
+    if fn_decl.is_entry {
+        head = head + "entry ";
     }
     head = head + "function " + fn_decl.name + "(" + format_param_list(fn_decl.params) + ")";
     if not fn_decl.is_constructor and fn_decl.return_type != "" {
@@ -555,7 +581,11 @@ public function format_method_decl(m: FunctionDecl, level: Int) returns String {
 
 // --- Test declaration ------------------------------------------------------
 public function format_test_decl(t: TestDecl) returns String {
-    let mutable out: String = "test \"" + t.name + "\" " + '{'.to_string() + "\n";
+    let mutable prefix: String = "";
+    if t.is_async {
+        prefix = "async ";
+    }
+    let mutable out: String = prefix + "test \"" + t.name + "\" " + '{'.to_string() + "\n";
     out = out + format_block_body(t.body, 1);
     out = out + '}'.to_string() + brace_trail(t.body);
     return out;
