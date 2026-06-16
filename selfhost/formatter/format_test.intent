@@ -1007,3 +1007,66 @@ test "generics: dogfood generic_stack.intent round-trips byte-equal" {
         assert_eq(out, src);
     }
 }
+
+// --- Phase 44: Fn types and lambda expressions --------------------------------
+
+test "Fn type: function with Fn(Int) -> Int param round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function apply(f: Fn(Int) -> Int) returns Int " + '{'.to_string() + "\n"
+        + "    return f(0);\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "Fn type: Fn(Int) -> Int param parses correctly" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function apply(f: Fn(Int) -> Int) returns Int " + '{'.to_string() + "\n"
+        + "    return f(0);\n"
+        + '}'.to_string() + "\n\n";
+    let prog: Program = formatter_parser.parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions), 1);
+    assert_eq(prog.functions[0].params[0].type_name, "Fn(Int) -> Int");
+}
+
+test "Fn type: function with Fn(Int, Int) -> Int param round-trips" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function apply2(f: Fn(Int, Int) -> Int) returns Int " + '{'.to_string() + "\n"
+        + "    return f(0, 1);\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "lambda: 1-arg lambda round-trips in let binding" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let g: Fn(Int) -> Int = |x: Int| -> Int => x * 2;\n"
+        + "    return g(1);\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "lambda: 2-arg lambda round-trips in let binding" {
+    let src: String = "module m version \"1.0.0\";\n\n"
+        + "function f() returns Int " + '{'.to_string() + "\n"
+        + "    let h: Fn(Int, Int) -> Int = |a: Int, b: Int| -> Int => a + b;\n"
+        + "    return h(3, 4);\n"
+        + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}
+
+test "lambda: dogfood closure_demo.intent round-trips byte-equal" {
+    let r: Result<String, String> = read_file("examples/closure_demo.intent");
+    let src: String = match r {
+        Ok(s) => s,
+        Err(_) => "",
+    };
+    if src != "" {
+        let out: String = roundtrip(src);
+        assert_eq(out, src);
+    }
+}

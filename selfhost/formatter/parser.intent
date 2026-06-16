@@ -213,6 +213,26 @@ public entity Parser {
     method parse_type_name() returns String {
         let tok: Token = self.advance();
         let mutable name: String = tok.text;
+        // Phase 44: `Fn(T1, T2) -> R` function type.
+        if name == "Fn" and self.check(formatter_lexer.tk_lparen()) {
+            self.advance();
+            name = "Fn(";
+            let mutable first_param: Bool = true;
+            while not self.check(formatter_lexer.tk_rparen()) and not self.at_end() and self.error == "" {
+                if not first_param {
+                    self.expect(formatter_lexer.tk_comma(), "',' between Fn param types");
+                    name = name + ", ";
+                }
+                name = name + self.parse_type_name();
+                first_param = false;
+            }
+            self.expect(formatter_lexer.tk_rparen(), "')' to close Fn param types");
+            name = name + ")";
+            self.expect(formatter_lexer.tk_thin_arrow(), "'->' in Fn type");
+            let ret: String = self.parse_type_name();
+            name = name + " -> " + ret;
+            return name;
+        }
         if self.check_consume(formatter_lexer.tk_lt()) {
             name = name + "<";
             let mutable depth: Int = 1;
@@ -717,8 +737,39 @@ public entity Parser {
             self.expect(formatter_lexer.tk_rbracket(), "']' to close array literal");
             return Expr(formatter_ast.ex_array(), 0, "", false, "", elems);
         }
+        // Phase 44: lambda expression `|p: T, ...| -> R => body`.
+        if kind == formatter_lexer.tk_pipe() {
+            return self.parse_lambda();
+        }
         self.fail("expected expression");
         return formatter_ast.empty_expr();
+    }
+
+    method parse_lambda() returns Expr {
+        self.expect(formatter_lexer.tk_pipe(), "'|' to start lambda params");
+        let mutable params: Array<Param> = [];
+        while not self.check(formatter_lexer.tk_pipe()) and not self.at_end() and self.error == "" {
+            let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "lambda parameter name");
+            self.expect(formatter_lexer.tk_colon(), "':' after lambda parameter name");
+            let ptype: String = self.parse_type_name();
+            params.push(Param(name_tok.text, ptype));
+            if not self.check(formatter_lexer.tk_pipe()) {
+                self.expect(formatter_lexer.tk_comma(), "',' between lambda parameters");
+            }
+        }
+        self.expect(formatter_lexer.tk_pipe(), "'|' to close lambda params");
+        let mutable ret: String = "";
+        if self.check(formatter_lexer.tk_thin_arrow()) {
+            self.advance();
+            ret = self.parse_type_name();
+        }
+        self.expect(formatter_lexer.tk_arrow(), "'=>' in lambda");
+        let body: Expr = self.parse_expr();
+        let mutable children: Array<Expr> = [];
+        children.push(body);
+        let mutable e: Expr = Expr(formatter_ast.ex_lambda(), 0, ret, false, "", children);
+        e.lambda_params = params;
+        return e;
     }
 
     method parse_match_expr() returns Expr {

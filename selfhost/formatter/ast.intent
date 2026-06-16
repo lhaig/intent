@@ -130,6 +130,10 @@ public function ex_exists() returns Int {
     return 20;
 } // name=var, children=[domain, body]; `exists var in domain: body` (Phase 43)
 
+public function ex_lambda() returns Int {
+    return 21;
+} // lambda_params=params, str_value=return type, children=[body]; `|p: T| -> R => body` (Phase 44)
+
 // --- Shared AST entities ----------------------------------------------------
 public entity Param {
     field name: String;
@@ -168,6 +172,9 @@ public entity Expr {
     // scrutinee). Empty for every other kind; defaulted in the constructor
     // body so the existing Expr(...) call sites don't change.
     field match_arms: Array<MatchArm>;
+    // Phase 44: parameters of an `ex_lambda` expression. Empty for every other
+    // kind; defaulted in the constructor body so existing call sites don't change.
+    field lambda_params: Array<Param>;
 
     constructor(kind: Int, int_value: Int, str_value: String, bool_value: Bool, name: String, children: Array<Expr>) {
         self.kind = kind;
@@ -177,6 +184,7 @@ public entity Expr {
         self.name = name;
         self.children = children;
         self.match_arms = empty_matcharm_array();
+        self.lambda_params = empty_param_array();
     }
 }
 
@@ -574,6 +582,12 @@ public function empty_expr_array() returns Array<Expr> {
 // Empty Array<MatchArm> — defaults Expr.match_arms (Phase 41.2).
 public function empty_matcharm_array() returns Array<MatchArm> {
     let mutable a: Array<MatchArm> = [];
+    return a;
+}
+
+// Empty Array<Param> — defaults Expr.lambda_params (Phase 44).
+public function empty_param_array() returns Array<Param> {
+    let mutable a: Array<Param> = [];
     return a;
 }
 

@@ -435,3 +435,16 @@ source file — stage1 and stage2 have diverging comment/paren behavior, so stag
 can "reformat" a stage2 file into something the stage2 formatter no longer treats
 as a fixpoint. Verify/maintain stage2 files only via the stage2 binary
 (make selfcheck-formatter).
+
+---
+
+## 2026-06-16 — Phase 42.9: Fn types + lambdas
+
+New tk_thin_arrow token for `->` (the `-` branch peeks for `>`; stage2's existing
+tk_arrow is the FAT `=>`). parse_type_name detects `Fn` + `(` and reconstructs
+`Fn(T1, T2) -> R` verbatim (stored as a type string, so formatting is automatic —
+same pattern as generic types). ex_lambda kind with a new Expr.lambda_params:
+Array<Param> field (defaulted in ctor body via empty_param_array(), no signature
+change); parse_lambda parses `|name: type, ...| [-> Ret] => body`; format_expr_inner
+emits it. +6 tests (+2 lexer). closure_demo PASS → 21/22, 0 diverged. Stage2 suite
+198/198 rust+js. selfcheck: all 4 EQUAL.

@@ -162,6 +162,9 @@ public function expr_precedence(e: Expr) returns Int {
     if e.kind == formatter_ast.ex_exists() {
         return 1;
     }
+    if e.kind == formatter_ast.ex_lambda() {
+        return 1;
+    }
     if e.kind == formatter_ast.ex_paren() {
         return expr_precedence(e.children[0]);
     }
@@ -289,6 +292,23 @@ public function format_expr_inner(e: Expr) returns String {
     }
     if e.kind == formatter_ast.ex_exists() {
         return "exists " + e.name + " in " + format_expr(e.children[0]) + ": " + format_expr(e.children[1]);
+    }
+    if e.kind == formatter_ast.ex_lambda() {
+        let mutable s: String = "|";
+        let mutable i: Int = 0;
+        while i < len(e.lambda_params) {
+            if i > 0 {
+                s = s + ", ";
+            }
+            s = s + e.lambda_params[i].name + ": " + e.lambda_params[i].type_name;
+            i = i + 1;
+        }
+        s = s + "|";
+        if e.str_value != "" {
+            s = s + " -> " + e.str_value;
+        }
+        s = s + " => " + format_expr(e.children[0]);
+        return s;
     }
     return "<unknown_expr>";
 }

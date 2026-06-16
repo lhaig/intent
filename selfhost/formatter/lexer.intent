@@ -149,6 +149,11 @@ public function tk_at() returns Int {
     return 36;
 }
 
+// Phase 44: thin arrow `->` used in Fn type signatures and lambda return types.
+public function tk_thin_arrow() returns Int {
+    return 37;
+}
+
 // Keywords. Identifiers that match these get their kind rewritten before
 // the Token is emitted. v1 covers the common ones; the parser phase will
 // extend the table as needed.
@@ -820,6 +825,10 @@ public entity Lexer {
             return Token(tk_plus(), "+", start_line, start_col);
         }
         if c == '-' {
+            if not self.at_end() and self.peek() == '>' {
+                self.advance();
+                return Token(tk_thin_arrow(), "->", start_line, start_col);
+            }
             return Token(tk_minus(), "-", start_line, start_col);
         }
         if c == '*' {
@@ -1160,5 +1169,21 @@ test "small program token sequence" {
     assert_eq(toks[9].kind, tk_semicolon());
     assert_eq(toks[10].kind, tk_rbrace());
     assert_eq(toks[11].kind, tk_eof());
+}
+
+// Phase 44: thin-arrow `->` token tests.
+test "thin arrow lexes as tk_thin_arrow" {
+    let toks: Array<Token> = lex("->");
+    assert_eq(toks[0].kind, tk_thin_arrow());
+    assert_eq(toks[0].text, "->");
+    assert_eq(toks[1].kind, tk_eof());
+}
+
+test "bare minus stays tk_minus when not followed by gt" {
+    let toks: Array<Token> = lex("a - b");
+    assert_eq(toks[0].kind, tk_ident());
+    assert_eq(toks[1].kind, tk_minus());
+    assert_eq(toks[1].text, "-");
+    assert_eq(toks[2].kind, tk_ident());
 }
 
