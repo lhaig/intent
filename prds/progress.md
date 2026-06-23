@@ -468,3 +468,30 @@ PATTERN: [intent-ctor-field-init] In stage2 Intent, initialize a non-primitive
 field in a constructor body with a direct helper CALL (= empty_string_array()), not
 a local variable — the rust backend emits the struct literal before constructor body
 statements, so a local referenced in a field init isn't in scope yet.
+
+---
+
+## 2026-06-23 — Phase 43.1: ADR 0046 self-hosted linter strategy
+
+Kicked off Phase 43 (rewrite the linter in Intent). Norman-scoped: PRD
+`prds/active/prd-phase-43-self-hosted-linter.md`, 13 tasks in TASKS.md.
+
+Recon (2 Explore agents): mapped the stage1 Go linter (16 rule families, all
+warnings, format `warning[file:line:col]: message`, single-pass recursive walk,
+no config/suppression) and the stage2 infra (lexer.lex / parser.parse -> Program;
+full AST; decls carry `line` but NOT `column`).
+
+Corpus baseline measured: `intentc lint examples/*.intent` = 76 warnings / 13 files,
+exercising 8 of 16 rule families (unused var 25, mutable-never-reassigned 14,
+method no-contracts 14, function no-contracts 12, fn naming 4, entity no-invariant 4,
+unused param 2, trait method 1). Other 8 families need golden fixtures.
+
+ADR 0046 records: D1 reuse `selfhost/formatter/` (grep confirms NO cross-dir imports
+exist anywhere -> separate dir is unproven/risky); D2 byte-equal parity INCLUDING
+`:col` (requires adding `column:Int` to stage2 AST decls); D3 all 16 rules this
+phase, gated by `make diff-linter`.
+
+PATTERN: [linter-corpus-gate] The examples corpus DOES fire lint warnings (76),
+so the differential is a real gate for the 8 common families. The 8 non-corpus
+families (extern, entity/enum/variant PascalCase, empty-body, intent verified_by,
+type-params, spawn-discard) must be covered by committed golden fixtures.

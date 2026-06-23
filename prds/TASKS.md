@@ -58,6 +58,29 @@ Widened the stage2 parser beyond its self-hostable subset so it can format arbit
 
 ## Phase 42: Stage2 Formatter CLI Wiring + Differential Test — 12 tasks completed 2026-06-16 (corpus 22/22 vs `intentc fmt`; see [TASKS-archive.md](TASKS-archive.md))
 
+## Phase 43: Self-Hosted Linter (stage2) — ACTIVE
+
+Faithful port of the 16 Go-linter rule families into Intent, reusing the stage2
+lexer/parser/AST. Byte-equal parity with stage1 `intentc lint` (including `:col`),
+gated by `make diff-linter`. See [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md)
+and ADR 0046. Corpus baseline: 76 warnings / 13 files / 8 of 16 families.
+
+| # | Task | PRD | Status | Notes |
+|---|------|-----|--------|-------|
+| 43.1 | ADR 0046 — self-hosted linter strategy | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-23) | docs/decisions/0046; D1 reuse-formatter-dir, D2 byte-equal-w/-col, D3 all-16-gated |
+| 43.2 | Column tracking in stage2 AST + parser | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | add `column:Int` to anchored decls/stmts/params; needs: 43.1 |
+| 43.3 | Linter core scaffold + diagnostic model | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | `lint.intent`, `LintDiag`, dispatch walk, `format_diags`, +1 rule; needs: 43.2 |
+| 43.4 | Contract-absence rules (R1-R4) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | function/method/trait-method/extern; skip `entry`; needs: 43.3 |
+| 43.5 | Naming rules (R5-R8) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | snake_case + PascalCase entity/enum/variant; needs: 43.3 |
+| 43.6 | Structural rules (R9-R11) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | no-invariant, empty-body, intent verified_by; needs: 43.3 |
+| 43.7 | Variable rules + used/assigned-name engine (R12-R13) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | full Stmt/Expr walk; 41/76 corpus warnings; needs: 43.3 |
+| 43.8 | Parameter rules (R14) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | reuses 43.7 engine; scope-label parity; needs: 43.7 |
+| 43.9 | Type-param + spawn rules (R15-R16) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | fixtures only (not in corpus); needs: 43.7 |
+| 43.10 | Runnable `lint_main.intent` | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | rust+js; exit codes mirror formatter; needs: 43.4-43.9 |
+| 43.11 | `intentc lint --self-hosted` Go shim | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | mirrors `fmt --self-hosted`; needs: 43.10 |
+| 43.12 | Differential harness + fixtures + `make diff-linter` | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | 76/76 corpus + golden fixtures byte-equal; needs: 43.10 |
+| 43.13 | Docs (ROADMAP/NEXT-STEPS/README) + final validate | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | needs: 43.12 |
+
 ## Backlog
 
 | # | Task | PRD | Status | Notes |
