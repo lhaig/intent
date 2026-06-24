@@ -648,6 +648,52 @@ test "R11: intent block with verified_by produces no R11 diag" {
     assert_eq(has_diag_msg(diags, "intent block has no verified_by references"), false);
 }
 
+// --- R3: trait method contracts (43.8) ----------------------------------------
+// R3 always fires — stage2 parse_trait_method_sig does not parse requires/ensures,
+// so every successfully-parsed trait method has no contracts.
+
+test "R3: trait method always produces no-contracts diag" {
+    let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method execute() returns Int; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "trait method 'T.execute' has no requires or ensures contracts"), true);
+}
+
+test "R3/R5 ORDER: R5 naming fires before R3 contracts for same method" {
+    // BadName violates R5; R5 must appear before R3 in diags array.
+    let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method BadName() returns Int; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let mutable r5_pos: Int = -1;
+    let mutable r3_pos: Int = -1;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "function 'BadName' should use snake_case naming" {
+            r5_pos = i;
+        }
+        if diags[i].message == "trait method 'T.BadName' has no requires or ensures contracts" {
+            r3_pos = i;
+        }
+        i = i + 1;
+    }
+    assert_eq(r5_pos >= 0, true);
+    assert_eq(r3_pos >= 0, true);
+    assert_eq(r5_pos < r3_pos, true);
+}
+
+// --- R4: extern contracts (43.8) ----------------------------------------------
+// R4 always fires — stage2 parse_extern_decl does not parse requires/ensures,
+// so every successfully-parsed extern has no contracts.
+// Extern syntax: extern "target" function name(...) returns T;
+// ExternDecl.func_name holds the function name.
+
+test "R4: extern always produces no-contracts diag" {
+    let src: String = "module m version \"1.0\"; extern \"rust\" function panic(msg: String) returns Void;";
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "extern function 'panic' has no requires/ensures; FFI declarations should document the boundary contract"), true);
+}
+
 entry function main() returns Int {
     return 0;
 }

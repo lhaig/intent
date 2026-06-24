@@ -285,9 +285,14 @@ public function lint_function_decl(fdecl: FunctionDecl) returns Array<LintDiag> 
     return diags;
 }
 
-// lint_extern_decl checks a single extern declaration (stub; rules added in 43.4+).
+// lint_extern_decl checks a single extern declaration.
+// R4: always fires — stage2 parse_extern_decl expects `;` immediately after the
+// return type and does not parse requires/ensures, so every successfully-parsed
+// extern has no contracts.
 public function lint_extern_decl(ext: ExternDecl) returns Array<LintDiag> {
     let mutable diags: Array<LintDiag> = [];
+    // R4: every extern lacks contracts (stage2 parser surface has no contract clause for externs)
+    diags.push(LintDiag(ext.line, ext.column, "extern function '" + ext.func_name + "' has no requires/ensures; FFI declarations should document the boundary contract"));
     return diags;
 }
 
@@ -379,22 +384,27 @@ public function lint_enum_decl(en: EnumDecl) returns Array<LintDiag> {
 
 // lint_trait_decl checks a single trait declaration.
 // R6-trait QUIRK: stage1 calls checkEntityNaming for traits, so the message
-// literally says "entity", not "trait". R3 (method contracts) is deferred to
-// 43.8 (TraitMethodSig doesn't carry requires/ensures yet).
-// Stage1 order: R6-quirk (naming), then per method R5 (naming). R3 after R5 in 43.8.
+// literally says "entity", not "trait".
+// Stage1 order per method: R5 (naming), then R3 (contracts).
+// R3 always fires — stage2 parse_trait_method_sig expects `;` immediately after
+// the return type and does not parse requires/ensures, so every successfully-parsed
+// trait method has no contracts.
 public function lint_trait_decl(tr: TraitDecl) returns Array<LintDiag> {
     let mutable diags: Array<LintDiag> = [];
     // R6-trait: naming check — message says "entity" (stage1 quirk)
     if not is_pascal_case(tr.name) {
         diags.push(LintDiag(tr.line, tr.column, "entity '" + tr.name + "' should use PascalCase naming"));
     }
-    // per method: R5 naming (R3 contracts deferred to 43.8)
+    // per method: R5 naming, then R3 contracts (always-fire; stage2 parser has no contract clause for trait methods)
     let mutable mi: Int = 0;
     while mi < len(tr.methods) {
         let m: TraitMethodSig = tr.methods[mi];
+        // R5: snake_case naming
         if not is_snake_case(m.name) {
             diags.push(LintDiag(m.line, m.column, "function '" + m.name + "' should use snake_case naming"));
         }
+        // R3: no contracts (always fires for every parseable trait method)
+        diags.push(LintDiag(m.line, m.column, "trait method '" + tr.name + "." + m.name + "' has no requires or ensures contracts"));
         mi = mi + 1;
     }
     return diags;

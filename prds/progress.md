@@ -675,3 +675,24 @@ committed work (43.6) instead of picking up 43.7; resolved by sending a disk-gro
 directive ("enum/intent dispatch are still stubs — execute now"). Lesson: trust the
 working tree, not the message stream, and re-anchor the worker to disk when reports
 drift from `git status`.
+
+---
+
+## 2026-06-24 — Phase 43.8: R3 (trait-method contracts) + R4 (extern contracts)
+
+Both implemented as always-fire, which is byte-equal-correct: stage2's
+parse_trait_method_sig and parse_extern_decl both expect `;` immediately after the
+return type and CANNOT parse requires/ensures — so every trait method / extern that
+parses is contract-less by construction. R3 inserted in lint_trait_decl AFTER R5
+(stage1 order); R4 replaces the lint_extern_decl stub (uses ext.func_name). Matches
+corpus (handler_trait R3 fires once; no corpus externs). +3 tests incl. R5-before-R3
+order lock. lint_test 175/175 rust+js; selfcheck 4 EQUAL; diff-formatter 22/22.
+
+PATTERN: [stage2-parser-surface] When a rule keys off a construct the stage2 parser
+cannot represent (trait-method/extern contracts), check whether the parser can even
+PARSE that construct. If it rejects it (parse error), then within the parseable
+subset the rule's condition is constant, and "always fire" is byte-equal-correct —
+no AST enrichment needed. (Contrast type-params, which ARE parsed but lack position.)
+
+Task split: old 43.8 (enrichment + R3/R4/R15/R15e) split into 43.8 (R3/R4, trivial)
+and 43.9 (type-param position enrichment + R15/R15e). Net 12 -> 13 tasks.
