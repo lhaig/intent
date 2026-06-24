@@ -553,3 +553,35 @@ with a local `let mutable arr: Array<T> = [];` + arr.push(...) directly. NEVER p
 an accumulator array into a helper and push inside the callee — the mutation is
 silently discarded (and a drain_into helper generated broken Rust). lint_program
 inlines the per-kind merge loops for this reason.
+
+---
+
+## 2026-06-24 — Phase 43 task reorg + authoritative port spec
+
+Reorganized remaining rule tasks from rule-family (old 43.4-43.9) to
+DISPATCH-FUNCTION-oriented (new 43.4-43.7). Reason: diagnostics are NOT sorted
+(emit order = output order), and stage1 interleaves rules WITHIN each dispatch
+function in a fixed order, so rule-family tasks would make fragile order-dependent
+edits to the same lint_* functions. Dispatch-oriented tasks each own whole functions
+with all their rules in stage1 order — no cross-task ordering coordination. Same 16
+rules, same byte-equal gate. Net 13 -> 11 tasks.
+
+Appended PRD section 9 "Stage1 port reference (AUTHORITATIVE)": full dispatch order,
+per-decl check order, message templates, and the used-name/assigned-name engine
+stage2 mapping. All remaining worker briefs reference it.
+
+KEY SPEC FINDINGS (verified against linter.go + parser.intent):
+- Dispatch order: functions -> externs -> entities -> enums -> traits -> impls ->
+  intents (NOT externs-first).
+- No sort in diagnostic.Format -> per-decl rule order is load-bearing.
+- Trait-name naming uses checkEntityNaming -> emits "entity 'X' should use PascalCase
+  naming" (literally "entity" even for a trait) — replicate verbatim.
+- Trait methods: naming BEFORE contracts. Impl methods: no contracts, no
+  mutable-never-reassigned. Methods: no type-param/spawn checks.
+- STAGE2 HAS NO ASSIGNMENT STATEMENT: `x = y` parses as st_expr whose expr is
+  ex_binop with name "=" (parser test 1557). The used-name engine must treat the
+  LHS plain-ident as a WRITE (not collected), collect RHS + field/index-target
+  objects; collect_assigned_names keys off this for R13.
+- ex_call: skip the callee if it's a plain ident (function name not a "read"); if
+  callee is ex_field, recurse it (method receiver IS read). ex_paren must be walked
+  (stage2-only node; stage1 has no paren node).

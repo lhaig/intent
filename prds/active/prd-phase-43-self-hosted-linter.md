@@ -275,3 +275,78 @@ type usage via the stage2 type-string representation) and discarded-spawn
   confirm in US-011.)
 - Exact column anchor per rule where stage1 and stage2 token positions differ —
   resolved empirically via the differential in US-012.
+
+## 9. Stage1 port reference (AUTHORITATIVE — read before any rule task)
+
+Source: `internal/linter/linter.go`. Diagnostics are NOT sorted
+(`internal/diagnostic/diagnostic.go`) — they print in append order. So stage2
+MUST emit in stage1's exact order, both across decl kinds and within a single decl.
+
+### Dispatch order (linter.go:25-31)
+functions → externs → entities → enums → traits → impls → intents.
+
+### Per-decl check order (exact)
+- **Top-level function** (lintFunctions): (1) empty-body R10; (2) if NOT entry:
+  missing-contracts R1; (3) naming R5; (4) unused-type-params R15; (5) if body
+  present, using collectUsedNames(body): unused-params R14, unused-vars R12,
+  mutable-never-reassigned R13, spawn-discarded R16.
+- **Entity** (lintEntities): (1) entity naming R6 (PascalCase); (2) no-invariant R9
+  (fields>0 && invariants==0); (3) unused-entity-type-params R15e; (4) constructor,
+  if body: unused-params R14 with scope `Entity.constructor`; (5) per method, in
+  order: empty-body R10 (name `Entity.method`), missing-method-contracts R2, naming
+  R5, then if body: unused-params R14 (scope `Entity.method`), unused-vars R12,
+  mutable-never-reassigned R13. Methods get NO type-param/spawn checks.
+- **Enum** (lintEnums): (1) enum naming R7 (PascalCase); (2) per variant: variant
+  naming R8.
+- **Trait** (lintTraits): (1) trait-name naming via checkEntityNaming → emits the
+  `entity 'X' should use PascalCase naming` message (QUIRK: literally says "entity",
+  not "trait" — replicate verbatim); (2) per method: naming R5 FIRST, then contracts
+  R3 (`trait method 'T.m' has no requires or ensures contracts`).
+- **Impl** (lintImplBlocks): per method: empty-body R10 (name `EntityName.method`),
+  naming R5, then if body: unused-params R14 (scope `EntityName.method`), unused-vars
+  R12. Impl methods get NO contracts check and NO mutable-never-reassigned.
+- **Intent** (lintIntents): empty-verified-by R11.
+
+### Naming-helper anchors / messages
+R5 `function 'X' should use snake_case naming`; R6/trait `entity 'X' should use
+PascalCase naming`; R7 `enum 'X' should use PascalCase naming`; R8 `variant 'V' in
+enum 'E' should use PascalCase naming`; R9 `entity 'X' has fields but no invariant`;
+R10 `function 'X' has an empty body` (methods use `Entity.method` as X); R11 `intent
+block has no verified_by references`; R1 `function 'X' has no requires or ensures
+contracts`; R2 `method 'E.m' has no requires or ensures contracts`; R4 `extern
+function 'X' has no requires/ensures; FFI declarations should document the boundary
+contract`; R12 `variable 'X' is declared but never used`; R13 `variable 'X' is
+declared mutable but never reassigned`; R14 `parameter 'X' in 'scope' is never used`;
+R15 `type parameter 'X' in function 'F' is never used in parameters or return type`;
+R16 `spawn result in 'F' is discarded; assign to a Future variable and await it`.
+
+### Used-name engine — stage2 mapping (collect_used_names → set of read names)
+stage2 has NO assignment statement: `x = y` is `st_expr` whose `expr` is `ex_binop`
+with `name == "="`. Replicate stage1 exactly:
+- st_let: collect initializer expr only (NOT the bound name).
+- st_expr that IS an assignment (ex_binop name "="): collect RHS = children[1] fully;
+  for LHS = children[0]: if ex_field collect its object, if ex_index collect
+  object+index, if plain ex_ident do NOT collect (write target). (Mirrors stage1
+  AssignStmt.)
+- st_expr (non-assignment): collect the whole expr.
+- st_return: collect value expr if present.
+- st_if: collect condition; recurse then_block + else_block.
+- st_while: collect condition; recurse body (+ loop invariants/decreases IF stage2
+  represents them in the statement; otherwise skip).
+- st_for: collect iterable expr; recurse body; do NOT collect the loop variable name.
+- Expr kinds: ex_ident → add name. ex_binop/ex_unary/ex_array/ex_index/ex_range →
+  recurse all children. ex_call → collect args (children[1..]); callee children[0]:
+  if ex_field recurse it (collects receiver), if ex_ident skip (function name not a
+  read). ex_field → recurse children[0] (object); field name not collected. ex_match
+  → recurse children[0] (scrutinee) + each match_arm.body; skip arm bindings.
+  ex_try/ex_await/ex_spawn → recurse children[0]. ex_lambda → recurse children[0]
+  (body); skip lambda_params. ex_forall/ex_exists → recurse children (domain+body);
+  skip bound name. ex_paren → recurse children[0] (STAGE2-ONLY; stage1 has no paren
+  node, so this case is an addition, not a port). Literals → nothing.
+- VERIFY stage2's method-call representation in the parser before porting ex_call
+  (confirm `obj.m(a)` is ex_call(ex_field(obj,"m"), a)).
+
+### Assigned-name engine — for R13 (collect_assigned_names → set of reassigned names)
+Walk statements; for an assignment (st_expr, ex_binop name "=") whose LHS is a plain
+ex_ident, mark that name assigned. Recurse into if/while/for blocks. Field/index
+targets do NOT count as reassigning the variable.

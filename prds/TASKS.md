@@ -70,16 +70,14 @@ and ADR 0046. Corpus baseline: 76 warnings / 13 files / 8 of 16 families.
 | 43.1 | ADR 0046 — self-hosted linter strategy | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-23) | docs/decisions/0046; D1 reuse-formatter-dir, D2 byte-equal-w/-col, D3 all-16-gated |
 | 43.2 | Column tracking in stage2 AST + parser | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | +column on 9 decls; +line+column on Stmt/Param/EnumVariant/TraitMethodSig; defaulted-in-body + post-construction assign; +4 tests; gates green |
 | 43.3 | Linter core scaffold + diagnostic model | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | lint.intent + lint_test.intent; LintDiag, dispatch (fns→externs→entities→enums→traits→impls→intents), format_diags, is_snake/pascal_case, R5; +18 tests; gates green |
-| 43.4 | Contract-absence rules (R1-R4) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | function/method/trait-method/extern; skip `entry`; needs: 43.3 |
-| 43.5 | Naming rules (R5-R8) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | snake_case + PascalCase entity/enum/variant; needs: 43.3 |
-| 43.6 | Structural rules (R9-R11) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | no-invariant, empty-body, intent verified_by; needs: 43.3 |
-| 43.7 | Variable rules + used/assigned-name engine (R12-R13) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | full Stmt/Expr walk; 41/76 corpus warnings; needs: 43.3 |
-| 43.8 | Parameter rules (R14) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | reuses 43.7 engine; scope-label parity; needs: 43.7 |
-| 43.9 | Type-param + spawn rules (R15-R16) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | fixtures only (not in corpus); needs: 43.7 |
-| 43.10 | Runnable `lint_main.intent` | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | rust+js; exit codes mirror formatter; needs: 43.4-43.9 |
-| 43.11 | `intentc lint --self-hosted` Go shim | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | mirrors `fmt --self-hosted`; needs: 43.10 |
-| 43.12 | Differential harness + fixtures + `make diff-linter` | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | 76/76 corpus + golden fixtures byte-equal; needs: 43.10 |
-| 43.13 | Docs (ROADMAP/NEXT-STEPS/README) + final validate | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | needs: 43.12 |
+| 43.4 | Used-name + assigned-name engine | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | collect_used_names / collect_assigned_names; full Stmt/Expr walk; assignment = st_expr ex_binop "="; unit-tested in isolation; needs: 43.3 |
+| 43.5 | Complete lint_function_decl (R10,R1,R15,R14,R12,R13,R16) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | all function checks in stage1 order; R5 already in; needs: 43.4 |
+| 43.6 | Complete lint_entity_decl + lint_impl_decl | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | entity R6/R9/R15e/ctor-R14 + methods; impl methods R10/R5/R14/R12; needs: 43.4 |
+| 43.7 | Complete lint_enum/trait/extern/intent dispatch | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | R7,R8,R6-trait(quirk),R5+R3,R4,R11; no engine needed; needs: 43.3 |
+| 43.8 | Runnable `lint_main.intent` | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | rust+js; exit codes + summary mirror stage1; needs: 43.5-43.7 |
+| 43.9 | `intentc lint --self-hosted` Go shim | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | mirrors `fmt --self-hosted`; needs: 43.8 |
+| 43.10 | Differential harness + fixtures + `make diff-linter` | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | 76/76 corpus + golden fixtures byte-equal; needs: 43.8 |
+| 43.11 | Docs (ROADMAP/NEXT-STEPS/README) + final validate | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | needs: 43.10 |
 
 ## Backlog
 
