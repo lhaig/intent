@@ -725,3 +725,22 @@ snapshot can race the worker's writes — confirm with a second snapshot before
 concluding a stall, and prefer retract-and-let-finish over taking over mid-edit.
 
 Cleanup: removed stray probe_col.intent (worker's column probe).
+
+---
+
+## 2026-06-24 — Phase 43.10: runnable lint_main.intent
+
+Created selfhost/formatter/lint_main.intent (entry main: args() -> read_file ->
+parse -> lint_program -> output). Output composition byte-matches stage1
+`intentc lint`: zero diags -> "No lint warnings." ; else format_diags(diags, path)
++ len(diags).to_string() + " warning(s) found." (print adds the single trailing
+newline; format_diags already ends each line with \n, so this reproduces stage1's
+Print(Format)+Println()+Printf exactly). Builds on rust + js. Exit codes 0/1/2/3
+mirror the formatter main.
+
+INDEPENDENT VERIFICATION (built rust binary, diffed vs `intentc lint`): byte-IDENTICAL
+on array_sum(1), map_demo(18), task_queue(17), enum_basic(12), io_demo(9),
+handler_trait(5). The high-warning files exercise multiple rules per decl + emit
+ordering — strong evidence the full port is faithful. Effectively the differential
+gate already passing; 43.12 formalizes it across the whole corpus + fixtures.
+Gates: selfcheck 4 EQUAL, diff-formatter 22/22, lint_test 188/188.
