@@ -123,6 +123,268 @@ public function lint_intent_block(ib: IntentBlock) returns Array<LintDiag> {
     return diags;
 }
 
+// --- Used-name / assigned-name engine ----------------------------------------
+// Faithful port of stage1 linter.go collectUsedNames / collectAssignedNames.
+// Arrays are pass-by-value in stage2 Intent; every helper RETURNS a new array.
+//
+// Rust backend note: `concat(a, helper_call())` fails because the Rust backend
+// emits `fn concat(a: &Vec, b: &Vec)` and a temporary return value cannot be
+// borrowed. Pattern: always store helper results in a named `let mutable tmp`
+// before appending. collect_used_names_from_expr uses inline push loops for
+// recursive cases to avoid the temp-borrow issue entirely.
+
+// concat merges two named Array<String> values into a new one.
+// Both args must be bound names (not temporaries) at call sites.
+public function concat(a: Array<String>, b: Array<String>) returns Array<String> {
+    let mutable out: Array<String> = [];
+    let mutable ai: Int = 0;
+    while ai < len(a) {
+        out.push(a[ai]);
+        ai = ai + 1;
+    }
+    let mutable bi: Int = 0;
+    while bi < len(b) {
+        out.push(b[bi]);
+        bi = bi + 1;
+    }
+    return out;
+}
+
+// append_names pushes every element of src into out (inline; both are named).
+// Used instead of concat() where the Rust temp-borrow restriction applies.
+function append_names(out: Array<String>, src: Array<String>) returns Array<String> {
+    let mutable dst: Array<String> = out;
+    let mutable i: Int = 0;
+    while i < len(src) {
+        dst.push(src[i]);
+        i = i + 1;
+    }
+    return dst;
+}
+
+// collect_used_names_from_expr returns every identifier that is read by expr e.
+// Method-call representation (verified in parser tests):
+//   obj.m(a)  →  ex_call( children=[ ex_field(children=[obj], name="m"), a ] )
+// So for ex_call: callee=children[0] — if ex_field, recurse it (collects receiver);
+// if ex_ident, skip (function name is not a use). Args = children[1..].
+function collect_used_names_from_expr(e: Expr) returns Array<String> {
+    let mutable out: Array<String> = [];
+    if e.kind == formatter_ast.ex_ident() {
+        out.push(e.name);
+        return out;
+    }
+    if e.kind == formatter_ast.ex_binop() or e.kind == formatter_ast.ex_unary() or e.kind == formatter_ast.ex_array() or e.kind == formatter_ast.ex_index() or e.kind == formatter_ast.ex_range() {
+        let mutable ci: Int = 0;
+        while ci < len(e.children) {
+            let mutable tmp: Array<String> = collect_used_names_from_expr(e.children[ci]);
+            out = append_names(out, tmp);
+            ci = ci + 1;
+        }
+        return out;
+    }
+    if e.kind == formatter_ast.ex_call() {
+        // callee is children[0]
+        let callee: Expr = e.children[0];
+        if callee.kind == formatter_ast.ex_field() {
+            let mutable ctmp: Array<String> = collect_used_names_from_expr(callee);
+            out = append_names(out, ctmp);
+        }
+        // if callee is ex_ident: function name, skip
+        // collect args: children[1..]
+        let mutable ai: Int = 1;
+        while ai < len(e.children) {
+            let mutable atmp: Array<String> = collect_used_names_from_expr(e.children[ai]);
+            out = append_names(out, atmp);
+            ai = ai + 1;
+        }
+        return out;
+    }
+    if e.kind == formatter_ast.ex_field() {
+        // recurse object (children[0]); field name is not a read
+        let mutable ftmp: Array<String> = collect_used_names_from_expr(e.children[0]);
+        out = append_names(out, ftmp);
+        return out;
+    }
+    if e.kind == formatter_ast.ex_paren() {
+        let mutable ptmp: Array<String> = collect_used_names_from_expr(e.children[0]);
+        out = append_names(out, ptmp);
+        return out;
+    }
+    if e.kind == formatter_ast.ex_match() {
+        // scrutinee is children[0]
+        let mutable stmp: Array<String> = collect_used_names_from_expr(e.children[0]);
+        out = append_names(out, stmp);
+        // each arm body; skip arm bindings
+        let mutable mi: Int = 0;
+        while mi < len(e.match_arms) {
+            let mutable mtmp: Array<String> = collect_used_names_from_expr(e.match_arms[mi].body);
+            out = append_names(out, mtmp);
+            mi = mi + 1;
+        }
+        return out;
+    }
+    if e.kind == formatter_ast.ex_try() or e.kind == formatter_ast.ex_await() or e.kind == formatter_ast.ex_spawn() {
+        let mutable ttmp: Array<String> = collect_used_names_from_expr(e.children[0]);
+        out = append_names(out, ttmp);
+        return out;
+    }
+    if e.kind == formatter_ast.ex_lambda() {
+        // skip lambda_params; recurse body (children[0])
+        let mutable ltmp: Array<String> = collect_used_names_from_expr(e.children[0]);
+        out = append_names(out, ltmp);
+        return out;
+    }
+    if e.kind == formatter_ast.ex_forall() or e.kind == formatter_ast.ex_exists() {
+        // bound name e.name is not a use; recurse all children (domain+body)
+        let mutable qi: Int = 0;
+        while qi < len(e.children) {
+            let mutable qtmp: Array<String> = collect_used_names_from_expr(e.children[qi]);
+            out = append_names(out, qtmp);
+            qi = qi + 1;
+        }
+        return out;
+    }
+    // literals (ex_int, ex_float, ex_char, ex_string, ex_bool, ex_void) → nothing
+    return out;
+}
+
+// collect_used_names_from_stmt returns names read by statement s.
+function collect_used_names_from_stmt(s: Stmt) returns Array<String> {
+    let mutable out: Array<String> = [];
+    if s.kind == formatter_ast.st_let() {
+        // bound name s.name is NOT a read; collect initializer expr only
+        let mutable ltmp: Array<String> = collect_used_names_from_expr(s.expr);
+        out = append_names(out, ltmp);
+        return out;
+    }
+    if s.kind == formatter_ast.st_expr() {
+        // check if this is an assignment: ex_binop with name "="
+        if s.expr.kind == formatter_ast.ex_binop() and s.expr.name == "=" {
+            // RHS = children[1]: collect fully
+            let mutable rtmp: Array<String> = collect_used_names_from_expr(s.expr.children[1]);
+            out = append_names(out, rtmp);
+            // LHS = children[0]: depends on kind
+            let lhs: Expr = s.expr.children[0];
+            if lhs.kind == formatter_ast.ex_field() {
+                // field assignment: collect the object
+                let mutable ftmp: Array<String> = collect_used_names_from_expr(lhs.children[0]);
+                out = append_names(out, ftmp);
+            }
+            if lhs.kind == formatter_ast.ex_index() {
+                // index assignment: collect object + index
+                let mutable iotmp: Array<String> = collect_used_names_from_expr(lhs.children[0]);
+                out = append_names(out, iotmp);
+                let mutable iitmp: Array<String> = collect_used_names_from_expr(lhs.children[1]);
+                out = append_names(out, iitmp);
+            }
+            // plain ex_ident LHS: write target, do NOT collect
+            return out;
+        }
+        // non-assignment st_expr: collect the whole expr
+        let mutable etmp: Array<String> = collect_used_names_from_expr(s.expr);
+        out = append_names(out, etmp);
+        return out;
+    }
+    if s.kind == formatter_ast.st_return() {
+        // collect value expr (ex_void = bare `return;` → nothing)
+        if s.expr.kind != formatter_ast.ex_void() {
+            let mutable retmp: Array<String> = collect_used_names_from_expr(s.expr);
+            out = append_names(out, retmp);
+        }
+        return out;
+    }
+    if s.kind == formatter_ast.st_if() {
+        // condition + then + else
+        let mutable ictmp: Array<String> = collect_used_names_from_expr(s.expr);
+        out = append_names(out, ictmp);
+        let mutable ittmp: Array<String> = collect_used_names(s.then_block.stmts);
+        out = append_names(out, ittmp);
+        if s.has_else {
+            let mutable ietmp: Array<String> = collect_used_names(s.else_block.stmts);
+            out = append_names(out, ietmp);
+        }
+        return out;
+    }
+    if s.kind == formatter_ast.st_while() {
+        // condition + body
+        let mutable wctmp: Array<String> = collect_used_names_from_expr(s.expr);
+        out = append_names(out, wctmp);
+        let mutable wbtmp: Array<String> = collect_used_names(s.then_block.stmts);
+        out = append_names(out, wbtmp);
+        return out;
+    }
+    if s.kind == formatter_ast.st_for() {
+        // iterable (s.expr) + body; do NOT collect loop var (s.name)
+        let mutable frtmp: Array<String> = collect_used_names_from_expr(s.expr);
+        out = append_names(out, frtmp);
+        let mutable fbtmp: Array<String> = collect_used_names(s.then_block.stmts);
+        out = append_names(out, fbtmp);
+        return out;
+    }
+    return out;
+}
+
+// collect_used_names returns all names read across stmts.
+public function collect_used_names(stmts: Array<Stmt>) returns Array<String> {
+    let mutable out: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(stmts) {
+        let mutable stmp: Array<String> = collect_used_names_from_stmt(stmts[i]);
+        out = append_names(out, stmp);
+        i = i + 1;
+    }
+    return out;
+}
+
+// collect_assigned_names returns names that are reassigned (LHS of `x = ...`
+// where LHS is a plain ident). Field/index targets do not count.
+// Recurses into if/else, while, for blocks.
+public function collect_assigned_names(stmts: Array<Stmt>) returns Array<String> {
+    let mutable out: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(stmts) {
+        let s: Stmt = stmts[i];
+        if s.kind == formatter_ast.st_expr() {
+            if s.expr.kind == formatter_ast.ex_binop() and s.expr.name == "=" {
+                let lhs: Expr = s.expr.children[0];
+                if lhs.kind == formatter_ast.ex_ident() {
+                    out.push(lhs.name);
+                }
+            }
+        }
+        if s.kind == formatter_ast.st_if() {
+            let mutable ittmp: Array<String> = collect_assigned_names(s.then_block.stmts);
+            out = append_names(out, ittmp);
+            if s.has_else {
+                let mutable ietmp: Array<String> = collect_assigned_names(s.else_block.stmts);
+                out = append_names(out, ietmp);
+            }
+        }
+        if s.kind == formatter_ast.st_while() {
+            let mutable wbtmp: Array<String> = collect_assigned_names(s.then_block.stmts);
+            out = append_names(out, wbtmp);
+        }
+        if s.kind == formatter_ast.st_for() {
+            let mutable fbtmp: Array<String> = collect_assigned_names(s.then_block.stmts);
+            out = append_names(out, fbtmp);
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+// name_in returns true if n appears anywhere in names (linear scan).
+public function name_in(names: Array<String>, n: String) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(names) {
+        if names[i] == n {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
 // --- Main dispatch walk ------------------------------------------------------
 // Mirrors stage1 Lint() call order exactly:
 //   lintFunctions → lintExternFunctions → lintEntities → lintEnums

@@ -585,3 +585,24 @@ KEY SPEC FINDINGS (verified against linter.go + parser.intent):
 - ex_call: skip the callee if it's a plain ident (function name not a "read"); if
   callee is ex_field, recurse it (method receiver IS read). ex_paren must be walked
   (stage2-only node; stage1 has no paren node).
+
+---
+
+## 2026-06-24 — Phase 43.4: used-name + assigned-name engine
+
+Added to lint.intent (functional style, returns Array<String>, due to pass-by-value):
+collect_used_names / collect_used_names_from_stmt / collect_used_names_from_expr,
+collect_assigned_names, name_in, plus concat + append_names helpers. Faithful port
+of stage1: assignment (st_expr ex_binop "=") LHS plain-ident is a write (not
+collected); field/index targets collect their object/index; ex_call callee skipped
+if ex_ident, recursed if ex_field (method receiver); ex_paren walked (stage2-only).
++5 engine unit tests incl. the assignment-target-not-read case. Gates: build OK,
+lint_test 129/129 rust+js, selfcheck 4 EQUAL, diff-formatter 22/22.
+
+Confirmed method-call layout (parser.intent:1824-1832): obj.m(a) =
+ex_call(children=[ex_field(children=[obj], name="m"), a]).
+
+PATTERN: [rust-temp-borrow] The rust backend emits Array params as &Vec<T>, and a
+temporary (a function's return value) cannot be auto-borrowed into another call.
+Store recursive-call results in a named `let mutable tmp = helper();` before passing
+to concat/append. Recurs throughout the functional-style engine.

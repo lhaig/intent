@@ -107,6 +107,64 @@ test "format_diags: two diags produce two lines in order" {
     assert_eq(out, "warning[x.intent:1:1]: first\nwarning[x.intent:2:3]: second\n");
 }
 
+// --- Used-name engine tests ---------------------------------------------------
+// Each test parses a tiny function body, extracts its stmts, and exercises
+// collect_used_names / collect_assigned_names / name_in directly.
+
+// Helper: parse a module with one function, return its body stmts.
+public function parse_body(body_src: String) returns Array<Stmt> {
+    let src: String = "module m version \"1.0\"; function f(a: Int, b: Int) returns Int " + '{'.to_string() + " " + body_src + " " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    return prog.functions[0].body.stmts;
+}
+
+test "engine: used names include param reference in initializer" {
+    // function with body: let c = a + b; return c;
+    let stmts: Array<Stmt> = parse_body("let c = a + 1; return c;");
+    let used: Array<String> = formatter_linter.collect_used_names(stmts);
+    assert_eq(formatter_linter.name_in(used, "a"), true);
+    assert_eq(formatter_linter.name_in(used, "c"), true);
+}
+
+test "engine: assignment target is NOT in used names; IS in assigned names" {
+    // x = 5 — write target not a read
+    let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let mutable x = 0; x = 5; return 1; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let stmts: Array<Stmt> = prog.functions[0].body.stmts;
+    let used: Array<String> = formatter_linter.collect_used_names(stmts);
+    let assigned: Array<String> = formatter_linter.collect_assigned_names(stmts);
+    assert_eq(formatter_linter.name_in(used, "x"), false);
+    assert_eq(formatter_linter.name_in(assigned, "x"), true);
+}
+
+test "engine: callee ident skipped, arg collected" {
+    // print(obj) — "print" is function name (not a read), "obj" is arg (a read)
+    let src: String = "module m version \"1.0\"; function f(obj: Int) returns Int " + '{'.to_string() + " print(obj); return 1; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let stmts: Array<Stmt> = prog.functions[0].body.stmts;
+    let used: Array<String> = formatter_linter.collect_used_names(stmts);
+    assert_eq(formatter_linter.name_in(used, "obj"), true);
+    assert_eq(formatter_linter.name_in(used, "print"), false);
+}
+
+test "engine: paren expression is walked (ex_paren)" {
+    // return (a + 1) — paren wraps binop; a should appear in used
+    let src: String = "module m version \"1.0\"; function f(a: Int) returns Int " + '{'.to_string() + " return (a + 1); " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let stmts: Array<Stmt> = prog.functions[0].body.stmts;
+    let used: Array<String> = formatter_linter.collect_used_names(stmts);
+    assert_eq(formatter_linter.name_in(used, "a"), true);
+}
+
+test "engine: nested block (if body) contributes to used names" {
+    // if a > 0 { let c = a; } return 1; — a used in condition + nested init
+    let src: String = "module m version \"1.0\"; function f(a: Int) returns Int " + '{'.to_string() + " if a > 0 " + '{'.to_string() + " let c = a; " + '}'.to_string() + " return 1; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let stmts: Array<Stmt> = prog.functions[0].body.stmts;
+    let used: Array<String> = formatter_linter.collect_used_names(stmts);
+    assert_eq(formatter_linter.name_in(used, "a"), true);
+}
+
 entry function main() returns Int {
     return 0;
 }
