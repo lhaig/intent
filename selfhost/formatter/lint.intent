@@ -357,15 +357,46 @@ public function lint_entity_decl(ent: EntityDecl) returns Array<LintDiag> {
     return diags;
 }
 
-// lint_enum_decl checks a single enum declaration (stub; rules added in 43.4+).
+// lint_enum_decl checks a single enum declaration.
+// Stage1 order: R7 (enum PascalCase naming), R8 (variant PascalCase naming per variant).
 public function lint_enum_decl(en: EnumDecl) returns Array<LintDiag> {
     let mutable diags: Array<LintDiag> = [];
+    // R7: enum must use PascalCase
+    if not is_pascal_case(en.name) {
+        diags.push(LintDiag(en.line, en.column, "enum '" + en.name + "' should use PascalCase naming"));
+    }
+    // R8: each variant must use PascalCase (declaration order)
+    let mutable vi: Int = 0;
+    while vi < len(en.variants) {
+        let v: EnumVariant = en.variants[vi];
+        if not is_pascal_case(v.name) {
+            diags.push(LintDiag(v.line, v.column, "variant '" + v.name + "' in enum '" + en.name + "' should use PascalCase naming"));
+        }
+        vi = vi + 1;
+    }
     return diags;
 }
 
-// lint_trait_decl checks a single trait declaration (stub; rules added in 43.4+).
+// lint_trait_decl checks a single trait declaration.
+// R6-trait QUIRK: stage1 calls checkEntityNaming for traits, so the message
+// literally says "entity", not "trait". R3 (method contracts) is deferred to
+// 43.8 (TraitMethodSig doesn't carry requires/ensures yet).
+// Stage1 order: R6-quirk (naming), then per method R5 (naming). R3 after R5 in 43.8.
 public function lint_trait_decl(tr: TraitDecl) returns Array<LintDiag> {
     let mutable diags: Array<LintDiag> = [];
+    // R6-trait: naming check — message says "entity" (stage1 quirk)
+    if not is_pascal_case(tr.name) {
+        diags.push(LintDiag(tr.line, tr.column, "entity '" + tr.name + "' should use PascalCase naming"));
+    }
+    // per method: R5 naming (R3 contracts deferred to 43.8)
+    let mutable mi: Int = 0;
+    while mi < len(tr.methods) {
+        let m: TraitMethodSig = tr.methods[mi];
+        if not is_snake_case(m.name) {
+            diags.push(LintDiag(m.line, m.column, "function '" + m.name + "' should use snake_case naming"));
+        }
+        mi = mi + 1;
+    }
     return diags;
 }
 
@@ -404,9 +435,14 @@ public function lint_impl_decl(impl_decl: ImplDecl) returns Array<LintDiag> {
     return diags;
 }
 
-// lint_intent_block checks a single intent block (stub; rules added in 43.4+).
+// lint_intent_block checks a single intent block.
+// R11: intent block must have at least one verified_by reference.
 public function lint_intent_block(ib: IntentBlock) returns Array<LintDiag> {
     let mutable diags: Array<LintDiag> = [];
+    // R11: no verified_by references
+    if len(ib.verifications) == 0 {
+        diags.push(LintDiag(ib.line, ib.column, "intent block has no verified_by references"));
+    }
     return diags;
 }
 

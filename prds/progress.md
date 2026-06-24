@@ -654,3 +654,24 @@ entity/impl tests. lint_test 161/161 rust+js; selfcheck 4 EQUAL; diff-formatter 
 PATTERN: [stage2-contract-clause-syntax] In a stage2 in-language test source string,
 contract clauses are bare expressions WITHOUT semicolons: `requires true ensures
 true` (NOT `requires true; ensures true;`). The semicolons cause stage2 parse errors.
+
+---
+
+## 2026-06-24 — Phase 43.7: enum/trait-naming/intent dispatch
+
+lint_enum_decl (R7 enum PascalCase, R8 variant PascalCase), lint_trait_decl (R6
+trait-name with the "entity 'X' should use PascalCase naming" stage1 QUIRK + R5
+trait-method snake_case), lint_intent_block (R11 verifications empty). R3 (trait
+method contracts) + R4 (extern contracts) DEFERRED to 43.8 because TraitMethodSig /
+ExternDecl carry no requires/ensures (parser discards them). +11 tests. lint_test
+172/172 rust+js; selfcheck 4 EQUAL; diff-formatter 22/22.
+
+DISCOVERY: corpus has NO externs (R4 fixture-only) and handler_trait's lone trait
+method has no contracts (R3 fires once). R3/R4/R15/R15e all need AST enrichment to
+be byte-equal for the fixture cases → consolidated into 43.8.
+
+PROCESS NOTE: out-of-order teammate messages had col-track re-confirming already-
+committed work (43.6) instead of picking up 43.7; resolved by sending a disk-grounded
+directive ("enum/intent dispatch are still stubs — execute now"). Lesson: trust the
+working tree, not the message stream, and re-anchor the worker to disk when reports
+drift from `git status`.

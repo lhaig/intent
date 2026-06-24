@@ -562,6 +562,92 @@ test "impl method: no R13 (mutable-unreassigned not fired for impl methods)" {
     assert_eq(has_diag_msg(diags, "variable 'v' is declared mutable but never reassigned"), false);
 }
 
+// --- Enum tests (43.7) -------------------------------------------------------
+
+test "R7: enum with non-PascalCase name produces diag" {
+    let src: String = "module m version \"1.0\"; enum bad_name " + '{'.to_string() + " A, B " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "enum 'bad_name' should use PascalCase naming"), true);
+}
+
+test "R7: PascalCase enum name produces no R7 diag" {
+    let src: String = "module m version \"1.0\"; enum Color " + '{'.to_string() + " Red, Green " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "enum 'Color' should use PascalCase naming"), false);
+}
+
+test "R8: non-PascalCase variant produces diag" {
+    let src: String = "module m version \"1.0\"; enum Color " + '{'.to_string() + " red, Green " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "variant 'red' in enum 'Color' should use PascalCase naming"), true);
+}
+
+test "R8: PascalCase variant produces no R8 diag" {
+    let src: String = "module m version \"1.0\"; enum Color " + '{'.to_string() + " Red, Green " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "variant 'Green' in enum 'Color' should use PascalCase naming"), false);
+}
+
+test "R8: only bad variant in mixed enum produces diag; good variant produces no diag" {
+    let src: String = "module m version \"1.0\"; enum Color " + '{'.to_string() + " red, Green " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "variant 'red' in enum 'Color' should use PascalCase naming"), true);
+    assert_eq(has_diag_msg(diags, "variant 'Green' in enum 'Color' should use PascalCase naming"), false);
+}
+
+// --- Trait tests (43.7) -------------------------------------------------------
+
+test "R6-trait quirk: non-PascalCase trait name produces diag with 'entity' wording" {
+    let src: String = "module m version \"1.0\"; trait bad_trait " + '{'.to_string() + " method foo() returns Int; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "entity 'bad_trait' should use PascalCase naming"), true);
+}
+
+test "R6-trait: PascalCase trait name produces no R6 diag" {
+    let src: String = "module m version \"1.0\"; trait GoodTrait " + '{'.to_string() + " method foo() returns Int; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "entity 'GoodTrait' should use PascalCase naming"), false);
+}
+
+test "R5 trait method: non-snake_case trait method name produces diag" {
+    let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method BadMethod() returns Int; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "function 'BadMethod' should use snake_case naming"), true);
+}
+
+test "R5 trait method: snake_case trait method name produces no diag" {
+    let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method good_method() returns Int; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "function 'good_method' should use snake_case naming"), false);
+}
+
+// --- Intent block tests (43.7) ------------------------------------------------
+// IntentBlock.verifications = the verified_by list (Array<String>).
+// R11 fires when len(verifications) == 0.
+
+test "R11: intent block with no verified_by produces diag" {
+    let src: String = "module m version \"1.0\"; intent \"do something\" " + '{'.to_string() + " goal: \"be correct\"; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "intent block has no verified_by references"), true);
+}
+
+test "R11: intent block with verified_by produces no R11 diag" {
+    let src: String = "module m version \"1.0\"; intent \"do something\" " + '{'.to_string() + " goal: \"be correct\"; verified_by: [some_contract]; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "intent block has no verified_by references"), false);
+}
+
 entry function main() returns Int {
     return 0;
 }
