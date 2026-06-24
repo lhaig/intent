@@ -100,7 +100,9 @@ public entity Parser {
         if self.check(formatter_lexer.tk_string()) {
             let path_tok: Token = self.advance();
             self.expect(formatter_lexer.tk_semicolon(), "';' after import");
-            return ImportDecl(false, self.unquote(path_tok.text), line, cmts);
+            let mutable imp: ImportDecl = ImportDecl(false, self.unquote(path_tok.text), line, cmts);
+            imp.column = import_tok.column;
+            return imp;
         }
         if self.check(formatter_lexer.tk_ident()) {
             let pkg_tok: Token = self.advance();
@@ -111,21 +113,30 @@ public entity Parser {
                     path = path + "." + seg.text;
                 } else {
                     self.fail("expected identifier after '.' in import");
-                    return ImportDecl(true, path, line, cmts);
+                    let mutable imp_err: ImportDecl = ImportDecl(true, path, line, cmts);
+                    imp_err.column = import_tok.column;
+                    return imp_err;
                 }
             }
             self.expect(formatter_lexer.tk_semicolon(), "';' after import");
-            return ImportDecl(true, path, line, cmts);
+            let mutable imp_pkg: ImportDecl = ImportDecl(true, path, line, cmts);
+            imp_pkg.column = import_tok.column;
+            return imp_pkg;
         }
         self.fail("expected string or identifier after 'import'");
-        return ImportDecl(false, "", line, cmts);
+        let mutable imp_fail: ImportDecl = ImportDecl(false, "", line, cmts);
+        imp_fail.column = import_tok.column;
+        return imp_fail;
     }
 
     method parse_param() returns Param {
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "parameter name");
         self.expect(formatter_lexer.tk_colon(), "':' after parameter name");
         let type_name: String = self.parse_type_name();
-        return Param(name_tok.text, type_name);
+        let mutable p: Param = Param(name_tok.text, type_name);
+        p.line = name_tok.line;
+        p.column = name_tok.column;
+        return p;
     }
 
     method parse_type_param_list() returns Array<String> {
@@ -327,6 +338,7 @@ public entity Parser {
         fd.ensures_clauses = enss;
         fd.decreases_clauses = decs;
         fd.type_params = type_params;
+        fd.column = first_tok.column;
         return fd;
     }
 
@@ -374,16 +386,19 @@ public entity Parser {
     }
 
     method parse_for_stmt() returns Stmt {
-        self.expect(formatter_lexer.kw_for_marker(), "'for'");
+        let for_tok: Token = self.expect(formatter_lexer.kw_for_marker(), "'for'");
         let var_tok: Token = self.expect(formatter_lexer.tk_ident(), "loop variable");
         self.expect(formatter_lexer.tk_ident(), "'in' in for loop");
         let iter: Expr = self.parse_expr();
         let body: Block = self.parse_block();
-        return Stmt(formatter_ast.st_for(), iter, var_tok.text, "", false, body, formatter_ast.empty_block(), false);
+        let mutable st: Stmt = Stmt(formatter_ast.st_for(), iter, var_tok.text, "", false, body, formatter_ast.empty_block(), false);
+        st.line = for_tok.line;
+        st.column = for_tok.column;
+        return st;
     }
 
     method parse_let_stmt() returns Stmt {
-        self.expect(formatter_lexer.kw_let(), "'let'");
+        let let_tok: Token = self.expect(formatter_lexer.kw_let(), "'let'");
         let mutable is_mut: Bool = false;
         if self.check_consume(formatter_lexer.kw_mutable()) {
             is_mut = true;
@@ -398,11 +413,13 @@ public entity Parser {
         let semi: Token = self.expect(formatter_lexer.tk_semicolon(), "';' to end let statement");
         let mutable st: Stmt = Stmt(formatter_ast.st_let(), rhs, name_tok.text, type_name, is_mut, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
         st.comment_after = semi.comment_after;
+        st.line = let_tok.line;
+        st.column = let_tok.column;
         return st;
     }
 
     method parse_return_stmt() returns Stmt {
-        self.expect(formatter_lexer.kw_return(), "'return'");
+        let ret_tok: Token = self.expect(formatter_lexer.kw_return(), "'return'");
         let mutable rhs: Expr = formatter_ast.empty_expr();
         if not self.check(formatter_lexer.tk_semicolon()) {
             rhs = self.parse_expr();
@@ -410,11 +427,13 @@ public entity Parser {
         let semi: Token = self.expect(formatter_lexer.tk_semicolon(), "';' to end return statement");
         let mutable st: Stmt = Stmt(formatter_ast.st_return(), rhs, "", "", false, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
         st.comment_after = semi.comment_after;
+        st.line = ret_tok.line;
+        st.column = ret_tok.column;
         return st;
     }
 
     method parse_if_stmt() returns Stmt {
-        self.expect(formatter_lexer.kw_if(), "'if'");
+        let if_tok: Token = self.expect(formatter_lexer.kw_if(), "'if'");
         let cond: Expr = self.parse_expr();
         let then_blk: Block = self.parse_block();
         let mutable else_blk: Block = formatter_ast.empty_block();
@@ -429,21 +448,30 @@ public entity Parser {
                 else_blk = self.parse_block();
             }
         }
-        return Stmt(formatter_ast.st_if(), cond, "", "", false, then_blk, else_blk, has_else);
+        let mutable st: Stmt = Stmt(formatter_ast.st_if(), cond, "", "", false, then_blk, else_blk, has_else);
+        st.line = if_tok.line;
+        st.column = if_tok.column;
+        return st;
     }
 
     method parse_while_stmt() returns Stmt {
-        self.expect(formatter_lexer.kw_while(), "'while'");
+        let while_tok: Token = self.expect(formatter_lexer.kw_while(), "'while'");
         let cond: Expr = self.parse_expr();
         let body: Block = self.parse_block();
-        return Stmt(formatter_ast.st_while(), cond, "", "", false, body, formatter_ast.empty_block(), false);
+        let mutable st: Stmt = Stmt(formatter_ast.st_while(), cond, "", "", false, body, formatter_ast.empty_block(), false);
+        st.line = while_tok.line;
+        st.column = while_tok.column;
+        return st;
     }
 
     method parse_expr_stmt() returns Stmt {
+        let first_tok: Token = self.tokens[self.position];
         let e: Expr = self.parse_expr();
         let semi: Token = self.expect(formatter_lexer.tk_semicolon(), "';' to end expression statement");
         let mutable st: Stmt = Stmt(formatter_ast.st_expr(), e, "", "", false, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
         st.comment_after = semi.comment_after;
+        st.line = first_tok.line;
+        st.column = first_tok.column;
         return st;
     }
 
@@ -961,6 +989,7 @@ public entity Parser {
                             self.fail("expected 'field', 'constructor', 'method', or 'invariant' in entity body");
                             let mutable ed_err: EntityDecl = EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line, cmts);
                             ed_err.type_params = ent_type_params;
+                            ed_err.column = entity_tok.column;
                             return ed_err;
                         }
                     }
@@ -970,6 +999,7 @@ public entity Parser {
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close entity body");
         let mutable ed: EntityDecl = EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line, cmts);
         ed.type_params = ent_type_params;
+        ed.column = entity_tok.column;
         return ed;
     }
 
@@ -1019,6 +1049,7 @@ public entity Parser {
         fd.requires_clauses = reqs;
         fd.ensures_clauses = enss;
         fd.decreases_clauses = decs;
+        fd.column = ctor_tok.column;
         return fd;
     }
 
@@ -1060,6 +1091,7 @@ public entity Parser {
         md.requires_clauses = reqs;
         md.ensures_clauses = enss;
         md.decreases_clauses = decs;
+        md.column = method_tok.column;
         return md;
     }
 
@@ -1088,7 +1120,9 @@ public entity Parser {
             }
         }
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close enum body");
-        return EnumDecl(name_tok.text, is_public, variants, line, cmts);
+        let mutable en: EnumDecl = EnumDecl(name_tok.text, is_public, variants, line, cmts);
+        en.column = enum_tok.column;
+        return en;
     }
 
     method fail_off() returns Void {
@@ -1107,7 +1141,10 @@ public entity Parser {
             }
             self.expect(formatter_lexer.tk_rparen(), "')' to close variant params");
         }
-        return EnumVariant(name_tok.text, params);
+        let mutable ev: EnumVariant = EnumVariant(name_tok.text, params);
+        ev.line = name_tok.line;
+        ev.column = name_tok.column;
+        return ev;
     }
 
     method parse_trait_decl(is_public: Bool, leading_comments: Array<String>) returns TraitDecl {
@@ -1121,11 +1158,13 @@ public entity Parser {
             methods.push(self.parse_trait_method_sig());
         }
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close trait body");
-        return TraitDecl(name_tok.text, is_public, methods, line, cmts);
+        let mutable td: TraitDecl = TraitDecl(name_tok.text, is_public, methods, line, cmts);
+        td.column = trait_tok.column;
+        return td;
     }
 
     method parse_trait_method_sig() returns TraitMethodSig {
-        self.expect(formatter_lexer.kw_method_marker(), "'method' in trait body");
+        let method_kw_tok: Token = self.expect(formatter_lexer.kw_method_marker(), "'method' in trait body");
         let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "method name");
         self.expect(formatter_lexer.tk_lparen(), "'(' after method name");
         let mutable params: Array<Param> = [];
@@ -1139,7 +1178,10 @@ public entity Parser {
         self.expect(formatter_lexer.kw_returns(), "'returns' after method params");
         let ret: String = self.parse_type_name();
         self.expect(formatter_lexer.tk_semicolon(), "';' to end trait method signature");
-        return TraitMethodSig(name_tok.text, params, ret);
+        let mutable tms: TraitMethodSig = TraitMethodSig(name_tok.text, params, ret);
+        tms.line = method_kw_tok.line;
+        tms.column = method_kw_tok.column;
+        return tms;
     }
 
     method parse_impl_decl(leading_comments: Array<String>) returns ImplDecl {
@@ -1158,7 +1200,9 @@ public entity Parser {
             methods.push(md);
         }
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close impl body");
-        return ImplDecl(trait_tok.text, entity_tok.text, methods, line, cmts);
+        let mutable impl_decl: ImplDecl = ImplDecl(trait_tok.text, entity_tok.text, methods, line, cmts);
+        impl_decl.column = impl_tok.column;
+        return impl_decl;
     }
 
     method parse_test_decl(leading_comments: Array<String>) returns TestDecl {
@@ -1167,7 +1211,9 @@ public entity Parser {
         let cmts: Array<String> = leading_comments;
         let name_tok: Token = self.expect(formatter_lexer.tk_string(), "test name (string literal)");
         let body: Block = self.parse_block();
-        return TestDecl(self.unquote(name_tok.text), body, line, cmts);
+        let mutable tdecl: TestDecl = TestDecl(self.unquote(name_tok.text), body, line, cmts);
+        tdecl.column = test_tok.column;
+        return tdecl;
     }
 
     // parse_test_annotations parses one or more `@name("arg", ...)` annotations
@@ -1239,7 +1285,9 @@ public entity Parser {
         self.expect(formatter_lexer.kw_returns(), "'returns' after extern params");
         let ret: String = self.parse_type_name();
         self.expect(formatter_lexer.tk_semicolon(), "';' to end extern declaration");
-        return ExternDecl(self.unquote(target_tok.text), name_tok.text, params, ret, line, cmts);
+        let mutable ext: ExternDecl = ExternDecl(self.unquote(target_tok.text), name_tok.text, params, ret, line, cmts);
+        ext.column = extern_tok.column;
+        return ext;
     }
 
     method parse_intent_ref() returns String {
@@ -1306,18 +1354,24 @@ public entity Parser {
                                 self.expect(formatter_lexer.tk_semicolon(), "';' after verified_by clause");
                             } else {
                                 self.fail("unexpected identifier '" + kw + "' in intent block");
-                                return IntentBlock(self.unquote(desc_tok.text), goals, constraints, guarantees, verifs, line, cmts);
+                                let mutable ib_err1: IntentBlock = IntentBlock(self.unquote(desc_tok.text), goals, constraints, guarantees, verifs, line, cmts);
+                                ib_err1.column = intent_tok.column;
+                                return ib_err1;
                             }
                         }
                     }
                 }
             } else {
                 self.fail("expected clause keyword in intent block");
-                return IntentBlock(self.unquote(desc_tok.text), goals, constraints, guarantees, verifs, line, cmts);
+                let mutable ib_err2: IntentBlock = IntentBlock(self.unquote(desc_tok.text), goals, constraints, guarantees, verifs, line, cmts);
+                ib_err2.column = intent_tok.column;
+                return ib_err2;
             }
         }
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close intent block");
-        return IntentBlock(self.unquote(desc_tok.text), goals, constraints, guarantees, verifs, line, cmts);
+        let mutable ib: IntentBlock = IntentBlock(self.unquote(desc_tok.text), goals, constraints, guarantees, verifs, line, cmts);
+        ib.column = intent_tok.column;
+        return ib;
     }
 }
 
@@ -2129,5 +2183,47 @@ test "synthetic dogfood: parse a small entity with methods and tests" {
     assert_eq(len(counter.methods), 1);
     assert_eq(len(prog.tests), 1);
     assert_eq(prog.tests[0].name, "counter increments");
+}
+
+test "position: FunctionDecl records line and column of leading keyword" {
+    let nl: String = '\n'.to_string();
+    let src: String = "module m version \"1.0\";" + nl + "function f() returns Int " + '{'.to_string() + nl + "    return 0;" + nl + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions), 1);
+    assert_eq(prog.functions[0].line, 2);
+    assert_eq(prog.functions[0].column, 1);
+}
+
+test "position: EntityDecl records line and column of entity keyword" {
+    let nl: String = '\n'.to_string();
+    let src: String = "module m version \"1.0\";" + nl + "entity E " + '{'.to_string() + " field n: Int; " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.entities), 1);
+    assert_eq(prog.entities[0].line, 2);
+    assert_eq(prog.entities[0].column, 1);
+}
+
+test "position: Stmt records line and column of first keyword" {
+    let nl: String = '\n'.to_string();
+    let src: String = "module m version \"1.0\";" + nl + "function f() returns Int " + '{'.to_string() + nl + "    let x: Int = 1;" + nl + "    return x;" + nl + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    let stmts: Array<Stmt> = prog.functions[0].body.stmts;
+    assert_eq(stmts[0].line, 3);
+    assert_eq(stmts[0].column, 5);
+    assert_eq(stmts[1].line, 4);
+    assert_eq(stmts[1].column, 5);
+}
+
+test "position: Param records line and column of name token" {
+    let nl: String = '\n'.to_string();
+    let src: String = "module m version \"1.0\";" + nl + "function f(a: Int) returns Int " + '{'.to_string() + nl + "    return a;" + nl + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    assert_eq(len(prog.functions[0].params), 1);
+    assert_eq(prog.functions[0].params[0].line, 2);
+    assert_eq(prog.functions[0].params[0].column, 12);
 }
 

@@ -138,10 +138,14 @@ public function ex_lambda() returns Int {
 public entity Param {
     field name: String;
     field type_name: String;
+    field line: Int;
+    field column: Int;
 
     constructor(name: String, type_name: String) {
         self.name = name;
         self.type_name = type_name;
+        self.line = 0;
+        self.column = 0;
     }
 }
 
@@ -227,6 +231,8 @@ public entity Stmt {
     // ADR 0044 (Phase 40A.2): inline comment after this statement's `;`
     // (same line). Empty = none.
     field comment_after: String;
+    field line: Int;
+    field column: Int;
 
     constructor(kind: Int, expr: Expr, name: String, type_name: String, is_mutable: Bool, then_block: Block, else_block: Block, has_else: Bool) {
         self.kind = kind;
@@ -239,6 +245,8 @@ public entity Stmt {
         self.has_else = has_else;
         self.comments_before = empty_string_array();
         self.comment_after = "";
+        self.line = 0;
+        self.column = 0;
     }
 }
 
@@ -279,6 +287,7 @@ public entity FunctionDecl {
     field return_type: String;
     field body: Block;
     field line: Int;
+    field column: Int;
     // ADR 0044: leading comments captured by the lexer at the decl's first
     // token. Populated by the parser from `Token.comments_before`. The
     // formatter emits these on their own lines before each decl.
@@ -311,6 +320,7 @@ public entity FunctionDecl {
         self.ensures_clauses = empty_expr_array();
         self.decreases_clauses = empty_expr_array();
         self.type_params = empty_string_array();
+        self.column = 0;
     }
 }
 
@@ -318,6 +328,7 @@ public entity ImportDecl {
     field is_package: Bool;
     field path: String;
     field line: Int;
+    field column: Int;
     field comments_before: Array<String>;
 
     constructor(is_package: Bool, path: String, line: Int, comments_before: Array<String>) {
@@ -325,6 +336,7 @@ public entity ImportDecl {
         self.path = path;
         self.line = line;
         self.comments_before = comments_before;
+        self.column = 0;
     }
 }
 
@@ -372,6 +384,7 @@ public entity EntityDecl {
     field ctor: FunctionDecl;
     field invariants: Array<Expr>;
     field line: Int;
+    field column: Int;
     field comments_before: Array<String>;
     // Phase 44: generic type parameters on the entity declaration, e.g. `<T>`
     // in `entity Stack<T> { ... }`. Defaulted empty; the parser assigns them
@@ -389,16 +402,21 @@ public entity EntityDecl {
         self.line = line;
         self.comments_before = comments_before;
         self.type_params = empty_string_array();
+        self.column = 0;
     }
 }
 
 public entity EnumVariant {
     field name: String;
     field params: Array<Param>; // empty for unit variants
+    field line: Int;
+    field column: Int;
 
     constructor(name: String, params: Array<Param>) {
         self.name = name;
         self.params = params;
+        self.line = 0;
+        self.column = 0;
     }
 }
 
@@ -407,6 +425,7 @@ public entity EnumDecl {
     field is_public: Bool;
     field variants: Array<EnumVariant>;
     field line: Int;
+    field column: Int;
     field comments_before: Array<String>;
 
     constructor(name: String, is_public: Bool, variants: Array<EnumVariant>, line: Int, comments_before: Array<String>) {
@@ -415,6 +434,7 @@ public entity EnumDecl {
         self.variants = variants;
         self.line = line;
         self.comments_before = comments_before;
+        self.column = 0;
     }
 }
 
@@ -424,11 +444,15 @@ public entity TraitMethodSig {
     field name: String;
     field params: Array<Param>;
     field return_type: String;
+    field line: Int;
+    field column: Int;
 
     constructor(name: String, params: Array<Param>, return_type: String) {
         self.name = name;
         self.params = params;
         self.return_type = return_type;
+        self.line = 0;
+        self.column = 0;
     }
 }
 
@@ -437,6 +461,7 @@ public entity TraitDecl {
     field is_public: Bool;
     field methods: Array<TraitMethodSig>;
     field line: Int;
+    field column: Int;
     field comments_before: Array<String>;
 
     constructor(name: String, is_public: Bool, methods: Array<TraitMethodSig>, line: Int, comments_before: Array<String>) {
@@ -445,6 +470,7 @@ public entity TraitDecl {
         self.methods = methods;
         self.line = line;
         self.comments_before = comments_before;
+        self.column = 0;
     }
 }
 
@@ -453,6 +479,7 @@ public entity ImplDecl {
     field entity_name: String;
     field methods: Array<FunctionDecl>;
     field line: Int;
+    field column: Int;
     field comments_before: Array<String>;
 
     constructor(trait_name: String, entity_name: String, methods: Array<FunctionDecl>, line: Int, comments_before: Array<String>) {
@@ -461,6 +488,7 @@ public entity ImplDecl {
         self.methods = methods;
         self.line = line;
         self.comments_before = comments_before;
+        self.column = 0;
     }
 }
 
@@ -474,6 +502,7 @@ public entity IntentBlock {
     field guarantees: Array<String>;
     field verifications: Array<String>;
     field line: Int;
+    field column: Int;
     field comments_before: Array<String>;
 
     constructor(description: String, goals: Array<String>, constraints: Array<String>, guarantees: Array<String>, verifications: Array<String>, line: Int, comments_before: Array<String>) {
@@ -484,6 +513,7 @@ public entity IntentBlock {
         self.verifications = verifications;
         self.line = line;
         self.comments_before = comments_before;
+        self.column = 0;
     }
 }
 
@@ -491,6 +521,7 @@ public entity TestDecl {
     field name: String;
     field body: Block;
     field line: Int;
+    field column: Int;
     field comments_before: Array<String>;
     // Phase 42: `async test "..." { ... }` — the async modifier.
     field is_async: Bool;
@@ -505,6 +536,7 @@ public entity TestDecl {
         self.comments_before = comments_before;
         self.is_async = false;
         self.annotations = empty_string_array();
+        self.column = 0;
     }
 }
 
@@ -514,6 +546,7 @@ public entity ExternDecl {
     field params: Array<Param>;
     field return_type: String;
     field line: Int;
+    field column: Int;
     field comments_before: Array<String>;
 
     constructor(target: String, func_name: String, params: Array<Param>, return_type: String, line: Int, comments_before: Array<String>) {
@@ -523,6 +556,7 @@ public entity ExternDecl {
         self.return_type = return_type;
         self.line = line;
         self.comments_before = comments_before;
+        self.column = 0;
     }
 }
 

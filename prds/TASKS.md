@@ -68,7 +68,7 @@ and ADR 0046. Corpus baseline: 76 warnings / 13 files / 8 of 16 families.
 | # | Task | PRD | Status | Notes |
 |---|------|-----|--------|-------|
 | 43.1 | ADR 0046 — self-hosted linter strategy | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-23) | docs/decisions/0046; D1 reuse-formatter-dir, D2 byte-equal-w/-col, D3 all-16-gated |
-| 43.2 | Column tracking in stage2 AST + parser | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | add `column:Int` to anchored decls/stmts/params; needs: 43.1 |
+| 43.2 | Column tracking in stage2 AST + parser | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | +column on 9 decls; +line+column on Stmt/Param/EnumVariant/TraitMethodSig; defaulted-in-body + post-construction assign; +4 tests; gates green |
 | 43.3 | Linter core scaffold + diagnostic model | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | `lint.intent`, `LintDiag`, dispatch walk, `format_diags`, +1 rule; needs: 43.2 |
 | 43.4 | Contract-absence rules (R1-R4) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | function/method/trait-method/extern; skip `entry`; needs: 43.3 |
 | 43.5 | Naming rules (R5-R8) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | snake_case + PascalCase entity/enum/variant; needs: 43.3 |

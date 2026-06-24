@@ -495,3 +495,25 @@ PATTERN: [linter-corpus-gate] The examples corpus DOES fire lint warnings (76),
 so the differential is a real gate for the 8 common families. The 8 non-corpus
 families (extern, entity/enum/variant PascalCase, empty-body, intent verified_by,
 type-params, spawn-discard) must be covered by committed golden fixtures.
+
+---
+
+## 2026-06-24 — Phase 43.2: column tracking in stage2 AST + parser
+
+Added source-column (and line where missing) to the stage2 AST nodes the linter
+anchors on. ast.intent: `+column` on the 9 decls that already had `line`
+(FunctionDecl, ImportDecl, EntityDecl, EnumDecl, TraitDecl, ImplDecl, IntentBlock,
+TestDecl, ExternDecl); `+line +column` on the 4 position-less nodes (Stmt, Param,
+EnumVariant, TraitMethodSig). All defaulted to 0 in the constructor BODY (no
+signature change). parser.intent: post-construction assignment from the leading
+token at every parse site, INCLUDING error return paths (imp_err, ed_err,
+ib_err1/2). parse_expr_stmt peeks `self.tokens[self.position]` for its anchor.
++4 position tests in parser.intent.
+
+Independently verified gates: build OK; parser suite 106/106 (rust); format_test
+207/207 (rust+js per worker); selfcheck-formatter all 4 EQUAL; diff-formatter 22/22.
+
+PATTERN: [ast-evolution] New optional position fields (line/column) are defaulted
+to 0 in the constructor body and assigned post-construction at each parse site —
+never added as constructor parameters — so all existing call sites stay unchanged.
+Same pattern as Stmt.comments_before / FunctionDecl.type_params.
