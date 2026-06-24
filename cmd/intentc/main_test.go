@@ -581,3 +581,138 @@ entry function main() returns Int {
 		}
 	})
 }
+
+// --- tests for --self-hosted lint (phase 43.11) ---
+
+// TestParseLintFlags tests flag parsing for the lint subcommand.
+func TestParseLintFlags(t *testing.T) {
+	cases := []struct {
+		name       string
+		args       []string
+		wantSelf   bool
+		wantFile   string
+		wantErrMsg string
+	}{
+		{name: "no flags", args: []string{"hello.intent"}, wantSelf: false, wantFile: "hello.intent"},
+		{name: "self-hosted", args: []string{"--self-hosted", "bar.intent"}, wantSelf: true, wantFile: "bar.intent"},
+		{name: "self-hosted after file", args: []string{"baz.intent", "--self-hosted"}, wantSelf: true, wantFile: "baz.intent"},
+		{name: "unknown flag errors", args: []string{"--bogus", "x.intent"}, wantErrMsg: "Unknown option: --bogus"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotSelf, gotFile, gotErr := parseLintFlags(tc.args)
+			if tc.wantErrMsg != "" {
+				if !strings.Contains(gotErr, tc.wantErrMsg) {
+					t.Errorf("expected errMsg containing %q, got %q", tc.wantErrMsg, gotErr)
+				}
+				return
+			}
+			if gotErr != "" {
+				t.Errorf("unexpected error: %s", gotErr)
+			}
+			if gotSelf != tc.wantSelf {
+				t.Errorf("selfHosted: got %v, want %v", gotSelf, tc.wantSelf)
+			}
+			if gotFile != tc.wantFile {
+				t.Errorf("filePath: got %q, want %q", gotFile, tc.wantFile)
+			}
+		})
+	}
+}
+
+// TestRunStage2Linter tests the runStage2Linter helper with fake binaries.
+// Unlike the formatter, the linter's stdout is emitted verbatim (no trailing-
+// newline trimming) because it already matches stage1 byte-for-byte.
+func TestRunStage2Linter(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummyFile := filepath.Join(tmpDir, "dummy.intent")
+	if err := os.WriteFile(dummyFile, []byte("anything"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("success: returns stdout verbatim", func(t *testing.T) {
+		content := "warning[dummy.intent:1:1]: variable 'x' is declared but never used\n1 warning(s) found.\n"
+		binPath := makeFakeFormatter(t, tmpDir, "lint-ok", content, 0)
+		got, err := runStage2Linter(binPath, dummyFile)
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if got != content {
+			t.Errorf("expected verbatim output\ngot:  %q\nwant: %q", got, content)
+		}
+	})
+
+	t.Run("success: no-warnings output verbatim", func(t *testing.T) {
+		content := "No lint warnings.\n"
+		binPath := makeFakeFormatter(t, tmpDir, "lint-clean", content, 0)
+		got, err := runStage2Linter(binPath, dummyFile)
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if got != content {
+			t.Errorf("got %q, want %q", got, content)
+		}
+	})
+
+	t.Run("error: non-zero exit includes output", func(t *testing.T) {
+		binPath := makeFakeFormatter(t, tmpDir, "lint-err", "parse error: boom\n", 3)
+		_, err := runStage2Linter(binPath, dummyFile)
+		if err == nil {
+			t.Fatal("expected an error on non-zero exit, got nil")
+		}
+		if !strings.Contains(err.Error(), "parse error: boom") {
+			t.Errorf("expected error to mention 'parse error: boom', got: %v", err)
+		}
+	})
+}
+
+// TestLintSelfHostedEnvOverride tests `intentc lint --self-hosted` with
+// INTENT_STAGE2_LINT set, exercising the full CLI path without needing cargo.
+func TestLintSelfHostedEnvOverride(t *testing.T) {
+	binary := buildTestBinary(t)
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "hello.intent")
+	src := "module hello version \"1.0\";\n\nentry function main() returns Int {\n    return 0;\n}\n"
+	if err := os.WriteFile(srcPath, []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("INTENT_STAGE2_LINT non-existent binary errors", func(t *testing.T) {
+		cmd := exec.Command(binary, "lint", "--self-hosted", srcPath)
+		cmd.Env = append(os.Environ(), "INTENT_STAGE2_LINT=/nonexistent/path/to/lint")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatal("expected non-zero exit, got success")
+		}
+		if !strings.Contains(string(out), "INTENT_STAGE2_LINT") {
+			t.Errorf("expected error mentioning INTENT_STAGE2_LINT, got: %s", out)
+		}
+	})
+
+	t.Run("INTENT_STAGE2_LINT fake binary output emitted verbatim", func(t *testing.T) {
+		want := "No lint warnings.\n"
+		fakeBin := makeFakeFormatter(t, tmpDir, "fake-lint-ok", want, 0)
+		cmd := exec.Command(binary, "lint", "--self-hosted", srcPath)
+		cmd.Env = append(os.Environ(), "INTENT_STAGE2_LINT="+fakeBin)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("expected success, got %v\noutput: %s", err, out)
+		}
+		if string(out) != want {
+			t.Errorf("got %q, want %q", string(out), want)
+		}
+	})
+
+	t.Run("INTENT_STAGE2_LINT stage2 parse error exits non-zero, no fallback", func(t *testing.T) {
+		fakeBin := makeFakeFormatter(t, tmpDir, "fake-lint-err", "parse error: bad\n", 3)
+		cmd := exec.Command(binary, "lint", "--self-hosted", srcPath)
+		cmd.Env = append(os.Environ(), "INTENT_STAGE2_LINT="+fakeBin)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatal("expected non-zero exit on stage2 parse error")
+		}
+		if !strings.Contains(string(out), "parse error: bad") {
+			t.Errorf("expected stage2 error in output, got: %s", out)
+		}
+	})
+}

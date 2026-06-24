@@ -744,3 +744,27 @@ handler_trait(5). The high-warning files exercise multiple rules per decl + emit
 ordering — strong evidence the full port is faithful. Effectively the differential
 gate already passing; 43.12 formalizes it across the whole corpus + fixtures.
 Gates: selfcheck 4 EQUAL, diff-formatter 22/22, lint_test 188/188.
+
+---
+
+## 2026-06-24 — Phase 43.11: intentc lint --self-hosted Go shim
+
+Mirrored the fmt --self-hosted shim in cmd/intentc/main.go: parseLintFlags
+(--self-hosted), stage2LinterBinary (INTENT_STAGE2_LINT env override; else builds
+selfhost/formatter/lint_main.intent to a cached temp binary `intent-stage2-lint`,
+rebuilding when any selfhost/formatter/*.intent is newer), runStage2Linter (runs the
+binary, returns stdout VERBATIM — no trailing-newline trim, since lint_main output
+already byte-matches stage1; non-zero exit surfaced as error, no fallback). Usage
+text updated. +Go tests (parseLintFlags, runStage2Linter fake-binary, env-override
+CLI path incl. parse-error-no-fallback). Verified: `intentc lint --self-hosted`
+byte-identical to `intentc lint` on array_sum/map_demo/enum_basic/hello. Full Go
+suite passes.
+
+NOTE: done INLINE by the orchestrator (not delegated) in parallel with col-track's
+43.12 (differential harness) — disjoint files (cmd/intentc/*.go vs selfhost/ +
+Makefile) so no write race.
+
+KEY DIFF vs fmt shim: runStage2Linter does NOT trim a trailing newline. The fmt
+shim trims one (formatter stdout = source + print's \n, but file content has no
+extra \n). The linter's stdout already equals stage1's exact bytes (the summary
+line's \n IS print's \n), so it's emitted as-is.

@@ -34,7 +34,7 @@ Usage:
   intentc test [--target <t>] [--all-targets] [--filter <s>] [--list] [--quiet] <file.intent>
                                                                Run in-language tests on one or more targets
   intentc fmt [--check] [--self-hosted] <file.intent>          Format source to canonical style
-  intentc lint <file.intent>                                   Run lint checks for style/best practices
+  intentc lint [--self-hosted] <file.intent>                   Run lint checks for style/best practices
   intentc pkg init                                             Create intent.toml from module declarations
   intentc pkg add <name> <version>                             Add dependency with version constraint
   intentc pkg add <name> --path <dir>                          Add local path dependency
@@ -82,6 +82,7 @@ Examples:
   intentc fmt --self-hosted hello.intent        Format using stage2 (Intent) formatter
   intentc fmt --self-hosted --check hello.intent  Check using stage2 formatter
   intentc lint hello.intent                     Lint for style/best practice issues
+  intentc lint --self-hosted hello.intent       Lint using the stage2 (Intent) linter
 `
 
 func main() {
@@ -719,13 +720,51 @@ func handleVerify(args []string) {
 	}
 }
 
+func parseLintFlags(args []string) (selfHosted bool, filePath, errMsg string) {
+	for _, arg := range args {
+		switch arg {
+		case "--self-hosted":
+			selfHosted = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				errMsg = "Unknown option: " + arg
+				return
+			}
+			filePath = arg
+		}
+	}
+	return
+}
+
 func handleLint(args []string) {
-	if len(args) == 0 {
+	selfHosted, filePath, errMsg := parseLintFlags(args)
+	if errMsg != "" {
+		fmt.Fprintln(os.Stderr, errMsg)
+		os.Exit(1)
+	}
+
+	if filePath == "" {
 		fmt.Fprintln(os.Stderr, "Error: no input file specified")
 		os.Exit(1)
 	}
 
-	filePath := args[0]
+	// --self-hosted delegates to the stage2 (Intent) linter binary, which emits
+	// output byte-identical to the stage1 (Go) linter below. No silent fallback:
+	// a stage2 build/parse failure is surfaced and exits non-zero.
+	if selfHosted {
+		binPath, err := stage2LinterBinary()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "stage2 linter: %s\n", err)
+			os.Exit(1)
+		}
+		out, err := runStage2Linter(binPath, filePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			os.Exit(1)
+		}
+		fmt.Print(out)
+		return
+	}
 
 	source, err := os.ReadFile(filePath)
 	if err != nil {
@@ -751,6 +790,118 @@ func handleLint(args []string) {
 	fmt.Print(diag.Format(filePath))
 	fmt.Println()
 	fmt.Printf("%d warning(s) found.\n", diag.Count())
+}
+
+// runStage2Linter runs the prebuilt stage2 linter binary on filePath and returns
+// its stdout verbatim. The stage2 linter already emits the full diagnostic block
+// plus the "N warning(s) found." / "No lint warnings." summary with the same
+// trailing newline as stage1, so no trimming is applied. A non-zero exit (e.g. a
+// stage2 parse error) is returned as an error including the binary output.
+func runStage2Linter(binaryPath, filePath string) (string, error) {
+	cmd := exec.Command(binaryPath, filePath)
+	out, err := cmd.Output()
+	if err != nil {
+		var stderr []byte
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			stderr = exitErr.Stderr
+		}
+		combined := strings.TrimSpace(string(out) + string(stderr))
+		if combined == "" {
+			return "", fmt.Errorf("stage2 linter exited with error: %w", err)
+		}
+		return "", fmt.Errorf("%s", combined)
+	}
+	return string(out), nil
+}
+
+// stage2LinterBinary returns the path to the stage2 linter binary, either from the
+// INTENT_STAGE2_LINT env override or by auto-building from
+// selfhost/formatter/lint_main.intent (cached in os.TempDir(), rebuilt when any
+// selfhost/formatter/*.intent file is newer than the cache).
+func stage2LinterBinary() (string, error) {
+	if envPath := os.Getenv("INTENT_STAGE2_LINT"); envPath != "" {
+		info, err := os.Stat(envPath)
+		if err != nil {
+			return "", fmt.Errorf("INTENT_STAGE2_LINT=%q: %w", envPath, err)
+		}
+		if info.IsDir() || info.Mode()&0111 == 0 {
+			return "", fmt.Errorf("INTENT_STAGE2_LINT=%q is not an executable file", envPath)
+		}
+		return envPath, nil
+	}
+
+	srcDir := filepath.Join("selfhost", "formatter")
+	mainSrc := filepath.Join(srcDir, "lint_main.intent")
+	if _, err := os.Stat(mainSrc); err != nil {
+		return "", fmt.Errorf(
+			"stage2 linter sources not found at selfhost/formatter/lint_main.intent; run from the repo root or set INTENT_STAGE2_LINT to a prebuilt binary",
+		)
+	}
+
+	cachePath := filepath.Join(os.TempDir(), "intent-stage2-lint")
+
+	needBuild := false
+	cacheInfo, err := os.Stat(cachePath)
+	if err != nil {
+		needBuild = true
+	} else {
+		entries, err := os.ReadDir(srcDir)
+		if err == nil {
+			for _, e := range entries {
+				if !strings.HasSuffix(e.Name(), ".intent") {
+					continue
+				}
+				fi, err := e.Info()
+				if err != nil {
+					continue
+				}
+				if fi.ModTime().After(cacheInfo.ModTime()) {
+					needBuild = true
+					break
+				}
+			}
+		}
+	}
+
+	if !needBuild {
+		return cachePath, nil
+	}
+
+	intentc, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("could not determine intentc path: %w", err)
+	}
+
+	absSrc, err := filepath.Abs(mainSrc)
+	if err != nil {
+		return "", fmt.Errorf("could not resolve lint_main.intent path: %w", err)
+	}
+
+	buildDir, err := os.MkdirTemp("", "intent-stage2-lint-build-*")
+	if err != nil {
+		return "", fmt.Errorf("could not create build temp dir: %w", err)
+	}
+	defer os.RemoveAll(buildDir)
+
+	buildCmd := exec.Command(intentc, "build", "--target", "rust", absSrc)
+	buildCmd.Dir = buildDir
+	buildOut, buildErr := buildCmd.CombinedOutput()
+	if buildErr != nil {
+		return "", fmt.Errorf("stage2 linter build failed: %w\n%s", buildErr, strings.TrimSpace(string(buildOut)))
+	}
+
+	builtBin := filepath.Join(buildDir, "lint_main")
+	if _, err := os.Stat(builtBin); err != nil {
+		return "", fmt.Errorf("stage2 linter build succeeded but binary not found at %s: %w", builtBin, err)
+	}
+
+	if err := os.Rename(builtBin, cachePath); err != nil {
+		if copyErr := copyFile(builtBin, cachePath, 0755); copyErr != nil {
+			return "", fmt.Errorf("could not install stage2 linter binary: %w", copyErr)
+		}
+	}
+
+	return cachePath, nil
 }
 
 const pkgUsage = `Usage:
