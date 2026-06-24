@@ -696,3 +696,32 @@ no AST enrichment needed. (Contrast type-params, which ARE parsed but lack posit
 
 Task split: old 43.8 (enrichment + R3/R4/R15/R15e) split into 43.8 (R3/R4, trivial)
 and 43.9 (type-param position enrichment + R15/R15e). Net 12 -> 13 tasks.
+
+---
+
+## 2026-06-24 — Phase 43.9: type-param position enrichment + R15/R15e (ALL 16 RULES DONE)
+
+Additive parallel position arrays type_param_lines/type_param_columns on FunctionDecl
+and EntityDecl (defaulted via new empty_int_array() helper; formatter untouched, so
+selfcheck/diff-formatter unaffected). Parser: Parser.tp_lines/tp_columns fields,
+populated in parse_type_param_list (reset + push per type-param token), assigned to
+fd/ed at the call sites (incl. entity error path). token-aware type_uses_param
+(extracts maximal identifier runs, whole-token match — "Type"/"TT" do NOT match "T").
+R15 in lint_function_decl after R5 (anchored at type_param position); R15e in
+lint_entity_decl after R9 (message has NO "in parameters or return type" suffix —
+stage1 difference). +13 tests incl. a column-position assertion. lint_test 188/188
+rust+js; selfcheck 4 EQUAL; diff-formatter 22/22.
+
+MILESTONE: all 16 Go-linter rule families now implemented in the stage2 Intent linter.
+
+PATTERN: [intent-no-break] Intent has no `break` statement — early-exit loops use a
+`let mutable running: Bool = true; while i < n and running { ... running = false; }`
+guard pattern (used in type_uses_param).
+
+PROCESS NOTE: a clean-tree + zero-marker disk snapshot wrongly read as "stalled" while
+col-track was actually about to write 43.9; I sent a stand-down, then saw ast/parser
+edits land and retracted it. Lesson: with laggy teammate messages, a single disk
+snapshot can race the worker's writes — confirm with a second snapshot before
+concluding a stall, and prefer retract-and-let-finish over taking over mid-edit.
+
+Cleanup: removed stray probe_col.intent (worker's column probe).

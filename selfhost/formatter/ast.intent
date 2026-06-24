@@ -304,6 +304,11 @@ public entity FunctionDecl {
     // them after the name token when a `<` follows. Methods do NOT carry type
     // params (only top-level functions and entity decls do).
     field type_params: Array<String>;
+    // Phase 43.9: source positions of each type parameter (parallel arrays).
+    // type_params[i] ↔ type_param_lines[i] ↔ type_param_columns[i].
+    // Defaulted empty; the parser assigns them alongside type_params.
+    field type_param_lines: Array<Int>;
+    field type_param_columns: Array<Int>;
 
     constructor(name: String, is_public: Bool, is_entry: Bool, is_async: Bool, is_constructor: Bool, params: Array<Param>, return_type: String, body: Block, line: Int, comments_before: Array<String>) {
         self.name = name;
@@ -320,6 +325,8 @@ public entity FunctionDecl {
         self.ensures_clauses = empty_expr_array();
         self.decreases_clauses = empty_expr_array();
         self.type_params = empty_string_array();
+        self.type_param_lines = empty_int_array();
+        self.type_param_columns = empty_int_array();
         self.column = 0;
     }
 }
@@ -390,6 +397,11 @@ public entity EntityDecl {
     // in `entity Stack<T> { ... }`. Defaulted empty; the parser assigns them
     // after the name token when a `<` follows.
     field type_params: Array<String>;
+    // Phase 43.9: source positions of each type parameter (parallel arrays).
+    // type_params[i] ↔ type_param_lines[i] ↔ type_param_columns[i].
+    // Defaulted empty; the parser assigns them alongside type_params.
+    field type_param_lines: Array<Int>;
+    field type_param_columns: Array<Int>;
 
     constructor(name: String, is_public: Bool, fields: Array<FieldDecl>, methods: Array<FunctionDecl>, has_constructor: Bool, ctor: FunctionDecl, invariants: Array<Expr>, line: Int, comments_before: Array<String>) {
         self.name = name;
@@ -402,6 +414,8 @@ public entity EntityDecl {
         self.line = line;
         self.comments_before = comments_before;
         self.type_params = empty_string_array();
+        self.type_param_lines = empty_int_array();
+        self.type_param_columns = empty_int_array();
         self.column = 0;
     }
 }
@@ -626,6 +640,13 @@ public function empty_matcharm_array() returns Array<MatchArm> {
 // Empty Array<Param> — defaults Expr.lambda_params (Phase 44).
 public function empty_param_array() returns Array<Param> {
     let mutable a: Array<Param> = [];
+    return a;
+}
+
+// Empty Array<Int> — defaults FunctionDecl/EntityDecl type_param_lines and
+// type_param_columns (Phase 43.9).
+public function empty_int_array() returns Array<Int> {
+    let mutable a: Array<Int> = [];
     return a;
 }
 

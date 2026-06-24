@@ -8,11 +8,17 @@ public entity Parser {
     field tokens: Array<Token>;
     field position: Int;
     field error: String;
+    // Phase 43.9: scratch arrays populated by parse_type_param_list; assigned
+    // to type_param_lines / type_param_columns on FunctionDecl and EntityDecl.
+    field tp_lines: Array<Int>;
+    field tp_columns: Array<Int>;
 
     constructor(source: String) {
         self.tokens = formatter_lexer.lex(source);
         self.position = 0;
         self.error = "";
+        self.tp_lines = formatter_ast.empty_int_array();
+        self.tp_columns = formatter_ast.empty_int_array();
     }
 
     method at_end() returns Bool {
@@ -141,6 +147,8 @@ public entity Parser {
 
     method parse_type_param_list() returns Array<String> {
         let mutable params: Array<String> = [];
+        self.tp_lines = formatter_ast.empty_int_array();
+        self.tp_columns = formatter_ast.empty_int_array();
         if not self.check(formatter_lexer.tk_lt()) {
             return params;
         }
@@ -148,10 +156,14 @@ public entity Parser {
         if self.check(formatter_lexer.tk_ident()) {
             let first: Token = self.advance();
             params.push(first.text);
+            self.tp_lines.push(first.line);
+            self.tp_columns.push(first.column);
             while self.check_consume(formatter_lexer.tk_comma()) {
                 if self.check(formatter_lexer.tk_ident()) {
                     let next: Token = self.advance();
                     params.push(next.text);
+                    self.tp_lines.push(next.line);
+                    self.tp_columns.push(next.column);
                 } else {
                     self.fail("expected type parameter name after ','");
                     return params;
@@ -338,6 +350,8 @@ public entity Parser {
         fd.ensures_clauses = enss;
         fd.decreases_clauses = decs;
         fd.type_params = type_params;
+        fd.type_param_lines = self.tp_lines;
+        fd.type_param_columns = self.tp_columns;
         fd.column = first_tok.column;
         return fd;
     }
@@ -989,6 +1003,8 @@ public entity Parser {
                             self.fail("expected 'field', 'constructor', 'method', or 'invariant' in entity body");
                             let mutable ed_err: EntityDecl = EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line, cmts);
                             ed_err.type_params = ent_type_params;
+                            ed_err.type_param_lines = self.tp_lines;
+                            ed_err.type_param_columns = self.tp_columns;
                             ed_err.column = entity_tok.column;
                             return ed_err;
                         }
@@ -999,6 +1015,8 @@ public entity Parser {
         self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close entity body");
         let mutable ed: EntityDecl = EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line, cmts);
         ed.type_params = ent_type_params;
+        ed.type_param_lines = self.tp_lines;
+        ed.type_param_columns = self.tp_columns;
         ed.column = entity_tok.column;
         return ed;
     }

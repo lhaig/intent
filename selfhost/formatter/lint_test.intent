@@ -694,6 +694,95 @@ test "R4: extern always produces no-contracts diag" {
     assert_eq(has_diag_msg(diags, "extern function 'panic' has no requires/ensures; FFI declarations should document the boundary contract"), true);
 }
 
+// --- type_uses_param helper tests (43.9) --------------------------------------
+
+test "type_uses_param: Array<T> contains T" {
+    assert_eq(formatter_linter.type_uses_param("Array<T>", "T"), true);
+}
+
+test "type_uses_param: Type does not match T (prefix)" {
+    assert_eq(formatter_linter.type_uses_param("Type", "T"), false);
+}
+
+test "type_uses_param: TT does not match T (longer)" {
+    assert_eq(formatter_linter.type_uses_param("TT", "T"), false);
+}
+
+test "type_uses_param: Int does not match T" {
+    assert_eq(formatter_linter.type_uses_param("Int", "T"), false);
+}
+
+test "type_uses_param: Map<K, V> contains K" {
+    assert_eq(formatter_linter.type_uses_param("Map<K, V>", "K"), true);
+}
+
+test "type_uses_param: Fn(T) -> R contains T" {
+    assert_eq(formatter_linter.type_uses_param("Fn(T) -> R", "T"), true);
+}
+
+// --- R15: unused function type parameters (43.9) ------------------------------
+// Column of T in "module m version \"1.0\"; function ident<T>...":
+// "module m version \"1.0\"; " = 24 chars, "function ident<" = 15 chars → T at column 40.
+
+test "R15: unused type param in function produces diag" {
+    let src: String = "module m version \"1.0\"; function ident<T>(x: Int) returns Int " + '{'.to_string() + " return x; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "type parameter 'T' in function 'ident' is never used in parameters or return type"), true);
+}
+
+test "R15: unused type param diag has correct column" {
+    let src: String = "module m version \"1.0\"; function ident<T>(x: Int) returns Int " + '{'.to_string() + " return x; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let mutable col: Int = -1;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "type parameter 'T' in function 'ident' is never used in parameters or return type" {
+            col = diags[i].column;
+        }
+        i = i + 1;
+    }
+    assert_eq(col, 40);
+}
+
+test "R15: used type param in param type produces no R15 diag" {
+    let src: String = "module m version \"1.0\"; function ident<T>(x: T) returns T " + '{'.to_string() + " return x; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "type parameter 'T' in function 'ident' is never used in parameters or return type"), false);
+}
+
+test "R15: token-aware — TT param type does not count as T usage" {
+    let src: String = "module m version \"1.0\"; function ident<T>(x: TT) returns Int " + '{'.to_string() + " return 1; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "type parameter 'T' in function 'ident' is never used in parameters or return type"), true);
+}
+
+// --- R15e: unused entity type parameters (43.9) -------------------------------
+
+test "R15e: unused type param in entity produces diag" {
+    let src: String = "module m version \"1.0\"; entity Box<T> " + '{'.to_string() + " field x: Int; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "type parameter 'T' in entity 'Box' is never used"), true);
+}
+
+test "R15e: type param used in field produces no R15e diag" {
+    let src: String = "module m version \"1.0\"; entity Box<T> " + '{'.to_string() + " field x: T; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "type parameter 'T' in entity 'Box' is never used"), false);
+}
+
+test "R15e: type param used in method return type produces no R15e diag" {
+    let src: String = "module m version \"1.0\"; entity Box<T> " + '{'.to_string() + " method get() returns T " + '{'.to_string() + " return 0; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "type parameter 'T' in entity 'Box' is never used"), false);
+}
+
 entry function main() returns Int {
     return 0;
 }

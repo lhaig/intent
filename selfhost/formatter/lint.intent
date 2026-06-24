@@ -228,9 +228,52 @@ public function find_discarded_spawns(stmts: Array<Stmt>, fname: String) returns
     return diags;
 }
 
+// type_uses_param returns true iff param appears as a whole identifier token
+// inside typestr. Extracts maximal identifier runs (alpha/digit/underscore)
+// and compares each to param. Avoids substring false positives:
+// type_uses_param("Type","T")==false, type_uses_param("TT","T")==false.
+public function type_uses_param(typestr: String, param: String) returns Bool {
+    let mutable i: Int = 0;
+    let n: Int = len(typestr);
+    while i < n {
+        let c: Char = typestr[i];
+        if c.is_uppercase() or c.is_lowercase() or c == '_' {
+            // start of an identifier run; advance j to its end
+            let mutable j: Int = i;
+            let mutable running: Bool = true;
+            while j < n and running {
+                let d: Char = typestr[j];
+                if d.is_uppercase() or d.is_lowercase() or d.is_digit() or d == '_' {
+                    j = j + 1;
+                } else {
+                    running = false;
+                }
+            }
+            // identifier is typestr[i..j]; compare to param
+            if j - i == len(param) {
+                let mutable k: Int = 0;
+                let mutable matched: Bool = true;
+                while k < len(param) {
+                    if typestr[i + k] != param[k] {
+                        matched = false;
+                    }
+                    k = k + 1;
+                }
+                if matched {
+                    return true;
+                }
+            }
+            i = j;
+        } else {
+            i = i + 1;
+        }
+    }
+    return false;
+}
+
 // lint_function_decl checks a single top-level function declaration.
 // Stage1 order: R10 (empty body), R1 (missing contracts, skip entry), R5
-// (snake_case), [R15 deferred to 43.8], then unconditionally (stage1 runs
+// (snake_case), R15 (unused type params), then unconditionally (stage1 runs
 // these whenever Body != nil, which is always true in stage2):
 // R14 (unused params), R12 (unused vars, recursive), R13 (mutable
 // never reassigned, top-level only), R16 (discarded spawn, recursive).
@@ -250,6 +293,23 @@ public function lint_function_decl(fdecl: FunctionDecl) returns Array<LintDiag> 
     // R5: snake_case naming
     if not is_snake_case(fdecl.name) {
         diags.push(LintDiag(fdecl.line, fdecl.column, "function '" + fdecl.name + "' should use snake_case naming"));
+    }
+    // R15: unused type parameters
+    let mutable tpi: Int = 0;
+    while tpi < len(fdecl.type_params) {
+        let tp: String = fdecl.type_params[tpi];
+        let mutable tp_used: Bool = type_uses_param(fdecl.return_type, tp);
+        let mutable pi: Int = 0;
+        while pi < len(fdecl.params) {
+            if type_uses_param(fdecl.params[pi].type_name, tp) {
+                tp_used = true;
+            }
+            pi = pi + 1;
+        }
+        if not tp_used {
+            diags.push(LintDiag(fdecl.type_param_lines[tpi], fdecl.type_param_columns[tpi], "type parameter '" + tp + "' in function '" + fdecl.name + "' is never used in parameters or return type"));
+        }
+        tpi = tpi + 1;
     }
     // R14/R12/R13/R16 run unconditionally (stage1 runs whenever Body != nil)
     let mutable used: Array<String> = collect_used_names(fdecl.body.stmts);
@@ -297,8 +357,8 @@ public function lint_extern_decl(ext: ExternDecl) returns Array<LintDiag> {
 }
 
 // lint_entity_decl checks a single entity declaration.
-// Stage1 order: R6 (entity naming), R9 (no-invariant), [R15e deferred],
-// ctor R14, then per method: R10, R2, R5, R14/R12/R13 (no R16).
+// Stage1 order: R6 (entity naming), R9 (no-invariant), R15e (unused type
+// params), ctor R14, then per method: R10, R2, R5, R14/R12/R13 (no R16).
 public function lint_entity_decl(ent: EntityDecl) returns Array<LintDiag> {
     let mutable diags: Array<LintDiag> = [];
     // R6: entity must use PascalCase
@@ -309,7 +369,40 @@ public function lint_entity_decl(ent: EntityDecl) returns Array<LintDiag> {
     if len(ent.fields) > 0 and len(ent.invariants) == 0 {
         diags.push(LintDiag(ent.line, ent.column, "entity '" + ent.name + "' has fields but no invariant"));
     }
-    // R15e (entity type-params) deferred to 43.8
+    // R15e: unused entity type parameters
+    let mutable etpi: Int = 0;
+    while etpi < len(ent.type_params) {
+        let etp: String = ent.type_params[etpi];
+        let mutable etp_used: Bool = false;
+        // check fields
+        let mutable efi: Int = 0;
+        while efi < len(ent.fields) {
+            if type_uses_param(ent.fields[efi].type_name, etp) {
+                etp_used = true;
+            }
+            efi = efi + 1;
+        }
+        // check methods: params and return type
+        let mutable emi: Int = 0;
+        while emi < len(ent.methods) {
+            let em: FunctionDecl = ent.methods[emi];
+            let mutable empi: Int = 0;
+            while empi < len(em.params) {
+                if type_uses_param(em.params[empi].type_name, etp) {
+                    etp_used = true;
+                }
+                empi = empi + 1;
+            }
+            if type_uses_param(em.return_type, etp) {
+                etp_used = true;
+            }
+            emi = emi + 1;
+        }
+        if not etp_used {
+            diags.push(LintDiag(ent.type_param_lines[etpi], ent.type_param_columns[etpi], "type parameter '" + etp + "' in entity '" + ent.name + "' is never used"));
+        }
+        etpi = etpi + 1;
+    }
     // Constructor R14: unused params (scope = "EntityName.constructor")
     if ent.has_constructor {
         let mutable ctor_used: Array<String> = collect_used_names(ent.ctor.body.stmts);
