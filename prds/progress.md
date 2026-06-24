@@ -768,3 +768,26 @@ KEY DIFF vs fmt shim: runStage2Linter does NOT trim a trailing newline. The fmt
 shim trims one (formatter stdout = source + print's \n, but file content has no
 extra \n). The linter's stdout already equals stage1's exact bytes (the summary
 line's \n IS print's \n), so it's emitted as-is.
+
+---
+
+## 2026-06-24 — Phase 43.12: differential harness + fixtures + make diff-linter
+
+selfhost/formatter/difftest-lint.sh builds the stage2 lint_main binary and compares
+its stdout to stage1 `intentc lint` across examples/*.intent + lint-fixtures/*.intent.
+4 fixtures cover the non-corpus rules: r6_r7_r8_naming (R6/R7/R8/R9), r10_empty_body
+(R10/R1), r11_intent_no_verified (R11), r15_unused_type_params (R15/R15e/R1/R9).
+Makefile `diff-linter` target + .PHONY. RESULT: `make diff-linter` = 26/26 PASS,
+0 diverged, 0 parse-err — the stage2 self-hosted linter is BYTE-EQUAL with stage1
+`intentc lint` across the full corpus + fixtures. With the 188 unit tests (which
+cover R4), all 16 rule families are validated.
+
+FINDING (real, verified): R4 (extern no-contracts) CANNOT be differentially gated —
+stage1 grammar requires `extern function NAME(...) returns T from "crate::path";`
+(grammar.ebnf:96, `from` clause mandatory) while stage2 parses `extern "target"
+function NAME(...) returns T;`. No single source parses in both. R4 is verified by
+the stage2 unit test in lint_test.intent instead; documented in the Makefile comment
++ difftest-lint.sh header. (Removed an erroneous stage2-syntax R4 fixture I had added.)
+
+Other gates unregressed: selfcheck 4 EQUAL, diff-formatter 22/22, lint_test 188,
+full Go suite passing.

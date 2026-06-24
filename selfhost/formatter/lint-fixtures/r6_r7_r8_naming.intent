@@ -1,0 +1,19 @@
+// lint-fixtures/r6_r7_r8_naming.intent — R6 (entity non-PascalCase),
+// R7 (enum non-PascalCase), R8 (variant non-PascalCase).
+//
+// R9 (entity no invariant) co-fires with R6 because bad_name has fields but
+// no invariant — this is expected and byte-equal between stage1 and stage2.
+module r6_r7_r8_naming version "0.1.0";
+
+entity bad_name {
+    field x: Int;
+
+    constructor(v: Int) {
+        self.x = v;
+    }
+}
+
+enum bad_enum {
+    GoodVariant,
+    bad_variant,
+}

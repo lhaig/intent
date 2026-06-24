@@ -1,0 +1,18 @@
+// lint-fixtures/r15_unused_type_params.intent — R15 (unused fn type param)
+// and R15e (unused entity type param).
+//
+// R1 (no contracts) co-fires on id<T> — expected and byte-equal.
+// R9 (entity no invariant) co-fires on Box<T> — expected and byte-equal.
+module r15_unused_type_params version "0.1.0";
+
+function id<T>(x: Int) returns Int {
+    return x;
+}
+
+entity Box<T> {
+    field x: Int;
+
+    constructor(v: Int) {
+        self.x = v;
+    }
+}

@@ -1,4 +1,4 @@
-.PHONY: build test test-v clean install check-examples lint-examples fmt-check-examples emit-examples test-gen-examples test-examples gofmt-check validate diff-formatter selfcheck-formatter
+.PHONY: build test test-v clean install check-examples lint-examples fmt-check-examples emit-examples test-gen-examples test-examples gofmt-check validate diff-formatter selfcheck-formatter diff-linter
 
 # Flat examples (single-file). Subdirectory examples (attractor, multi_file, packages, ffi_blake3)
 # are exercised via their own entry points.
@@ -82,6 +82,14 @@ emit-examples: build
 # non-zero on any non-allowed divergence. Drives stage2 formatter gap-closing.
 diff-formatter: build
 	@./selfhost/formatter/difftest.sh
+
+# Differential test: stage2 (Intent) linter vs stage1 `intentc lint` over the
+# examples corpus + lint-fixtures (Phase 43). Reports per-file PASS/DIVERGE/
+# PARSE-ERR; exits non-zero on any divergence or unexpected parse-error.
+# R4 (extern) is excluded — the extern syntax differs between stage1 and stage2;
+# it is verified by unit tests in lint_test.intent instead.
+diff-linter: build
+	@./selfhost/formatter/difftest-lint.sh
 
 # Byte-equal self-format gate: the stage2 formatter is a fixpoint on its own
 # source files (Phase 42). Drives the built binary (not in-language tests, whose

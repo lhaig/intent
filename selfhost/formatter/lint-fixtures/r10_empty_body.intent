@@ -1,0 +1,8 @@
+// lint-fixtures/r10_empty_body.intent — R10 (function has an empty body).
+//
+// R1 (no contracts) co-fires because empty_fn has no requires/ensures —
+// this is expected and byte-equal between stage1 and stage2.
+module r10_empty_body version "0.1.0";
+
+function empty_fn() returns Int {
+}
