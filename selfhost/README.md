@@ -12,11 +12,18 @@ multi-phase delivery plan.
 
 ```
 selfhost/
-  formatter/    Intent-implemented formatter (in progress; see formatter/README.md)
+  formatter/    Intent-implemented formatter AND linter — they share the stage2
+                lexer / parser / AST (see formatter/README.md)
 ```
 
-Future siblings: `linter/`, eventually `compiler/`. Each is its own Intent
-package with its own `intent.toml`.
+The **formatter** (Phase 38-42, `intentc fmt --self-hosted`) and the **linter**
+(Phase 43, `intentc lint --self-hosted`) both live in `selfhost/formatter/`
+because they share one stage2 lexer/parser/AST. Keeping them in a single
+directory uses the proven flat same-directory imports ([ADR 0046](../docs/decisions/0046-self-hosted-linter-strategy.md)
+D1); a `selfhost/shared/` split is deferred until a third stage2 tool lands.
+
+Future sibling: eventually `compiler/`. Each is its own Intent package with its
+own `intent.toml`.
 
 ## How stage2 is built
 

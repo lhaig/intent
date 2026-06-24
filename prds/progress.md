@@ -791,3 +791,23 @@ the stage2 unit test in lint_test.intent instead; documented in the Makefile com
 
 Other gates unregressed: selfcheck 4 EQUAL, diff-formatter 22/22, lint_test 188,
 full Go suite passing.
+
+---
+
+## 2026-06-24 — Phase 43.13: docs + final validation (PHASE 43 COMPLETE)
+
+docs/ROADMAP.md: added "Phase 43: Self-Hosted Linter — SHIPPED" entry (above Phase
+42). prds/NEXT-STEPS.md: rewritten for Phase 43 complete + candidate next directions
+(recommend self-hosting the checker next). selfhost/README.md + selfhost/formatter/
+README.md: updated to document the linter living alongside the formatter (shared
+stage2 lexer/parser/AST per ADR 0046 D1), the new files, the Phase 43 row, and the
+diff-linter command. PRD moved active/ -> done/. Phase 43 collapsed in TASKS.md ->
+one-line summary; full 13-row table appended to TASKS-archive.md.
+
+FINAL VALIDATION (all green): make validate OK (gofmt + build + go test + examples);
+make selfcheck-formatter 4 EQUAL; make diff-formatter 22/22; make diff-linter 26/26.
+
+PHASE 43 COMPLETE. The self-hosted (stage2) linter is byte-equal with stage1
+`intentc lint` across the corpus + fixtures, all 16 rule families, wired as
+`intentc lint --self-hosted`. Second self-hosted toolchain artefact after the
+formatter. Next milestone: self-hosting the compiler (start with the checker).

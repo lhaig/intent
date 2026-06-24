@@ -58,28 +58,7 @@ Widened the stage2 parser beyond its self-hostable subset so it can format arbit
 
 ## Phase 42: Stage2 Formatter CLI Wiring + Differential Test — 12 tasks completed 2026-06-16 (corpus 22/22 vs `intentc fmt`; see [TASKS-archive.md](TASKS-archive.md))
 
-## Phase 43: Self-Hosted Linter (stage2) — ACTIVE
-
-Faithful port of the 16 Go-linter rule families into Intent, reusing the stage2
-lexer/parser/AST. Byte-equal parity with stage1 `intentc lint` (including `:col`),
-gated by `make diff-linter`. See [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md)
-and ADR 0046. Corpus baseline: 76 warnings / 13 files / 8 of 16 families.
-
-| # | Task | PRD | Status | Notes |
-|---|------|-----|--------|-------|
-| 43.1 | ADR 0046 — self-hosted linter strategy | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-23) | docs/decisions/0046; D1 reuse-formatter-dir, D2 byte-equal-w/-col, D3 all-16-gated |
-| 43.2 | Column tracking in stage2 AST + parser | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | +column on 9 decls; +line+column on Stmt/Param/EnumVariant/TraitMethodSig; defaulted-in-body + post-construction assign; +4 tests; gates green |
-| 43.3 | Linter core scaffold + diagnostic model | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | lint.intent + lint_test.intent; LintDiag, dispatch (fns→externs→entities→enums→traits→impls→intents), format_diags, is_snake/pascal_case, R5; +18 tests; gates green |
-| 43.4 | Used-name + assigned-name engine | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | collect_used_names/from_stmt/from_expr + collect_assigned_names + name_in; functional (returns arrays) due to pass-by-value; +5 engine tests; gates green |
-| 43.5 | Complete lint_function_decl (R10,R1,R5,R14,R12,R13,R16) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | stage1 order; reusable check_unused_params/variables/mutable + find_discarded_spawns; advisor revise fixed R12/R13 split, R13 top-level, R16 recursion, R15 deferred; +tests; gates green |
-| 43.6 | Complete lint_entity_decl + lint_impl_decl | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | entity R6/R9/ctor-R14 + methods R10/R2/R5/R14/R12/R13; impl R10/R5/R14/R12 (no R2/R13); guard fix (body checks unconditional); +3 locking tests; lint_test 161; gates green |
-| 43.7 | Enum/trait-naming/intent dispatch (R7,R8,R6-trait,R5,R11) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | enum R7/R8, trait R6("entity" quirk)+R5, intent R11; R3/R4 deferred to 43.8; lint_test 172; gates green |
-| 43.8 | R3 + R4 (trait-method + extern contracts) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | always-fire (stage2 parser rejects contracts on trait-methods/externs); R3 after R5 in trait loop; R4 in lint_extern_decl; lint_test 175; gates green |
-| 43.9 | Type-param position enrichment + R15 (fn) + R15e (entity) | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | additive type_param_lines/columns + empty_int_array; parser tp_lines/tp_columns plumbing; token-aware type_uses_param; R15 after R5, R15e after R9; +13 tests (188); gates green. ALL 16 rules implemented |
-| 43.10 | Runnable `lint_main.intent` | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | entry main: args/read_file/parse/lint_program; output byte-identical to `intentc lint` on array_sum/map_demo(18)/task_queue(17)/enum_basic(12)/io_demo/handler_trait; builds rust+js; gates green |
-| 43.11 | `intentc lint --self-hosted` Go shim | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | parseLintFlags + stage2LinterBinary (INTENT_STAGE2_LINT override + build/cache) + runStage2Linter (verbatim, no trim); byte-identical to `intentc lint` on array_sum/map_demo/enum_basic/hello; +Go tests; all Go tests pass |
-| 43.12 | Differential harness + fixtures + `make diff-linter` | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | difftest-lint.sh + 4 fixtures (R6/R7/R8/R9/R10/R11/R15/R15e) + Makefile target; `make diff-linter` 26/26 PASS byte-equal vs `intentc lint`; R4 unit-test-only (extern syntax differs stage1/stage2) |
-| 43.13 | Docs (ROADMAP/NEXT-STEPS/README) + final validate | [prd-phase-43-self-hosted-linter.md](active/prd-phase-43-self-hosted-linter.md) | TODO | needs: 43.12 |
+## Phase 43: Self-Hosted Linter (stage2) — 13 tasks completed 2026-06-24 (all 16 rule families; `make diff-linter` 26/26 byte-equal vs `intentc lint`; see [TASKS-archive.md](TASKS-archive.md))
 
 ## Backlog
 

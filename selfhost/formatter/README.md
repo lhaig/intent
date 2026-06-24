@@ -1,16 +1,16 @@
 # selfhost/formatter/
 
-Stage2 Intent formatter — Intent-implemented `intentc fmt`. Lives alongside
-stage1's Go formatter (`internal/formatter/`); will eventually replace it
-once parity is reached.
+Stage2 Intent toolchain — Intent-implemented `intentc fmt` **and** `intentc lint`.
+Both live here because they share one stage2 lexer/parser/AST. They live alongside
+stage1's Go implementations (`internal/formatter/`, `internal/linter/`); each will
+eventually replace its stage1 counterpart once parity is reached.
 
-**Status (2026-06-09):** Phases 32-40A shipped. 131 in-language
-tests on rust + js. **Self-parse + self-format certified** (Phase
-39); **source-order tracking** (Phase 40C, ADR 0042); **paren
-stripping** (Phase 40B, ADR 0043); **leading-decl comment
-preservation** (Phase 40A.1, ADR 0044). hello.intent remains the
-byte-equal dogfood fixture. Stage2-source byte-equal needs Phase
-40A.2 (inline + body comments).
+**Status (2026-06-24):** Formatter **complete** — byte-for-byte parity with
+`intentc fmt` on the full examples corpus (Phase 42, `make diff-formatter` 22/22) and
+a self-format fixpoint on its own four source files (`make selfcheck-formatter`).
+Linter **complete** (Phase 43) — all 16 Go-linter rule families ported, byte-for-byte
+parity with `intentc lint` across the corpus + fixtures (`make diff-linter` 26/26),
+wired as `intentc lint --self-hosted`. 269 in-language linter tests on rust + js.
 
 ## Big picture
 
@@ -31,10 +31,18 @@ for the full multi-phase plan. The short version:
 selfhost/formatter/
   intent.toml             # package manifest (Phase 30 / ADR 0039)
   lexer.intent            # source → tokens                 (Phase 32 / 37 — shipped)
-  ast.intent              # AST entity declarations          (Phase 36 / 37 — shipped)
-  parser.intent           # tokens → AST (full grammar)     (Phases 33-37 — shipped)
+  ast.intent              # AST entity declarations          (Phase 36 / 37 / 43 — shipped)
+  parser.intent           # tokens → AST (full grammar)     (Phases 33-37 / 43 — shipped)
   format.intent           # AST → source                    (Phase 38 — shipped)
   format_test.intent      # formatter tests + hello.intent dogfood
+  main.intent             # formatter entry (intentc fmt --self-hosted)  (Phase 42)
+  lint.intent             # AST → diagnostics (the linter)   (Phase 43 — shipped)
+  lint_test.intent        # linter tests (269 with imports)  (Phase 43)
+  lint_main.intent        # linter entry (intentc lint --self-hosted)    (Phase 43)
+  lint-fixtures/          # non-corpus-rule fixtures for make diff-linter (Phase 43)
+  difftest.sh             # make diff-formatter harness      (Phase 42)
+  difftest-lint.sh        # make diff-linter harness         (Phase 43)
+  selfcheck.sh            # make selfcheck-formatter harness  (Phase 42)
   README.md               # (this file)
 ```
 
@@ -71,6 +79,7 @@ selfhost/formatter/
 | **40A.2 / 40A.3** | Inline-after + body + real-file comments; byte-equal self-format on all 4 stage2 files. | **Shipped** ([PRD](../../prds/done/phase-40a-comment-preservation.md)) |
 | **41** | Parser surface widening: contracts (`requires`/`ensures`/`decreases`), `match`, `for`-in, `try`. | **Shipped** ([PRD](../../prds/done/phase-41-parser-surface-widening.md)) |
 | **42** | CLI wiring (`args()` builtin, `main.intent`, `intentc fmt --self-hosted`) + differential harness (`make diff-formatter`) vs `intentc fmt` + parser-gap closing (invariants, contracts, intent blocks, implies, await, forall/exists, generics, Fn/lambdas, attributes). **Corpus 22/22, 0 divergences.** Self-format gate via built binary (`make selfcheck-formatter`). | **Shipped** ([PRD](../../prds/done/phase-42-formatter-cli-differential.md)) |
+| **43** | **Self-hosted linter** — all 16 Go-linter rule families in `lint.intent` reusing the stage2 lexer/parser/AST; `lint_main.intent` + `intentc lint --self-hosted` shim; `make diff-linter` differential vs `intentc lint`. **Corpus + fixtures 26/26, byte-equal.** Added source-`column` tracking to the AST ([ADR 0046](../../docs/decisions/0046-self-hosted-linter-strategy.md)). | **Shipped** ([PRD](../../prds/done/prd-phase-43-self-hosted-linter.md)) |
 
 Phase numbers are indicative and may shift as language gaps surface.
 
@@ -98,9 +107,18 @@ file count grows.
 Run the stage2 tests on every backend with:
 
 ```bash
-intentc test --all-targets selfhost/formatter/lexer.intent       # 27 tests
-intentc test --all-targets selfhost/formatter/parser.intent      # 66 tests + 27 lexer (imported) = 93
-intentc test --all-targets selfhost/formatter/format_test.intent # 38 formatter tests + 93 imported = 131
+intentc test --all-targets selfhost/formatter/lexer.intent       # lexer tests
+intentc test --all-targets selfhost/formatter/parser.intent      # parser + lexer (imported)
+intentc test --all-targets selfhost/formatter/format_test.intent # formatter + imported
+intentc test --all-targets selfhost/formatter/lint_test.intent   # linter + imported (269)
+```
+
+Differential + self-format gates (run from the repo root):
+
+```bash
+make diff-formatter        # stage2 fmt vs intentc fmt over examples (22/22)
+make selfcheck-formatter   # stage2 files are formatter fixpoints (4 EQUAL)
+make diff-linter           # stage2 lint vs intentc lint over examples + fixtures (26/26)
 ```
 
 PRs should reference the relevant phase number.
