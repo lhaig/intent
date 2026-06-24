@@ -15,39 +15,49 @@ public function lint_fn(name: String) returns Array<LintDiag> {
     return formatter_linter.lint_program(prog);
 }
 
-test "R5: non-snake_case function name produces one diag with correct message" {
-    let diags: Array<LintDiag> = lint_fn("BadName");
-    assert_eq(len(diags), 1);
-    assert_eq(diags[0].message, "function 'BadName' should use snake_case naming");
+// Helper: search diags for a specific message substring.
+public function has_diag_msg(diags: Array<LintDiag>, msg: String) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == msg {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
 }
 
-test "R5: snake_case function name produces no diags" {
+test "R5: non-snake_case function name produces diag with correct message" {
+    let diags: Array<LintDiag> = lint_fn("BadName");
+    assert_eq(has_diag_msg(diags, "function 'BadName' should use snake_case naming"), true);
+}
+
+test "R5: snake_case function name produces no R5 diag" {
     let diags: Array<LintDiag> = lint_fn("good_name");
-    assert_eq(len(diags), 0);
+    assert_eq(has_diag_msg(diags, "function 'good_name' should use snake_case naming"), false);
 }
 
 test "R5: function with digits in name is valid snake_case" {
     let diags: Array<LintDiag> = lint_fn("parse_v2");
-    assert_eq(len(diags), 0);
+    assert_eq(has_diag_msg(diags, "function 'parse_v2' should use snake_case naming"), false);
 }
 
 test "R5: function with leading underscore is valid snake_case" {
     let diags: Array<LintDiag> = lint_fn("_helper");
-    assert_eq(len(diags), 0);
+    assert_eq(has_diag_msg(diags, "function '_helper' should use snake_case naming"), false);
 }
 
-test "R5: PascalCase function name produces one diag" {
+test "R5: PascalCase function name produces R5 diag" {
     let diags: Array<LintDiag> = lint_fn("MyFunc");
-    assert_eq(len(diags), 1);
-    assert_eq(diags[0].message, "function 'MyFunc' should use snake_case naming");
+    assert_eq(has_diag_msg(diags, "function 'MyFunc' should use snake_case naming"), true);
 }
 
-test "R5: multiple functions - only bad names produce diags" {
+test "R5: multiple functions - only bad names produce R5 diags" {
     let src: String = "module m version \"1.0\"; function good() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string() + " function BadOne() returns Int " + '{'.to_string() + " return 1; " + '}'.to_string();
     let prog: Program = formatter_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
-    assert_eq(len(diags), 1);
-    assert_eq(diags[0].message, "function 'BadOne' should use snake_case naming");
+    assert_eq(has_diag_msg(diags, "function 'BadOne' should use snake_case naming"), true);
+    assert_eq(has_diag_msg(diags, "function 'good' should use snake_case naming"), false);
 }
 
 test "is_snake_case: empty string returns false" {
@@ -163,6 +173,263 @@ test "engine: nested block (if body) contributes to used names" {
     let stmts: Array<Stmt> = prog.functions[0].body.stmts;
     let used: Array<String> = formatter_linter.collect_used_names(stmts);
     assert_eq(formatter_linter.name_in(used, "a"), true);
+}
+
+// --- R10: empty body ---------------------------------------------------------
+
+test "R10: empty body produces diag" {
+    let src: String = "module m version \"1.0\"; function empty_body() returns Int " + '{'.to_string() + ' '.to_string() + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let mutable found: Bool = false;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "function 'empty_body' has an empty body" {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert_eq(found, true);
+}
+
+test "R10: non-empty body produces no empty-body diag" {
+    let src: String = "module m version \"1.0\"; function has_body() returns Int " + '{'.to_string() + " return 1; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let mutable found: Bool = false;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "function 'has_body' has an empty body" {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert_eq(found, false);
+}
+
+// --- R1: missing contracts ---------------------------------------------------
+
+test "R1: non-entry function with no contracts produces diag" {
+    let src: String = "module m version \"1.0\"; function no_contract(x: Int) returns Int " + '{'.to_string() + " return x; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let mutable found: Bool = false;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "function 'no_contract' has no requires or ensures contracts" {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert_eq(found, true);
+}
+
+test "R1: entry function with no contracts is exempt" {
+    let src: String = "module m version \"1.0\"; entry function main() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let mutable found: Bool = false;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "function 'main' has no requires or ensures contracts" {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert_eq(found, false);
+}
+
+// --- R14: unused parameter ---------------------------------------------------
+
+test "R14: used parameter produces no diag" {
+    let src: String = "module m version \"1.0\"; function use_param(x: Int) returns Int " + '{'.to_string() + " return x; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let mutable found: Bool = false;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "parameter 'x' in 'use_param' is never used" {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert_eq(found, false);
+}
+
+test "R14: unused parameter produces diag" {
+    let src: String = "module m version \"1.0\"; function ignore_param(x: Int) returns Int " + '{'.to_string() + " return 1; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let mutable found: Bool = false;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "parameter 'x' in 'ignore_param' is never used" {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert_eq(found, true);
+}
+
+// --- R12: unused variable ----------------------------------------------------
+
+test "R12: used variable produces no diag" {
+    let src: String = "module m version \"1.0\"; function use_var() returns Int " + '{'.to_string() + " let x = 1; return x; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let mutable found: Bool = false;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "variable 'x' is declared but never used" {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert_eq(found, false);
+}
+
+test "R12: unused variable produces diag" {
+    let src: String = "module m version \"1.0\"; function unused_var() returns Int " + '{'.to_string() + " let x = 1; return 0; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let mutable found: Bool = false;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "variable 'x' is declared but never used" {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert_eq(found, true);
+}
+
+test "R12: unused variable in nested block is found" {
+    let src: String = "module m version \"1.0\"; function nested_unused() returns Int " + '{'.to_string() + " if true " + '{'.to_string() + " let y = 2; " + '}'.to_string() + " return 0; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let mutable found: Bool = false;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "variable 'y' is declared but never used" {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert_eq(found, true);
+}
+
+// --- R13: mutable never reassigned -------------------------------------------
+
+test "R13: reassigned mutable produces no diag" {
+    let src: String = "module m version \"1.0\"; function reassigned() returns Int " + '{'.to_string() + " let mutable x = 1; x = 2; return x; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let mutable found: Bool = false;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "variable 'x' is declared mutable but never reassigned" {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert_eq(found, false);
+}
+
+test "R13: mutable never reassigned produces diag" {
+    let src: String = "module m version \"1.0\"; function not_reassigned() returns Int " + '{'.to_string() + " let mutable x = 1; return x; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let mutable found: Bool = false;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "variable 'x' is declared mutable but never reassigned" {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert_eq(found, true);
+}
+
+// --- ORDER: exact diag sequence test -----------------------------------------
+// BadFn() — empty body + no contracts + non-snake_case → exactly 3 diags
+// in stage1's order: R10, R1, R5.
+
+test "ORDER: empty-body + no-contracts + bad-name diags in stage1 order" {
+    let src: String = "module m version \"1.0\"; function BadFn() returns Int " + '{'.to_string() + ' '.to_string() + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(len(diags), 3);
+    assert_eq(diags[0].message, "function 'BadFn' has an empty body");
+    assert_eq(diags[1].message, "function 'BadFn' has no requires or ensures contracts");
+    assert_eq(diags[2].message, "function 'BadFn' should use snake_case naming");
+}
+
+test "ORDER: R12 full pass before R13 full pass for multiple mutable lets" {
+    // Two unused mutable lets: stage1 order is R12(a), R12(b), R13(a), R13(b)
+    // not interleaved R12(a)/R13(a), R12(b)/R13(b).
+    let src: String = "module m version \"1.0\"; function two_lets() returns Int " + '{'.to_string() + " let mutable a = 1; let mutable b = 2; return 0; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let mutable r12a: Int = -1;
+    let mutable r12b: Int = -1;
+    let mutable r13a: Int = -1;
+    let mutable r13b: Int = -1;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "variable 'a' is declared but never used" {
+            r12a = i;
+        }
+        if diags[i].message == "variable 'b' is declared but never used" {
+            r12b = i;
+        }
+        if diags[i].message == "variable 'a' is declared mutable but never reassigned" {
+            r13a = i;
+        }
+        if diags[i].message == "variable 'b' is declared mutable but never reassigned" {
+            r13b = i;
+        }
+        i = i + 1;
+    }
+    assert_eq(r12a >= 0, true);
+    assert_eq(r12b >= 0, true);
+    assert_eq(r13a >= 0, true);
+    assert_eq(r13b >= 0, true);
+    assert_eq(r12a < r13a, true);
+    assert_eq(r12a < r13b, true);
+    assert_eq(r12b < r13a, true);
+    assert_eq(r12b < r13b, true);
+}
+
+test "R13: mutable in nested if block does NOT produce R13 diag (top-level only)" {
+    let src: String = "module m version \"1.0\"; function nested_mut() returns Int " + '{'.to_string() + " if true " + '{'.to_string() + " let mutable y = 5; " + '}'.to_string() + " return 0; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "variable 'y' is declared mutable but never reassigned"), false);
+}
+
+test "R16: spawn nested inside if block fires R16 diag" {
+    let src: String = "module m version \"1.0\"; function nested_spawn() returns Int " + '{'.to_string() + " if true " + '{'.to_string() + " spawn foo(); " + '}'.to_string() + " return 1; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "spawn result in 'nested_spawn' is discarded; assign to a Future variable and await it"), true);
+}
+
+// --- R16: discarded spawn ----------------------------------------------------
+// `spawn foo();` parses as st_expr(expr=ex_spawn(children=[ex_call(ex_ident("foo"))])).
+// Verified: stage2 parse_unary wraps the operand in ex_spawn.
+
+test "R16: discarded spawn in function body produces diag" {
+    let src: String = "module m version \"1.0\"; function do_spawn() returns Int " + '{'.to_string() + " spawn foo(); return 1; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "spawn result in 'do_spawn' is discarded; assign to a Future variable and await it"), true);
+}
+
+test "R16: no spawn in body produces no spawn diag" {
+    let src: String = "module m version \"1.0\"; function no_spawn() returns Int " + '{'.to_string() + " return 1; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "spawn result in 'no_spawn' is discarded; assign to a Future variable and await it"), false);
 }
 
 entry function main() returns Int {

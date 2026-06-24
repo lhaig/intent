@@ -606,3 +606,33 @@ PATTERN: [rust-temp-borrow] The rust backend emits Array params as &Vec<T>, and 
 temporary (a function's return value) cannot be auto-borrowed into another call.
 Store recursive-call results in a named `let mutable tmp = helper();` before passing
 to concat/append. Recurs throughout the functional-style engine.
+
+---
+
+## 2026-06-24 — Phase 43.5: complete lint_function_decl
+
+All function-level rules in stage1 order: R10 empty-body, R1 contracts (skip entry),
+R5 naming, [R15 deferred to 43.8], then for non-empty body: R14 unused-params, R12
+unused-vars, R13 mutable-never-reassigned, R16 discarded-spawn. Reusable helpers
+check_unused_params / check_unused_variables (recursive via collect_let_stmts) /
+check_mutable_never_reassigned (top-level only) / find_discarded_spawns (recursive) —
+will be reused by 43.6 entity/impl methods. R5 tests rewritten to message-presence
+(has_diag_msg) since R1 now fires on contract-less test fns. lint_test 143/143
+rust+js; selfcheck 4 EQUAL; diff-formatter 22/22.
+
+ADVISOR REVISE (caught 4 byte-equal divergences the worker's tests missed):
+- R15 was wrongly implemented with .contains substring match + function-column
+  anchor → removed (deferred to 43.8 where type_params get position).
+- R12/R13 were interleaved in one loop → split into separate full passes (stage1
+  runs checkUnusedVariables fully, THEN checkMutableNeverReassigned).
+- R13 walked recursed lets → fixed to TOP-LEVEL only (stage1 asymmetry: R12 recurses,
+  R13 does not; only collect_assigned_names recurses).
+- R16 was top-level only → made recursive into if/while/for (matches stage1).
+
+PATTERN: [stage1-rule-order] Diagnostics are emitted in append order (no sort), so
+per-decl rule order AND each rule's recursion behavior must match stage1 exactly.
+checkUnusedVariables recurses; checkMutableNeverReassigned does NOT; checkSpawnWithoutAwait
+recurses. Verify recursion per-rule against linter.go, don't assume uniformity.
+
+Cleanup: removed stray repo-root `lint_test` build artifact; added /lint_test +
+/lint_main to .gitignore (mirrors /main for the formatter binary).

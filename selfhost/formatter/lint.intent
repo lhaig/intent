@@ -77,12 +77,211 @@ public function format_diags(diags: Array<LintDiag>, file: String) returns Strin
 // --- Per-kind lint helpers ---------------------------------------------------
 // Each returns an Array<LintDiag>; lint_program appends them in order.
 
+// collect_let_stmts returns all st_let statements reachable from stmts,
+// recursing into if/else, while, and for blocks. Stage1 collectLetStmts
+// does the same full-body walk so R12/R13 catch nested `let` declarations.
+public function collect_let_stmts(stmts: Array<Stmt>) returns Array<Stmt> {
+    let mutable out: Array<Stmt> = [];
+    let mutable i: Int = 0;
+    while i < len(stmts) {
+        let s: Stmt = stmts[i];
+        if s.kind == formatter_ast.st_let() {
+            out.push(s);
+        }
+        if s.kind == formatter_ast.st_if() {
+            let mutable ttmp: Array<Stmt> = collect_let_stmts(s.then_block.stmts);
+            let mutable ti: Int = 0;
+            while ti < len(ttmp) {
+                out.push(ttmp[ti]);
+                ti = ti + 1;
+            }
+            if s.has_else {
+                let mutable etmp: Array<Stmt> = collect_let_stmts(s.else_block.stmts);
+                let mutable ei: Int = 0;
+                while ei < len(etmp) {
+                    out.push(etmp[ei]);
+                    ei = ei + 1;
+                }
+            }
+        }
+        if s.kind == formatter_ast.st_while() {
+            let mutable wtmp: Array<Stmt> = collect_let_stmts(s.then_block.stmts);
+            let mutable wi: Int = 0;
+            while wi < len(wtmp) {
+                out.push(wtmp[wi]);
+                wi = wi + 1;
+            }
+        }
+        if s.kind == formatter_ast.st_for() {
+            let mutable ftmp: Array<Stmt> = collect_let_stmts(s.then_block.stmts);
+            let mutable fi: Int = 0;
+            while fi < len(ftmp) {
+                out.push(ftmp[fi]);
+                fi = fi + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+// check_unused_params emits R14 for each param not present in used.
+// scope is the enclosing function/method name for the message.
+// Reused by lint_entity_decl and lint_impl_decl (task 43.6).
+public function check_unused_params(params: Array<Param>, used: Array<String>, scope: String) returns Array<LintDiag> {
+    let mutable diags: Array<LintDiag> = [];
+    let mutable i: Int = 0;
+    while i < len(params) {
+        let prm: Param = params[i];
+        if not name_in(used, prm.name) {
+            diags.push(LintDiag(prm.line, prm.column, "parameter '" + prm.name + "' in '" + scope + "' is never used"));
+        }
+        i = i + 1;
+    }
+    return diags;
+}
+
+// check_unused_variables emits R12 for each st_let reachable from stmts
+// (recurses into if/else, while, for) whose name is not in used.
+// Reused by lint_entity_decl and lint_impl_decl (task 43.6).
+public function check_unused_variables(stmts: Array<Stmt>, used: Array<String>) returns Array<LintDiag> {
+    let mutable diags: Array<LintDiag> = [];
+    let mutable lets: Array<Stmt> = collect_let_stmts(stmts);
+    let mutable i: Int = 0;
+    while i < len(lets) {
+        let ls: Stmt = lets[i];
+        if not name_in(used, ls.name) {
+            diags.push(LintDiag(ls.line, ls.column, "variable '" + ls.name + "' is declared but never used"));
+        }
+        i = i + 1;
+    }
+    return diags;
+}
+
+// check_mutable_never_reassigned emits R13 for top-level st_let stmts that
+// are is_mutable but whose name is NOT in assigned. Stage1 does NOT recurse
+// into nested blocks for R13 (asymmetry with R12). Reused by 43.6.
+public function check_mutable_never_reassigned(stmts: Array<Stmt>, assigned: Array<String>) returns Array<LintDiag> {
+    let mutable diags: Array<LintDiag> = [];
+    let mutable i: Int = 0;
+    while i < len(stmts) {
+        let s: Stmt = stmts[i];
+        if s.kind == formatter_ast.st_let() {
+            if s.is_mutable {
+                if not name_in(assigned, s.name) {
+                    diags.push(LintDiag(s.line, s.column, "variable '" + s.name + "' is declared mutable but never reassigned"));
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return diags;
+}
+
+// find_discarded_spawns emits R16 for st_expr statements whose expr is
+// ex_spawn, recursing into if/else, while, for bodies. Reused by 43.6.
+// `spawn x();` parses as st_expr(expr=ex_spawn(children=[ex_call(x)])).
+public function find_discarded_spawns(stmts: Array<Stmt>, fname: String) returns Array<LintDiag> {
+    let mutable diags: Array<LintDiag> = [];
+    let mutable i: Int = 0;
+    while i < len(stmts) {
+        let s: Stmt = stmts[i];
+        if s.kind == formatter_ast.st_expr() {
+            if s.expr.kind == formatter_ast.ex_spawn() {
+                diags.push(LintDiag(s.line, s.column, "spawn result in '" + fname + "' is discarded; assign to a Future variable and await it"));
+            }
+        }
+        if s.kind == formatter_ast.st_if() {
+            let mutable ttmp: Array<LintDiag> = find_discarded_spawns(s.then_block.stmts, fname);
+            let mutable ti: Int = 0;
+            while ti < len(ttmp) {
+                diags.push(ttmp[ti]);
+                ti = ti + 1;
+            }
+            if s.has_else {
+                let mutable etmp: Array<LintDiag> = find_discarded_spawns(s.else_block.stmts, fname);
+                let mutable ei: Int = 0;
+                while ei < len(etmp) {
+                    diags.push(etmp[ei]);
+                    ei = ei + 1;
+                }
+            }
+        }
+        if s.kind == formatter_ast.st_while() {
+            let mutable wtmp: Array<LintDiag> = find_discarded_spawns(s.then_block.stmts, fname);
+            let mutable wi: Int = 0;
+            while wi < len(wtmp) {
+                diags.push(wtmp[wi]);
+                wi = wi + 1;
+            }
+        }
+        if s.kind == formatter_ast.st_for() {
+            let mutable ftmp: Array<LintDiag> = find_discarded_spawns(s.then_block.stmts, fname);
+            let mutable fi: Int = 0;
+            while fi < len(ftmp) {
+                diags.push(ftmp[fi]);
+                fi = fi + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return diags;
+}
+
 // lint_function_decl checks a single top-level function declaration.
-// R5: function name must be snake_case.
+// Stage1 order: R10 (empty body), R1 (missing contracts, skip entry), R5
+// (snake_case), [R15 deferred to 43.8], then if body present:
+// R14 (unused params), R12 (unused vars, recursive), R13 (mutable
+// never reassigned, top-level only), R16 (discarded spawn, recursive).
 public function lint_function_decl(fdecl: FunctionDecl) returns Array<LintDiag> {
     let mutable diags: Array<LintDiag> = [];
+    let body_empty: Bool = len(fdecl.body.stmts) == 0;
+    // R10: empty body (fires for all functions including entry)
+    if body_empty {
+        diags.push(LintDiag(fdecl.line, fdecl.column, "function '" + fdecl.name + "' has an empty body"));
+    }
+    // R1: missing contracts (skip entry functions)
+    if not fdecl.is_entry {
+        if len(fdecl.requires_clauses) == 0 and len(fdecl.ensures_clauses) == 0 {
+            diags.push(LintDiag(fdecl.line, fdecl.column, "function '" + fdecl.name + "' has no requires or ensures contracts"));
+        }
+    }
+    // R5: snake_case naming
     if not is_snake_case(fdecl.name) {
         diags.push(LintDiag(fdecl.line, fdecl.column, "function '" + fdecl.name + "' should use snake_case naming"));
+    }
+    // R14, R12, R13, R16 require a non-empty body
+    if not body_empty {
+        let mutable used: Array<String> = collect_used_names(fdecl.body.stmts);
+        // R14: unused parameters
+        let mutable r14: Array<LintDiag> = check_unused_params(fdecl.params, used, fdecl.name);
+        let mutable r14i: Int = 0;
+        while r14i < len(r14) {
+            diags.push(r14[r14i]);
+            r14i = r14i + 1;
+        }
+        // R12: unused variables (recursive into nested blocks)
+        let mutable r12: Array<LintDiag> = check_unused_variables(fdecl.body.stmts, used);
+        let mutable r12i: Int = 0;
+        while r12i < len(r12) {
+            diags.push(r12[r12i]);
+            r12i = r12i + 1;
+        }
+        // R13: mutable never reassigned (top-level stmts only — stage1 asymmetry)
+        let mutable assigned: Array<String> = collect_assigned_names(fdecl.body.stmts);
+        let mutable r13: Array<LintDiag> = check_mutable_never_reassigned(fdecl.body.stmts, assigned);
+        let mutable r13i: Int = 0;
+        while r13i < len(r13) {
+            diags.push(r13[r13i]);
+            r13i = r13i + 1;
+        }
+        // R16: discarded spawn (recursive into nested blocks)
+        let mutable r16: Array<LintDiag> = find_discarded_spawns(fdecl.body.stmts, fdecl.name);
+        let mutable r16i: Int = 0;
+        while r16i < len(r16) {
+            diags.push(r16[r16i]);
+            r16i = r16i + 1;
+        }
     }
     return diags;
 }

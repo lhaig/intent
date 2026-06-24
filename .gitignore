@@ -10,6 +10,8 @@ target/
 
 # Compiled Intent program outputs (native binaries from intentc build)
 /main
+/lint_test
+/lint_main
 /integration_test
 /result_option
 /sorted_check
