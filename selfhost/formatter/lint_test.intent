@@ -432,6 +432,136 @@ test "R16: no spawn in body produces no spawn diag" {
     assert_eq(has_diag_msg(diags, "spawn result in 'no_spawn' is discarded; assign to a Future variable and await it"), false);
 }
 
+// --- Entity / impl tests (43.6) -----------------------------------------------
+
+test "R6: entity with non-PascalCase name produces diag" {
+    let src: String = "module m version \"1.0\"; entity bad_name " + '{'.to_string() + " field x: Int; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "entity 'bad_name' should use PascalCase naming"), true);
+}
+
+test "R6: entity with PascalCase name produces no R6 diag" {
+    let src: String = "module m version \"1.0\"; entity GoodName " + '{'.to_string() + " field x: Int; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "entity 'GoodName' should use PascalCase naming"), false);
+}
+
+test "R9: entity with fields and no invariant produces diag" {
+    let src: String = "module m version \"1.0\"; entity Foo " + '{'.to_string() + " field x: Int; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "entity 'Foo' has fields but no invariant"), true);
+}
+
+test "R9: entity with invariant produces no R9 diag" {
+    let src: String = "module m version \"1.0\"; entity Foo " + '{'.to_string() + " field x: Int; invariant self.x >= 0; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "entity 'Foo' has fields but no invariant"), false);
+}
+
+test "entity ctor R14: unused constructor param produces diag" {
+    let src: String = "module m version \"1.0\"; entity Foo " + '{'.to_string() + " field x: Int; constructor(x: Int, unused: Int) " + '{'.to_string() + " self.x = x; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "parameter 'unused' in 'Foo.constructor' is never used"), true);
+}
+
+test "entity method R10/R2/R5 ORDER: empty-body + no-contracts + bad-name in stage1 order" {
+    let src: String = "module m version \"1.0\"; entity Foo " + '{'.to_string() + " method BadM() returns Int " + '{'.to_string() + ' '.to_string() + '}'.to_string() + ' '.to_string() + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    // Find positions
+    let mutable r10_pos: Int = -1;
+    let mutable r2_pos: Int = -1;
+    let mutable r5_pos: Int = -1;
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if diags[i].message == "function 'Foo.BadM' has an empty body" {
+            r10_pos = i;
+        }
+        if diags[i].message == "method 'Foo.BadM' has no requires or ensures contracts" {
+            r2_pos = i;
+        }
+        if diags[i].message == "function 'BadM' should use snake_case naming" {
+            r5_pos = i;
+        }
+        i = i + 1;
+    }
+    assert_eq(r10_pos >= 0, true);
+    assert_eq(r2_pos >= 0, true);
+    assert_eq(r5_pos >= 0, true);
+    assert_eq(r10_pos < r2_pos, true);
+    assert_eq(r2_pos < r5_pos, true);
+}
+
+test "entity method R14: unused method param produces diag" {
+    let src: String = "module m version \"1.0\"; entity Foo " + '{'.to_string() + " method do_work(x: Int, y: Int) returns Int requires x > 0; ensures true; " + '{'.to_string() + " return x; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "parameter 'y' in 'Foo.do_work' is never used"), true);
+}
+
+test "entity method R12: unused variable in method produces diag" {
+    // No contracts intentionally (R2 fires too, but we check for R12 only)
+    let src: String = "module m version \"1.0\"; entity Foo " + '{'.to_string() + " method do_work() returns Int " + '{'.to_string() + " let z = 5; return 1; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "variable 'z' is declared but never used"), true);
+}
+
+test "entity method R13: mutable never reassigned in method produces diag" {
+    // No contracts intentionally (R2 fires too, but we check for R13 only)
+    let src: String = "module m version \"1.0\"; entity Foo " + '{'.to_string() + " method do_work() returns Int " + '{'.to_string() + " let mutable w = 1; return w; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "variable 'w' is declared mutable but never reassigned"), true);
+}
+
+test "impl method R10: empty-body impl method produces diag" {
+    let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method do_work() returns Int; " + '}'.to_string() + " entity Foo " + '{'.to_string() + ' '.to_string() + '}'.to_string() + " impl T for Foo " + '{'.to_string() + " method do_work() returns Int " + '{'.to_string() + ' '.to_string() + '}'.to_string() + ' '.to_string() + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "function 'Foo.do_work' has an empty body"), true);
+}
+
+test "impl method R5: non-snake_case impl method produces diag" {
+    let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method BadImpl() returns Int; " + '}'.to_string() + " entity Foo " + '{'.to_string() + ' '.to_string() + '}'.to_string() + " impl T for Foo " + '{'.to_string() + " method BadImpl() returns Int " + '{'.to_string() + " return 1; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "function 'BadImpl' should use snake_case naming"), true);
+}
+
+test "impl method R14: unused param in impl method produces diag" {
+    let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method work(x: Int) returns Int; " + '}'.to_string() + " entity Foo " + '{'.to_string() + ' '.to_string() + '}'.to_string() + " impl T for Foo " + '{'.to_string() + " method work(x: Int) returns Int " + '{'.to_string() + " return 1; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "parameter 'x' in 'Foo.work' is never used"), true);
+}
+
+test "impl method R12: unused var in impl method produces diag" {
+    let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method work() returns Int; " + '}'.to_string() + " entity Foo " + '{'.to_string() + ' '.to_string() + '}'.to_string() + " impl T for Foo " + '{'.to_string() + " method work() returns Int " + '{'.to_string() + " let z = 3; return 1; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "variable 'z' is declared but never used"), true);
+}
+
+test "impl method: no R2 (no contracts diag for impl methods)" {
+    let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method work() returns Int; " + '}'.to_string() + " entity Foo " + '{'.to_string() + ' '.to_string() + '}'.to_string() + " impl T for Foo " + '{'.to_string() + " method work() returns Int " + '{'.to_string() + " return 1; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "method 'Foo.work' has no requires or ensures contracts"), false);
+}
+
+test "impl method: no R13 (mutable-unreassigned not fired for impl methods)" {
+    let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method work() returns Int; " + '}'.to_string() + " entity Foo " + '{'.to_string() + ' '.to_string() + '}'.to_string() + " impl T for Foo " + '{'.to_string() + " method work() returns Int " + '{'.to_string() + " let mutable v = 1; return v; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "variable 'v' is declared mutable but never reassigned"), false);
+}
+
 entry function main() returns Int {
     return 0;
 }

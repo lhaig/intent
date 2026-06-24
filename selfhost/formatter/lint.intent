@@ -230,7 +230,8 @@ public function find_discarded_spawns(stmts: Array<Stmt>, fname: String) returns
 
 // lint_function_decl checks a single top-level function declaration.
 // Stage1 order: R10 (empty body), R1 (missing contracts, skip entry), R5
-// (snake_case), [R15 deferred to 43.8], then if body present:
+// (snake_case), [R15 deferred to 43.8], then unconditionally (stage1 runs
+// these whenever Body != nil, which is always true in stage2):
 // R14 (unused params), R12 (unused vars, recursive), R13 (mutable
 // never reassigned, top-level only), R16 (discarded spawn, recursive).
 public function lint_function_decl(fdecl: FunctionDecl) returns Array<LintDiag> {
@@ -250,38 +251,36 @@ public function lint_function_decl(fdecl: FunctionDecl) returns Array<LintDiag> 
     if not is_snake_case(fdecl.name) {
         diags.push(LintDiag(fdecl.line, fdecl.column, "function '" + fdecl.name + "' should use snake_case naming"));
     }
-    // R14, R12, R13, R16 require a non-empty body
-    if not body_empty {
-        let mutable used: Array<String> = collect_used_names(fdecl.body.stmts);
-        // R14: unused parameters
-        let mutable r14: Array<LintDiag> = check_unused_params(fdecl.params, used, fdecl.name);
-        let mutable r14i: Int = 0;
-        while r14i < len(r14) {
-            diags.push(r14[r14i]);
-            r14i = r14i + 1;
-        }
-        // R12: unused variables (recursive into nested blocks)
-        let mutable r12: Array<LintDiag> = check_unused_variables(fdecl.body.stmts, used);
-        let mutable r12i: Int = 0;
-        while r12i < len(r12) {
-            diags.push(r12[r12i]);
-            r12i = r12i + 1;
-        }
-        // R13: mutable never reassigned (top-level stmts only — stage1 asymmetry)
-        let mutable assigned: Array<String> = collect_assigned_names(fdecl.body.stmts);
-        let mutable r13: Array<LintDiag> = check_mutable_never_reassigned(fdecl.body.stmts, assigned);
-        let mutable r13i: Int = 0;
-        while r13i < len(r13) {
-            diags.push(r13[r13i]);
-            r13i = r13i + 1;
-        }
-        // R16: discarded spawn (recursive into nested blocks)
-        let mutable r16: Array<LintDiag> = find_discarded_spawns(fdecl.body.stmts, fdecl.name);
-        let mutable r16i: Int = 0;
-        while r16i < len(r16) {
-            diags.push(r16[r16i]);
-            r16i = r16i + 1;
-        }
+    // R14/R12/R13/R16 run unconditionally (stage1 runs whenever Body != nil)
+    let mutable used: Array<String> = collect_used_names(fdecl.body.stmts);
+    // R14: unused parameters
+    let mutable r14: Array<LintDiag> = check_unused_params(fdecl.params, used, fdecl.name);
+    let mutable r14i: Int = 0;
+    while r14i < len(r14) {
+        diags.push(r14[r14i]);
+        r14i = r14i + 1;
+    }
+    // R12: unused variables (recursive into nested blocks)
+    let mutable r12: Array<LintDiag> = check_unused_variables(fdecl.body.stmts, used);
+    let mutable r12i: Int = 0;
+    while r12i < len(r12) {
+        diags.push(r12[r12i]);
+        r12i = r12i + 1;
+    }
+    // R13: mutable never reassigned (top-level stmts only — stage1 asymmetry)
+    let mutable assigned: Array<String> = collect_assigned_names(fdecl.body.stmts);
+    let mutable r13: Array<LintDiag> = check_mutable_never_reassigned(fdecl.body.stmts, assigned);
+    let mutable r13i: Int = 0;
+    while r13i < len(r13) {
+        diags.push(r13[r13i]);
+        r13i = r13i + 1;
+    }
+    // R16: discarded spawn (recursive into nested blocks)
+    let mutable r16: Array<LintDiag> = find_discarded_spawns(fdecl.body.stmts, fdecl.name);
+    let mutable r16i: Int = 0;
+    while r16i < len(r16) {
+        diags.push(r16[r16i]);
+        r16i = r16i + 1;
     }
     return diags;
 }
@@ -292,9 +291,69 @@ public function lint_extern_decl(ext: ExternDecl) returns Array<LintDiag> {
     return diags;
 }
 
-// lint_entity_decl checks a single entity declaration (stub; rules added in 43.4+).
+// lint_entity_decl checks a single entity declaration.
+// Stage1 order: R6 (entity naming), R9 (no-invariant), [R15e deferred],
+// ctor R14, then per method: R10, R2, R5, R14/R12/R13 (no R16).
 public function lint_entity_decl(ent: EntityDecl) returns Array<LintDiag> {
     let mutable diags: Array<LintDiag> = [];
+    // R6: entity must use PascalCase
+    if not is_pascal_case(ent.name) {
+        diags.push(LintDiag(ent.line, ent.column, "entity '" + ent.name + "' should use PascalCase naming"));
+    }
+    // R9: entity with fields but no invariant
+    if len(ent.fields) > 0 and len(ent.invariants) == 0 {
+        diags.push(LintDiag(ent.line, ent.column, "entity '" + ent.name + "' has fields but no invariant"));
+    }
+    // R15e (entity type-params) deferred to 43.8
+    // Constructor R14: unused params (scope = "EntityName.constructor")
+    if ent.has_constructor {
+        let mutable ctor_used: Array<String> = collect_used_names(ent.ctor.body.stmts);
+        let mutable cr14: Array<LintDiag> = check_unused_params(ent.ctor.params, ctor_used, ent.name + ".constructor");
+        let mutable cr14i: Int = 0;
+        while cr14i < len(cr14) {
+            diags.push(cr14[cr14i]);
+            cr14i = cr14i + 1;
+        }
+    }
+    // Per method in declaration order
+    let mutable mi: Int = 0;
+    while mi < len(ent.methods) {
+        let m: FunctionDecl = ent.methods[mi];
+        // R10: empty body (qualified name "Entity.method")
+        if len(m.body.stmts) == 0 {
+            diags.push(LintDiag(m.line, m.column, "function '" + ent.name + "." + m.name + "' has an empty body"));
+        }
+        // R2: method missing contracts (word "method", qualified name)
+        if len(m.requires_clauses) == 0 and len(m.ensures_clauses) == 0 {
+            diags.push(LintDiag(m.line, m.column, "method '" + ent.name + "." + m.name + "' has no requires or ensures contracts"));
+        }
+        // R5: snake_case (word "function", UNqualified name)
+        if not is_snake_case(m.name) {
+            diags.push(LintDiag(m.line, m.column, "function '" + m.name + "' should use snake_case naming"));
+        }
+        // R14/R12/R13 body checks (no R16 for methods)
+        let mutable m_used: Array<String> = collect_used_names(m.body.stmts);
+        let mutable mr14: Array<LintDiag> = check_unused_params(m.params, m_used, ent.name + "." + m.name);
+        let mutable mr14i: Int = 0;
+        while mr14i < len(mr14) {
+            diags.push(mr14[mr14i]);
+            mr14i = mr14i + 1;
+        }
+        let mutable mr12: Array<LintDiag> = check_unused_variables(m.body.stmts, m_used);
+        let mutable mr12i: Int = 0;
+        while mr12i < len(mr12) {
+            diags.push(mr12[mr12i]);
+            mr12i = mr12i + 1;
+        }
+        let mutable m_assigned: Array<String> = collect_assigned_names(m.body.stmts);
+        let mutable mr13: Array<LintDiag> = check_mutable_never_reassigned(m.body.stmts, m_assigned);
+        let mutable mr13i: Int = 0;
+        while mr13i < len(mr13) {
+            diags.push(mr13[mr13i]);
+            mr13i = mr13i + 1;
+        }
+        mi = mi + 1;
+    }
     return diags;
 }
 
@@ -310,9 +369,38 @@ public function lint_trait_decl(tr: TraitDecl) returns Array<LintDiag> {
     return diags;
 }
 
-// lint_impl_decl checks a single impl block (stub; rules added in 43.5+).
+// lint_impl_decl checks a single impl block.
+// Stage1 order per method: R10 (empty body), R5 (naming), R14/R12 body checks.
+// Impl methods get NO R2 (contracts), NO R13 (mutable), NO R16 (spawn).
 public function lint_impl_decl(impl_decl: ImplDecl) returns Array<LintDiag> {
     let mutable diags: Array<LintDiag> = [];
+    let mutable mi: Int = 0;
+    while mi < len(impl_decl.methods) {
+        let m: FunctionDecl = impl_decl.methods[mi];
+        // R10: empty body (qualified name "EntityName.method")
+        if len(m.body.stmts) == 0 {
+            diags.push(LintDiag(m.line, m.column, "function '" + impl_decl.entity_name + "." + m.name + "' has an empty body"));
+        }
+        // R5: snake_case (UNqualified name)
+        if not is_snake_case(m.name) {
+            diags.push(LintDiag(m.line, m.column, "function '" + m.name + "' should use snake_case naming"));
+        }
+        // R14/R12 body checks (no R2, no R13, no R16)
+        let mutable m_used: Array<String> = collect_used_names(m.body.stmts);
+        let mutable mr14: Array<LintDiag> = check_unused_params(m.params, m_used, impl_decl.entity_name + "." + m.name);
+        let mutable mr14i: Int = 0;
+        while mr14i < len(mr14) {
+            diags.push(mr14[mr14i]);
+            mr14i = mr14i + 1;
+        }
+        let mutable mr12: Array<LintDiag> = check_unused_variables(m.body.stmts, m_used);
+        let mutable mr12i: Int = 0;
+        while mr12i < len(mr12) {
+            diags.push(mr12[mr12i]);
+            mr12i = mr12i + 1;
+        }
+        mi = mi + 1;
+    }
     return diags;
 }
 

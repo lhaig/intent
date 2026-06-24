@@ -636,3 +636,21 @@ recurses. Verify recursion per-rule against linter.go, don't assume uniformity.
 
 Cleanup: removed stray repo-root `lint_test` build artifact; added /lint_test +
 /lint_main to .gitignore (mirrors /main for the formatter binary).
+
+---
+
+## 2026-06-24 — Phase 43.6: complete lint_entity_decl + lint_impl_decl
+
+lint_entity_decl: R6 (PascalCase) -> R9 (no-invariant) -> [R15e deferred] -> ctor
+R14 (scope "Entity.constructor") -> per method R10/R2/R5/R14/R12/R13 (methods get NO
+R16, NO type-params). Exact message distinctions: R10 "function 'Entity.method' has
+an empty body", R2 "method 'Entity.method' has no requires or ensures contracts", R5
+"function 'method' ..." (UNqualified). lint_impl_decl: per method R10/R5/R14/R12 only
+(impl methods skip R2/R13/R16). Reused 43.5 helpers. Also applied the guard fix in
+lint_function_decl (body checks now unconditional, matching stage1 Body != nil).
++3 locking tests (R12-before-R13 ordering, R13-nested-no-fire, R16-nested-fires) +
+entity/impl tests. lint_test 161/161 rust+js; selfcheck 4 EQUAL; diff-formatter 22/22.
+
+PATTERN: [stage2-contract-clause-syntax] In a stage2 in-language test source string,
+contract clauses are bare expressions WITHOUT semicolons: `requires true ensures
+true` (NOT `requires true; ensures true;`). The semicolons cause stage2 parse errors.
