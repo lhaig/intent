@@ -1,0 +1,215 @@
+// selfhost/formatter/lint.intent — Phase 43.3 / self-hosted linter scaffold.
+//
+// Diagnostic model + dispatch walk + R5 (function snake_case naming).
+// Emit order mirrors stage1 Lint(): functions → externs → entities → enums
+// → traits → impls → intent_blocks, so byte-equal output is achievable in
+// the differential gate (43.12).
+module formatter_linter version "0.1.0";
+
+import "ast.intent";
+
+// --- Diagnostic entity -------------------------------------------------------
+
+public entity LintDiag {
+    field line: Int;
+    field column: Int;
+    field message: String;
+
+    constructor(line: Int, column: Int, message: String) {
+        self.line = line;
+        self.column = column;
+        self.message = message;
+    }
+}
+
+// --- Naming helpers ----------------------------------------------------------
+// Ported from stage1 linter.go isSnakeCase / isPascalCase (the Go code, not
+// the doc comments). Char predicates used: is_lowercase(), is_uppercase(),
+// is_digit() — all available as Char methods in the Intent runtime.
+
+public function is_snake_case(name: String) returns Bool {
+    if len(name) == 0 {
+        return false;
+    }
+    let mutable i: Int = 0;
+    while i < len(name) {
+        let c: Char = name[i];
+        if not c.is_lowercase() and c != '_' and not c.is_digit() {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+public function is_pascal_case(name: String) returns Bool {
+    if len(name) == 0 {
+        return false;
+    }
+    if not name[0].is_uppercase() {
+        return false;
+    }
+    let mutable i: Int = 1;
+    while i < len(name) {
+        if name[i] == '_' {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+// --- Diagnostic formatter ----------------------------------------------------
+// Produces one line per diag matching stage1 diagnostic.Format exactly:
+//   warning[<file>:<line>:<col>]: <message>\n
+
+public function format_diags(diags: Array<LintDiag>, file: String) returns String {
+    let mutable s: String = "";
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        let d: LintDiag = diags[i];
+        s = s + "warning[" + file + ":" + d.line.to_string() + ":" + d.column.to_string() + "]: " + d.message + "\n";
+        i = i + 1;
+    }
+    return s;
+}
+
+// --- Per-kind lint helpers ---------------------------------------------------
+// Each returns an Array<LintDiag>; lint_program appends them in order.
+
+// lint_function_decl checks a single top-level function declaration.
+// R5: function name must be snake_case.
+public function lint_function_decl(fdecl: FunctionDecl) returns Array<LintDiag> {
+    let mutable diags: Array<LintDiag> = [];
+    if not is_snake_case(fdecl.name) {
+        diags.push(LintDiag(fdecl.line, fdecl.column, "function '" + fdecl.name + "' should use snake_case naming"));
+    }
+    return diags;
+}
+
+// lint_extern_decl checks a single extern declaration (stub; rules added in 43.4+).
+public function lint_extern_decl(ext: ExternDecl) returns Array<LintDiag> {
+    let mutable diags: Array<LintDiag> = [];
+    return diags;
+}
+
+// lint_entity_decl checks a single entity declaration (stub; rules added in 43.4+).
+public function lint_entity_decl(ent: EntityDecl) returns Array<LintDiag> {
+    let mutable diags: Array<LintDiag> = [];
+    return diags;
+}
+
+// lint_enum_decl checks a single enum declaration (stub; rules added in 43.4+).
+public function lint_enum_decl(en: EnumDecl) returns Array<LintDiag> {
+    let mutable diags: Array<LintDiag> = [];
+    return diags;
+}
+
+// lint_trait_decl checks a single trait declaration (stub; rules added in 43.4+).
+public function lint_trait_decl(tr: TraitDecl) returns Array<LintDiag> {
+    let mutable diags: Array<LintDiag> = [];
+    return diags;
+}
+
+// lint_impl_decl checks a single impl block (stub; rules added in 43.5+).
+public function lint_impl_decl(impl_decl: ImplDecl) returns Array<LintDiag> {
+    let mutable diags: Array<LintDiag> = [];
+    return diags;
+}
+
+// lint_intent_block checks a single intent block (stub; rules added in 43.4+).
+public function lint_intent_block(ib: IntentBlock) returns Array<LintDiag> {
+    let mutable diags: Array<LintDiag> = [];
+    return diags;
+}
+
+// --- Main dispatch walk ------------------------------------------------------
+// Mirrors stage1 Lint() call order exactly:
+//   lintFunctions → lintExternFunctions → lintEntities → lintEnums
+//   → lintTraits → lintImplBlocks → lintIntents
+
+public function lint_program(prog: Program) returns Array<LintDiag> {
+    let mutable diags: Array<LintDiag> = [];
+    // functions
+    let mutable fi: Int = 0;
+    while fi < len(prog.functions) {
+        let mutable fd: Array<LintDiag> = lint_function_decl(prog.functions[fi]);
+        let mutable fj: Int = 0;
+        while fj < len(fd) {
+            diags.push(fd[fj]);
+            fj = fj + 1;
+        }
+        fi = fi + 1;
+    }
+    // externs
+    let mutable ei: Int = 0;
+    while ei < len(prog.externs) {
+        let mutable ed: Array<LintDiag> = lint_extern_decl(prog.externs[ei]);
+        let mutable ej: Int = 0;
+        while ej < len(ed) {
+            diags.push(ed[ej]);
+            ej = ej + 1;
+        }
+        ei = ei + 1;
+    }
+    // entities
+    let mutable enti: Int = 0;
+    while enti < len(prog.entities) {
+        let mutable entd: Array<LintDiag> = lint_entity_decl(prog.entities[enti]);
+        let mutable entj: Int = 0;
+        while entj < len(entd) {
+            diags.push(entd[entj]);
+            entj = entj + 1;
+        }
+        enti = enti + 1;
+    }
+    // enums
+    let mutable eni: Int = 0;
+    while eni < len(prog.enums) {
+        let mutable end: Array<LintDiag> = lint_enum_decl(prog.enums[eni]);
+        let mutable enj: Int = 0;
+        while enj < len(end) {
+            diags.push(end[enj]);
+            enj = enj + 1;
+        }
+        eni = eni + 1;
+    }
+    // traits
+    let mutable ti: Int = 0;
+    while ti < len(prog.traits) {
+        let mutable trd: Array<LintDiag> = lint_trait_decl(prog.traits[ti]);
+        let mutable tj: Int = 0;
+        while tj < len(trd) {
+            diags.push(trd[tj]);
+            tj = tj + 1;
+        }
+        ti = ti + 1;
+    }
+    // impls
+    let mutable ii: Int = 0;
+    while ii < len(prog.impls) {
+        let mutable imd: Array<LintDiag> = lint_impl_decl(prog.impls[ii]);
+        let mutable ij: Int = 0;
+        while ij < len(imd) {
+            diags.push(imd[ij]);
+            ij = ij + 1;
+        }
+        ii = ii + 1;
+    }
+    // intent blocks
+    let mutable ibi: Int = 0;
+    while ibi < len(prog.intent_blocks) {
+        let mutable ibd: Array<LintDiag> = lint_intent_block(prog.intent_blocks[ibi]);
+        let mutable ibj: Int = 0;
+        while ibj < len(ibd) {
+            diags.push(ibd[ibj]);
+            ibj = ibj + 1;
+        }
+        ibi = ibi + 1;
+    }
+    return diags;
+}
+
+entry function main() returns Int {
+    return 0;
+}

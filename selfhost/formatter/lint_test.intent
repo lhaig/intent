@@ -1,0 +1,112 @@
+// selfhost/formatter/lint_test.intent — Phase 43.3 linter tests.
+module formatter_linter_test version "0.1.0";
+
+import "ast.intent";
+
+import "lint.intent";
+
+import "parser.intent";
+
+// Helper: parse a tiny source with one top-level function named `name` and
+// return the lint diagnostics.
+public function lint_fn(name: String) returns Array<LintDiag> {
+    let src: String = "module m version \"1.0\"; function " + name + "() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    return formatter_linter.lint_program(prog);
+}
+
+test "R5: non-snake_case function name produces one diag with correct message" {
+    let diags: Array<LintDiag> = lint_fn("BadName");
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "function 'BadName' should use snake_case naming");
+}
+
+test "R5: snake_case function name produces no diags" {
+    let diags: Array<LintDiag> = lint_fn("good_name");
+    assert_eq(len(diags), 0);
+}
+
+test "R5: function with digits in name is valid snake_case" {
+    let diags: Array<LintDiag> = lint_fn("parse_v2");
+    assert_eq(len(diags), 0);
+}
+
+test "R5: function with leading underscore is valid snake_case" {
+    let diags: Array<LintDiag> = lint_fn("_helper");
+    assert_eq(len(diags), 0);
+}
+
+test "R5: PascalCase function name produces one diag" {
+    let diags: Array<LintDiag> = lint_fn("MyFunc");
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "function 'MyFunc' should use snake_case naming");
+}
+
+test "R5: multiple functions - only bad names produce diags" {
+    let src: String = "module m version \"1.0\"; function good() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string() + " function BadOne() returns Int " + '{'.to_string() + " return 1; " + '}'.to_string();
+    let prog: Program = formatter_parser.parse(src);
+    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "function 'BadOne' should use snake_case naming");
+}
+
+test "is_snake_case: empty string returns false" {
+    assert_eq(formatter_linter.is_snake_case(""), false);
+}
+
+test "is_snake_case: all lowercase is true" {
+    assert_eq(formatter_linter.is_snake_case("foo"), true);
+}
+
+test "is_snake_case: lowercase with underscore is true" {
+    assert_eq(formatter_linter.is_snake_case("foo_bar"), true);
+}
+
+test "is_snake_case: lowercase with digit is true" {
+    assert_eq(formatter_linter.is_snake_case("foo2"), true);
+}
+
+test "is_snake_case: uppercase returns false" {
+    assert_eq(formatter_linter.is_snake_case("Foo"), false);
+}
+
+test "is_pascal_case: empty string returns false" {
+    assert_eq(formatter_linter.is_pascal_case(""), false);
+}
+
+test "is_pascal_case: uppercase start no underscore is true" {
+    assert_eq(formatter_linter.is_pascal_case("FooBar"), true);
+}
+
+test "is_pascal_case: lowercase start returns false" {
+    assert_eq(formatter_linter.is_pascal_case("fooBar"), false);
+}
+
+test "is_pascal_case: contains underscore returns false" {
+    assert_eq(formatter_linter.is_pascal_case("Foo_Bar"), false);
+}
+
+test "format_diags: single diag produces correct warning line" {
+    let mutable diags: Array<LintDiag> = [];
+    diags.push(LintDiag(3, 5, "m"));
+    let out: String = formatter_linter.format_diags(diags, "f.intent");
+    assert_eq(out, "warning[f.intent:3:5]: m\n");
+}
+
+test "format_diags: empty array produces empty string" {
+    let mutable diags: Array<LintDiag> = [];
+    let out: String = formatter_linter.format_diags(diags, "f.intent");
+    assert_eq(out, "");
+}
+
+test "format_diags: two diags produce two lines in order" {
+    let mutable diags: Array<LintDiag> = [];
+    diags.push(LintDiag(1, 1, "first"));
+    diags.push(LintDiag(2, 3, "second"));
+    let out: String = formatter_linter.format_diags(diags, "x.intent");
+    assert_eq(out, "warning[x.intent:1:1]: first\nwarning[x.intent:2:3]: second\n");
+}
+
+entry function main() returns Int {
+    return 0;
+}

@@ -517,3 +517,39 @@ PATTERN: [ast-evolution] New optional position fields (line/column) are defaulte
 to 0 in the constructor body and assigned post-construction at each parse site —
 never added as constructor parameters — so all existing call sites stay unchanged.
 Same pattern as Stmt.comments_before / FunctionDecl.type_params.
+
+---
+
+## 2026-06-24 — Phase 43.3: linter core scaffold + diagnostic model
+
+New files selfhost/formatter/lint.intent (module formatter_linter) + lint_test.intent.
+LintDiag entity (line, column, message); lint_program dispatch walk; format_diags;
+is_snake_case / is_pascal_case (exact ports); R5 (function snake_case) wired
+end-to-end. +18 lint tests. Gates: build OK, lint_test 124/124 rust+js,
+selfcheck 4 EQUAL, diff-formatter 22/22.
+
+CORRECTION: the stage1 Lint() dispatch order is functions -> externs -> entities ->
+enums -> traits -> impls -> intents (linter.go:25-31), NOT externs-first as an
+earlier recon note claimed. Verified against source.
+
+CRITICAL for the differential (43.12): diagnostic.Format does NOT sort — it prints
+in APPEND order (diagnostic.go). So stage2 must emit in stage1's exact order, BOTH
+across decl kinds (above) AND per-decl when multiple rules fire on one decl. Each
+rule task (43.4-43.9) must append in stage1's per-function/per-entity rule order.
+
+STAGE1 TOTAL OUTPUT (for lint_main, 43.10): no warnings -> "No lint warnings.\n".
+With warnings -> Format() (lines joined by \n, NO trailing) + Println() (one \n) +
+"N warning(s) found.\n". Net: every warning line incl. last ends \n, no blank line
+before summary. format_diags already emits trailing \n per line, which composes
+correctly; lint_main must account for print()'s extra newline (formatter-shim trick).
+
+PATTERN: [cross-target-naming] Avoid parameter/variable names reserved in Intent OR
+Rust: fn, impl, result, type, trait, enum, use, mod, pub, let, for, in, loop, match,
+where, self, super, crate. Use compound names (fdecl, impl_decl, out). Caught at
+compile time but wastes a cycle.
+
+PATTERN: [array-accumulation] Stage2 Intent arrays are pass-by-value: accumulate
+with a local `let mutable arr: Array<T> = [];` + arr.push(...) directly. NEVER pass
+an accumulator array into a helper and push inside the callee — the mutation is
+silently discarded (and a drain_into helper generated broken Rust). lint_program
+inlines the per-kind merge loops for this reason.
