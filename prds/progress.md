@@ -471,7 +471,7 @@ statements, so a local referenced in a field init isn't in scope yet.
 
 ---
 
-## 2026-06-23 — Phase 43.1: ADR 0046 self-hosted linter strategy
+## 2026-06-23 — Phase 43.1: ADR 0050 self-hosted linter strategy
 
 Kicked off Phase 43 (rewrite the linter in Intent). Norman-scoped: PRD
 `prds/active/prd-phase-43-self-hosted-linter.md`, 13 tasks in TASKS.md.
@@ -486,7 +486,7 @@ exercising 8 of 16 rule families (unused var 25, mutable-never-reassigned 14,
 method no-contracts 14, function no-contracts 12, fn naming 4, entity no-invariant 4,
 unused param 2, trait method 1). Other 8 families need golden fixtures.
 
-ADR 0046 records: D1 reuse `selfhost/formatter/` (grep confirms NO cross-dir imports
+ADR 0050 records: D1 reuse `selfhost/formatter/` (grep confirms NO cross-dir imports
 exist anywhere -> separate dir is unproven/risky); D2 byte-equal parity INCLUDING
 `:col` (requires adding `column:Int` to stage2 AST decls); D3 all 16 rules this
 phase, gated by `make diff-linter`.
@@ -800,7 +800,7 @@ docs/ROADMAP.md: added "Phase 43: Self-Hosted Linter — SHIPPED" entry (above P
 42). prds/NEXT-STEPS.md: rewritten for Phase 43 complete + candidate next directions
 (recommend self-hosting the checker next). selfhost/README.md + selfhost/formatter/
 README.md: updated to document the linter living alongside the formatter (shared
-stage2 lexer/parser/AST per ADR 0046 D1), the new files, the Phase 43 row, and the
+stage2 lexer/parser/AST per ADR 0050 D1), the new files, the Phase 43 row, and the
 diff-linter command. PRD moved active/ -> done/. Phase 43 collapsed in TASKS.md ->
 one-line summary; full 13-row table appended to TASKS-archive.md.
 

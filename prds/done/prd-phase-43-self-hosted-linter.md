@@ -107,18 +107,18 @@ byte-equal gate forces completeness. The 8 corpus-exercised families are covered
 the examples differential; the 8 non-corpus families are covered by golden lint
 fixtures committed under `selfhost/linter/fixtures/`.
 
-### D4 — ADR recorded up front (ADR 0046)
+### D4 — ADR recorded up front (ADR 0050)
 
 Per project convention (write ADRs along the way), the strategy — self-hosted
 linter, byte-equal-with-column parity, reuse-formatter-dir, fixtures for non-corpus
-rules — is recorded as ADR 0046 before implementation, mirroring ADR 0040 for the
+rules — is recorded as ADR 0050 before implementation, mirroring ADR 0040 for the
 formatter.
 
 ## 4. User Stories / Tasks
 
-### US-001 (43.1): ADR 0046 — self-hosted linter strategy
+### US-001 (43.1): ADR 0050 — self-hosted linter strategy
 **AC:**
-- [ ] `docs/decisions/0046-self-hosted-linter-strategy.md` exists following the ADR
+- [ ] `docs/decisions/0050-self-hosted-linter-strategy.md` exists following the ADR
   template, recording D1–D3 with prior-art context (ADR 0040 formatter strategy,
   HARNESS.md §7) and the corpus baseline (76 warnings / 13 files / 8 families).
 - [ ] Linked from the PRD and referenced by the linter source header comment.

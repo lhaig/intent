@@ -3,7 +3,7 @@
 # selfhost/formatter/difftest-lint.sh — Phase 43.12 differential test.
 #
 # Compares the stage2 (Intent) linter against stage1 `intentc lint` across:
-#   - examples/*.intent  (22 files; the ADR 0046 baseline corpus)
+#   - examples/*.intent  (22 files; the ADR 0050 baseline corpus)
 #   - selfhost/formatter/lint-fixtures/*.intent  (4 fixture files; non-corpus rules)
 #
 # For each file:

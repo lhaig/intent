@@ -19,7 +19,7 @@ selfhost/
 The **formatter** (Phase 38-42, `intentc fmt --self-hosted`) and the **linter**
 (Phase 43, `intentc lint --self-hosted`) both live in `selfhost/formatter/`
 because they share one stage2 lexer/parser/AST. Keeping them in a single
-directory uses the proven flat same-directory imports ([ADR 0046](../docs/decisions/0046-self-hosted-linter-strategy.md)
+directory uses the proven flat same-directory imports ([ADR 0050](../docs/decisions/0050-self-hosted-linter-strategy.md)
 D1); a `selfhost/shared/` split is deferred until a third stage2 tool lands.
 
 Future sibling: eventually `compiler/`. Each is its own Intent package with its

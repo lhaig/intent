@@ -70,11 +70,11 @@ Baseline: 12/22 examples already byte-equal (= agree with `intentc fmt`). See
 
 Faithful port of the 16 Go-linter rule families into Intent, reusing the stage2
 lexer/parser/AST. Byte-equal parity with stage1 `intentc lint` (including `:col`),
-gated by `make diff-linter` (26/26). ADR 0046. Wired as `intentc lint --self-hosted`.
+gated by `make diff-linter` (26/26). ADR 0050. Wired as `intentc lint --self-hosted`.
 
 | # | Task | PRD | Status | Notes |
 |---|------|-----|--------|-------|
-| 43.1 | ADR 0046 — self-hosted linter strategy | [prd-phase-43-self-hosted-linter.md](done/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-23) | docs/decisions/0046; D1 reuse-formatter-dir, D2 byte-equal-w/-col, D3 all-16-gated |
+| 43.1 | ADR 0050 — self-hosted linter strategy | [prd-phase-43-self-hosted-linter.md](done/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-23) | docs/decisions/0050; D1 reuse-formatter-dir, D2 byte-equal-w/-col, D3 all-16-gated |
 | 43.2 | Column tracking in stage2 AST + parser | [prd-phase-43-self-hosted-linter.md](done/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | +column on 9 decls; +line+column on Stmt/Param/EnumVariant/TraitMethodSig; defaulted-in-body + post-construction assign; +4 tests |
 | 43.3 | Linter core scaffold + diagnostic model | [prd-phase-43-self-hosted-linter.md](done/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | lint.intent + lint_test.intent; LintDiag, dispatch (fns→externs→entities→enums→traits→impls→intents), format_diags, is_snake/pascal_case, R5; +18 tests |
 | 43.4 | Used-name + assigned-name engine | [prd-phase-43-self-hosted-linter.md](done/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | collect_used_names/from_stmt/from_expr + collect_assigned_names + name_in; functional (pass-by-value); +5 tests |

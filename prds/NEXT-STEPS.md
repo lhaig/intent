@@ -12,10 +12,10 @@ suite: 269 in-language tests on rust + js. The formatter gates are preserved
 throughout (`make diff-formatter` 22/22, `make selfcheck-formatter` 4 EQUAL).
 
 This is the **second self-hosted toolchain artefact** after the formatter — the
-proof point named in HARNESS.md §7. Strategy: [ADR 0046](../docs/decisions/0046-self-hosted-linter-strategy.md).
+proof point named in HARNESS.md §7. Strategy: [ADR 0050](../docs/decisions/0050-self-hosted-linter-strategy.md).
 
 Shipped this phase (43.1-43.13):
-- **43.1 ADR 0046** — strategy: faithful port, reuse `selfhost/formatter/`, byte-equal
+- **43.1 ADR 0050** — strategy: faithful port, reuse `selfhost/formatter/`, byte-equal
   *including column*, all-16-rules gated by the differential.
 - **43.2 column tracking** — `column` (and `line` where missing) on the stage2 AST
   nodes the linter anchors on (decls, `Stmt`, `Param`, `EnumVariant`, `TraitMethodSig`).
@@ -67,7 +67,7 @@ Shipped this phase (43.1-43.13):
    with contracts. Small, well-scoped parser-widening tasks (Phase 41 pattern).
 4. **(Optional) `selfhost/shared/` restructure** — once a third stage2 tool (the
    compiler) lands, split the shared lexer/parser/AST out of `selfhost/formatter/`
-   (deferred per ADR 0046 D1; needs its own ADR + module renames).
+   (deferred per ADR 0050 D1; needs its own ADR + module renames).
 
 ## How to resume
 

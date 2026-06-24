@@ -1,4 +1,4 @@
-# 0046: Self-Hosted Linter Strategy
+# 0050: Self-Hosted Linter Strategy
 
 **Date:** 2026-06-23
 **Status:** accepted
