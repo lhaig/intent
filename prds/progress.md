@@ -933,3 +933,22 @@ register passes (checker.go:113-116: registerEnums, registerEntities, registerTr
 registerFunctions). Diagnostics are NOT sorted, so this order is load-bearing for
 byte-equal when a program has dups in multiple kinds. (My Phase-44 recon note had the
 register order wrong; the worker correctly read the source — verified checker.go:113-116.)
+
+---
+
+## 2026-06-26 — Phase 45 plan refinement: discovered break/continue parser gap
+
+DISCOVERY: examples/error_handling.intent (valid corpus, in the 22/22 formatter set)
+uses real `break;` / `continue;`, but the stage2 lexer has NO break/continue keyword —
+they lex as plain identifiers, so `break;` parses as st_expr(ex_ident("break")). That
+round-trips fine for the formatter (emits the identifier + `;`), but for the checker:
+(1) break/continue-outside-loop can't be detected (no break/continue stmt nodes), and
+(2) the undeclared-variable check (45.7) would FALSE-POSITIVE on `break`/`continue` on
+error_handling.intent, breaking the no-false-positives gate.
+
+DECISION: add real break/continue statement support to the stage2 front-end as a
+discovered prerequisite (new task 45.4): kw_break/kw_continue in the lexer, st_break/
+st_continue stmt kinds in ast, parser support, formatter emit. This unblocks the
+outside-loop check AND keeps name-resolution faithful. Formatter must still round-trip
+error_handling.intent byte-equal (diff-formatter 22/22). Phase 45 grows 9 -> 11 tasks.
+45.3 (dup-variant + return-in-test) is unblocked and proceeds first.
