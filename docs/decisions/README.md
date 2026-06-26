@@ -84,3 +84,4 @@ What follows from this decision? Trade-offs accepted.
 | 0050 | [Self-hosted linter strategy](0050-self-hosted-linter-strategy.md) | 2026-06-24 | accepted (Phase 43 shipped 2026-06-24) |
 | 0051 | [`selfhost/shared/` restructure](0051-selfhost-shared-restructure.md) | 2026-06-25 | accepted (Phase 44) |
 | 0052 | [Self-hosted checker strategy](0052-self-hosted-checker-strategy.md) | 2026-06-26 | accepted (Phase 45) |
+| 0053 | [Self-hosted checker — type representation foundation](0053-self-hosted-checker-type-foundation.md) | 2026-06-26 | accepted (Phase 46) |

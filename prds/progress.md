@@ -1105,3 +1105,21 @@ diff-formatter 22/22; diff-linter 26/26; diff-checker 34/34.
 PHASE 45 COMPLETE. Three self-hosted tools now byte-equal with stage1: fmt, lint, check.
 The checker is the first compiler subsystem; first slice ships structural +
 name-resolution + arity (no type inference). Next: Phase 46 type-inference foundation.
+
+---
+
+## 2026-06-26 — Phase 46.1: ADR 0053 checker type-representation foundation
+
+Kicked off Phase 46 (checker type-system foundation — the gating prereq for all
+type-inference checks). ADR 0053: D1 represent types as an in-checker Type tree built
+by parse_type(string) over the type strings the AST already carries (NO parser/AST/
+formatter change — avoids the formatter byte-equal risk; the formatter doesn't need
+structured types, only the checker does); D2 first slice = Type + parse_type + resolver
++ unknown-type check (NO expression inference, deferred to Phase 47+); D3 two-directional
+diff-checker (unknown-type fixtures byte-equal + no-false-positives on the 22 valid
+examples = resolver must resolve every corpus type); D4 faithful port of ResolveType
+(types.go) + the unknown-type emit sites (checker.go). PRD in active/, 6 tasks.
+
+Recon: corpus types = primitives + Array/Map/Result/Option/Future<...> + Fn(..)->R +
+entity/enum names + generic type params; stage1 ResolveType returns nil on unknown base
+→ `unknown type '<base>'` (base name, not full string), anchored at the declaration.

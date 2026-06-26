@@ -64,6 +64,23 @@ Widened the stage2 parser beyond its self-hostable subset so it can format arbit
 
 ## Phase 45: Self-Hosted Checker (first slice) — 11 tasks completed 2026-06-26 (selfhost/checker/; make diff-checker 34/34 byte-equal vs `intentc check`; see [TASKS-archive.md](TASKS-archive.md))
 
+## Phase 46: Checker Type Representation Foundation — ACTIVE
+
+Build the self-hosted checker's type-system foundation: a structured `Type` tree +
+`parse_type(string)` (parsing the type strings the AST already carries — NO front-end
+change) + a resolver + the `unknown type 'X'` check. Expression inference + type-rule
+checks are Phase 47+. Gated by `make diff-checker` (unknown-type fixtures byte-equal +
+no false positives on the 22 valid examples). See [prd-phase-46-checker-type-foundation.md](active/prd-phase-46-checker-type-foundation.md) and ADR 0053.
+
+| # | Task | PRD | Status | Notes |
+|---|------|-----|--------|-------|
+| 46.1 | ADR 0053 — type representation foundation | [prd-phase-46-checker-type-foundation.md](active/prd-phase-46-checker-type-foundation.md) | DONE (2026-06-26) | docs/decisions/0053; D1 in-checker Type from strings (no front-end change), D2 first-slice=resolver+unknown-type, D3 two-dir diff, D4 faithful port |
+| 46.2 | `Type` entity + `parse_type(string)` | [prd-phase-46-checker-type-foundation.md](active/prd-phase-46-checker-type-foundation.md) | TODO | Type{name,type_args} + Fn shape; parse_type mirrors parse_type_name forms (nested <>, Fn(..)->R); ≥6 tests; needs: 46.1 |
+| 46.3 | resolver `type_is_known` | [prd-phase-46-checker-type-foundation.md](active/prd-phase-46-checker-type-foundation.md) | TODO | primitives + Array/Map/Result/Option/Future/Fn + entity/enum + type-params; recurse args; port ResolveType; needs: 46.2 |
+| 46.4 | `unknown type 'X'` check | [prd-phase-46-checker-type-foundation.md](active/prd-phase-46-checker-type-foundation.md) | TODO | param/field/return/let annotations; base name; thread decl type_params; verify emit order vs checker.go; needs: 46.3 |
+| 46.5 | diff-checker fixtures + no-false-positives | [prd-phase-46-checker-type-foundation.md](active/prd-phase-46-checker-type-foundation.md) | TODO | unknown-type fixtures byte-equal + 22 valid examples still clean; needs: 46.4 |
+| 46.6 | docs + final validate + push | [prd-phase-46-checker-type-foundation.md](active/prd-phase-46-checker-type-foundation.md) | TODO | checker README + ROADMAP + NEXT-STEPS; needs: 46.5 |
+
 ## Backlog
 
 | # | Task | PRD | Status | Notes |
