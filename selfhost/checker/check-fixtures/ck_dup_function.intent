@@ -1,0 +1,12 @@
+// check-fixtures/ck_dup_function.intent — Phase 45.10 / dup-function check.
+//
+// stage1: error[...:7:1]: function 'greet' already defined
+module ck_dup_function version "0.1.0";
+
+function greet() returns Int {
+    return 1;
+}
+
+function greet() returns Int {
+    return 2;
+}

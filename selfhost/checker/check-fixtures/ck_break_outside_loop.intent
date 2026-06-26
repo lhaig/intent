@@ -1,0 +1,9 @@
+// check-fixtures/ck_break_outside_loop.intent — Phase 45.10 / break-outside-loop check.
+//
+// stage1: error[...:4:5]: break statement outside loop
+module ck_break_outside_loop version "0.1.0";
+
+function f() returns Int {
+    break;
+    return 0;
+}

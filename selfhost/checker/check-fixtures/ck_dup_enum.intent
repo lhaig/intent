@@ -1,0 +1,13 @@
+// check-fixtures/ck_dup_enum.intent — Phase 45.10 / dup-enum check.
+//
+// stage1: error[...:8:1]: enum 'Color' already defined
+module ck_dup_enum version "0.1.0";
+
+enum Color {
+    Red,
+    Blue,
+}
+
+enum Color {
+    Green,
+}

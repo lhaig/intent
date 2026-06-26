@@ -1,0 +1,10 @@
+// check-fixtures/ck_dup_variant.intent — Phase 45.10 / dup-variant check.
+//
+// stage1: error[...:6:5]: duplicate variant name 'North' in enum 'Dir'
+module ck_dup_variant version "0.1.0";
+
+enum Dir {
+    North,
+    South,
+    North,
+}

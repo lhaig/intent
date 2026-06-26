@@ -1067,3 +1067,25 @@ VERIFIED byte-identical: `intentc check --self-hosted` vs `intentc check` on
 examples/hello.intent (both "No errors found.", exit 0) and a dup-function file (both
 `error[...:4:1]: function 'f' already defined`, exit 1). Gates: build, go test, selfcheck
 4 EQUAL, diff-formatter 22/22, diff-linter 26/26 all green.
+
+---
+
+## 2026-06-26 — Phase 45.10: differential gate make diff-checker + fixtures (DECISIVE — 34/34)
+
+selfhost/checker/difftest-check.sh (builds check_main, runs stage1 `intentc check` vs
+stage2 over examples + fixtures, byte-compares) + Makefile diff-checker target. 12
+check-fixtures/ (one per implemented check: dup entity/enum/function/trait, dup-variant,
+break/continue-outside-loop, return-in-test, undeclared-variable, variable-redefinition,
+function-arity, variant-arity), each minimized to trigger ONLY its target check.
+
+RESULT: `make diff-checker` = **34/34 PASS, 0 diverged** — 22 valid examples produce
+ZERO errors (no false positives) AND 12 invalid fixtures are byte-equal with stage1
+`intentc check`. The self-hosted checker first slice is byte-equal with stage1.
+
+GATE-DISCOVERED FIX: build_global_scope now seeds enum VARIANT names (not just enum
+names). Unit variants used as bare values (`return Running;`) appear as ex_ident and
+must resolve, else undeclared-variable false-positived on examples using them (e.g.
+enum_basic/task_queue). stage1 has variants in scope; this matches it. The
+no-false-positives sweep is exactly what surfaced this.
+
+Other gates green: selfcheck 4 EQUAL, diff-formatter 22/22, diff-linter 26/26, go test.

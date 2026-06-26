@@ -1,0 +1,14 @@
+// check-fixtures/ck_dup_entity.intent — Phase 45.10 / dup-entity check.
+//
+// stage1: error[...:8:1]: entity 'Box' already defined
+module ck_dup_entity version "0.1.0";
+
+entity Box {
+    field x: Int;
+    constructor(x: Int) { self.x = x; }
+}
+
+entity Box {
+    field y: Int;
+    constructor(y: Int) { self.y = y; }
+}

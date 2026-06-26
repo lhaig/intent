@@ -1,0 +1,12 @@
+// check-fixtures/ck_undeclared_variable.intent — Phase 45.10 / undeclared-variable check.
+//
+// Uses `let y: Int = x;` so stage1 emits only the undeclared-variable error
+// (the nil init type skips the assignability check; no co-firing type errors).
+//
+// stage1: error[...:4:18]: undeclared variable 'x'
+module ck_undeclared_variable version "0.1.0";
+
+function f() returns Int {
+    let y: Int = x;
+    return y;
+}

@@ -1,0 +1,9 @@
+// check-fixtures/ck_return_in_test.intent — Phase 45.10 / return-in-test check.
+//
+// stage1: error[...:5:5]: 'return' is not allowed inside a test body; test "bad return" has implicit Void return
+module ck_return_in_test version "0.1.0";
+
+test "bad return" {
+    let x: Int = 1;
+    return;
+}

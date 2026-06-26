@@ -1,0 +1,12 @@
+// check-fixtures/ck_function_arity.intent — Phase 45.10 / function-arity check.
+//
+// stage1: error[...:8:12]: function 'add' expects 2 arguments, got 1
+module ck_function_arity version "0.1.0";
+
+function add(a: Int, b: Int) returns Int {
+    return a + b;
+}
+
+function f() returns Int {
+    return add(1);
+}

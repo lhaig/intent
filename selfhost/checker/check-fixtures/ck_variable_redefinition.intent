@@ -1,0 +1,10 @@
+// check-fixtures/ck_variable_redefinition.intent — Phase 45.10 / variable-redefinition check.
+//
+// stage1: error[...:5:5]: variable 'x' already defined in this scope
+module ck_variable_redefinition version "0.1.0";
+
+function f() returns Int {
+    let x: Int = 1;
+    let x: Int = 2;
+    return x;
+}

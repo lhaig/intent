@@ -1,0 +1,9 @@
+// check-fixtures/ck_continue_outside_loop.intent — Phase 45.10 / continue-outside-loop check.
+//
+// stage1: error[...:4:5]: continue statement outside loop
+module ck_continue_outside_loop version "0.1.0";
+
+function g() returns Int {
+    continue;
+    return 0;
+}

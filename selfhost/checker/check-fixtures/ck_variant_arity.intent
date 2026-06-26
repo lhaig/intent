@@ -1,0 +1,13 @@
+// check-fixtures/ck_variant_arity.intent — Phase 45.10 / variant-arity check.
+//
+// stage1: error[...:9:12]: variant 'Circle' expects 1 arguments, got 2
+module ck_variant_arity version "0.1.0";
+
+enum Shape {
+    Circle(radius: Float),
+    Point,
+}
+
+function f() returns Shape {
+    return Circle(1.0, 2.0);
+}

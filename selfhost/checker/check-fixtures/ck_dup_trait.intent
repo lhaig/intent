@@ -1,0 +1,12 @@
+// check-fixtures/ck_dup_trait.intent — Phase 45.10 / dup-trait check.
+//
+// stage1: error[...:7:1]: trait 'Drawable' already defined
+module ck_dup_trait version "0.1.0";
+
+trait Drawable {
+    method draw() returns Void;
+}
+
+trait Drawable {
+    method render() returns Void;
+}

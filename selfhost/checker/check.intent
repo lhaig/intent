@@ -132,6 +132,16 @@ public function build_global_scope(prog: Program) returns Scope {
     let mutable eni: Int = 0;
     while eni < len(prog.enums) {
         s = scope_define(s, prog.enums[eni].name);
+        // Seed all variant names too: unit variants appear as bare ex_ident
+        // in expressions (e.g. `return Running;`) and must resolve in scope.
+        // Data variants appear as ex_call callee and are also checked by the
+        // arity registry, but seeding here prevents undeclared-variable false
+        // positives if arity-check is bypassed or variant is used as a value.
+        let mutable vni: Int = 0;
+        while vni < len(prog.enums[eni].variants) {
+            s = scope_define(s, prog.enums[eni].variants[vni].name);
+            vni = vni + 1;
+        }
         eni = eni + 1;
     }
     let mutable fi: Int = 0;
