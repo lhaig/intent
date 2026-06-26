@@ -62,27 +62,7 @@ Widened the stage2 parser beyond its self-hostable subset so it can format arbit
 
 ## Phase 44: selfhost/shared Restructure — 5 tasks completed 2026-06-26 (shared/ + formatter/ + linter/ siblings; all gates green; see [TASKS-archive.md](TASKS-archive.md))
 
-## Phase 45: Self-Hosted Checker (first slice) — ACTIVE
-
-First compiler subsystem self-hosted in Intent: a `selfhost/checker/` sibling reusing
-`../shared/`. First slice = structural checks + name-resolution (Array scope stack) +
-call arity; NO type inference (deferred). Two-directional `make diff-checker` gate
-(invalid fixtures byte-equal vs stage1 + no false positives on the valid corpus). See
-[prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) and ADR 0052.
-
-| # | Task | PRD | Status | Notes |
-|---|------|-----|--------|-------|
-| 45.1 | ADR 0052 — self-hosted checker strategy | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | DONE (2026-06-26) | docs/decisions/0052; D1 first-slice scope, D2 type-inference deferred, D3 Array scope stack, D4 two-dir diff, D5 faithful port |
-| 45.2 | Checker scaffold + duplicate-decl check | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | DONE (2026-06-26) | selfhost/checker/check.intent + check_test.intent; CheckDiag, format_diags (error[f:l:c], no trailing \n), dispatch order enums→entities→traits→functions (matches checker.go:113-116), dup-decl all 4 kinds; 8 tests, 114 rust+js; gates green |
-| 45.3 | Structural checks: dup enum variant + return-in-test | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | DONE (2026-06-26) | dup-variant in enum loop (register phase); return-in-test recursive over test bodies (check phase) with double-quoted name; two-phase register→check structure; +6 tests (120); gates green |
-| 45.4 | Stage2 break/continue statement support | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | DONE (2026-06-26) | kw_break/kw_continue (lexer) + st_break/st_continue (ast) + parser + formatter emit; error_handling.intent still byte-equal (diff-formatter 22/22), selfcheck 4 EQUAL; parser 108, format_test 210, go test green |
-| 45.5 | break/continue outside loop check | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | DONE (2026-06-26) | unified check_body_stmts(stmts,loop_depth,in_test,test_name) walker (break/continue-outside-loop + return-in-test in one walk, source order); loop_depth++ in while/for only; called functions→entities→impls→tests; +8 tests (128); gates green |
-| 45.6 | Array-based scope stack / symbol table | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | DONE (2026-06-26) | Scope{local_names,outer_names} (no recursive field/no Map); scope_empty/define/enter/resolve/resolve_local (functional); build_global_scope = decl names + 23 free builtins (print/len/assert*/read_file/args/...); +4 tests (132); gates green |
-| 45.7 | Expr position + undeclared-variable + redefinition | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | DONE (2026-06-26) | Expr+line/column (populated at ex_ident sites; selfcheck 4 EQUAL held); scope-threaded check_body_stmts; undeclared-var at ident, redefinition at let stmt; +10 tests (142); gates green. NO-false-positives corpus sweep deferred to 45.10 (needs built binary — libtest stack can't run check over the corpus) |
-| 45.8 | Call arity (function + variant) | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | DONE (2026-06-26) | function + variant arity registries; integrated in ex_call walk (variant-first, early-return-on-mismatch skips args); anchored at callee position; builtin+method arity deferred; +8 tests (150); gates green |
-| 45.9 | check_main.intent + `intentc check --self-hosted` shim | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | DONE (2026-06-26) | check_main (exit 0 clean / 1 error); parseCheckFlags + stage2CheckerBinary (INTENT_STAGE2_CHECK + shared-staleness) + runStage2Checker; handleCheck routes exit-1 stdout→stderr (1 trailing \n stripped); byte-identical to `intentc check` on valid+invalid; +Go tests; gates green |
-| 45.10 | Differential gate `make diff-checker` + fixtures | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | DONE (2026-06-26) | difftest-check.sh + 12 fixtures (one per check) + Makefile; **34/34 PASS** (22 valid examples no-false-positives + 12 invalid byte-equal vs `intentc check`); fix: seed enum variant names in global scope (unit variants used as bare idents); needs: 45.9 |
-| 45.11 | Docs + final validate + push | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | TODO | checker README + selfhost README + ROADMAP + NEXT-STEPS; needs: 45.10 |
+## Phase 45: Self-Hosted Checker (first slice) — 11 tasks completed 2026-06-26 (selfhost/checker/; make diff-checker 34/34 byte-equal vs `intentc check`; see [TASKS-archive.md](TASKS-archive.md))
 
 ## Backlog
 

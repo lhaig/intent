@@ -16,14 +16,16 @@ selfhost/
                 ast.intent, parser.intent  (modules shared_lexer/ast/parser)
   formatter/    Intent-implemented `intentc fmt --self-hosted` (Phase 38-42)
   linter/       Intent-implemented `intentc lint --self-hosted` (Phase 43)
-  (checker/     Phase 45 — first compiler subsystem)
+  checker/      Intent-implemented `intentc check --self-hosted` (Phase 45 — first slice)
 ```
 
 The shared front-end lives in `selfhost/shared/`; each tool is a sibling that
 imports it via `../shared/…` ([ADR 0051](../docs/decisions/0051-selfhost-shared-restructure.md),
 Phase 44). This split was deferred (ADR 0050 D1) until a third stage2 tool — the
-checker — was about to land, then done as a pure refactor before the checker
-arrived. Future sibling: eventually a fuller `compiler/`.
+checker ([ADR 0052](../docs/decisions/0052-self-hosted-checker-strategy.md)) — was
+about to land, then done as a pure refactor before the checker arrived. The checker
+is multi-phase (Phase 45 ships structural + name-resolution + arity checks; type
+inference follows). Future: a fuller self-hosted `compiler/`.
 
 ## How stage2 is built
 

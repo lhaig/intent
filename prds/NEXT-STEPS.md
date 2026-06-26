@@ -1,64 +1,64 @@
-# Pickup Notes — 2026-06-26 (Phase 44 COMPLETE: selfhost/shared restructure)
+# Pickup Notes — 2026-06-26 (Phase 45 COMPLETE: self-hosted checker, first slice)
 
 ## Where we are
 
-**Phase 44 (selfhost/shared restructure) — COMPLETE.** Pure refactor that split the
-shared stage2 front-end into `selfhost/shared/` and made the tools siblings:
+**Phase 45 (Self-Hosted Checker — first slice) — COMPLETE.** The first *compiler*
+subsystem is now self-hosted: `selfhost/checker/` reuses the `../shared/` front-end and
+is **byte-equal with stage1 `intentc check`** across the examples corpus + fixtures —
+`make diff-checker` → **34/34 PASS** (22 valid examples produce zero errors = no false
+positives; 12 invalid fixtures match byte-for-byte). Wired as `intentc check
+--self-hosted`. ~150 in-language checker tests. ADR 0052.
 
+The self-hosted toolchain now has three tools, all byte-equal with their stage1
+counterparts:
 ```
 selfhost/
-  shared/      lexer.intent, ast.intent, parser.intent   (modules shared_lexer/ast/parser)
-  formatter/   format.intent, main.intent, format_test.intent + harness scripts
-  linter/      lint.intent, lint_main.intent, lint_test.intent, lint-fixtures/
-  (checker/    Phase 45)
+  shared/    lexer · ast · parser
+  formatter/ intentc fmt   --self-hosted   (Phase 42, diff-formatter 22/22)
+  linter/    intentc lint  --self-hosted   (Phase 43, diff-linter 26/26)
+  checker/   intentc check --self-hosted   (Phase 45, diff-checker 34/34)
 ```
 
-Everything imports the front-end via `../shared/…`. Zero behaviour change — all four
-gates identical to before: `make selfcheck-formatter` 4 EQUAL (over
-`shared/{lexer,ast,parser}` + `formatter/format`), `make diff-formatter` 22/22,
-`make diff-linter` 26/26, full Go suite + stage2 suites (207 / 188) green;
-`fmt`/`lint --self-hosted` byte-identical. ADR 0051. This was the ADR 0050 D1
-"third-tool" trigger, paid down before the checker arrives.
+### Implemented checker checks (first slice — NO type inference)
+duplicate decl (entity/enum/function/trait), duplicate enum variant, break/continue
+outside loop, return-in-test, undeclared-variable + variable-redefinition (Array-based
+scope stack), function/variant call arity.
 
-## Next: Phase 45 — Self-Hosted Checker (first slice). ADR 0052 (to be written).
+### Two front-end prerequisites landed this phase (gap-driven, HARNESS.md §7)
+- **break/continue statements** (45.4): stage2 had lexed them as identifiers; now real
+  `st_break`/`st_continue` (kw + ast + parser + formatter). error_handling.intent stays
+  byte-equal.
+- **Expr source positions** (45.7): added `line`/`column` to `Expr` (populated at the
+  ex_ident sites) so `undeclared variable` anchors at the identifier. Additive — the
+  formatter ignores it; selfcheck stayed 4 EQUAL.
 
-This was scoped during Phase 44 planning (two Explore recon agents). Key findings:
+## Next: Phase 46 — Checker type-inference foundation (the big one)
 
-- **The Go checker is ~4,281 LOC / ~167 diagnostics / a full type system** (Type
-  struct, lexical scope stack, symbol table, generics — `internal/checker/`). Far too
-  big for one phase; Phase 45 is a deliberate FIRST SLICE.
-- **Stage2 AST readiness:** types are flat `String`s (no structured `TypeRef`), `Expr`
-  has no type field, there is NO symbol table and NO `Map` (only `Array`, linear
-  scans). So **type-inference checks are out of reach** without major AST enrichment,
-  but **structural checks are feasible today**, reusing the linter's `Array<String>`
-  machinery.
-- **Approved first-slice scope (user, 2026-06-25):** scope stack + name-resolution +
-  arity, i.e.:
-  - Zero-machinery structural checks: duplicate top-level decl, duplicate enum
-    variant, break/continue outside loop, return-in-test.
-  - An Array-based scope stack / symbol table (globals + function/block/entity scopes)
-    → **undeclared-variable** detection.
-  - **Arity** checks (function/method/builtin/variant calls) using the registry.
-- **Diagnostic format:** same `diagnostic` package → errors render `error[file:line:col]: message`. NOT sorted — emit order = stage1 walk order (verify per-check, as with the linter).
-- **Differential gate is two-directional:** the VALID corpus produces ZERO errors, so
-  `make diff-checker` needs (a) **invalid fixtures** (one per check) where stage1
-  `intentc check` errors and stage2 matches byte-equal, AND (b) **no false positives**
-  on the 22 valid examples. Verify the exact `intentc check` stdout/stderr split +
-  emit order before locking the harness (`handleCheck`, cmd/intentc/main.go:220-265).
+The remaining ~140 checker diagnostics are type-inference-heavy and blocked on a
+**structured type representation** the stage2 AST doesn't have yet (types are flat
+`String`s; `Expr` has no type). The natural next phase:
 
-Indicative Phase 45 tasks: 45.1 ADR 0052 → 45.2 scaffold (`selfhost/checker/check.intent`,
-`CheckDiag`, dispatch, `error[…]` format + duplicate-decl) → 45.3 structural
-no-symbol-table checks → 45.4 Array-based scope stack → 45.5 undeclared-variable →
-45.6 arity → 45.7 `check_main.intent` + `intentc check --self-hosted` shim →
-45.8 `make diff-checker` (invalid fixtures + no-false-positives) → 45.9 docs + push.
-Type inference and the rest of the 167 diagnostics are later phases (need a structured
-`TypeRef`/`Type` entity + richer symbol table).
+1. **Structured types** — a `TypeRef`/`Type` entity (name + type-args tree) parsed from
+   the type strings (or carried by the parser), so `Array<Map<K,V>>` is a tree not a
+   string. ADR-worthy. This is the gating prerequisite for everything below.
+2. **Expression type inference** — infer types for every `Expr` kind (literals, idents
+   via scope-with-types, binops, calls, field/index, match, etc.), storing the result
+   (the Go checker keeps `exprTypes`). Needs the scope to carry types, not just names.
+3. **Type-rule checks** — assignability (`type mismatch`), operator typing, condition-
+   must-be-boolean, argument-type mismatch, return-type, generic instantiation, match
+   exhaustiveness + arm-type consistency, contract well-typedness, etc. Each is a
+   `make diff-checker` fixture (and many need new invalid fixtures + corpus
+   no-false-positive coverage).
+
+Also still open (smaller, independent): **method-call arity** and **builtin-call arity**
+(deferred from Phase 45), and the stage2 **extern `from "path"` / trait-method
+contract** parser gaps (would let the linter's R3/R4 be differentially gated too).
 
 ## How to resume
 
 1. `git log --oneline -20`, then read this file + `prds/TASKS.md`.
-2. `continue norman` finds nothing queued — scope Phase 45 (checker), write ADR 0052,
-   add TASKS.md rows, then proceed. The checker is a `selfhost/checker/` sibling
-   importing `../shared/…` (the layout Phase 44 just established).
+2. `continue norman` finds nothing queued — scope Phase 46 (start with the structured
+   `Type`/`TypeRef` representation — it gates all type-inference checks), write its ADR,
+   add TASKS.md rows, then proceed. The checker lives in `selfhost/checker/`.
 3. Validate with `make validate`, `make selfcheck-formatter`, `make diff-formatter`,
-   `make diff-linter` (and the new `make diff-checker` once it exists).
+   `make diff-linter`, `make diff-checker`.

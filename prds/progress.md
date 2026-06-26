@@ -1089,3 +1089,19 @@ enum_basic/task_queue). stage1 has variants in scope; this matches it. The
 no-false-positives sweep is exactly what surfaced this.
 
 Other gates green: selfcheck 4 EQUAL, diff-formatter 22/22, diff-linter 26/26, go test.
+
+---
+
+## 2026-06-26 — Phase 45.11: docs + final validate (PHASE 45 COMPLETE)
+
+New selfhost/checker/README.md; selfhost/README.md updated (checker/ now a real sibling);
+docs/ROADMAP.md Phase 45 entry; prds/NEXT-STEPS.md rewritten for Phase 45 complete +
+Phase 46 (checker type-inference foundation — structured TypeRef/Type, expr inference,
+type-rule checks). PRD active/→done/; Phase 45 collapsed to archive (11 tasks).
+
+FINAL VALIDATION (all green): make validate OK; selfcheck-formatter 4 EQUAL;
+diff-formatter 22/22; diff-linter 26/26; diff-checker 34/34.
+
+PHASE 45 COMPLETE. Three self-hosted tools now byte-equal with stage1: fmt, lint, check.
+The checker is the first compiler subsystem; first slice ships structural +
+name-resolution + arity (no type inference). Next: Phase 46 type-inference foundation.
