@@ -915,3 +915,21 @@ Verified `intentc check` output contract (main.go:220-266): valid → "No errors
 stdout exit 0; invalid → diag.Format() (error[f:l:c]: msg, \n-joined, NO trailing) on
 STDERR exit 1; not sorted (walk order). check_main prints stdout-only, so the shim +
 differential reconcile the stderr/stdout split + exit code. PRD in active/, 9 tasks.
+
+---
+
+## 2026-06-26 — Phase 45.2: checker scaffold + duplicate-declaration check
+
+selfhost/checker/check.intent (module checker, imports ../shared/) + check_test.intent.
+CheckDiag(line,column,message); format_diags renders `error[file:line:col]: message`
+joined by \n with NO trailing newline (matches stage1 diagnostic.Format exactly —
+differs from the linter's trailing-\n format_diags). check_program does duplicate
+top-level decl detection for all 4 kinds. +8 tests (incl. format_diags edge cases),
+114 passed rust+js. Unaffected gates green: selfcheck 4 EQUAL, diff-formatter 22/22,
+diff-linter 26/26. No intent.toml needed.
+
+KEY: dispatch/emit order is enums → entities → traits → functions, matching the stage1
+register passes (checker.go:113-116: registerEnums, registerEntities, registerTraits,
+registerFunctions). Diagnostics are NOT sorted, so this order is load-bearing for
+byte-equal when a program has dups in multiple kinds. (My Phase-44 recon note had the
+register order wrong; the worker correctly read the source — verified checker.go:113-116.)

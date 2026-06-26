@@ -1,0 +1,166 @@
+// selfhost/checker/check.intent — Phase 45 / self-hosted checker scaffold.
+//
+// Semantic error model + duplicate top-level declaration detection.
+// Mirrors stage1 internal/checker/checker.go register passes in dispatch
+// order: enums → entities → traits → functions (checker.go lines 113-116).
+//
+// format_diags produces `error[file:line:col]: message` lines joined by "\n"
+// with NO trailing newline — matching diagnostic.Format in stage1 exactly.
+// (Contrast: the linter's format_diags appends "\n" after every line; the
+// checker must not.)
+module checker version "0.1.0";
+
+import "../shared/parser.intent";
+import "../shared/ast.intent";
+import "../shared/lexer.intent";
+
+// --- Diagnostic entity -------------------------------------------------------
+
+public entity CheckDiag {
+    field line: Int;
+    field column: Int;
+    field message: String;
+
+    constructor(line: Int, column: Int, message: String) {
+        self.line = line;
+        self.column = column;
+        self.message = message;
+    }
+}
+
+// --- Diagnostic formatter ----------------------------------------------------
+// Produces one `error[<file>:<line>:<col>]: <message>` line per diag, joined
+// by "\n". Empty diags array → empty string. NO trailing newline.
+
+public function format_diags(diags: Array<CheckDiag>, file: String) returns String {
+    if len(diags) == 0 {
+        return "";
+    }
+    let mutable s: String = "";
+    let mutable i: Int = 0;
+    while i < len(diags) {
+        if i > 0 {
+            s = s + "\n";
+        }
+        let d: CheckDiag = diags[i];
+        s = s + "error[" + file + ":" + d.line.to_string() + ":" + d.column.to_string() + "]: " + d.message;
+        i = i + 1;
+    }
+    return s;
+}
+
+// --- Helpers -----------------------------------------------------------------
+// Linear scan: returns true if `name` is already in `seen`.
+
+function name_seen(seen: Array<String>, name: String) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(seen) {
+        if seen[i] == name {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// --- Duplicate top-level declaration detection --------------------------------
+// Walks entities / enums / traits / functions in the same order as stage1
+// registerEnums → registerEntities → registerTraits → registerFunctions.
+// Reports the SECOND (duplicate) occurrence.
+
+function check_dup_enums(prog: Program) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
+    let mutable seen: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(prog.enums) {
+        let e: EnumDecl = prog.enums[i];
+        if name_seen(seen, e.name) {
+            diags.push(CheckDiag(e.line, e.column, "enum '" + e.name + "' already defined"));
+        } else {
+            seen.push(e.name);
+        }
+        i = i + 1;
+    }
+    return diags;
+}
+
+function check_dup_entities(prog: Program) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
+    let mutable seen: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(prog.entities) {
+        let e: EntityDecl = prog.entities[i];
+        if name_seen(seen, e.name) {
+            diags.push(CheckDiag(e.line, e.column, "entity '" + e.name + "' already defined"));
+        } else {
+            seen.push(e.name);
+        }
+        i = i + 1;
+    }
+    return diags;
+}
+
+function check_dup_traits(prog: Program) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
+    let mutable seen: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(prog.traits) {
+        let t: TraitDecl = prog.traits[i];
+        if name_seen(seen, t.name) {
+            diags.push(CheckDiag(t.line, t.column, "trait '" + t.name + "' already defined"));
+        } else {
+            seen.push(t.name);
+        }
+        i = i + 1;
+    }
+    return diags;
+}
+
+function check_dup_functions(prog: Program) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
+    let mutable seen: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(prog.functions) {
+        let f: FunctionDecl = prog.functions[i];
+        if name_seen(seen, f.name) {
+            diags.push(CheckDiag(f.line, f.column, "function '" + f.name + "' already defined"));
+        } else {
+            seen.push(f.name);
+        }
+        i = i + 1;
+    }
+    return diags;
+}
+
+// --- Main dispatch ------------------------------------------------------------
+// check_program runs all implemented checks and returns diagnostics in the
+// same order stage1 produces them: enums → entities → traits → functions.
+
+public function check_program(prog: Program) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
+    let mutable enums_d: Array<CheckDiag> = check_dup_enums(prog);
+    let mutable ei: Int = 0;
+    while ei < len(enums_d) {
+        diags.push(enums_d[ei]);
+        ei = ei + 1;
+    }
+    let mutable ents_d: Array<CheckDiag> = check_dup_entities(prog);
+    let mutable enti: Int = 0;
+    while enti < len(ents_d) {
+        diags.push(ents_d[enti]);
+        enti = enti + 1;
+    }
+    let mutable traits_d: Array<CheckDiag> = check_dup_traits(prog);
+    let mutable ti: Int = 0;
+    while ti < len(traits_d) {
+        diags.push(traits_d[ti]);
+        ti = ti + 1;
+    }
+    let mutable fns_d: Array<CheckDiag> = check_dup_functions(prog);
+    let mutable fi: Int = 0;
+    while fi < len(fns_d) {
+        diags.push(fns_d[fi]);
+        fi = fi + 1;
+    }
+    return diags;
+}

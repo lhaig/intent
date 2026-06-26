@@ -1,0 +1,82 @@
+// selfhost/checker/check_test.intent — Phase 45 checker tests.
+module checker_test version "0.1.0";
+
+import "check.intent";
+import "../shared/parser.intent";
+import "../shared/ast.intent";
+import "../shared/lexer.intent";
+
+// Curly brace helpers — avoids string interpolation mis-parse of `{` / `}`.
+function lbrace() returns String {
+    return '{'.to_string();
+}
+
+function rbrace() returns String {
+    return '}'.to_string();
+}
+
+// Helper: minimal function body " { }".
+function fn_body() returns String {
+    return " " + lbrace() + " " + rbrace();
+}
+
+// Helper: parse src and return check diagnostics.
+function parse_and_check(src: String) returns Array<CheckDiag> {
+    let prog: Program = shared_parser.parse(src);
+    return checker.check_program(prog);
+}
+
+test "dup function: two functions named 'f' produces exactly one diag" {
+    let src: String = "module m version \"1.0\"; function f() returns Void" + fn_body() + " function f() returns Void" + fn_body();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "function 'f' already defined");
+}
+
+test "dup function: duplicate diag message matches exactly" {
+    let src: String = "module m version \"1.0\"; function foo() returns Void" + fn_body() + " function f() returns Void" + fn_body() + " function f() returns Void" + fn_body();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "function 'f' already defined");
+}
+
+test "dup entity: two entities named 'Foo' produces exactly one diag" {
+    let src: String = "module m version \"1.0\"; entity Foo " + lbrace() + " field x: Int; " + rbrace() + " entity Foo " + lbrace() + " field y: Int; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "entity 'Foo' already defined");
+}
+
+test "dup enum: two enums named 'Color' produces exactly one diag" {
+    let src: String = "module m version \"1.0\"; enum Color " + lbrace() + " Red, " + rbrace() + " enum Color " + lbrace() + " Blue, " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "enum 'Color' already defined");
+}
+
+test "clean program: no dups produces zero diags" {
+    let src: String = "module m version \"1.0\"; function foo() returns Void" + fn_body() + " function bar() returns Void" + fn_body();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "format_diags: one CheckDiag renders error line with no trailing newline" {
+    let mutable one: Array<CheckDiag> = [];
+    one.push(CheckDiag(3, 5, "m"));
+    let out: String = checker.format_diags(one, "x.intent");
+    assert_eq(out, "error[x.intent:3:5]: m");
+}
+
+test "format_diags: empty array returns empty string" {
+    let empty: Array<CheckDiag> = [];
+    let out: String = checker.format_diags(empty, "x.intent");
+    assert_eq(out, "");
+}
+
+test "format_diags: two diags joined by newline with no trailing newline" {
+    let mutable two: Array<CheckDiag> = [];
+    two.push(CheckDiag(1, 1, "first"));
+    two.push(CheckDiag(2, 3, "second"));
+    let out: String = checker.format_diags(two, "f.intent");
+    assert_eq(out, "error[f.intent:1:1]: first\nerror[f.intent:2:3]: second");
+}

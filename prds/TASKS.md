@@ -73,7 +73,7 @@ call arity; NO type inference (deferred). Two-directional `make diff-checker` ga
 | # | Task | PRD | Status | Notes |
 |---|------|-----|--------|-------|
 | 45.1 | ADR 0052 — self-hosted checker strategy | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | DONE (2026-06-26) | docs/decisions/0052; D1 first-slice scope, D2 type-inference deferred, D3 Array scope stack, D4 two-dir diff, D5 faithful port |
-| 45.2 | Checker scaffold + duplicate-decl check | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | TODO | check.intent (module checker), CheckDiag, dispatch, error[f:l:c] format + dup-decl; verify emit order/output contract; needs: 45.1 |
+| 45.2 | Checker scaffold + duplicate-decl check | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | DONE (2026-06-26) | selfhost/checker/check.intent + check_test.intent; CheckDiag, format_diags (error[f:l:c], no trailing \n), dispatch order enums→entities→traits→functions (matches checker.go:113-116), dup-decl all 4 kinds; 8 tests, 114 rust+js; gates green |
 | 45.3 | Structural no-symbol-table checks | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | TODO | dup enum variant, break/continue outside loop, return-in-test; needs: 45.2 |
 | 45.4 | Array-based scope stack / symbol table | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | TODO | parallel-Array Scope (define/resolve/resolve_local), globals + builtins; needs: 45.2 |
 | 45.5 | Undeclared-variable + redefinition checks | [prd-phase-45-self-hosted-checker.md](active/prd-phase-45-self-hosted-checker.md) | TODO | uses 45.4; NO false positives on valid corpus; needs: 45.4 |
