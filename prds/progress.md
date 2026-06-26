@@ -994,3 +994,20 @@ if). Called per body in stage1 check order: functions → entity methods+ctors �
 methods → tests. +8 tests (128 rust+js) incl. nested if-in-while (no fire) and a
 return-before-break order lock. Gates green: selfcheck 4 EQUAL, diff-formatter 22/22,
 diff-linter 26/26.
+
+---
+
+## 2026-06-26 — Phase 45.6: Array-based scope stack / symbol table
+
+Scope entity { local_names: Array<String>, outer_names: Array<String> } — flattened,
+NO recursive parent field (would be infinitely-sized in rust), no Map. Functional ops
+(return new Scope, dodging pass-by-value): scope_empty, scope_define (append to local),
+scope_enter (outer = outer++local, local=[]), scope_resolve (local OR outer),
+scope_resolve_local (local). build_global_scope seeds all decl names (entities/enums/
+functions/traits) + 23 free builtins: print, len, assert, assert_eq, assert_close,
+assert_panics, read_file, write_file, create_dir, file_exists, env_get, args, http_post,
+http_get, json_get, json_path, emit_event, timestamp_ms, sleep, await_all, await_any,
+timeout, char_from_codepoint. (Method-style builtins like push/get/set/remove are NOT
+seeded — they're resolved via field access, not bare identifiers.) +4 tests (132).
+Gates green. Foundation for 45.7 undeclared-variable; the no-false-positives gate
+(45.7/45.10) will catch any missing builtin on the corpus.

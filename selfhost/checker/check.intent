@@ -18,6 +18,184 @@ import "../shared/parser.intent";
 import "../shared/ast.intent";
 import "../shared/lexer.intent";
 
+// =============================================================================
+// SCOPE STACK
+//
+// Flattened lexical scope — no recursive parent field (the Rust backend cannot
+// represent infinitely-sized structs). Design follows stage1 scope.go semantics
+// (Scope.Resolve walks current→parent) mapped onto two parallel String arrays:
+//
+//   local_names  — names defined in the CURRENT scope level.
+//   outer_names  — ALL names visible from enclosing scopes (flattened).
+//
+// scope_enter(s) opens a child scope: outer = outer + local, local = [].
+// scope_define(s, n) appends n to local_names, returning a new Scope.
+// scope_resolve(s, n)  — true if n is in local or outer (mirrors Resolve).
+// scope_resolve_local(s, n) — true if n is in local only (mirrors ResolveLocal).
+// =============================================================================
+
+public entity Scope {
+    field local_names: Array<String>;
+    field outer_names: Array<String>;
+
+    constructor(local_names: Array<String>, outer_names: Array<String>) {
+        self.local_names = local_names;
+        self.outer_names = outer_names;
+    }
+}
+
+// scope_empty — a fresh, empty scope with no names in any tier.
+
+public function scope_empty() returns Scope {
+    return Scope(shared_ast.empty_string_array(), shared_ast.empty_string_array());
+}
+
+// scope_define — returns a new Scope with `name` added to local_names.
+// Caller is responsible for checking scope_resolve_local first if redefinition
+// detection is needed (used in 45.7).
+
+public function scope_define(s: Scope, name: String) returns Scope {
+    let mutable new_local: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(s.local_names) {
+        new_local.push(s.local_names[i]);
+        i = i + 1;
+    }
+    new_local.push(name);
+    return Scope(new_local, s.outer_names);
+}
+
+// scope_enter — open a child scope. Flattens local_names into outer_names so
+// the parent names remain resolvable in the child.
+
+public function scope_enter(s: Scope) returns Scope {
+    let mutable new_outer: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(s.outer_names) {
+        new_outer.push(s.outer_names[i]);
+        i = i + 1;
+    }
+    let mutable j: Int = 0;
+    while j < len(s.local_names) {
+        new_outer.push(s.local_names[j]);
+        j = j + 1;
+    }
+    return Scope(shared_ast.empty_string_array(), new_outer);
+}
+
+// scope_resolve — true if `name` is visible in the current or any enclosing
+// scope (mirrors stage1 Scope.Resolve which walks the parent chain).
+
+public function scope_resolve(s: Scope, name: String) returns Bool {
+    if name_seen(s.local_names, name) {
+        return true;
+    }
+    return name_seen(s.outer_names, name);
+}
+
+// scope_resolve_local — true if `name` is defined in the current scope only
+// (mirrors stage1 Scope.ResolveLocal; used to detect redefinitions in 45.7).
+
+public function scope_resolve_local(s: Scope, name: String) returns Bool {
+    return name_seen(s.local_names, name);
+}
+
+// =============================================================================
+// GLOBAL SCOPE BUILDER
+//
+// Populates a Scope with every top-level declaration name (entities, enums,
+// functions, traits, plus extern names) and the full set of stage1 builtin
+// function/variant names. This matches what stage1 seeds into c.scope during
+// the register passes (checker.go:589, 722, 779, 841) plus the builtin
+// function handling in checkCallExpr (checker.go:1659-2031).
+//
+// Seeded builtins (verified against internal/checker/checker.go:1659-2031):
+//   Core:     print, len
+//   Assert:   assert, assert_eq, assert_close, assert_panics
+//   File I/O: read_file, write_file, create_dir, file_exists
+//   Env/CLI:  env_get, args
+//   HTTP/JSON: http_post, http_get, json_get, json_path, emit_event
+//   Time/Async: timestamp_ms, sleep, await_all, await_any, timeout
+//   Char:     char_from_codepoint
+//   Result/Option constructors: Ok, Err, Some, None
+// =============================================================================
+
+public function build_global_scope(prog: Program) returns Scope {
+    let mutable s: Scope = scope_empty();
+
+    // Top-level declarations (mirrors register passes).
+    let mutable ei: Int = 0;
+    while ei < len(prog.entities) {
+        s = scope_define(s, prog.entities[ei].name);
+        ei = ei + 1;
+    }
+    let mutable eni: Int = 0;
+    while eni < len(prog.enums) {
+        s = scope_define(s, prog.enums[eni].name);
+        eni = eni + 1;
+    }
+    let mutable fi: Int = 0;
+    while fi < len(prog.functions) {
+        s = scope_define(s, prog.functions[fi].name);
+        fi = fi + 1;
+    }
+    let mutable ti: Int = 0;
+    while ti < len(prog.traits) {
+        s = scope_define(s, prog.traits[ti].name);
+        ti = ti + 1;
+    }
+    let mutable xi: Int = 0;
+    while xi < len(prog.externs) {
+        s = scope_define(s, prog.externs[xi].func_name);
+        xi = xi + 1;
+    }
+
+    // Core builtins.
+    s = scope_define(s, "print");
+    s = scope_define(s, "len");
+
+    // Assert builtins (phase 16 / ADR 0029).
+    s = scope_define(s, "assert");
+    s = scope_define(s, "assert_eq");
+    s = scope_define(s, "assert_close");
+    s = scope_define(s, "assert_panics");
+
+    // File I/O builtins (phase 19 / ADR 0019).
+    s = scope_define(s, "read_file");
+    s = scope_define(s, "write_file");
+    s = scope_define(s, "create_dir");
+    s = scope_define(s, "file_exists");
+
+    // Environment / CLI builtins.
+    s = scope_define(s, "env_get");
+    s = scope_define(s, "args");
+
+    // HTTP / JSON / event builtins (phase 20 / ADR 0020).
+    s = scope_define(s, "http_post");
+    s = scope_define(s, "http_get");
+    s = scope_define(s, "json_get");
+    s = scope_define(s, "json_path");
+    s = scope_define(s, "emit_event");
+
+    // Time / async builtins.
+    s = scope_define(s, "timestamp_ms");
+    s = scope_define(s, "sleep");
+    s = scope_define(s, "await_all");
+    s = scope_define(s, "await_any");
+    s = scope_define(s, "timeout");
+
+    // Char builtin (phase 31 / ADR 0041).
+    s = scope_define(s, "char_from_codepoint");
+
+    // Result / Option constructors: Ok(v), Err(e), Some(v), None (identifier).
+    s = scope_define(s, "Ok");
+    s = scope_define(s, "Err");
+    s = scope_define(s, "Some");
+    s = scope_define(s, "None");
+
+    return s;
+}
+
 // --- Diagnostic entity -------------------------------------------------------
 
 public entity CheckDiag {

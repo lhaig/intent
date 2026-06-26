@@ -179,3 +179,41 @@ test "ordering: in unified walk return-in-test fires before break-outside-loop i
     assert_eq(diags[0].message, "'return' is not allowed inside a test body; test \"t\" has implicit Void return");
     assert_eq(diags[1].message, "break statement outside loop");
 }
+
+// =============================================================================
+// Scope stack tests (45.6)
+// =============================================================================
+
+test "scope: define then resolve finds the name" {
+    let s: Scope = checker.scope_define(checker.scope_empty(), "x");
+    assert_eq(checker.scope_resolve(s, "x"), true);
+    assert_eq(checker.scope_resolve(s, "y"), false);
+}
+
+test "scope: resolve_local sees current-scope names only" {
+    let parent: Scope = checker.scope_define(checker.scope_empty(), "x");
+    let child: Scope = checker.scope_enter(parent);
+    assert_eq(checker.scope_resolve(child, "x"), true);
+    assert_eq(checker.scope_resolve_local(child, "x"), false);
+}
+
+test "scope: shadowing — define same name in child, resolve_local true in child" {
+    let parent: Scope = checker.scope_define(checker.scope_empty(), "x");
+    let mutable child: Scope = checker.scope_enter(parent);
+    child = checker.scope_define(child, "x");
+    assert_eq(checker.scope_resolve_local(child, "x"), true);
+    assert_eq(checker.scope_resolve(child, "x"), true);
+}
+
+test "scope: build_global_scope seeds declared names and builtins" {
+    let src: String = "module m version \"1.0\"; function foo() returns Void" + fn_body() + " entity Bar " + lbrace() + " field x: Int; " + rbrace();
+    let prog: Program = shared_parser.parse(src);
+    let s: Scope = checker.build_global_scope(prog);
+    assert_eq(checker.scope_resolve(s, "foo"), true);
+    assert_eq(checker.scope_resolve(s, "Bar"), true);
+    assert_eq(checker.scope_resolve(s, "print"), true);
+    assert_eq(checker.scope_resolve(s, "len"), true);
+    assert_eq(checker.scope_resolve(s, "assert_eq"), true);
+    assert_eq(checker.scope_resolve(s, "None"), true);
+    assert_eq(checker.scope_resolve(s, "nope"), false);
+}
