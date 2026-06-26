@@ -405,6 +405,12 @@ public function format_stmt_inner(s: Stmt, level: Int) returns String {
         out = out + pad + '}'.to_string();
         return out;
     }
+    if s.kind == shared_ast.st_break() {
+        return pad + "break;";
+    }
+    if s.kind == shared_ast.st_continue() {
+        return pad + "continue;";
+    }
     return pad + "<unknown_stmt>;";
 }
 

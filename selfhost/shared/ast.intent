@@ -45,6 +45,15 @@ public function st_for() returns Int {
     return 6;
 } // Phase 41.3: name=loop var, expr=iterable, then_block=body
 
+// Phase 45.4: loop-control statements (no operands, no blocks).
+public function st_break() returns Int {
+    return 7;
+}
+
+public function st_continue() returns Int {
+    return 8;
+}
+
 // --- Expression kind constants ----------------------------------------------
 public function ex_void() returns Int {
     return 0;
@@ -210,11 +219,13 @@ public entity MatchArm {
 }
 
 // Statement node. Field usage by kind:
-//   st_let    — name, type_name, is_mutable, expr (rhs)
-//   st_return — expr (may be ex_void for `return;`)
-//   st_expr   — expr
-//   st_if     — expr (condition), then_block, else_block, has_else
-//   st_while  — expr (condition), then_block (body)
+//   st_let      — name, type_name, is_mutable, expr (rhs)
+//   st_return   — expr (may be ex_void for `return;`)
+//   st_expr     — expr
+//   st_if       — expr (condition), then_block, else_block, has_else
+//   st_while    — expr (condition), then_block (body)
+//   st_break    — no operands (Phase 45.4)
+//   st_continue — no operands (Phase 45.4)
 public entity Stmt {
     field kind: Int;
     field expr: Expr;

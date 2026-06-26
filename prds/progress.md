@@ -965,3 +965,19 @@ each test body recursively for st_return, message `'return' is not allowed insid
 test body; test "NAME" has implicit Void return` (Go %q → double-quoted name). +6
 tests incl. a register-before-check ORDER lock; 120 passed rust+js. Gates green:
 selfcheck 4 EQUAL, diff-formatter 22/22, diff-linter 26/26.
+
+---
+
+## 2026-06-26 — Phase 45.4: stage2 break/continue statement support
+
+Front-end widening (the discovered prereq): kw_break()/kw_continue() + keyword-table
+entries (shared/lexer.intent); st_break()/st_continue() stmt kinds (shared/ast.intent);
+parser builds st_break/st_continue Stmts on those keywords + `;` (shared/parser.intent);
+format.intent emits `break;`/`continue;`. Now `break;`/`continue;` parse as real
+statements, NOT st_expr(ex_ident("break")).
+
+Gate-CRITICAL result: examples/error_handling.intent (uses break;/continue; at lines
+60/76) still round-trips byte-equal → diff-formatter 22/22; selfcheck 4 EQUAL;
+diff-linter 26/26. stage2 suites: parser 108, format_test 210, lint_test 190,
+check_test 122; go test ./... green. This unblocks 45.5 (break/continue-outside-loop)
+and removes the undeclared-var false-positive risk for 45.7.

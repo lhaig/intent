@@ -1130,3 +1130,9 @@ test "annotations: dogfood target_specific_demo.intent round-trips byte-equal" {
         assert_eq(out, src);
     }
 }
+
+test "break and continue round-trip byte-identically" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction f() returns Void " + '{'.to_string() + "\n    while true " + '{'.to_string() + "\n        break;\n        continue;\n    " + '}'.to_string() + "\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}

@@ -396,6 +396,12 @@ public entity Parser {
         if self.check(shared_lexer.kw_for_marker()) {
             return self.parse_for_stmt();
         }
+        if self.check(shared_lexer.kw_break()) {
+            return self.parse_break_stmt();
+        }
+        if self.check(shared_lexer.kw_continue()) {
+            return self.parse_continue_stmt();
+        }
         return self.parse_expr_stmt();
     }
 
@@ -408,6 +414,27 @@ public entity Parser {
         let mutable st: Stmt = Stmt(shared_ast.st_for(), iter, var_tok.text, "", false, body, shared_ast.empty_block(), false);
         st.line = for_tok.line;
         st.column = for_tok.column;
+        return st;
+    }
+
+    // Phase 45.4: break and continue carry no operands.
+    method parse_break_stmt() returns Stmt {
+        let brk_tok: Token = self.expect(shared_lexer.kw_break(), "'break'");
+        let semi: Token = self.expect(shared_lexer.tk_semicolon(), "';' to end break statement");
+        let mutable st: Stmt = Stmt(shared_ast.st_break(), shared_ast.empty_expr(), "", "", false, shared_ast.empty_block(), shared_ast.empty_block(), false);
+        st.comment_after = semi.comment_after;
+        st.line = brk_tok.line;
+        st.column = brk_tok.column;
+        return st;
+    }
+
+    method parse_continue_stmt() returns Stmt {
+        let cont_tok: Token = self.expect(shared_lexer.kw_continue(), "'continue'");
+        let semi: Token = self.expect(shared_lexer.tk_semicolon(), "';' to end continue statement");
+        let mutable st: Stmt = Stmt(shared_ast.st_continue(), shared_ast.empty_expr(), "", "", false, shared_ast.empty_block(), shared_ast.empty_block(), false);
+        st.comment_after = semi.comment_after;
+        st.line = cont_tok.line;
+        st.column = cont_tok.column;
         return st;
     }
 
@@ -2243,5 +2270,28 @@ test "position: Param records line and column of name token" {
     assert_eq(len(prog.functions[0].params), 1);
     assert_eq(prog.functions[0].params[0].line, 2);
     assert_eq(prog.functions[0].params[0].column, 12);
+}
+
+test "break parses as st_break, not st_expr" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + '{'.to_string() + " while true " + '{'.to_string() + " break; " + '}'.to_string() + " " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    let body: Block = prog.functions[0].body;
+    assert_eq(len(body.stmts), 1);
+    let loop_stmt: Stmt = body.stmts[0];
+    assert_eq(loop_stmt.kind, shared_ast.st_while());
+    let inner: Stmt = loop_stmt.then_block.stmts[0];
+    assert_eq(inner.kind, shared_ast.st_break());
+}
+
+test "continue parses as st_continue, not st_expr" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + '{'.to_string() + " while true " + '{'.to_string() + " continue; " + '}'.to_string() + " " + '}'.to_string();
+    let prog: Program = parse(src);
+    assert_eq(prog.error, "");
+    let body: Block = prog.functions[0].body;
+    let loop_stmt: Stmt = body.stmts[0];
+    assert_eq(loop_stmt.kind, shared_ast.st_while());
+    let inner: Stmt = loop_stmt.then_block.stmts[0];
+    assert_eq(inner.kind, shared_ast.st_continue());
 }
 

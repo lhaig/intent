@@ -331,6 +331,15 @@ public function kw_exists_marker() returns Int {
     return 80;
 }
 
+// Phase 45.4: `break` and `continue` loop-control statements.
+public function kw_break() returns Int {
+    return 81;
+}
+
+public function kw_continue() returns Int {
+    return 82;
+}
+
 public function tk_eof() returns Int {
     return 98;
 }
@@ -465,6 +474,12 @@ public function keyword_kind(text: String) returns Int {
     }
     if text == "for" {
         return kw_for_marker();
+    }
+    if text == "break" {
+        return kw_break();
+    }
+    if text == "continue" {
+        return kw_continue();
     }
     return tk_ident();
 }
