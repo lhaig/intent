@@ -60,6 +60,21 @@ Widened the stage2 parser beyond its self-hostable subset so it can format arbit
 
 ## Phase 43: Self-Hosted Linter (stage2) — 13 tasks completed 2026-06-24 (all 16 rule families; `make diff-linter` 26/26 byte-equal vs `intentc lint`; see [TASKS-archive.md](TASKS-archive.md))
 
+## Phase 44: selfhost/shared Restructure — ACTIVE
+
+Split the shared stage2 front-end (lexer/ast/parser) into `selfhost/shared/` and make
+`formatter/`, `linter/`, (later) `checker/` siblings importing it — the restructure
+ADR 0050 D1 deferred until a third tool (the checker) lands. Pure refactor; all four
+gates stay green. See [prd-phase-44-selfhost-shared-restructure.md](active/prd-phase-44-selfhost-shared-restructure.md) and ADR 0051.
+
+| # | Task | PRD | Status | Notes |
+|---|------|-----|--------|-------|
+| 44.1 | ADR 0051 — selfhost/shared restructure | [prd-phase-44-selfhost-shared-restructure.md](active/prd-phase-44-selfhost-shared-restructure.md) | DONE (2026-06-25) | docs/decisions/0051; D1 do-it-now, D2 shared+sibling dirs, D3 cross-dir imports, D4 shared_* rename, D5 pure-refactor |
+| 44.2 | Verify cross-directory imports (spike) | [prd-phase-44-selfhost-shared-restructure.md](active/prd-phase-44-selfhost-shared-restructure.md) | TODO | `import "../other/x.intent"` builds on rust; needs: 44.1 |
+| 44.3 | Create selfhost/shared/ + re-point formatter | [prd-phase-44-selfhost-shared-restructure.md](active/prd-phase-44-selfhost-shared-restructure.md) | TODO | move lexer/ast/parser, rename shared_*, re-point formatter, update selfcheck/difftest + Makefile; formatter gates green; needs: 44.2 |
+| 44.4 | Move linter to selfhost/linter/ | [prd-phase-44-selfhost-shared-restructure.md](active/prd-phase-44-selfhost-shared-restructure.md) | TODO | move lint*.intent + fixtures, rename module `linter`, re-point ../shared, update difftest-lint + Makefile + Go shim path; diff-linter 26/26 + go test; needs: 44.3 |
+| 44.5 | Docs + final validate + push | [prd-phase-44-selfhost-shared-restructure.md](active/prd-phase-44-selfhost-shared-restructure.md) | TODO | READMEs + ROADMAP + NEXT-STEPS; all gates green; needs: 44.4 |
+
 ## Backlog
 
 | # | Task | PRD | Status | Notes |

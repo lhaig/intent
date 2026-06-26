@@ -811,3 +811,25 @@ PHASE 43 COMPLETE. The self-hosted (stage2) linter is byte-equal with stage1
 `intentc lint` across the corpus + fixtures, all 16 rule families, wired as
 `intentc lint --self-hosted`. Second self-hosted toolchain artefact after the
 formatter. Next milestone: self-hosting the compiler (start with the checker).
+
+---
+
+## 2026-06-25 — Phase 44.1: ADR 0051 selfhost/shared restructure
+
+Kicked off Phase 44 (selfhost/shared restructure — the precondition for the
+self-hosted checker, Phase 45). User chose BOTH the ambitious checker scope
+(scope-stack + name-resolution + arity) AND doing the shared/ restructure now (the
+3rd-tool trigger ADR 0050 D1 set). Split into Phase 44 (restructure, pure refactor)
++ Phase 45 (checker) to isolate restructure risk behind its own green-gate checkpoint.
+
+ADR 0051 records D1-D5: do-it-now, shared/+sibling-dirs layout, cross-dir imports
+(verified feasible — registry.go:509 joins entryDir+importPath, `..` supported),
+shared_* module rename, pure-refactor-gate-protected. PRD in active/.
+
+Recon (2 Explore agents): Go checker is ~4281 LOC / ~167 diagnostics / full type
+system (Type struct, scope stack, generics) — far too big for one phase. Stage2 AST:
+types are flat Strings, no symbol table, no Map (only Array). Structural checks
+(dup-decl, break/continue, return-in-test) need zero machinery; undefined-var + arity
+need an Array-based scope stack. Checker errors use the same diagnostic.Format ->
+`error[file:line:col]: message`. Valid corpus produces ZERO errors, so the Phase 45
+differential needs INVALID fixtures + a no-false-positives-on-corpus direction.

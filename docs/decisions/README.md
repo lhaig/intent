@@ -82,3 +82,4 @@ What follows from this decision? Trade-offs accepted.
 | 0048 | [Verification trust manifest](0048-verification-trust-manifest.md) | 2026-06-15 | proposed (research) |
 | 0049 | [Agent interface (MCP / structured tool API)](0049-agent-interface.md) | 2026-06-15 | proposed (research) |
 | 0050 | [Self-hosted linter strategy](0050-self-hosted-linter-strategy.md) | 2026-06-24 | accepted (Phase 43 shipped 2026-06-24) |
+| 0051 | [`selfhost/shared/` restructure](0051-selfhost-shared-restructure.md) | 2026-06-25 | accepted (Phase 44) |
