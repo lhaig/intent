@@ -197,11 +197,97 @@ public function build_global_scope(prog: Program) returns Scope {
 }
 
 // =============================================================================
+// ARITY REGISTRIES
+//
+// Parallel-array registries for function and variant call-arity checking.
+// Built once per check_program invocation (like build_global_scope) and
+// threaded into check_expr_names. Mirrors stage1 c.functions and c.enumVariants
+// maps (checker.go:2034-2040 variant check, 2167-2172 function check).
+//
+// build_fn_arity: name → param count from prog.functions.
+// build_variant_arity: variant name → params count from all enums' variants.
+// arity_lookup: linear scan returning count for `name`, or -1 if absent.
+//
+// Builtin arity (assert, len, etc.) and method arity are DEFERRED — builtins
+// have ~20 bespoke messages (checker.go:1676-2028) and methods need receiver
+// types. They are intentionally excluded from these registries.
+// =============================================================================
+
+public function build_fn_arity_names(prog: Program) returns Array<String> {
+    let mutable names: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(prog.functions) {
+        names.push(prog.functions[i].name);
+        i = i + 1;
+    }
+    return names;
+}
+
+public function build_fn_arity_counts(prog: Program) returns Array<Int> {
+    let mutable counts: Array<Int> = [];
+    let mutable i: Int = 0;
+    while i < len(prog.functions) {
+        counts.push(len(prog.functions[i].params));
+        i = i + 1;
+    }
+    return counts;
+}
+
+public function build_variant_arity_names(prog: Program) returns Array<String> {
+    let mutable names: Array<String> = [];
+    let mutable ei: Int = 0;
+    while ei < len(prog.enums) {
+        let e: EnumDecl = prog.enums[ei];
+        let mutable vi: Int = 0;
+        while vi < len(e.variants) {
+            names.push(e.variants[vi].name);
+            vi = vi + 1;
+        }
+        ei = ei + 1;
+    }
+    return names;
+}
+
+public function build_variant_arity_counts(prog: Program) returns Array<Int> {
+    let mutable counts: Array<Int> = [];
+    let mutable ei: Int = 0;
+    while ei < len(prog.enums) {
+        let e: EnumDecl = prog.enums[ei];
+        let mutable vi: Int = 0;
+        while vi < len(e.variants) {
+            counts.push(len(e.variants[vi].params));
+            vi = vi + 1;
+        }
+        ei = ei + 1;
+    }
+    return counts;
+}
+
+// arity_lookup — returns the count for `name` in the parallel arrays, or -1.
+
+function arity_lookup(names: Array<String>, counts: Array<Int>, name: String) returns Int {
+    let mutable i: Int = 0;
+    while i < len(names) {
+        if names[i] == name {
+            return counts[i];
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// =============================================================================
 // EXPRESSION NAME CHECKER
 //
-// check_expr_names walks an Expr in USE position and emits
-// `undeclared variable 'NAME'` for every ex_ident whose name is not visible
-// in the provided Scope (mirrors stage1 checkIdentifier, checker.go:2636).
+// check_expr_names walks an Expr in USE position and emits:
+//   • `undeclared variable 'NAME'` for unresolved ex_ident (checker.go:2661).
+//   • `variant 'N' expects F arguments, got A` for variant arity mismatch
+//     (checker.go:2034-2040).
+//   • `function 'N' expects P arguments, got A` for function arity mismatch
+//     (checker.go:2167-2172).
+// Arity is checked first (variant before function, matching stage1 order); on
+// mismatch the args are NOT recursed (stage1 returns early — only one error
+// per bad call). Builtin arity and method arity are deferred.
 //
 // USE-position rules (conservative — mirrors stage1, avoids false positives):
 //   ex_ident     — check name; skip if scope_resolve returns true.
@@ -212,12 +298,14 @@ public function build_global_scope(prog: Program) returns Scope {
 //   ex_range     — recurse children[0] and children[1].
 //   ex_paren     — recurse children[0].
 //   ex_call      — callee is children[0]:
-//                    • if callee is ex_ident → SKIP (function-call target
-//                      resolved via function/entity/enum registry, not scope).
-//                    • if callee is ex_field → recurse callee.children[0]
-//                      (the receiver); the field name is not a variable.
-//                    • otherwise → recurse callee.
-//                  Args are children[1..]. Recurse each.
+//                    • if callee is ex_ident:
+//                        1. If variant name → check arity; return on mismatch.
+//                        2. If function name → check arity; return on mismatch.
+//                        3. Otherwise (builtin/unknown) → recurse args normally.
+//                    • if callee is ex_field → recurse callee.children[0] (the
+//                      receiver); args recursed normally.
+//                    • otherwise → recurse callee; args recursed normally.
+//                  Args recursed only when no arity error was emitted.
 //   ex_field     — recurse children[0] (receiver). The field name is not a var.
 //   ex_match     — recurse children[0] (scrutinee). For each arm: recurse the
 //                  arm body in a child scope that has all arm bindings defined.
@@ -229,7 +317,7 @@ public function build_global_scope(prog: Program) returns Scope {
 //   literals (ex_int, ex_float, ex_string, ex_bool, ex_char, ex_void) → skip.
 // =============================================================================
 
-function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
+function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_counts: Array<Int>, var_names: Array<String>, var_counts: Array<Int>) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     if e.kind == shared_ast.ex_ident() {
         if not scope_resolve(scope, e.name) {
@@ -238,13 +326,13 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
         return diags;
     }
     if e.kind == shared_ast.ex_binop() {
-        let mutable ld: Array<CheckDiag> = check_expr_names(e.children[0], scope);
+        let mutable ld: Array<CheckDiag> = check_expr_names(e.children[0], scope, fn_names, fn_counts, var_names, var_counts);
         let mutable li: Int = 0;
         while li < len(ld) {
             diags.push(ld[li]);
             li = li + 1;
         }
-        let mutable rd: Array<CheckDiag> = check_expr_names(e.children[1], scope);
+        let mutable rd: Array<CheckDiag> = check_expr_names(e.children[1], scope, fn_names, fn_counts, var_names, var_counts);
         let mutable ri: Int = 0;
         while ri < len(rd) {
             diags.push(rd[ri]);
@@ -253,7 +341,7 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
         return diags;
     }
     if e.kind == shared_ast.ex_unary() {
-        let mutable ud: Array<CheckDiag> = check_expr_names(e.children[0], scope);
+        let mutable ud: Array<CheckDiag> = check_expr_names(e.children[0], scope, fn_names, fn_counts, var_names, var_counts);
         let mutable ui: Int = 0;
         while ui < len(ud) {
             diags.push(ud[ui]);
@@ -262,7 +350,7 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
         return diags;
     }
     if e.kind == shared_ast.ex_paren() {
-        let mutable pd: Array<CheckDiag> = check_expr_names(e.children[0], scope);
+        let mutable pd: Array<CheckDiag> = check_expr_names(e.children[0], scope, fn_names, fn_counts, var_names, var_counts);
         let mutable pi: Int = 0;
         while pi < len(pd) {
             diags.push(pd[pi]);
@@ -273,7 +361,7 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
     if e.kind == shared_ast.ex_array() {
         let mutable ai: Int = 0;
         while ai < len(e.children) {
-            let mutable ad: Array<CheckDiag> = check_expr_names(e.children[ai], scope);
+            let mutable ad: Array<CheckDiag> = check_expr_names(e.children[ai], scope, fn_names, fn_counts, var_names, var_counts);
             let mutable adi: Int = 0;
             while adi < len(ad) {
                 diags.push(ad[adi]);
@@ -284,13 +372,13 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
         return diags;
     }
     if e.kind == shared_ast.ex_index() {
-        let mutable od: Array<CheckDiag> = check_expr_names(e.children[0], scope);
+        let mutable od: Array<CheckDiag> = check_expr_names(e.children[0], scope, fn_names, fn_counts, var_names, var_counts);
         let mutable oi: Int = 0;
         while oi < len(od) {
             diags.push(od[oi]);
             oi = oi + 1;
         }
-        let mutable id: Array<CheckDiag> = check_expr_names(e.children[1], scope);
+        let mutable id: Array<CheckDiag> = check_expr_names(e.children[1], scope, fn_names, fn_counts, var_names, var_counts);
         let mutable ii: Int = 0;
         while ii < len(id) {
             diags.push(id[ii]);
@@ -299,13 +387,13 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
         return diags;
     }
     if e.kind == shared_ast.ex_range() {
-        let mutable rd0: Array<CheckDiag> = check_expr_names(e.children[0], scope);
+        let mutable rd0: Array<CheckDiag> = check_expr_names(e.children[0], scope, fn_names, fn_counts, var_names, var_counts);
         let mutable ri0: Int = 0;
         while ri0 < len(rd0) {
             diags.push(rd0[ri0]);
             ri0 = ri0 + 1;
         }
-        let mutable rd1: Array<CheckDiag> = check_expr_names(e.children[1], scope);
+        let mutable rd1: Array<CheckDiag> = check_expr_names(e.children[1], scope, fn_names, fn_counts, var_names, var_counts);
         let mutable ri1: Int = 0;
         while ri1 < len(rd1) {
             diags.push(rd1[ri1]);
@@ -315,7 +403,7 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
     }
     if e.kind == shared_ast.ex_field() {
         // Recurse receiver (children[0]); the field name is not a variable.
-        let mutable fd: Array<CheckDiag> = check_expr_names(e.children[0], scope);
+        let mutable fd: Array<CheckDiag> = check_expr_names(e.children[0], scope, fn_names, fn_counts, var_names, var_counts);
         let mutable fi: Int = 0;
         while fi < len(fd) {
             diags.push(fd[fi]);
@@ -326,14 +414,56 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
     if e.kind == shared_ast.ex_call() {
         // children[0] is the callee; children[1..] are the arguments.
         let callee: Expr = e.children[0];
+        let arg_count: Int = len(e.children) - 1;
         if callee.kind == shared_ast.ex_ident() {
-            // Plain function call: callee is a function/entity/enum constructor
-            // name resolved via the registry, not a scope variable — SKIP it.
+            // Arity check: variants FIRST (stage1 order: 2034 before 2167),
+            // then functions. On mismatch: emit error and SKIP arg recursion
+            // (early return, matching stage1 behaviour).
+            let var_arity: Int = arity_lookup(var_names, var_counts, callee.name);
+            if var_arity >= 0 {
+                if arg_count != var_arity {
+                    diags.push(CheckDiag(callee.line, callee.column, "variant '" + callee.name + "' expects " + var_arity.to_string() + " arguments, got " + arg_count.to_string()));
+                    return diags;
+                }
+                // Correct variant arity — recurse args for undeclared.
+                let mutable vai: Int = 1;
+                while vai < len(e.children) {
+                    let mutable vad: Array<CheckDiag> = check_expr_names(e.children[vai], scope, fn_names, fn_counts, var_names, var_counts);
+                    let mutable vadj: Int = 0;
+                    while vadj < len(vad) {
+                        diags.push(vad[vadj]);
+                        vadj = vadj + 1;
+                    }
+                    vai = vai + 1;
+                }
+                return diags;
+            }
+            let fn_arity: Int = arity_lookup(fn_names, fn_counts, callee.name);
+            if fn_arity >= 0 {
+                if arg_count != fn_arity {
+                    diags.push(CheckDiag(callee.line, callee.column, "function '" + callee.name + "' expects " + fn_arity.to_string() + " arguments, got " + arg_count.to_string()));
+                    return diags;
+                }
+                // Correct function arity — recurse args for undeclared.
+                let mutable fai: Int = 1;
+                while fai < len(e.children) {
+                    let mutable fad: Array<CheckDiag> = check_expr_names(e.children[fai], scope, fn_names, fn_counts, var_names, var_counts);
+                    let mutable fadj: Int = 0;
+                    while fadj < len(fad) {
+                        diags.push(fad[fadj]);
+                        fadj = fadj + 1;
+                    }
+                    fai = fai + 1;
+                }
+                return diags;
+            }
+            // Builtin, entity constructor, or unknown — no arity check here;
+            // recurse args for undeclared-variable.
         } else {
             if callee.kind == shared_ast.ex_field() {
                 // Method call: recurse the receiver only (callee.children[0]).
                 // The method name is not a variable.
-                let mutable mrd: Array<CheckDiag> = check_expr_names(callee.children[0], scope);
+                let mutable mrd: Array<CheckDiag> = check_expr_names(callee.children[0], scope, fn_names, fn_counts, var_names, var_counts);
                 let mutable mri: Int = 0;
                 while mri < len(mrd) {
                     diags.push(mrd[mri]);
@@ -341,7 +471,7 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
                 }
             } else {
                 // Closure-call or other callee form — recurse it.
-                let mutable ccd: Array<CheckDiag> = check_expr_names(callee, scope);
+                let mutable ccd: Array<CheckDiag> = check_expr_names(callee, scope, fn_names, fn_counts, var_names, var_counts);
                 let mutable cci: Int = 0;
                 while cci < len(ccd) {
                     diags.push(ccd[cci]);
@@ -349,10 +479,11 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
                 }
             }
         }
-        // Recurse arguments (children[1..]).
+        // Recurse arguments (children[1..]) — reached only when no arity error
+        // was returned above (builtin/unknown/method/closure callee paths).
         let mutable cai: Int = 1;
         while cai < len(e.children) {
-            let mutable cad: Array<CheckDiag> = check_expr_names(e.children[cai], scope);
+            let mutable cad: Array<CheckDiag> = check_expr_names(e.children[cai], scope, fn_names, fn_counts, var_names, var_counts);
             let mutable cadj: Int = 0;
             while cadj < len(cad) {
                 diags.push(cad[cadj]);
@@ -364,7 +495,7 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
     }
     if e.kind == shared_ast.ex_match() {
         // children[0] is the scrutinee.
-        let mutable scd: Array<CheckDiag> = check_expr_names(e.children[0], scope);
+        let mutable scd: Array<CheckDiag> = check_expr_names(e.children[0], scope, fn_names, fn_counts, var_names, var_counts);
         let mutable sci: Int = 0;
         while sci < len(scd) {
             diags.push(scd[sci]);
@@ -380,7 +511,7 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
                 arm_scope = scope_define(arm_scope, arm.bindings[bi]);
                 bi = bi + 1;
             }
-            let mutable amd: Array<CheckDiag> = check_expr_names(arm.body, arm_scope);
+            let mutable amd: Array<CheckDiag> = check_expr_names(arm.body, arm_scope, fn_names, fn_counts, var_names, var_counts);
             let mutable amdi: Int = 0;
             while amdi < len(amd) {
                 diags.push(amd[amdi]);
@@ -398,7 +529,7 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
             lam_scope = scope_define(lam_scope, e.lambda_params[lpi].name);
             lpi = lpi + 1;
         }
-        let mutable lamd: Array<CheckDiag> = check_expr_names(e.children[0], lam_scope);
+        let mutable lamd: Array<CheckDiag> = check_expr_names(e.children[0], lam_scope, fn_names, fn_counts, var_names, var_counts);
         let mutable lami: Int = 0;
         while lami < len(lamd) {
             diags.push(lamd[lami]);
@@ -410,13 +541,13 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
         // Bound variable is e.name; domain = children[0], body = children[1].
         let mutable qd_scope: Scope = scope_enter(scope);
         qd_scope = scope_define(qd_scope, e.name);
-        let mutable qdd: Array<CheckDiag> = check_expr_names(e.children[0], qd_scope);
+        let mutable qdd: Array<CheckDiag> = check_expr_names(e.children[0], qd_scope, fn_names, fn_counts, var_names, var_counts);
         let mutable qddi: Int = 0;
         while qddi < len(qdd) {
             diags.push(qdd[qddi]);
             qddi = qddi + 1;
         }
-        let mutable qbd: Array<CheckDiag> = check_expr_names(e.children[1], qd_scope);
+        let mutable qbd: Array<CheckDiag> = check_expr_names(e.children[1], qd_scope, fn_names, fn_counts, var_names, var_counts);
         let mutable qbdi: Int = 0;
         while qbdi < len(qbd) {
             diags.push(qbd[qbdi]);
@@ -428,13 +559,13 @@ function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
         // Same structure as ex_forall.
         let mutable eqs: Scope = scope_enter(scope);
         eqs = scope_define(eqs, e.name);
-        let mutable eqdd: Array<CheckDiag> = check_expr_names(e.children[0], eqs);
+        let mutable eqdd: Array<CheckDiag> = check_expr_names(e.children[0], eqs, fn_names, fn_counts, var_names, var_counts);
         let mutable eqddi: Int = 0;
         while eqddi < len(eqdd) {
             diags.push(eqdd[eqddi]);
             eqddi = eqddi + 1;
         }
-        let mutable eqbd: Array<CheckDiag> = check_expr_names(e.children[1], eqs);
+        let mutable eqbd: Array<CheckDiag> = check_expr_names(e.children[1], eqs, fn_names, fn_counts, var_names, var_counts);
         let mutable eqbdi: Int = 0;
         while eqbdi < len(eqbd) {
             diags.push(eqbd[eqbdi]);
@@ -604,7 +735,7 @@ function check_dup_functions(prog: Program) returns Array<CheckDiag> {
 //   - st_for: check iterable, recurse body in scope_enter + loop var + depth+1.
 // Mirrors stage1 checkStatement (checker.go:1221-1254).
 
-function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, test_name: String, scope: Scope) returns Array<CheckDiag> {
+function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, test_name: String, scope: Scope, fn_names: Array<String>, fn_counts: Array<Int>, var_names: Array<String>, var_counts: Array<Int>) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable cur_scope: Scope = scope;
     let mutable i: Int = 0;
@@ -626,7 +757,7 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
             }
             // Check the return value expression (if any — st_return with
             // ex_void has no names to check, but check_expr_names is safe).
-            let mutable retd: Array<CheckDiag> = check_expr_names(s.expr, cur_scope);
+            let mutable retd: Array<CheckDiag> = check_expr_names(s.expr, cur_scope, fn_names, fn_counts, var_names, var_counts);
             let mutable reti: Int = 0;
             while reti < len(retd) {
                 diags.push(retd[reti]);
@@ -635,7 +766,7 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
         }
         if s.kind == shared_ast.st_let() {
             // Check RHS against the CURRENT scope (before the name is bound).
-            let mutable rhsd: Array<CheckDiag> = check_expr_names(s.expr, cur_scope);
+            let mutable rhsd: Array<CheckDiag> = check_expr_names(s.expr, cur_scope, fn_names, fn_counts, var_names, var_counts);
             let mutable rhsi: Int = 0;
             while rhsi < len(rhsd) {
                 diags.push(rhsd[rhsi]);
@@ -649,7 +780,7 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
             }
         }
         if s.kind == shared_ast.st_expr() {
-            let mutable exprd: Array<CheckDiag> = check_expr_names(s.expr, cur_scope);
+            let mutable exprd: Array<CheckDiag> = check_expr_names(s.expr, cur_scope, fn_names, fn_counts, var_names, var_counts);
             let mutable expri: Int = 0;
             while expri < len(exprd) {
                 diags.push(exprd[expri]);
@@ -659,20 +790,20 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
         // Recurse into if bodies with the SAME loop depth (if does not add depth).
         // Each branch gets its OWN child scope (bindings in then don't leak to else).
         if s.kind == shared_ast.st_if() {
-            let mutable cond_d: Array<CheckDiag> = check_expr_names(s.expr, cur_scope);
+            let mutable cond_d: Array<CheckDiag> = check_expr_names(s.expr, cur_scope, fn_names, fn_counts, var_names, var_counts);
             let mutable cond_i: Int = 0;
             while cond_i < len(cond_d) {
                 diags.push(cond_d[cond_i]);
                 cond_i = cond_i + 1;
             }
-            let mutable ttmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth, in_test, test_name, scope_enter(cur_scope));
+            let mutable ttmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth, in_test, test_name, scope_enter(cur_scope), fn_names, fn_counts, var_names, var_counts);
             let mutable ti: Int = 0;
             while ti < len(ttmp) {
                 diags.push(ttmp[ti]);
                 ti = ti + 1;
             }
             if s.has_else {
-                let mutable etmp: Array<CheckDiag> = check_body_stmts(s.else_block.stmts, loop_depth, in_test, test_name, scope_enter(cur_scope));
+                let mutable etmp: Array<CheckDiag> = check_body_stmts(s.else_block.stmts, loop_depth, in_test, test_name, scope_enter(cur_scope), fn_names, fn_counts, var_names, var_counts);
                 let mutable ei: Int = 0;
                 while ei < len(etmp) {
                     diags.push(etmp[ei]);
@@ -682,13 +813,13 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
         }
         // Recurse into while/for bodies with loop_depth + 1.
         if s.kind == shared_ast.st_while() {
-            let mutable wcond_d: Array<CheckDiag> = check_expr_names(s.expr, cur_scope);
+            let mutable wcond_d: Array<CheckDiag> = check_expr_names(s.expr, cur_scope, fn_names, fn_counts, var_names, var_counts);
             let mutable wcond_i: Int = 0;
             while wcond_i < len(wcond_d) {
                 diags.push(wcond_d[wcond_i]);
                 wcond_i = wcond_i + 1;
             }
-            let mutable wtmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth + 1, in_test, test_name, scope_enter(cur_scope));
+            let mutable wtmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth + 1, in_test, test_name, scope_enter(cur_scope), fn_names, fn_counts, var_names, var_counts);
             let mutable wi: Int = 0;
             while wi < len(wtmp) {
                 diags.push(wtmp[wi]);
@@ -697,7 +828,7 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
         }
         if s.kind == shared_ast.st_for() {
             // Check the iterable expression against the current scope.
-            let mutable iter_d: Array<CheckDiag> = check_expr_names(s.expr, cur_scope);
+            let mutable iter_d: Array<CheckDiag> = check_expr_names(s.expr, cur_scope, fn_names, fn_counts, var_names, var_counts);
             let mutable iter_i: Int = 0;
             while iter_i < len(iter_d) {
                 diags.push(iter_d[iter_i]);
@@ -706,7 +837,7 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
             // Body scope: child scope + loop variable defined (s.name holds
             // the loop var per parse_for_stmt, which sets st_for name=var_tok).
             let mutable for_scope: Scope = scope_define(scope_enter(cur_scope), s.name);
-            let mutable ftmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth + 1, in_test, test_name, for_scope);
+            let mutable ftmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth + 1, in_test, test_name, for_scope, fn_names, fn_counts, var_names, var_counts);
             let mutable fti: Int = 0;
             while fti < len(ftmp) {
                 diags.push(ftmp[fti]);
@@ -749,13 +880,13 @@ function make_method_scope(f: FunctionDecl, global: Scope) returns Scope {
 // check_functions walks each top-level function body, mirroring stage1
 // checkFunctions (checker.go:907).
 
-function check_functions(prog: Program, global: Scope) returns Array<CheckDiag> {
+function check_functions(prog: Program, global: Scope, fn_names: Array<String>, fn_counts: Array<Int>, var_names: Array<String>, var_counts: Array<Int>) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable i: Int = 0;
     while i < len(prog.functions) {
         let f: FunctionDecl = prog.functions[i];
         let fn_scope: Scope = make_fn_scope(f, global);
-        let mutable fd: Array<CheckDiag> = check_body_stmts(f.body.stmts, 0, false, "", fn_scope);
+        let mutable fd: Array<CheckDiag> = check_body_stmts(f.body.stmts, 0, false, "", fn_scope, fn_names, fn_counts, var_names, var_counts);
         let mutable fi: Int = 0;
         while fi < len(fd) {
             diags.push(fd[fi]);
@@ -769,14 +900,14 @@ function check_functions(prog: Program, global: Scope) returns Array<CheckDiag> 
 // check_entities walks each entity's constructor and methods, mirroring
 // stage1 checkEntities (checker.go:1054).
 
-function check_entities(prog: Program, global: Scope) returns Array<CheckDiag> {
+function check_entities(prog: Program, global: Scope, fn_names: Array<String>, fn_counts: Array<Int>, var_names: Array<String>, var_counts: Array<Int>) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable i: Int = 0;
     while i < len(prog.entities) {
         let e: EntityDecl = prog.entities[i];
         if e.has_constructor {
             let ctor_scope: Scope = make_method_scope(e.ctor, global);
-            let mutable cd: Array<CheckDiag> = check_body_stmts(e.ctor.body.stmts, 0, false, "", ctor_scope);
+            let mutable cd: Array<CheckDiag> = check_body_stmts(e.ctor.body.stmts, 0, false, "", ctor_scope, fn_names, fn_counts, var_names, var_counts);
             let mutable ci: Int = 0;
             while ci < len(cd) {
                 diags.push(cd[ci]);
@@ -787,7 +918,7 @@ function check_entities(prog: Program, global: Scope) returns Array<CheckDiag> {
         while mi < len(e.methods) {
             let m: FunctionDecl = e.methods[mi];
             let meth_scope: Scope = make_method_scope(m, global);
-            let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "", meth_scope);
+            let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "", meth_scope, fn_names, fn_counts, var_names, var_counts);
             let mutable mdi: Int = 0;
             while mdi < len(md) {
                 diags.push(md[mdi]);
@@ -803,7 +934,7 @@ function check_entities(prog: Program, global: Scope) returns Array<CheckDiag> {
 // check_impl_bodies walks each impl block's method bodies, mirroring stage1
 // checkImplBlockBodies (traits.go:206).
 
-function check_impl_bodies(prog: Program, global: Scope) returns Array<CheckDiag> {
+function check_impl_bodies(prog: Program, global: Scope, fn_names: Array<String>, fn_counts: Array<Int>, var_names: Array<String>, var_counts: Array<Int>) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable i: Int = 0;
     while i < len(prog.impls) {
@@ -812,7 +943,7 @@ function check_impl_bodies(prog: Program, global: Scope) returns Array<CheckDiag
         while mi < len(ib.methods) {
             let m: FunctionDecl = ib.methods[mi];
             let meth_scope: Scope = make_method_scope(m, global);
-            let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "", meth_scope);
+            let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "", meth_scope, fn_names, fn_counts, var_names, var_counts);
             let mutable mdi: Int = 0;
             while mdi < len(md) {
                 diags.push(md[mdi]);
@@ -829,13 +960,13 @@ function check_impl_bodies(prog: Program, global: Scope) returns Array<CheckDiag
 // (checker.go:975). Return-in-test, break/continue-outside-loop, and
 // undeclared-variable all fire here if triggered.
 
-function check_tests(prog: Program, global: Scope) returns Array<CheckDiag> {
+function check_tests(prog: Program, global: Scope, fn_names: Array<String>, fn_counts: Array<Int>, var_names: Array<String>, var_counts: Array<Int>) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable i: Int = 0;
     while i < len(prog.tests) {
         let t: TestDecl = prog.tests[i];
         let test_scope: Scope = scope_enter(global);
-        let mutable td: Array<CheckDiag> = check_body_stmts(t.body.stmts, 0, true, t.name, test_scope);
+        let mutable td: Array<CheckDiag> = check_body_stmts(t.body.stmts, 0, true, t.name, test_scope, fn_names, fn_counts, var_names, var_counts);
         let mutable tdi: Int = 0;
         while tdi < len(td) {
             diags.push(td[tdi]);
@@ -881,29 +1012,34 @@ public function check_program(prog: Program) returns Array<CheckDiag> {
     }
 
     // --- Check phase ----------------------------------------------------------
-    // Build the global scope once; all body walkers share it.
+    // Build the global scope and arity registries once; all body walkers share.
+    // Builtin arity (assert/len/etc.) and method arity are deferred.
     // Order mirrors stage1: checkFunctions → checkEntities →
     // checkImplBlockBodies → checkTests (checker.go lines 118-121).
     let global: Scope = build_global_scope(prog);
-    let mutable fn_d: Array<CheckDiag> = check_functions(prog, global);
+    let fn_names: Array<String> = build_fn_arity_names(prog);
+    let fn_counts: Array<Int> = build_fn_arity_counts(prog);
+    let var_names: Array<String> = build_variant_arity_names(prog);
+    let var_counts: Array<Int> = build_variant_arity_counts(prog);
+    let mutable fn_d: Array<CheckDiag> = check_functions(prog, global, fn_names, fn_counts, var_names, var_counts);
     let mutable fni: Int = 0;
     while fni < len(fn_d) {
         diags.push(fn_d[fni]);
         fni = fni + 1;
     }
-    let mutable ent_d: Array<CheckDiag> = check_entities(prog, global);
+    let mutable ent_d: Array<CheckDiag> = check_entities(prog, global, fn_names, fn_counts, var_names, var_counts);
     let mutable enti2: Int = 0;
     while enti2 < len(ent_d) {
         diags.push(ent_d[enti2]);
         enti2 = enti2 + 1;
     }
-    let mutable impl_d: Array<CheckDiag> = check_impl_bodies(prog, global);
+    let mutable impl_d: Array<CheckDiag> = check_impl_bodies(prog, global, fn_names, fn_counts, var_names, var_counts);
     let mutable impli: Int = 0;
     while impli < len(impl_d) {
         diags.push(impl_d[impli]);
         impli = impli + 1;
     }
-    let mutable tests_d: Array<CheckDiag> = check_tests(prog, global);
+    let mutable tests_d: Array<CheckDiag> = check_tests(prog, global, fn_names, fn_counts, var_names, var_counts);
     let mutable tdi: Int = 0;
     while tdi < len(tests_d) {
         diags.push(tests_d[tdi]);

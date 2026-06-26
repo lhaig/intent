@@ -1034,3 +1034,16 @@ NOTE: tried an early no-false-positives spot-check over the 22 examples via an
 like the formatter/linter differentials. So the no-false-positives corpus sweep MUST
 use the built checker binary (45.9) and runs in 45.10; a revise loop handles any false
 positives surfaced there (module-qualified receivers are the main risk to watch).
+
+---
+
+## 2026-06-26 — Phase 45.8: function + variant call arity
+
+Built function-arity (name→param count from prog.functions) and variant-arity
+(variant name→field count across all enums) registries. Integrated into the ex_call
+case of check_expr_names: callee plain-ident resolved variant-first then function;
+on arity mismatch emit `variant 'N'/function 'N' expects X arguments, got Y` at the
+callee ident position and SKIP recursing args (matches stage1's early return); else
+recurse args for undeclared. builtin arity (~20 bespoke messages) and method arity
+(needs receiver type) DEFERRED to later phases. +8 tests incl. early-return lock
+(150 rust+js). Gates green: selfcheck 4 EQUAL, diff-formatter 22/22, diff-linter 26/26.

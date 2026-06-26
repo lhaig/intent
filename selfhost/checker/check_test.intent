@@ -287,3 +287,69 @@ test "undeclared: name used before let in same scope fires" {
     assert_eq(len(diags), 1);
     assert_eq(diags[0].message, "undeclared variable 'x'");
 }
+
+// =============================================================================
+// Arity tests (45.8)
+// =============================================================================
+
+// Helper: enclose a body in a function named f.
+function fn_f_body(body: String) returns String {
+    return "function f() returns Void " + lbrace() + " " + body + " " + rbrace();
+}
+
+test "arity: function with wrong arg count fires" {
+    let src: String = "module m version \"1.0\"; function g(a: Int, b: Int) returns Int " + lbrace() + " return a; " + rbrace() + " " + fn_f_body("g(1);");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "function 'g' expects 2 arguments, got 1");
+}
+
+test "arity: function with correct arg count produces no diag" {
+    let src: String = "module m version \"1.0\"; function g(a: Int, b: Int) returns Int " + lbrace() + " return a; " + rbrace() + " " + fn_f_body("g(1, 2);");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "arity: zero-param function called with an arg fires" {
+    let src: String = "module m version \"1.0\"; function g() returns Void " + fn_body() + " " + fn_f_body("g(1);");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "function 'g' expects 0 arguments, got 1");
+}
+
+test "arity: variant with wrong field count fires" {
+    let enum_src: String = "enum Maybe " + lbrace() + " Nothing, Just(x: Int), " + rbrace();
+    let src: String = "module m version \"1.0\"; " + enum_src + " " + fn_f_body("let v: Maybe = Just();");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "variant 'Just' expects 1 arguments, got 0");
+}
+
+test "arity: variant with correct field count produces no diag" {
+    let enum_src: String = "enum Maybe " + lbrace() + " Nothing, Just(x: Int), " + rbrace();
+    let src: String = "module m version \"1.0\"; " + enum_src + " " + fn_f_body("let v: Maybe = Just(42);");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "arity: early return — wrong-arity call with undeclared arg emits only arity diag" {
+    let src: String = "module m version \"1.0\"; function g(a: Int) returns Void " + fn_body() + " " + fn_f_body("g(nope, extra);");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "function 'g' expects 1 arguments, got 2");
+}
+
+test "arity: builtin call is not checked for arity (no false positive)" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " print(\"hi\"); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "arity: variant check fires before function check (variants win on name collision)" {
+    // If a variant and function share a name, variant arity fires first.
+    let enum_src: String = "enum E " + lbrace() + " Wrap(x: Int), " + rbrace();
+    let src: String = "module m version \"1.0\"; " + enum_src + " " + fn_f_body("let v: E = Wrap();");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "variant 'Wrap' expects 1 arguments, got 0");
+}
