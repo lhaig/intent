@@ -1,6 +1,6 @@
 module formatter_format version "0.1.0";
 
-import "ast.intent";
+import "../shared/ast.intent";
 
 public function indent_string(level: Int) returns String {
     let mutable s: String = "";
@@ -129,43 +129,43 @@ public function binop_is_right_assoc(op: String) returns Bool {
 }
 
 public function expr_precedence(e: Expr) returns Int {
-    if e.kind == formatter_ast.ex_binop() {
+    if e.kind == shared_ast.ex_binop() {
         return binop_precedence(e.name);
     }
-    if e.kind == formatter_ast.ex_unary() {
+    if e.kind == shared_ast.ex_unary() {
         return 9;
     }
-    if e.kind == formatter_ast.ex_call() {
+    if e.kind == shared_ast.ex_call() {
         return 10;
     }
-    if e.kind == formatter_ast.ex_index() {
+    if e.kind == shared_ast.ex_index() {
         return 10;
     }
-    if e.kind == formatter_ast.ex_field() {
+    if e.kind == shared_ast.ex_field() {
         return 10;
     }
-    if e.kind == formatter_ast.ex_try() {
+    if e.kind == shared_ast.ex_try() {
         return 10;
     }
-    if e.kind == formatter_ast.ex_await() {
+    if e.kind == shared_ast.ex_await() {
         return 10;
     }
-    if e.kind == formatter_ast.ex_spawn() {
+    if e.kind == shared_ast.ex_spawn() {
         return 10;
     }
-    if e.kind == formatter_ast.ex_range() {
+    if e.kind == shared_ast.ex_range() {
         return 6;
     }
-    if e.kind == formatter_ast.ex_forall() {
+    if e.kind == shared_ast.ex_forall() {
         return 1;
     }
-    if e.kind == formatter_ast.ex_exists() {
+    if e.kind == shared_ast.ex_exists() {
         return 1;
     }
-    if e.kind == formatter_ast.ex_lambda() {
+    if e.kind == shared_ast.ex_lambda() {
         return 1;
     }
-    if e.kind == formatter_ast.ex_paren() {
+    if e.kind == shared_ast.ex_paren() {
         return expr_precedence(e.children[0]);
     }
     return 11;
@@ -176,7 +176,7 @@ public function format_expr(e: Expr) returns String {
 }
 
 public function format_expr_at(e: Expr, min_prec: Int) returns String {
-    if e.kind == formatter_ast.ex_paren() {
+    if e.kind == shared_ast.ex_paren() {
         return format_expr_at(e.children[0], min_prec);
     }
     let body: String = format_expr_inner(e);
@@ -187,38 +187,38 @@ public function format_expr_at(e: Expr, min_prec: Int) returns String {
 }
 
 public function format_expr_inner(e: Expr) returns String {
-    if e.kind == formatter_ast.ex_void() {
+    if e.kind == shared_ast.ex_void() {
         return "";
     }
-    if e.kind == formatter_ast.ex_int() {
+    if e.kind == shared_ast.ex_int() {
         return e.int_value.to_string();
     }
-    if e.kind == formatter_ast.ex_float() {
+    if e.kind == shared_ast.ex_float() {
         return e.str_value;
     }
-    if e.kind == formatter_ast.ex_char() {
+    if e.kind == shared_ast.ex_char() {
         return e.str_value;
     }
-    if e.kind == formatter_ast.ex_string() {
+    if e.kind == shared_ast.ex_string() {
         return "\"" + e.str_value + "\"";
     }
-    if e.kind == formatter_ast.ex_bool() {
+    if e.kind == shared_ast.ex_bool() {
         if e.bool_value {
             return "true";
         }
         return "false";
     }
-    if e.kind == formatter_ast.ex_ident() {
+    if e.kind == shared_ast.ex_ident() {
         return e.name;
     }
-    if e.kind == formatter_ast.ex_unary() {
+    if e.kind == shared_ast.ex_unary() {
         let operand: String = format_expr_at(e.children[0], 9);
         if e.name == "not" {
             return "not " + operand;
         }
         return e.name + operand;
     }
-    if e.kind == formatter_ast.ex_binop() {
+    if e.kind == shared_ast.ex_binop() {
         let p: Int = binop_precedence(e.name);
         let mutable lhs_min: Int = p;
         let mutable rhs_min: Int = p + 1;
@@ -230,7 +230,7 @@ public function format_expr_inner(e: Expr) returns String {
         let rhs: String = format_expr_at(e.children[1], rhs_min);
         return lhs + " " + e.name + " " + rhs;
     }
-    if e.kind == formatter_ast.ex_call() {
+    if e.kind == shared_ast.ex_call() {
         let callee: String = format_expr_at(e.children[0], 10);
         let mutable args: String = "";
         let mutable i: Int = 1;
@@ -243,28 +243,28 @@ public function format_expr_inner(e: Expr) returns String {
         }
         return callee + "(" + args + ")";
     }
-    if e.kind == formatter_ast.ex_index() {
+    if e.kind == shared_ast.ex_index() {
         let obj: String = format_expr_at(e.children[0], 10);
         let idx: String = format_expr_at(e.children[1], 0);
         return obj + "[" + idx + "]";
     }
-    if e.kind == formatter_ast.ex_field() {
+    if e.kind == shared_ast.ex_field() {
         let obj: String = format_expr_at(e.children[0], 10);
         return obj + "." + e.name;
     }
-    if e.kind == formatter_ast.ex_try() {
+    if e.kind == shared_ast.ex_try() {
         let inner: String = format_expr_at(e.children[0], 10);
         return inner + "?";
     }
-    if e.kind == formatter_ast.ex_await() {
+    if e.kind == shared_ast.ex_await() {
         let inner: String = format_expr_at(e.children[0], 9);
         return "await " + inner;
     }
-    if e.kind == formatter_ast.ex_spawn() {
+    if e.kind == shared_ast.ex_spawn() {
         let inner: String = format_expr_at(e.children[0], 9);
         return "spawn " + inner;
     }
-    if e.kind == formatter_ast.ex_array() {
+    if e.kind == shared_ast.ex_array() {
         let mutable elems: String = "";
         let mutable i: Int = 0;
         while i < len(e.children) {
@@ -276,24 +276,24 @@ public function format_expr_inner(e: Expr) returns String {
         }
         return "[" + elems + "]";
     }
-    if e.kind == formatter_ast.ex_range() {
+    if e.kind == shared_ast.ex_range() {
         let start: String = format_expr_at(e.children[0], 7);
         let end: String = format_expr_at(e.children[1], 7);
         return start + ".." + end;
     }
-    if e.kind == formatter_ast.ex_paren() {
+    if e.kind == shared_ast.ex_paren() {
         return "(" + format_expr_at(e.children[0], 0) + ")";
     }
-    if e.kind == formatter_ast.ex_match() {
+    if e.kind == shared_ast.ex_match() {
         return format_match(e, 0);
     }
-    if e.kind == formatter_ast.ex_forall() {
+    if e.kind == shared_ast.ex_forall() {
         return "forall " + e.name + " in " + format_expr(e.children[0]) + ": " + format_expr(e.children[1]);
     }
-    if e.kind == formatter_ast.ex_exists() {
+    if e.kind == shared_ast.ex_exists() {
         return "exists " + e.name + " in " + format_expr(e.children[0]) + ": " + format_expr(e.children[1]);
     }
-    if e.kind == formatter_ast.ex_lambda() {
+    if e.kind == shared_ast.ex_lambda() {
         let mutable s: String = "|";
         let mutable i: Int = 0;
         while i < len(e.lambda_params) {
@@ -344,7 +344,7 @@ public function format_match(e: Expr, level: Int) returns String {
 }
 
 public function format_expr_indented(e: Expr, level: Int) returns String {
-    if e.kind == formatter_ast.ex_match() {
+    if e.kind == shared_ast.ex_match() {
         return format_match(e, level);
     }
     return format_expr(e);
@@ -366,23 +366,23 @@ public function format_stmt(s: Stmt, level: Int) returns String {
 
 public function format_stmt_inner(s: Stmt, level: Int) returns String {
     let pad: String = indent_string(level);
-    if s.kind == formatter_ast.st_let() {
+    if s.kind == shared_ast.st_let() {
         let mutable mut_kw: String = "";
         if s.is_mutable {
             mut_kw = "mutable ";
         }
         return pad + "let " + mut_kw + s.name + ": " + s.type_name + " = " + format_expr_indented(s.expr, level) + ";";
     }
-    if s.kind == formatter_ast.st_return() {
-        if s.expr.kind == formatter_ast.ex_void() {
+    if s.kind == shared_ast.st_return() {
+        if s.expr.kind == shared_ast.ex_void() {
             return pad + "return;";
         }
         return pad + "return " + format_expr_indented(s.expr, level) + ";";
     }
-    if s.kind == formatter_ast.st_expr() {
+    if s.kind == shared_ast.st_expr() {
         return pad + format_expr_indented(s.expr, level) + ";";
     }
-    if s.kind == formatter_ast.st_if() {
+    if s.kind == shared_ast.st_if() {
         let mutable out: String = pad + "if " + format_expr(s.expr) + " " + '{'.to_string() + "\n";
         out = out + format_block_body(s.then_block, level + 1);
         out = out + pad + '}'.to_string();
@@ -393,13 +393,13 @@ public function format_stmt_inner(s: Stmt, level: Int) returns String {
         }
         return out;
     }
-    if s.kind == formatter_ast.st_while() {
+    if s.kind == shared_ast.st_while() {
         let mutable out: String = pad + "while " + format_expr(s.expr) + " " + '{'.to_string() + "\n";
         out = out + format_block_body(s.then_block, level + 1);
         out = out + pad + '}'.to_string();
         return out;
     }
-    if s.kind == formatter_ast.st_for() {
+    if s.kind == shared_ast.st_for() {
         let mutable out: String = pad + "for " + s.name + " in " + format_expr(s.expr) + " " + '{'.to_string() + "\n";
         out = out + format_block_body(s.then_block, level + 1);
         out = out + pad + '}'.to_string();

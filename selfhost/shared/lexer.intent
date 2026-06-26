@@ -14,7 +14,7 @@
 //     be a match arm; a plain Int kind keeps call sites concise.
 //   - Lexer state lives on a mutable entity. position is a codepoint
 //     index into source.
-module formatter_lexer version "0.1.0";
+module shared_lexer version "0.1.0";
 
 // --- Token kind constants ---------------------------------------------------
 //

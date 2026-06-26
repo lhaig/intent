@@ -37,3 +37,5 @@ target/
 # OS files
 .DS_Store
 .aiki/
+/main.js
+/lint_main.js

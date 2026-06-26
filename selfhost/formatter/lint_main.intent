@@ -22,9 +22,9 @@
 module formatter_lint_main version "0.1.0";
 
 import "lint.intent";
-import "parser.intent";
-import "ast.intent";
-import "lexer.intent";
+import "../shared/parser.intent";
+import "../shared/ast.intent";
+import "../shared/lexer.intent";
 
 entry function main() returns Int {
     let argv: Array<String> = args();
@@ -42,7 +42,7 @@ entry function main() returns Int {
         Ok(s) => s,
         Err(_) => "",
     };
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     if prog.error != "" {
         print("parse error: " + prog.error);
         return 3;

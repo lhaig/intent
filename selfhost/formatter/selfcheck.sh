@@ -47,14 +47,22 @@ if [ ! -x "$BIN" ]; then
   exit 2
 fi
 
+SHARED_DIR="$ROOT/selfhost/shared"
+
 fail=0
-for f in lexer ast parser format; do
-  src="$FMT_DIR/$f.intent"
-  "$BIN" "$src" 2>/dev/null | perl -0777 -pe 's/\n\z//' > "$BUILD_DIR/$f.out"
-  if diff -q "$BUILD_DIR/$f.out" "$src" >/dev/null; then
-    printf '%-14s %s\n' "$f.intent" "EQUAL"
+for entry in \
+    "shared/lexer.intent:$SHARED_DIR/lexer.intent" \
+    "shared/ast.intent:$SHARED_DIR/ast.intent" \
+    "shared/parser.intent:$SHARED_DIR/parser.intent" \
+    "formatter/format.intent:$FMT_DIR/format.intent"; do
+  label="${entry%%:*}"
+  src="${entry#*:}"
+  base=$(basename "$src" .intent)
+  "$BIN" "$src" 2>/dev/null | perl -0777 -pe 's/\n\z//' > "$BUILD_DIR/$base.out"
+  if diff -q "$BUILD_DIR/$base.out" "$src" >/dev/null; then
+    printf '%-26s %s\n' "$label" "EQUAL"
   else
-    printf '%-14s %s\n' "$f.intent" "DIFF"
+    printf '%-26s %s\n' "$label" "DIFF"
     fail=1
   fi
 done

@@ -1,17 +1,17 @@
 // selfhost/formatter/lint_test.intent — Phase 43.3 linter tests.
 module formatter_linter_test version "0.1.0";
 
-import "ast.intent";
+import "../shared/ast.intent";
 
 import "lint.intent";
 
-import "parser.intent";
+import "../shared/parser.intent";
 
 // Helper: parse a tiny source with one top-level function named `name` and
 // return the lint diagnostics.
 public function lint_fn(name: String) returns Array<LintDiag> {
     let src: String = "module m version \"1.0\"; function " + name + "() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     return formatter_linter.lint_program(prog);
 }
 
@@ -54,7 +54,7 @@ test "R5: PascalCase function name produces R5 diag" {
 
 test "R5: multiple functions - only bad names produce R5 diags" {
     let src: String = "module m version \"1.0\"; function good() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string() + " function BadOne() returns Int " + '{'.to_string() + " return 1; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "function 'BadOne' should use snake_case naming"), true);
     assert_eq(has_diag_msg(diags, "function 'good' should use snake_case naming"), false);
@@ -124,7 +124,7 @@ test "format_diags: two diags produce two lines in order" {
 // Helper: parse a module with one function, return its body stmts.
 public function parse_body(body_src: String) returns Array<Stmt> {
     let src: String = "module m version \"1.0\"; function f(a: Int, b: Int) returns Int " + '{'.to_string() + " " + body_src + " " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     return prog.functions[0].body.stmts;
 }
 
@@ -139,7 +139,7 @@ test "engine: used names include param reference in initializer" {
 test "engine: assignment target is NOT in used names; IS in assigned names" {
     // x = 5 — write target not a read
     let src: String = "module m version \"1.0\"; function f() returns Int " + '{'.to_string() + " let mutable x = 0; x = 5; return 1; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let stmts: Array<Stmt> = prog.functions[0].body.stmts;
     let used: Array<String> = formatter_linter.collect_used_names(stmts);
     let assigned: Array<String> = formatter_linter.collect_assigned_names(stmts);
@@ -150,7 +150,7 @@ test "engine: assignment target is NOT in used names; IS in assigned names" {
 test "engine: callee ident skipped, arg collected" {
     // print(obj) — "print" is function name (not a read), "obj" is arg (a read)
     let src: String = "module m version \"1.0\"; function f(obj: Int) returns Int " + '{'.to_string() + " print(obj); return 1; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let stmts: Array<Stmt> = prog.functions[0].body.stmts;
     let used: Array<String> = formatter_linter.collect_used_names(stmts);
     assert_eq(formatter_linter.name_in(used, "obj"), true);
@@ -160,7 +160,7 @@ test "engine: callee ident skipped, arg collected" {
 test "engine: paren expression is walked (ex_paren)" {
     // return (a + 1) — paren wraps binop; a should appear in used
     let src: String = "module m version \"1.0\"; function f(a: Int) returns Int " + '{'.to_string() + " return (a + 1); " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let stmts: Array<Stmt> = prog.functions[0].body.stmts;
     let used: Array<String> = formatter_linter.collect_used_names(stmts);
     assert_eq(formatter_linter.name_in(used, "a"), true);
@@ -169,7 +169,7 @@ test "engine: paren expression is walked (ex_paren)" {
 test "engine: nested block (if body) contributes to used names" {
     // if a > 0 { let c = a; } return 1; — a used in condition + nested init
     let src: String = "module m version \"1.0\"; function f(a: Int) returns Int " + '{'.to_string() + " if a > 0 " + '{'.to_string() + " let c = a; " + '}'.to_string() + " return 1; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let stmts: Array<Stmt> = prog.functions[0].body.stmts;
     let used: Array<String> = formatter_linter.collect_used_names(stmts);
     assert_eq(formatter_linter.name_in(used, "a"), true);
@@ -179,7 +179,7 @@ test "engine: nested block (if body) contributes to used names" {
 
 test "R10: empty body produces diag" {
     let src: String = "module m version \"1.0\"; function empty_body() returns Int " + '{'.to_string() + ' '.to_string() + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     let mutable found: Bool = false;
     let mutable i: Int = 0;
@@ -194,7 +194,7 @@ test "R10: empty body produces diag" {
 
 test "R10: non-empty body produces no empty-body diag" {
     let src: String = "module m version \"1.0\"; function has_body() returns Int " + '{'.to_string() + " return 1; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     let mutable found: Bool = false;
     let mutable i: Int = 0;
@@ -211,7 +211,7 @@ test "R10: non-empty body produces no empty-body diag" {
 
 test "R1: non-entry function with no contracts produces diag" {
     let src: String = "module m version \"1.0\"; function no_contract(x: Int) returns Int " + '{'.to_string() + " return x; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     let mutable found: Bool = false;
     let mutable i: Int = 0;
@@ -226,7 +226,7 @@ test "R1: non-entry function with no contracts produces diag" {
 
 test "R1: entry function with no contracts is exempt" {
     let src: String = "module m version \"1.0\"; entry function main() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     let mutable found: Bool = false;
     let mutable i: Int = 0;
@@ -243,7 +243,7 @@ test "R1: entry function with no contracts is exempt" {
 
 test "R14: used parameter produces no diag" {
     let src: String = "module m version \"1.0\"; function use_param(x: Int) returns Int " + '{'.to_string() + " return x; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     let mutable found: Bool = false;
     let mutable i: Int = 0;
@@ -258,7 +258,7 @@ test "R14: used parameter produces no diag" {
 
 test "R14: unused parameter produces diag" {
     let src: String = "module m version \"1.0\"; function ignore_param(x: Int) returns Int " + '{'.to_string() + " return 1; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     let mutable found: Bool = false;
     let mutable i: Int = 0;
@@ -275,7 +275,7 @@ test "R14: unused parameter produces diag" {
 
 test "R12: used variable produces no diag" {
     let src: String = "module m version \"1.0\"; function use_var() returns Int " + '{'.to_string() + " let x = 1; return x; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     let mutable found: Bool = false;
     let mutable i: Int = 0;
@@ -290,7 +290,7 @@ test "R12: used variable produces no diag" {
 
 test "R12: unused variable produces diag" {
     let src: String = "module m version \"1.0\"; function unused_var() returns Int " + '{'.to_string() + " let x = 1; return 0; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     let mutable found: Bool = false;
     let mutable i: Int = 0;
@@ -305,7 +305,7 @@ test "R12: unused variable produces diag" {
 
 test "R12: unused variable in nested block is found" {
     let src: String = "module m version \"1.0\"; function nested_unused() returns Int " + '{'.to_string() + " if true " + '{'.to_string() + " let y = 2; " + '}'.to_string() + " return 0; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     let mutable found: Bool = false;
     let mutable i: Int = 0;
@@ -322,7 +322,7 @@ test "R12: unused variable in nested block is found" {
 
 test "R13: reassigned mutable produces no diag" {
     let src: String = "module m version \"1.0\"; function reassigned() returns Int " + '{'.to_string() + " let mutable x = 1; x = 2; return x; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     let mutable found: Bool = false;
     let mutable i: Int = 0;
@@ -337,7 +337,7 @@ test "R13: reassigned mutable produces no diag" {
 
 test "R13: mutable never reassigned produces diag" {
     let src: String = "module m version \"1.0\"; function not_reassigned() returns Int " + '{'.to_string() + " let mutable x = 1; return x; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     let mutable found: Bool = false;
     let mutable i: Int = 0;
@@ -356,7 +356,7 @@ test "R13: mutable never reassigned produces diag" {
 
 test "ORDER: empty-body + no-contracts + bad-name diags in stage1 order" {
     let src: String = "module m version \"1.0\"; function BadFn() returns Int " + '{'.to_string() + ' '.to_string() + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(len(diags), 3);
     assert_eq(diags[0].message, "function 'BadFn' has an empty body");
@@ -368,7 +368,7 @@ test "ORDER: R12 full pass before R13 full pass for multiple mutable lets" {
     // Two unused mutable lets: stage1 order is R12(a), R12(b), R13(a), R13(b)
     // not interleaved R12(a)/R13(a), R12(b)/R13(b).
     let src: String = "module m version \"1.0\"; function two_lets() returns Int " + '{'.to_string() + " let mutable a = 1; let mutable b = 2; return 0; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     let mutable r12a: Int = -1;
     let mutable r12b: Int = -1;
@@ -402,14 +402,14 @@ test "ORDER: R12 full pass before R13 full pass for multiple mutable lets" {
 
 test "R13: mutable in nested if block does NOT produce R13 diag (top-level only)" {
     let src: String = "module m version \"1.0\"; function nested_mut() returns Int " + '{'.to_string() + " if true " + '{'.to_string() + " let mutable y = 5; " + '}'.to_string() + " return 0; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "variable 'y' is declared mutable but never reassigned"), false);
 }
 
 test "R16: spawn nested inside if block fires R16 diag" {
     let src: String = "module m version \"1.0\"; function nested_spawn() returns Int " + '{'.to_string() + " if true " + '{'.to_string() + " spawn foo(); " + '}'.to_string() + " return 1; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "spawn result in 'nested_spawn' is discarded; assign to a Future variable and await it"), true);
 }
@@ -420,14 +420,14 @@ test "R16: spawn nested inside if block fires R16 diag" {
 
 test "R16: discarded spawn in function body produces diag" {
     let src: String = "module m version \"1.0\"; function do_spawn() returns Int " + '{'.to_string() + " spawn foo(); return 1; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "spawn result in 'do_spawn' is discarded; assign to a Future variable and await it"), true);
 }
 
 test "R16: no spawn in body produces no spawn diag" {
     let src: String = "module m version \"1.0\"; function no_spawn() returns Int " + '{'.to_string() + " return 1; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "spawn result in 'no_spawn' is discarded; assign to a Future variable and await it"), false);
 }
@@ -436,42 +436,42 @@ test "R16: no spawn in body produces no spawn diag" {
 
 test "R6: entity with non-PascalCase name produces diag" {
     let src: String = "module m version \"1.0\"; entity bad_name " + '{'.to_string() + " field x: Int; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "entity 'bad_name' should use PascalCase naming"), true);
 }
 
 test "R6: entity with PascalCase name produces no R6 diag" {
     let src: String = "module m version \"1.0\"; entity GoodName " + '{'.to_string() + " field x: Int; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "entity 'GoodName' should use PascalCase naming"), false);
 }
 
 test "R9: entity with fields and no invariant produces diag" {
     let src: String = "module m version \"1.0\"; entity Foo " + '{'.to_string() + " field x: Int; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "entity 'Foo' has fields but no invariant"), true);
 }
 
 test "R9: entity with invariant produces no R9 diag" {
     let src: String = "module m version \"1.0\"; entity Foo " + '{'.to_string() + " field x: Int; invariant self.x >= 0; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "entity 'Foo' has fields but no invariant"), false);
 }
 
 test "entity ctor R14: unused constructor param produces diag" {
     let src: String = "module m version \"1.0\"; entity Foo " + '{'.to_string() + " field x: Int; constructor(x: Int, unused: Int) " + '{'.to_string() + " self.x = x; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "parameter 'unused' in 'Foo.constructor' is never used"), true);
 }
 
 test "entity method R10/R2/R5 ORDER: empty-body + no-contracts + bad-name in stage1 order" {
     let src: String = "module m version \"1.0\"; entity Foo " + '{'.to_string() + " method BadM() returns Int " + '{'.to_string() + ' '.to_string() + '}'.to_string() + ' '.to_string() + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     // Find positions
     let mutable r10_pos: Int = -1;
@@ -499,7 +499,7 @@ test "entity method R10/R2/R5 ORDER: empty-body + no-contracts + bad-name in sta
 
 test "entity method R14: unused method param produces diag" {
     let src: String = "module m version \"1.0\"; entity Foo " + '{'.to_string() + " method do_work(x: Int, y: Int) returns Int requires x > 0; ensures true; " + '{'.to_string() + " return x; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "parameter 'y' in 'Foo.do_work' is never used"), true);
 }
@@ -507,7 +507,7 @@ test "entity method R14: unused method param produces diag" {
 test "entity method R12: unused variable in method produces diag" {
     // No contracts intentionally (R2 fires too, but we check for R12 only)
     let src: String = "module m version \"1.0\"; entity Foo " + '{'.to_string() + " method do_work() returns Int " + '{'.to_string() + " let z = 5; return 1; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "variable 'z' is declared but never used"), true);
 }
@@ -515,49 +515,49 @@ test "entity method R12: unused variable in method produces diag" {
 test "entity method R13: mutable never reassigned in method produces diag" {
     // No contracts intentionally (R2 fires too, but we check for R13 only)
     let src: String = "module m version \"1.0\"; entity Foo " + '{'.to_string() + " method do_work() returns Int " + '{'.to_string() + " let mutable w = 1; return w; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "variable 'w' is declared mutable but never reassigned"), true);
 }
 
 test "impl method R10: empty-body impl method produces diag" {
     let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method do_work() returns Int; " + '}'.to_string() + " entity Foo " + '{'.to_string() + ' '.to_string() + '}'.to_string() + " impl T for Foo " + '{'.to_string() + " method do_work() returns Int " + '{'.to_string() + ' '.to_string() + '}'.to_string() + ' '.to_string() + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "function 'Foo.do_work' has an empty body"), true);
 }
 
 test "impl method R5: non-snake_case impl method produces diag" {
     let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method BadImpl() returns Int; " + '}'.to_string() + " entity Foo " + '{'.to_string() + ' '.to_string() + '}'.to_string() + " impl T for Foo " + '{'.to_string() + " method BadImpl() returns Int " + '{'.to_string() + " return 1; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "function 'BadImpl' should use snake_case naming"), true);
 }
 
 test "impl method R14: unused param in impl method produces diag" {
     let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method work(x: Int) returns Int; " + '}'.to_string() + " entity Foo " + '{'.to_string() + ' '.to_string() + '}'.to_string() + " impl T for Foo " + '{'.to_string() + " method work(x: Int) returns Int " + '{'.to_string() + " return 1; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "parameter 'x' in 'Foo.work' is never used"), true);
 }
 
 test "impl method R12: unused var in impl method produces diag" {
     let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method work() returns Int; " + '}'.to_string() + " entity Foo " + '{'.to_string() + ' '.to_string() + '}'.to_string() + " impl T for Foo " + '{'.to_string() + " method work() returns Int " + '{'.to_string() + " let z = 3; return 1; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "variable 'z' is declared but never used"), true);
 }
 
 test "impl method: no R2 (no contracts diag for impl methods)" {
     let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method work() returns Int; " + '}'.to_string() + " entity Foo " + '{'.to_string() + ' '.to_string() + '}'.to_string() + " impl T for Foo " + '{'.to_string() + " method work() returns Int " + '{'.to_string() + " return 1; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "method 'Foo.work' has no requires or ensures contracts"), false);
 }
 
 test "impl method: no R13 (mutable-unreassigned not fired for impl methods)" {
     let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method work() returns Int; " + '}'.to_string() + " entity Foo " + '{'.to_string() + ' '.to_string() + '}'.to_string() + " impl T for Foo " + '{'.to_string() + " method work() returns Int " + '{'.to_string() + " let mutable v = 1; return v; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "variable 'v' is declared mutable but never reassigned"), false);
 }
@@ -566,35 +566,35 @@ test "impl method: no R13 (mutable-unreassigned not fired for impl methods)" {
 
 test "R7: enum with non-PascalCase name produces diag" {
     let src: String = "module m version \"1.0\"; enum bad_name " + '{'.to_string() + " A, B " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "enum 'bad_name' should use PascalCase naming"), true);
 }
 
 test "R7: PascalCase enum name produces no R7 diag" {
     let src: String = "module m version \"1.0\"; enum Color " + '{'.to_string() + " Red, Green " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "enum 'Color' should use PascalCase naming"), false);
 }
 
 test "R8: non-PascalCase variant produces diag" {
     let src: String = "module m version \"1.0\"; enum Color " + '{'.to_string() + " red, Green " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "variant 'red' in enum 'Color' should use PascalCase naming"), true);
 }
 
 test "R8: PascalCase variant produces no R8 diag" {
     let src: String = "module m version \"1.0\"; enum Color " + '{'.to_string() + " Red, Green " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "variant 'Green' in enum 'Color' should use PascalCase naming"), false);
 }
 
 test "R8: only bad variant in mixed enum produces diag; good variant produces no diag" {
     let src: String = "module m version \"1.0\"; enum Color " + '{'.to_string() + " red, Green " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "variant 'red' in enum 'Color' should use PascalCase naming"), true);
     assert_eq(has_diag_msg(diags, "variant 'Green' in enum 'Color' should use PascalCase naming"), false);
@@ -604,28 +604,28 @@ test "R8: only bad variant in mixed enum produces diag; good variant produces no
 
 test "R6-trait quirk: non-PascalCase trait name produces diag with 'entity' wording" {
     let src: String = "module m version \"1.0\"; trait bad_trait " + '{'.to_string() + " method foo() returns Int; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "entity 'bad_trait' should use PascalCase naming"), true);
 }
 
 test "R6-trait: PascalCase trait name produces no R6 diag" {
     let src: String = "module m version \"1.0\"; trait GoodTrait " + '{'.to_string() + " method foo() returns Int; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "entity 'GoodTrait' should use PascalCase naming"), false);
 }
 
 test "R5 trait method: non-snake_case trait method name produces diag" {
     let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method BadMethod() returns Int; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "function 'BadMethod' should use snake_case naming"), true);
 }
 
 test "R5 trait method: snake_case trait method name produces no diag" {
     let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method good_method() returns Int; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "function 'good_method' should use snake_case naming"), false);
 }
@@ -636,14 +636,14 @@ test "R5 trait method: snake_case trait method name produces no diag" {
 
 test "R11: intent block with no verified_by produces diag" {
     let src: String = "module m version \"1.0\"; intent \"do something\" " + '{'.to_string() + " goal: \"be correct\"; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "intent block has no verified_by references"), true);
 }
 
 test "R11: intent block with verified_by produces no R11 diag" {
     let src: String = "module m version \"1.0\"; intent \"do something\" " + '{'.to_string() + " goal: \"be correct\"; verified_by: [some_contract]; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "intent block has no verified_by references"), false);
 }
@@ -654,7 +654,7 @@ test "R11: intent block with verified_by produces no R11 diag" {
 
 test "R3: trait method always produces no-contracts diag" {
     let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method execute() returns Int; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "trait method 'T.execute' has no requires or ensures contracts"), true);
 }
@@ -662,7 +662,7 @@ test "R3: trait method always produces no-contracts diag" {
 test "R3/R5 ORDER: R5 naming fires before R3 contracts for same method" {
     // BadName violates R5; R5 must appear before R3 in diags array.
     let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method BadName() returns Int; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     let mutable r5_pos: Int = -1;
     let mutable r3_pos: Int = -1;
@@ -689,7 +689,7 @@ test "R3/R5 ORDER: R5 naming fires before R3 contracts for same method" {
 
 test "R4: extern always produces no-contracts diag" {
     let src: String = "module m version \"1.0\"; extern \"rust\" function panic(msg: String) returns Void;";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "extern function 'panic' has no requires/ensures; FFI declarations should document the boundary contract"), true);
 }
@@ -726,14 +726,14 @@ test "type_uses_param: Fn(T) -> R contains T" {
 
 test "R15: unused type param in function produces diag" {
     let src: String = "module m version \"1.0\"; function ident<T>(x: Int) returns Int " + '{'.to_string() + " return x; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "type parameter 'T' in function 'ident' is never used in parameters or return type"), true);
 }
 
 test "R15: unused type param diag has correct column" {
     let src: String = "module m version \"1.0\"; function ident<T>(x: Int) returns Int " + '{'.to_string() + " return x; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     let mutable col: Int = -1;
     let mutable i: Int = 0;
@@ -748,14 +748,14 @@ test "R15: unused type param diag has correct column" {
 
 test "R15: used type param in param type produces no R15 diag" {
     let src: String = "module m version \"1.0\"; function ident<T>(x: T) returns T " + '{'.to_string() + " return x; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "type parameter 'T' in function 'ident' is never used in parameters or return type"), false);
 }
 
 test "R15: token-aware — TT param type does not count as T usage" {
     let src: String = "module m version \"1.0\"; function ident<T>(x: TT) returns Int " + '{'.to_string() + " return 1; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "type parameter 'T' in function 'ident' is never used in parameters or return type"), true);
 }
@@ -764,21 +764,21 @@ test "R15: token-aware — TT param type does not count as T usage" {
 
 test "R15e: unused type param in entity produces diag" {
     let src: String = "module m version \"1.0\"; entity Box<T> " + '{'.to_string() + " field x: Int; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "type parameter 'T' in entity 'Box' is never used"), true);
 }
 
 test "R15e: type param used in field produces no R15e diag" {
     let src: String = "module m version \"1.0\"; entity Box<T> " + '{'.to_string() + " field x: T; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "type parameter 'T' in entity 'Box' is never used"), false);
 }
 
 test "R15e: type param used in method return type produces no R15e diag" {
     let src: String = "module m version \"1.0\"; entity Box<T> " + '{'.to_string() + " method get() returns T " + '{'.to_string() + " return 0; " + '}'.to_string() + ' '.to_string() + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "type parameter 'T' in entity 'Box' is never used"), false);
 }

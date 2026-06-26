@@ -8,9 +8,9 @@
 module formatter_format_test version "0.1.0";
 
 import "format.intent";
-import "parser.intent";
-import "ast.intent";
-import "lexer.intent";
+import "../shared/parser.intent";
+import "../shared/ast.intent";
+import "../shared/lexer.intent";
 
 // --- Unit tests: individual emitters ----------------------------------------
 
@@ -36,40 +36,40 @@ test "format_import_decl package form" {
 
 test "format_expr int literal" {
     let mutable children: Array<Expr> = [];
-    let e: Expr = Expr(formatter_ast.ex_int(), 42, "", false, "", children);
+    let e: Expr = Expr(shared_ast.ex_int(), 42, "", false, "", children);
     assert_eq(formatter_format.format_expr(e), "42");
 }
 
 test "format_expr bool literals" {
     let mutable c1: Array<Expr> = [];
-    let t: Expr = Expr(formatter_ast.ex_bool(), 0, "", true, "", c1);
+    let t: Expr = Expr(shared_ast.ex_bool(), 0, "", true, "", c1);
     assert_eq(formatter_format.format_expr(t), "true");
     let mutable c2: Array<Expr> = [];
-    let f: Expr = Expr(formatter_ast.ex_bool(), 0, "", false, "", c2);
+    let f: Expr = Expr(shared_ast.ex_bool(), 0, "", false, "", c2);
     assert_eq(formatter_format.format_expr(f), "false");
 }
 
 test "format_expr string literal re-quotes" {
     let mutable children: Array<Expr> = [];
-    let e: Expr = Expr(formatter_ast.ex_string(), 0, "hello", false, "", children);
+    let e: Expr = Expr(shared_ast.ex_string(), 0, "hello", false, "", children);
     assert_eq(formatter_format.format_expr(e), "\"hello\"");
 }
 
 test "format_expr char literal preserves raw lexeme" {
     let mutable children: Array<Expr> = [];
-    let e: Expr = Expr(formatter_ast.ex_char(), 0, "'a'", false, "", children);
+    let e: Expr = Expr(shared_ast.ex_char(), 0, "'a'", false, "", children);
     assert_eq(formatter_format.format_expr(e), "'a'");
 }
 
 test "format_expr float literal preserves raw lexeme" {
     let mutable children: Array<Expr> = [];
-    let e: Expr = Expr(formatter_ast.ex_float(), 0, "3.14", false, "", children);
+    let e: Expr = Expr(shared_ast.ex_float(), 0, "3.14", false, "", children);
     assert_eq(formatter_format.format_expr(e), "3.14");
 }
 
 test "format_expr ident" {
     let mutable children: Array<Expr> = [];
-    let e: Expr = Expr(formatter_ast.ex_ident(), 0, "", false, "foo", children);
+    let e: Expr = Expr(shared_ast.ex_ident(), 0, "", false, "foo", children);
     assert_eq(formatter_format.format_expr(e), "foo");
 }
 
@@ -77,7 +77,7 @@ test "format_expr ident" {
 
 // Helper: parse a source string and format it. Asserts no parse error.
 public function roundtrip(src: String) returns String {
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     return formatter_format.format_program(prog);
 }
@@ -97,7 +97,7 @@ test "source order: interleaved decl kinds preserve user order (ADR 0042)" {
 
 test "source order: line field populated by parser" {
     let src: String = "module m version \"1.0.0\";\n\nfunction a() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string() + "\n\nfunction b() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string();
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.functions), 2);
     // Module is line 1, blank line is 2, function a is line 3, blank is 4,
@@ -194,7 +194,7 @@ test "trailing: parser populates Program.trailing_comments from EOF token" {
     let src: String = "module m version \"1.0.0\";\n\n"
         + "function f() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string() + "\n\n"
         + "// Trailing note.\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.trailing_comments), 1);
     assert_eq(prog.trailing_comments[0], "// Trailing note.");
@@ -203,7 +203,7 @@ test "trailing: parser populates Program.trailing_comments from EOF token" {
 test "trailing: no trailing comment leaves trailing_comments empty" {
     let src: String = "module m version \"1.0.0\";\n\n"
         + "function f() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.trailing_comments), 0);
 }
@@ -268,7 +268,7 @@ test "body comments: parser populates Stmt.comments_before" {
         + "    // annotated\n"
         + "    return x;\n"
         + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.functions), 1);
     let body: Block = prog.functions[0].body;
@@ -322,7 +322,7 @@ test "inline-after: parser populates Stmt.comment_after" {
         + "    let x: Int = 1; // note\n"
         + "    return x;\n"
         + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.functions), 1);
     let body: Block = prog.functions[0].body;
@@ -337,7 +337,7 @@ test "inline-after: statement without inline comment has empty comment_after" {
         + "    let x: Int = 1;\n"
         + "    return x;\n"
         + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.functions), 1);
     let body: Block = prog.functions[0].body;
@@ -377,7 +377,7 @@ test "module-leading: comments before module survive roundtrip" {
 
 test "module-leading: parser populates ModuleDecl.comments_before" {
     let src: String = "// Header.\nmodule m version \"1.0.0\";\n\nfunction f() returns Int " + '{'.to_string() + " return 0; " + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.module_decl.comments_before), 1);
     assert_eq(prog.module_decl.comments_before[0], "// Header.");
@@ -427,7 +427,7 @@ test "entity comments: parser populates FieldDecl comments_before and comment_af
         + "    // count\n"
         + "    field n: Int; // inline\n"
         + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.entities[0].fields[0].comments_before), 1);
     assert_eq(prog.entities[0].fields[0].comments_before[0], "// count");
@@ -452,7 +452,7 @@ test "end-of-block: parser populates Block.trailing_comments" {
         + "    return 0;\n"
         + "    // tail\n"
         + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     let body: Block = prog.functions[0].body;
     assert_eq(len(body.trailing_comments), 1);
@@ -471,7 +471,7 @@ test "brace-after: inline comment after a function's closing brace round-trips" 
 test "brace-after: parser populates Block.brace_comment_after" {
     let src: String = "module m version \"1.0.0\";\n\n"
         + "function f() returns Int " + '{'.to_string() + " return 1; " + '}'.to_string() + " // note\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     assert_eq(prog.functions[0].body.brace_comment_after, "// note");
 }
@@ -519,7 +519,7 @@ test "contracts: parser populates requires/ensures clauses" {
         + "    requires n >= 0\n"
         + "    ensures result >= 0\n"
         + '{'.to_string() + "\n    return n;\n" + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     let decl: FunctionDecl = prog.functions[0];
     assert_eq(len(decl.requires_clauses), 1);
@@ -565,11 +565,11 @@ test "match: parser populates arms, bindings, and wildcard" {
         + "    " + '}'.to_string() + ";\n"
         + "    return recovered;\n"
         + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     let body: Block = prog.functions[0].body;
     let rhs: Expr = body.stmts[0].expr;
-    assert_eq(rhs.kind, formatter_ast.ex_match());
+    assert_eq(rhs.kind, shared_ast.ex_match());
     assert_eq(len(rhs.match_arms), 2);
     assert_eq(rhs.match_arms[0].variant, "Ok");
     assert_eq(len(rhs.match_arms[0].bindings), 1);
@@ -611,10 +611,10 @@ test "for-in: parser populates loop var, iterable, body" {
         + "    " + '}'.to_string() + "\n"
         + "    return 0;\n"
         + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     let s: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(s.kind, formatter_ast.st_for());
+    assert_eq(s.kind, shared_ast.st_for());
     assert_eq(s.name, "x");
     assert_eq(formatter_format.format_expr(s.expr), "numbers");
 }
@@ -637,11 +637,11 @@ test "try: parser populates ex_try wrapping the inner expr" {
         + "    let x: Int = parse(s)?;\n"
         + "    return x;\n"
         + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     let rhs: Expr = prog.functions[0].body.stmts[0].expr;
-    assert_eq(rhs.kind, formatter_ast.ex_try());
-    assert_eq(rhs.children[0].kind, formatter_ast.ex_call());
+    assert_eq(rhs.kind, shared_ast.ex_try());
+    assert_eq(rhs.children[0].kind, shared_ast.ex_call());
 }
 
 // --- Paren stripping tests (ADR 0043) ---------------------------------------
@@ -751,7 +751,7 @@ test "self-parse: stage2 lexer.intent parses with no errors" {
         Err(_) => "",
     };
     if src != "" {
-        let prog: Program = formatter_parser.parse(src);
+        let prog: Program = shared_parser.parse(src);
         assert_eq(prog.error, "");
     }
 }
@@ -763,7 +763,7 @@ test "self-parse: stage2 ast.intent parses with no errors" {
         Err(_) => "",
     };
     if src != "" {
-        let prog: Program = formatter_parser.parse(src);
+        let prog: Program = shared_parser.parse(src);
         assert_eq(prog.error, "");
     }
 }
@@ -775,7 +775,7 @@ test "self-parse: stage2 parser.intent parses with no errors" {
         Err(_) => "",
     };
     if src != "" {
-        let prog: Program = formatter_parser.parse(src);
+        let prog: Program = shared_parser.parse(src);
         assert_eq(prog.error, "");
     }
 }
@@ -787,7 +787,7 @@ test "self-parse: stage2 format.intent parses with no errors" {
         Err(_) => "",
     };
     if src != "" {
-        let prog: Program = formatter_parser.parse(src);
+        let prog: Program = shared_parser.parse(src);
         assert_eq(prog.error, "");
     }
 }
@@ -805,7 +805,7 @@ public function self_format_one(path: String) returns Void {
         Err(_) => "",
     };
     if src != "" {
-        let prog: Program = formatter_parser.parse(src);
+        let prog: Program = shared_parser.parse(src);
         assert_eq(prog.error, "");
         let out: String = formatter_format.format_program(prog);
         assert_eq(out, src);
@@ -853,14 +853,14 @@ test "implies: round-trip in ensures clause" {
 
 test "implies: parser produces right-associative ex_binop" {
     let src: String = "module m version \"1.0.0\";\n\nfunction f() returns Int " + '{'.to_string() + "\n    let b: Bool = a implies b implies c;\n    return 0;\n" + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     let e: Expr = prog.functions[0].body.stmts[0].expr;
-    assert_eq(e.kind, formatter_ast.ex_binop());
+    assert_eq(e.kind, shared_ast.ex_binop());
     assert_eq(e.name, "implies");
     // Right-assoc: lhs=a, rhs=(b implies c).
     assert_eq(e.children[0].name, "a");
-    assert_eq(e.children[1].kind, formatter_ast.ex_binop());
+    assert_eq(e.children[1].kind, shared_ast.ex_binop());
     assert_eq(e.children[1].name, "implies");
 }
 
@@ -878,11 +878,11 @@ test "await: round-trip in async function body" {
 
 test "await: parser produces ex_await wrapping inner expr" {
     let src: String = "module m version \"1.0.0\";\n\nasync function f() returns Int " + '{'.to_string() + "\n    let x: Int = await g();\n    return x;\n" + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     let rhs: Expr = prog.functions[0].body.stmts[0].expr;
-    assert_eq(rhs.kind, formatter_ast.ex_await());
-    assert_eq(rhs.children[0].kind, formatter_ast.ex_call());
+    assert_eq(rhs.kind, shared_ast.ex_await());
+    assert_eq(rhs.children[0].kind, shared_ast.ex_call());
 }
 
 // --- forall / exists quantifier tests (Phase 43) ----------------------------
@@ -916,12 +916,12 @@ test "forall: parser produces ex_forall with correct variable name" {
         + '{'.to_string() + "\n"
         + "    return true;\n"
         + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     let decl: FunctionDecl = prog.functions[0];
     assert_eq(len(decl.requires_clauses), 1);
     let e: Expr = decl.requires_clauses[0];
-    assert_eq(e.kind, formatter_ast.ex_forall());
+    assert_eq(e.kind, shared_ast.ex_forall());
     assert_eq(e.name, "i");
     assert_eq(len(e.children), 2);
 }
@@ -956,7 +956,7 @@ test "generics: entity type param stored in type_params array" {
         + "entity Box<T> " + '{'.to_string() + "\n"
         + "    field val: T;\n"
         + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.entities), 1);
     assert_eq(len(prog.entities[0].type_params), 1);
@@ -988,11 +988,11 @@ test "generics: generic constructor call parsed as ex_call with generic callee" 
         + "    let s: Stack<Int> = Stack<Int>();\n"
         + "    return 0;\n"
         + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     let rhs: Expr = prog.functions[0].body.stmts[0].expr;
-    assert_eq(rhs.kind, formatter_ast.ex_call());
-    assert_eq(rhs.children[0].kind, formatter_ast.ex_ident());
+    assert_eq(rhs.kind, shared_ast.ex_call());
+    assert_eq(rhs.children[0].kind, shared_ast.ex_ident());
     assert_eq(rhs.children[0].name, "Stack<Int>");
 }
 
@@ -1024,7 +1024,7 @@ test "Fn type: Fn(Int) -> Int param parses correctly" {
         + "function apply(f: Fn(Int) -> Int) returns Int " + '{'.to_string() + "\n"
         + "    return f(0);\n"
         + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.functions), 1);
     assert_eq(prog.functions[0].params[0].type_name, "Fn(Int) -> Int");
@@ -1099,7 +1099,7 @@ test "annotations: parser captures annotation string on TestDecl" {
         + "test \"annotated\" " + '{'.to_string() + "\n"
         + "    assert(true);\n"
         + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.tests), 1);
     let t: TestDecl = prog.tests[0];
@@ -1112,7 +1112,7 @@ test "annotations: test without annotation has empty annotations list" {
         + "test \"plain\" " + '{'.to_string() + "\n"
         + "    assert(true);\n"
         + '}'.to_string() + "\n\n";
-    let prog: Program = formatter_parser.parse(src);
+    let prog: Program = shared_parser.parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.tests), 1);
     let t: TestDecl = prog.tests[0];

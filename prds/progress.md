@@ -843,3 +843,23 @@ lib/. `intentc build --target rust --emit` and `--target js --emit` both succeed
 the `../` cross-directory module import resolves correctly (registry.go:509 joins the
 entry file's dir + import path, `..` handled by filepath.Clean). The selfhost/shared
 restructure needs NO stage1 change. Greenlight for 44.3.
+
+---
+
+## 2026-06-26 — Phase 44.3: selfhost/shared/ + re-point formatter & linter
+
+git mv lexer/ast/parser → selfhost/shared/; renamed modules formatter_{lexer,ast,
+parser} → shared_{...} (~601 qualified refs); formatter AND linter files (still in
+selfhost/formatter/) now import "../shared/...". Updated selfcheck.sh (checks
+shared/{lexer,ast,parser} + formatter/format) and difftest.sh probe imports. The
+identifier-only renames preserved canonical formatting (no reformat needed).
+
+Gates green: build OK; selfcheck-formatter 4 EQUAL (shared/lexer, shared/ast,
+shared/parser, formatter/format); diff-formatter 22/22; diff-linter 26/26 (linter
+still in formatter/ but importing ../shared/); go test ./... pass; stage2 suites
+207 (format_test) + 188 (lint_test) rust+js. Stray main.js js-emit artifact removed;
+/main.js + /lint_main.js added to .gitignore.
+
+NOTE: linter still physically in selfhost/formatter/ — it relocates to selfhost/
+linter/ in 44.4 (imports already ../shared/, so the move won't change them since
+formatter/ and linter/ are both siblings of shared/).

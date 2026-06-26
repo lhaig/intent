@@ -18,7 +18,7 @@
 //   - Unused fields per kind are populated with defaults ("" / false /
 //     empty_block() / empty_expr()). Wasteful but uniform; same trade
 //     Token already makes.
-module formatter_ast version "0.1.0";
+module shared_ast version "0.1.0";
 
 // --- Statement kind constants -----------------------------------------------
 public function st_let() returns Int {
@@ -616,7 +616,7 @@ public entity Program {
 
 // --- Helpers ----------------------------------------------------------------
 // Helper to initialise an empty Array<String>. Used by Stmt.comments_before
-// — mirrors the same function in formatter_lexer so that Stmt's constructor
+// — mirrors the same function in shared_lexer so that Stmt's constructor
 // body can initialise the field without a module prefix.
 public function empty_string_array() returns Array<String> {
     let mutable a: Array<String> = [];

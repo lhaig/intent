@@ -1,8 +1,8 @@
-module formatter_parser version "0.1.0";
+module shared_parser version "0.1.0";
 
-import "lexer.intent";
+import "../shared/lexer.intent";
 
-import "ast.intent";
+import "../shared/ast.intent";
 
 public entity Parser {
     field tokens: Array<Token>;
@@ -14,15 +14,15 @@ public entity Parser {
     field tp_columns: Array<Int>;
 
     constructor(source: String) {
-        self.tokens = formatter_lexer.lex(source);
+        self.tokens = shared_lexer.lex(source);
         self.position = 0;
         self.error = "";
-        self.tp_lines = formatter_ast.empty_int_array();
-        self.tp_columns = formatter_ast.empty_int_array();
+        self.tp_lines = shared_ast.empty_int_array();
+        self.tp_columns = shared_ast.empty_int_array();
     }
 
     method at_end() returns Bool {
-        return self.peek_kind() == formatter_lexer.tk_eof();
+        return self.peek_kind() == shared_lexer.tk_eof();
     }
 
     method peek_kind() returns Int {
@@ -36,7 +36,7 @@ public entity Parser {
     method peek_n(n: Int) returns Int {
         let idx: Int = self.position + n;
         if idx >= len(self.tokens) {
-            return formatter_lexer.tk_eof();
+            return shared_lexer.tk_eof();
         }
         return self.tokens[idx].kind;
     }
@@ -89,32 +89,32 @@ public entity Parser {
     }
 
     method parse_module_decl() returns ModuleDecl {
-        let module_tok: Token = self.expect(formatter_lexer.kw_module(), "'module' keyword");
-        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "module name");
-        self.expect(formatter_lexer.kw_version(), "'version' keyword");
-        let ver_tok: Token = self.expect(formatter_lexer.tk_string(), "version string literal");
-        self.expect(formatter_lexer.tk_semicolon(), "';' after module declaration");
+        let module_tok: Token = self.expect(shared_lexer.kw_module(), "'module' keyword");
+        let name_tok: Token = self.expect(shared_lexer.tk_ident(), "module name");
+        self.expect(shared_lexer.kw_version(), "'version' keyword");
+        let ver_tok: Token = self.expect(shared_lexer.tk_string(), "version string literal");
+        self.expect(shared_lexer.tk_semicolon(), "';' after module declaration");
         let mutable md: ModuleDecl = ModuleDecl(name_tok.text, self.unquote(ver_tok.text));
         md.comments_before = module_tok.comments_before;
         return md;
     }
 
     method parse_import_decl(leading_comments: Array<String>) returns ImportDecl {
-        let import_tok: Token = self.expect(formatter_lexer.kw_import_marker(), "'import' keyword");
+        let import_tok: Token = self.expect(shared_lexer.kw_import_marker(), "'import' keyword");
         let line: Int = import_tok.line;
         let cmts: Array<String> = leading_comments;
-        if self.check(formatter_lexer.tk_string()) {
+        if self.check(shared_lexer.tk_string()) {
             let path_tok: Token = self.advance();
-            self.expect(formatter_lexer.tk_semicolon(), "';' after import");
+            self.expect(shared_lexer.tk_semicolon(), "';' after import");
             let mutable imp: ImportDecl = ImportDecl(false, self.unquote(path_tok.text), line, cmts);
             imp.column = import_tok.column;
             return imp;
         }
-        if self.check(formatter_lexer.tk_ident()) {
+        if self.check(shared_lexer.tk_ident()) {
             let pkg_tok: Token = self.advance();
             let mutable path: String = pkg_tok.text;
-            while self.check_consume(formatter_lexer.tk_dot()) {
-                if self.check(formatter_lexer.tk_ident()) {
+            while self.check_consume(shared_lexer.tk_dot()) {
+                if self.check(shared_lexer.tk_ident()) {
                     let seg: Token = self.advance();
                     path = path + "." + seg.text;
                 } else {
@@ -124,7 +124,7 @@ public entity Parser {
                     return imp_err;
                 }
             }
-            self.expect(formatter_lexer.tk_semicolon(), "';' after import");
+            self.expect(shared_lexer.tk_semicolon(), "';' after import");
             let mutable imp_pkg: ImportDecl = ImportDecl(true, path, line, cmts);
             imp_pkg.column = import_tok.column;
             return imp_pkg;
@@ -136,8 +136,8 @@ public entity Parser {
     }
 
     method parse_param() returns Param {
-        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "parameter name");
-        self.expect(formatter_lexer.tk_colon(), "':' after parameter name");
+        let name_tok: Token = self.expect(shared_lexer.tk_ident(), "parameter name");
+        self.expect(shared_lexer.tk_colon(), "':' after parameter name");
         let type_name: String = self.parse_type_name();
         let mutable p: Param = Param(name_tok.text, type_name);
         p.line = name_tok.line;
@@ -147,19 +147,19 @@ public entity Parser {
 
     method parse_type_param_list() returns Array<String> {
         let mutable params: Array<String> = [];
-        self.tp_lines = formatter_ast.empty_int_array();
-        self.tp_columns = formatter_ast.empty_int_array();
-        if not self.check(formatter_lexer.tk_lt()) {
+        self.tp_lines = shared_ast.empty_int_array();
+        self.tp_columns = shared_ast.empty_int_array();
+        if not self.check(shared_lexer.tk_lt()) {
             return params;
         }
         self.advance();
-        if self.check(formatter_lexer.tk_ident()) {
+        if self.check(shared_lexer.tk_ident()) {
             let first: Token = self.advance();
             params.push(first.text);
             self.tp_lines.push(first.line);
             self.tp_columns.push(first.column);
-            while self.check_consume(formatter_lexer.tk_comma()) {
-                if self.check(formatter_lexer.tk_ident()) {
+            while self.check_consume(shared_lexer.tk_comma()) {
+                if self.check(shared_lexer.tk_ident()) {
                     let next: Token = self.advance();
                     params.push(next.text);
                     self.tp_lines.push(next.line);
@@ -170,7 +170,7 @@ public entity Parser {
                 }
             }
         }
-        self.expect(formatter_lexer.tk_gt(), "'>' to close type parameter list");
+        self.expect(shared_lexer.tk_gt(), "'>' to close type parameter list");
         return params;
     }
 
@@ -180,13 +180,13 @@ public entity Parser {
         let mutable i: Int = start;
         while depth > 0 and i < len(self.tokens) {
             let k: Int = self.tokens[i].kind;
-            if k == formatter_lexer.tk_lt() {
+            if k == shared_lexer.tk_lt() {
                 depth = depth + 1;
             } else {
-                if k == formatter_lexer.tk_gt() {
+                if k == shared_lexer.tk_gt() {
                     depth = depth - 1;
                 } else {
-                    if k == formatter_lexer.tk_eof() {
+                    if k == shared_lexer.tk_eof() {
                         return false;
                     }
                 }
@@ -199,7 +199,7 @@ public entity Parser {
         if i >= len(self.tokens) {
             return false;
         }
-        return self.tokens[i].kind == formatter_lexer.tk_lparen();
+        return self.tokens[i].kind == shared_lexer.tk_lparen();
     }
 
     method consume_generic_type_args() returns String {
@@ -207,19 +207,19 @@ public entity Parser {
         let mutable s: String = "<";
         let mutable depth: Int = 1;
         while depth > 0 and not self.at_end() {
-            if self.check(formatter_lexer.tk_lt()) {
+            if self.check(shared_lexer.tk_lt()) {
                 self.advance();
                 s = s + "<";
                 depth = depth + 1;
             } else {
-                if self.check(formatter_lexer.tk_gt()) {
+                if self.check(shared_lexer.tk_gt()) {
                     self.advance();
                     depth = depth - 1;
                     if depth > 0 {
                         s = s + ">";
                     }
                 } else {
-                    if self.check(formatter_lexer.tk_comma()) {
+                    if self.check(shared_lexer.tk_comma()) {
                         self.advance();
                         s = s + ", ";
                     } else {
@@ -237,42 +237,42 @@ public entity Parser {
         let tok: Token = self.advance();
         let mutable name: String = tok.text;
         // Phase 44: `Fn(T1, T2) -> R` function type.
-        if name == "Fn" and self.check(formatter_lexer.tk_lparen()) {
+        if name == "Fn" and self.check(shared_lexer.tk_lparen()) {
             self.advance();
             name = "Fn(";
             let mutable first_param: Bool = true;
-            while not self.check(formatter_lexer.tk_rparen()) and not self.at_end() and self.error == "" {
+            while not self.check(shared_lexer.tk_rparen()) and not self.at_end() and self.error == "" {
                 if not first_param {
-                    self.expect(formatter_lexer.tk_comma(), "',' between Fn param types");
+                    self.expect(shared_lexer.tk_comma(), "',' between Fn param types");
                     name = name + ", ";
                 }
                 name = name + self.parse_type_name();
                 first_param = false;
             }
-            self.expect(formatter_lexer.tk_rparen(), "')' to close Fn param types");
+            self.expect(shared_lexer.tk_rparen(), "')' to close Fn param types");
             name = name + ")";
-            self.expect(formatter_lexer.tk_thin_arrow(), "'->' in Fn type");
+            self.expect(shared_lexer.tk_thin_arrow(), "'->' in Fn type");
             let ret: String = self.parse_type_name();
             name = name + " -> " + ret;
             return name;
         }
-        if self.check_consume(formatter_lexer.tk_lt()) {
+        if self.check_consume(shared_lexer.tk_lt()) {
             name = name + "<";
             let mutable depth: Int = 1;
             while depth > 0 and not self.at_end() {
-                if self.check(formatter_lexer.tk_lt()) {
+                if self.check(shared_lexer.tk_lt()) {
                     self.advance();
                     name = name + "<";
                     depth = depth + 1;
                 } else {
-                    if self.check(formatter_lexer.tk_gt()) {
+                    if self.check(shared_lexer.tk_gt()) {
                         self.advance();
                         depth = depth - 1;
                         if depth > 0 {
                             name = name + ">";
                         }
                     } else {
-                        if self.check(formatter_lexer.tk_comma()) {
+                        if self.check(shared_lexer.tk_comma()) {
                             self.advance();
                             name = name + ", ";
                         } else {
@@ -296,15 +296,15 @@ public entity Parser {
         let mutable is_entry: Bool = false;
         let mutable scanning_modifiers: Bool = true;
         while scanning_modifiers {
-            if self.check(formatter_lexer.kw_public_marker()) {
+            if self.check(shared_lexer.kw_public_marker()) {
                 self.advance();
                 is_public = true;
             } else {
-                if self.check(formatter_lexer.kw_async_marker()) {
+                if self.check(shared_lexer.kw_async_marker()) {
                     self.advance();
                     is_async = true;
                 } else {
-                    if self.check(formatter_lexer.kw_entry()) {
+                    if self.check(shared_lexer.kw_entry()) {
                         self.advance();
                         is_entry = true;
                     } else {
@@ -313,19 +313,19 @@ public entity Parser {
                 }
             }
         }
-        self.expect(formatter_lexer.kw_function(), "'function' keyword");
-        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "function name");
+        self.expect(shared_lexer.kw_function(), "'function' keyword");
+        let name_tok: Token = self.expect(shared_lexer.tk_ident(), "function name");
         let type_params: Array<String> = self.parse_type_param_list();
-        self.expect(formatter_lexer.tk_lparen(), "'(' after function name");
+        self.expect(shared_lexer.tk_lparen(), "'(' after function name");
         let mutable params: Array<Param> = [];
-        if not self.check(formatter_lexer.tk_rparen()) {
+        if not self.check(shared_lexer.tk_rparen()) {
             params.push(self.parse_param());
-            while self.check_consume(formatter_lexer.tk_comma()) {
+            while self.check_consume(shared_lexer.tk_comma()) {
                 params.push(self.parse_param());
             }
         }
-        self.expect(formatter_lexer.tk_rparen(), "')' to close parameter list");
-        self.expect(formatter_lexer.kw_returns(), "'returns' after parameter list");
+        self.expect(shared_lexer.tk_rparen(), "')' to close parameter list");
+        self.expect(shared_lexer.kw_returns(), "'returns' after parameter list");
         let return_type: String = self.parse_type_name();
         let mutable reqs: Array<Expr> = [];
         let mutable enss: Array<Expr> = [];
@@ -357,7 +357,7 @@ public entity Parser {
     }
 
     method is_contract_kw() returns Bool {
-        if not self.check(formatter_lexer.tk_ident()) {
+        if not self.check(shared_lexer.tk_ident()) {
             return false;
         }
         let t: String = self.peek_text();
@@ -365,15 +365,15 @@ public entity Parser {
     }
 
     method parse_block() returns Block {
-        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start block");
+        self.expect(shared_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start block");
         let mutable stmts: Array<Stmt> = [];
-        while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
+        while not self.at_end() and not self.check(shared_lexer.tk_rbrace()) and self.error == "" {
             let cmts: Array<String> = self.tokens[self.position].comments_before;
             let mutable st: Stmt = self.parse_statement();
             st.comments_before = cmts;
             stmts.push(st);
         }
-        let rbrace: Token = self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close block");
+        let rbrace: Token = self.expect(shared_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close block");
         let mutable blk: Block = Block(stmts);
         blk.trailing_comments = rbrace.comments_before;
         blk.brace_comment_after = rbrace.comment_after;
@@ -381,51 +381,51 @@ public entity Parser {
     }
 
     method parse_statement() returns Stmt {
-        if self.check(formatter_lexer.kw_let()) {
+        if self.check(shared_lexer.kw_let()) {
             return self.parse_let_stmt();
         }
-        if self.check(formatter_lexer.kw_return()) {
+        if self.check(shared_lexer.kw_return()) {
             return self.parse_return_stmt();
         }
-        if self.check(formatter_lexer.kw_if()) {
+        if self.check(shared_lexer.kw_if()) {
             return self.parse_if_stmt();
         }
-        if self.check(formatter_lexer.kw_while()) {
+        if self.check(shared_lexer.kw_while()) {
             return self.parse_while_stmt();
         }
-        if self.check(formatter_lexer.kw_for_marker()) {
+        if self.check(shared_lexer.kw_for_marker()) {
             return self.parse_for_stmt();
         }
         return self.parse_expr_stmt();
     }
 
     method parse_for_stmt() returns Stmt {
-        let for_tok: Token = self.expect(formatter_lexer.kw_for_marker(), "'for'");
-        let var_tok: Token = self.expect(formatter_lexer.tk_ident(), "loop variable");
-        self.expect(formatter_lexer.tk_ident(), "'in' in for loop");
+        let for_tok: Token = self.expect(shared_lexer.kw_for_marker(), "'for'");
+        let var_tok: Token = self.expect(shared_lexer.tk_ident(), "loop variable");
+        self.expect(shared_lexer.tk_ident(), "'in' in for loop");
         let iter: Expr = self.parse_expr();
         let body: Block = self.parse_block();
-        let mutable st: Stmt = Stmt(formatter_ast.st_for(), iter, var_tok.text, "", false, body, formatter_ast.empty_block(), false);
+        let mutable st: Stmt = Stmt(shared_ast.st_for(), iter, var_tok.text, "", false, body, shared_ast.empty_block(), false);
         st.line = for_tok.line;
         st.column = for_tok.column;
         return st;
     }
 
     method parse_let_stmt() returns Stmt {
-        let let_tok: Token = self.expect(formatter_lexer.kw_let(), "'let'");
+        let let_tok: Token = self.expect(shared_lexer.kw_let(), "'let'");
         let mutable is_mut: Bool = false;
-        if self.check_consume(formatter_lexer.kw_mutable()) {
+        if self.check_consume(shared_lexer.kw_mutable()) {
             is_mut = true;
         }
-        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "binding name");
+        let name_tok: Token = self.expect(shared_lexer.tk_ident(), "binding name");
         let mutable type_name: String = "";
-        if self.check_consume(formatter_lexer.tk_colon()) {
+        if self.check_consume(shared_lexer.tk_colon()) {
             type_name = self.parse_type_name();
         }
-        self.expect(formatter_lexer.tk_assign(), "'=' in let binding");
+        self.expect(shared_lexer.tk_assign(), "'=' in let binding");
         let rhs: Expr = self.parse_expr();
-        let semi: Token = self.expect(formatter_lexer.tk_semicolon(), "';' to end let statement");
-        let mutable st: Stmt = Stmt(formatter_ast.st_let(), rhs, name_tok.text, type_name, is_mut, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
+        let semi: Token = self.expect(shared_lexer.tk_semicolon(), "';' to end let statement");
+        let mutable st: Stmt = Stmt(shared_ast.st_let(), rhs, name_tok.text, type_name, is_mut, shared_ast.empty_block(), shared_ast.empty_block(), false);
         st.comment_after = semi.comment_after;
         st.line = let_tok.line;
         st.column = let_tok.column;
@@ -433,13 +433,13 @@ public entity Parser {
     }
 
     method parse_return_stmt() returns Stmt {
-        let ret_tok: Token = self.expect(formatter_lexer.kw_return(), "'return'");
-        let mutable rhs: Expr = formatter_ast.empty_expr();
-        if not self.check(formatter_lexer.tk_semicolon()) {
+        let ret_tok: Token = self.expect(shared_lexer.kw_return(), "'return'");
+        let mutable rhs: Expr = shared_ast.empty_expr();
+        if not self.check(shared_lexer.tk_semicolon()) {
             rhs = self.parse_expr();
         }
-        let semi: Token = self.expect(formatter_lexer.tk_semicolon(), "';' to end return statement");
-        let mutable st: Stmt = Stmt(formatter_ast.st_return(), rhs, "", "", false, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
+        let semi: Token = self.expect(shared_lexer.tk_semicolon(), "';' to end return statement");
+        let mutable st: Stmt = Stmt(shared_ast.st_return(), rhs, "", "", false, shared_ast.empty_block(), shared_ast.empty_block(), false);
         st.comment_after = semi.comment_after;
         st.line = ret_tok.line;
         st.column = ret_tok.column;
@@ -447,14 +447,14 @@ public entity Parser {
     }
 
     method parse_if_stmt() returns Stmt {
-        let if_tok: Token = self.expect(formatter_lexer.kw_if(), "'if'");
+        let if_tok: Token = self.expect(shared_lexer.kw_if(), "'if'");
         let cond: Expr = self.parse_expr();
         let then_blk: Block = self.parse_block();
-        let mutable else_blk: Block = formatter_ast.empty_block();
+        let mutable else_blk: Block = shared_ast.empty_block();
         let mutable has_else: Bool = false;
-        if self.check_consume(formatter_lexer.kw_else()) {
+        if self.check_consume(shared_lexer.kw_else()) {
             has_else = true;
-            if self.check(formatter_lexer.kw_if()) {
+            if self.check(shared_lexer.kw_if()) {
                 let mutable inner: Array<Stmt> = [];
                 inner.push(self.parse_if_stmt());
                 else_blk = Block(inner);
@@ -462,17 +462,17 @@ public entity Parser {
                 else_blk = self.parse_block();
             }
         }
-        let mutable st: Stmt = Stmt(formatter_ast.st_if(), cond, "", "", false, then_blk, else_blk, has_else);
+        let mutable st: Stmt = Stmt(shared_ast.st_if(), cond, "", "", false, then_blk, else_blk, has_else);
         st.line = if_tok.line;
         st.column = if_tok.column;
         return st;
     }
 
     method parse_while_stmt() returns Stmt {
-        let while_tok: Token = self.expect(formatter_lexer.kw_while(), "'while'");
+        let while_tok: Token = self.expect(shared_lexer.kw_while(), "'while'");
         let cond: Expr = self.parse_expr();
         let body: Block = self.parse_block();
-        let mutable st: Stmt = Stmt(formatter_ast.st_while(), cond, "", "", false, body, formatter_ast.empty_block(), false);
+        let mutable st: Stmt = Stmt(shared_ast.st_while(), cond, "", "", false, body, shared_ast.empty_block(), false);
         st.line = while_tok.line;
         st.column = while_tok.column;
         return st;
@@ -481,8 +481,8 @@ public entity Parser {
     method parse_expr_stmt() returns Stmt {
         let first_tok: Token = self.tokens[self.position];
         let e: Expr = self.parse_expr();
-        let semi: Token = self.expect(formatter_lexer.tk_semicolon(), "';' to end expression statement");
-        let mutable st: Stmt = Stmt(formatter_ast.st_expr(), e, "", "", false, formatter_ast.empty_block(), formatter_ast.empty_block(), false);
+        let semi: Token = self.expect(shared_lexer.tk_semicolon(), "';' to end expression statement");
+        let mutable st: Stmt = Stmt(shared_ast.st_expr(), e, "", "", false, shared_ast.empty_block(), shared_ast.empty_block(), false);
         st.comment_after = semi.comment_after;
         st.line = first_tok.line;
         st.column = first_tok.column;
@@ -495,60 +495,60 @@ public entity Parser {
 
     method parse_assign() returns Expr {
         let lhs: Expr = self.parse_or();
-        if self.check(formatter_lexer.kw_implies_marker()) {
+        if self.check(shared_lexer.kw_implies_marker()) {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_assign();
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            return Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            return Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
-        if self.check(formatter_lexer.tk_assign()) {
+        if self.check(shared_lexer.tk_assign()) {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_assign();
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            return Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            return Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
         return lhs;
     }
 
     method parse_or() returns Expr {
         let mutable lhs: Expr = self.parse_and();
-        while self.check(formatter_lexer.kw_or()) {
+        while self.check(shared_lexer.kw_or()) {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_and();
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            lhs = Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
         return lhs;
     }
 
     method parse_and() returns Expr {
         let mutable lhs: Expr = self.parse_eq();
-        while self.check(formatter_lexer.kw_and()) {
+        while self.check(shared_lexer.kw_and()) {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_eq();
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            lhs = Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
         return lhs;
     }
 
     method parse_eq() returns Expr {
         let mutable lhs: Expr = self.parse_cmp();
-        while self.check(formatter_lexer.tk_eq()) or self.check(formatter_lexer.tk_neq()) {
+        while self.check(shared_lexer.tk_eq()) or self.check(shared_lexer.tk_neq()) {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_cmp();
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            lhs = Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
         return lhs;
     }
@@ -561,22 +561,22 @@ public entity Parser {
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            lhs = Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
         return lhs;
     }
 
     method is_cmp_op() returns Bool {
-        if self.check(formatter_lexer.tk_lt()) {
+        if self.check(shared_lexer.tk_lt()) {
             return true;
         }
-        if self.check(formatter_lexer.tk_gt()) {
+        if self.check(shared_lexer.tk_gt()) {
             return true;
         }
-        if self.check(formatter_lexer.tk_leq()) {
+        if self.check(shared_lexer.tk_leq()) {
             return true;
         }
-        if self.check(formatter_lexer.tk_geq()) {
+        if self.check(shared_lexer.tk_geq()) {
             return true;
         }
         return false;
@@ -584,25 +584,25 @@ public entity Parser {
 
     method parse_range() returns Expr {
         let lhs: Expr = self.parse_add();
-        if self.check_consume(formatter_lexer.tk_dotdot()) {
+        if self.check_consume(shared_lexer.tk_dotdot()) {
             let rhs: Expr = self.parse_add();
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            return Expr(formatter_ast.ex_range(), 0, "", false, "", children);
+            return Expr(shared_ast.ex_range(), 0, "", false, "", children);
         }
         return lhs;
     }
 
     method parse_add() returns Expr {
         let mutable lhs: Expr = self.parse_mul();
-        while self.check(formatter_lexer.tk_plus()) or self.check(formatter_lexer.tk_minus()) {
+        while self.check(shared_lexer.tk_plus()) or self.check(shared_lexer.tk_minus()) {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_mul();
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            lhs = Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
         return lhs;
     }
@@ -615,52 +615,52 @@ public entity Parser {
             let mutable children: Array<Expr> = [];
             children.push(lhs);
             children.push(rhs);
-            lhs = Expr(formatter_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
         }
         return lhs;
     }
 
     method is_mul_op() returns Bool {
-        if self.check(formatter_lexer.tk_star()) {
+        if self.check(shared_lexer.tk_star()) {
             return true;
         }
-        if self.check(formatter_lexer.tk_slash()) {
+        if self.check(shared_lexer.tk_slash()) {
             return true;
         }
-        if self.check(formatter_lexer.tk_percent()) {
+        if self.check(shared_lexer.tk_percent()) {
             return true;
         }
         return false;
     }
 
     method parse_unary() returns Expr {
-        if self.check(formatter_lexer.tk_minus()) {
+        if self.check(shared_lexer.tk_minus()) {
             self.advance();
             let operand: Expr = self.parse_unary();
             let mutable children: Array<Expr> = [];
             children.push(operand);
-            return Expr(formatter_ast.ex_unary(), 0, "", false, "-", children);
+            return Expr(shared_ast.ex_unary(), 0, "", false, "-", children);
         }
-        if self.check(formatter_lexer.kw_not()) {
+        if self.check(shared_lexer.kw_not()) {
             self.advance();
             let operand: Expr = self.parse_unary();
             let mutable children: Array<Expr> = [];
             children.push(operand);
-            return Expr(formatter_ast.ex_unary(), 0, "", false, "not", children);
+            return Expr(shared_ast.ex_unary(), 0, "", false, "not", children);
         }
-        if self.check(formatter_lexer.kw_await_marker()) {
+        if self.check(shared_lexer.kw_await_marker()) {
             self.advance();
             let operand: Expr = self.parse_unary();
             let mutable children: Array<Expr> = [];
             children.push(operand);
-            return Expr(formatter_ast.ex_await(), 0, "", false, "", children);
+            return Expr(shared_ast.ex_await(), 0, "", false, "", children);
         }
-        if self.check(formatter_lexer.kw_spawn_marker()) {
+        if self.check(shared_lexer.kw_spawn_marker()) {
             self.advance();
             let operand: Expr = self.parse_unary();
             let mutable children: Array<Expr> = [];
             children.push(operand);
-            return Expr(formatter_ast.ex_spawn(), 0, "", false, "", children);
+            return Expr(shared_ast.ex_spawn(), 0, "", false, "", children);
         }
         return self.parse_postfix();
     }
@@ -668,36 +668,36 @@ public entity Parser {
     method parse_postfix() returns Expr {
         let mutable e: Expr = self.parse_primary();
         while true {
-            if self.check_consume(formatter_lexer.tk_lparen()) {
+            if self.check_consume(shared_lexer.tk_lparen()) {
                 let mutable children: Array<Expr> = [];
                 children.push(e);
-                if not self.check(formatter_lexer.tk_rparen()) {
+                if not self.check(shared_lexer.tk_rparen()) {
                     children.push(self.parse_expr());
-                    while self.check_consume(formatter_lexer.tk_comma()) {
+                    while self.check_consume(shared_lexer.tk_comma()) {
                         children.push(self.parse_expr());
                     }
                 }
-                self.expect(formatter_lexer.tk_rparen(), "')' to close call");
-                e = Expr(formatter_ast.ex_call(), 0, "", false, "", children);
+                self.expect(shared_lexer.tk_rparen(), "')' to close call");
+                e = Expr(shared_ast.ex_call(), 0, "", false, "", children);
             } else {
-                if self.check_consume(formatter_lexer.tk_lbracket()) {
+                if self.check_consume(shared_lexer.tk_lbracket()) {
                     let idx: Expr = self.parse_expr();
-                    self.expect(formatter_lexer.tk_rbracket(), "']' to close index");
+                    self.expect(shared_lexer.tk_rbracket(), "']' to close index");
                     let mutable children: Array<Expr> = [];
                     children.push(e);
                     children.push(idx);
-                    e = Expr(formatter_ast.ex_index(), 0, "", false, "", children);
+                    e = Expr(shared_ast.ex_index(), 0, "", false, "", children);
                 } else {
-                    if self.check_consume(formatter_lexer.tk_dot()) {
-                        let fld: Token = self.expect(formatter_lexer.tk_ident(), "field name after '.'");
+                    if self.check_consume(shared_lexer.tk_dot()) {
+                        let fld: Token = self.expect(shared_lexer.tk_ident(), "field name after '.'");
                         let mutable children: Array<Expr> = [];
                         children.push(e);
-                        e = Expr(formatter_ast.ex_field(), 0, "", false, fld.text, children);
+                        e = Expr(shared_ast.ex_field(), 0, "", false, fld.text, children);
                     } else {
-                        if self.check_consume(formatter_lexer.tk_question()) {
+                        if self.check_consume(shared_lexer.tk_question()) {
                             let mutable children: Array<Expr> = [];
                             children.push(e);
-                            e = Expr(formatter_ast.ex_try(), 0, "", false, "", children);
+                            e = Expr(shared_ast.ex_try(), 0, "", false, "", children);
                         } else {
                             return e;
                         }
@@ -710,122 +710,122 @@ public entity Parser {
 
     method parse_primary() returns Expr {
         let kind: Int = self.peek_kind();
-        if kind == formatter_lexer.kw_match_marker() {
+        if kind == shared_lexer.kw_match_marker() {
             return self.parse_match_expr();
         }
-        if kind == formatter_lexer.kw_forall_marker() {
-            return self.parse_quantifier(formatter_ast.ex_forall());
+        if kind == shared_lexer.kw_forall_marker() {
+            return self.parse_quantifier(shared_ast.ex_forall());
         }
-        if kind == formatter_lexer.kw_exists_marker() {
-            return self.parse_quantifier(formatter_ast.ex_exists());
+        if kind == shared_lexer.kw_exists_marker() {
+            return self.parse_quantifier(shared_ast.ex_exists());
         }
-        if kind == formatter_lexer.tk_int() {
+        if kind == shared_lexer.tk_int() {
             let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(formatter_ast.ex_int(), formatter_ast.parse_int(tok.text), "", false, "", children);
+            return Expr(shared_ast.ex_int(), shared_ast.parse_int(tok.text), "", false, "", children);
         }
-        if kind == formatter_lexer.tk_string() {
+        if kind == shared_lexer.tk_string() {
             let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(formatter_ast.ex_string(), 0, self.unquote(tok.text), false, "", children);
+            return Expr(shared_ast.ex_string(), 0, self.unquote(tok.text), false, "", children);
         }
-        if kind == formatter_lexer.tk_float() {
+        if kind == shared_lexer.tk_float() {
             let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(formatter_ast.ex_float(), 0, tok.text, false, "", children);
+            return Expr(shared_ast.ex_float(), 0, tok.text, false, "", children);
         }
-        if kind == formatter_lexer.tk_char() {
+        if kind == shared_lexer.tk_char() {
             let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(formatter_ast.ex_char(), 0, tok.text, false, "", children);
+            return Expr(shared_ast.ex_char(), 0, tok.text, false, "", children);
         }
-        if kind == formatter_lexer.kw_true() {
+        if kind == shared_lexer.kw_true() {
             self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(formatter_ast.ex_bool(), 0, "", true, "", children);
+            return Expr(shared_ast.ex_bool(), 0, "", true, "", children);
         }
-        if kind == formatter_lexer.kw_false() {
+        if kind == shared_lexer.kw_false() {
             self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(formatter_ast.ex_bool(), 0, "", false, "", children);
+            return Expr(shared_ast.ex_bool(), 0, "", false, "", children);
         }
-        if kind == formatter_lexer.tk_ident() {
+        if kind == shared_lexer.tk_ident() {
             let tok: Token = self.advance();
-            if self.check(formatter_lexer.tk_lt()) and self.lookahead_is_generic_call() {
+            if self.check(shared_lexer.tk_lt()) and self.lookahead_is_generic_call() {
                 let type_args: String = self.consume_generic_type_args();
                 let mutable children: Array<Expr> = [];
-                return Expr(formatter_ast.ex_ident(), 0, "", false, tok.text + type_args, children);
+                return Expr(shared_ast.ex_ident(), 0, "", false, tok.text + type_args, children);
             }
             let mutable children: Array<Expr> = [];
-            return Expr(formatter_ast.ex_ident(), 0, "", false, tok.text, children);
+            return Expr(shared_ast.ex_ident(), 0, "", false, tok.text, children);
         }
-        if kind == formatter_lexer.tk_lparen() {
+        if kind == shared_lexer.tk_lparen() {
             self.advance();
             let inner: Expr = self.parse_expr();
-            self.expect(formatter_lexer.tk_rparen(), "')' to close parenthesised expression");
+            self.expect(shared_lexer.tk_rparen(), "')' to close parenthesised expression");
             let mutable children: Array<Expr> = [];
             children.push(inner);
-            return Expr(formatter_ast.ex_paren(), 0, "", false, "", children);
+            return Expr(shared_ast.ex_paren(), 0, "", false, "", children);
         }
-        if kind == formatter_lexer.tk_lbracket() {
+        if kind == shared_lexer.tk_lbracket() {
             self.advance();
             let mutable elems: Array<Expr> = [];
-            if not self.check(formatter_lexer.tk_rbracket()) {
+            if not self.check(shared_lexer.tk_rbracket()) {
                 elems.push(self.parse_expr());
-                while self.check_consume(formatter_lexer.tk_comma()) {
+                while self.check_consume(shared_lexer.tk_comma()) {
                     elems.push(self.parse_expr());
                 }
             }
-            self.expect(formatter_lexer.tk_rbracket(), "']' to close array literal");
-            return Expr(formatter_ast.ex_array(), 0, "", false, "", elems);
+            self.expect(shared_lexer.tk_rbracket(), "']' to close array literal");
+            return Expr(shared_ast.ex_array(), 0, "", false, "", elems);
         }
         // Phase 44: lambda expression `|p: T, ...| -> R => body`.
-        if kind == formatter_lexer.tk_pipe() {
+        if kind == shared_lexer.tk_pipe() {
             return self.parse_lambda();
         }
         self.fail("expected expression");
-        return formatter_ast.empty_expr();
+        return shared_ast.empty_expr();
     }
 
     method parse_lambda() returns Expr {
-        self.expect(formatter_lexer.tk_pipe(), "'|' to start lambda params");
+        self.expect(shared_lexer.tk_pipe(), "'|' to start lambda params");
         let mutable params: Array<Param> = [];
-        while not self.check(formatter_lexer.tk_pipe()) and not self.at_end() and self.error == "" {
-            let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "lambda parameter name");
-            self.expect(formatter_lexer.tk_colon(), "':' after lambda parameter name");
+        while not self.check(shared_lexer.tk_pipe()) and not self.at_end() and self.error == "" {
+            let name_tok: Token = self.expect(shared_lexer.tk_ident(), "lambda parameter name");
+            self.expect(shared_lexer.tk_colon(), "':' after lambda parameter name");
             let ptype: String = self.parse_type_name();
             params.push(Param(name_tok.text, ptype));
-            if not self.check(formatter_lexer.tk_pipe()) {
-                self.expect(formatter_lexer.tk_comma(), "',' between lambda parameters");
+            if not self.check(shared_lexer.tk_pipe()) {
+                self.expect(shared_lexer.tk_comma(), "',' between lambda parameters");
             }
         }
-        self.expect(formatter_lexer.tk_pipe(), "'|' to close lambda params");
+        self.expect(shared_lexer.tk_pipe(), "'|' to close lambda params");
         let mutable ret: String = "";
-        if self.check(formatter_lexer.tk_thin_arrow()) {
+        if self.check(shared_lexer.tk_thin_arrow()) {
             self.advance();
             ret = self.parse_type_name();
         }
-        self.expect(formatter_lexer.tk_arrow(), "'=>' in lambda");
+        self.expect(shared_lexer.tk_arrow(), "'=>' in lambda");
         let body: Expr = self.parse_expr();
         let mutable children: Array<Expr> = [];
         children.push(body);
-        let mutable e: Expr = Expr(formatter_ast.ex_lambda(), 0, ret, false, "", children);
+        let mutable e: Expr = Expr(shared_ast.ex_lambda(), 0, ret, false, "", children);
         e.lambda_params = params;
         return e;
     }
 
     method parse_match_expr() returns Expr {
-        self.expect(formatter_lexer.kw_match_marker(), "'match'");
+        self.expect(shared_lexer.kw_match_marker(), "'match'");
         let scrutinee: Expr = self.parse_expr();
-        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start match arms");
+        self.expect(shared_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start match arms");
         let mutable arms: Array<MatchArm> = [];
-        while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
+        while not self.at_end() and not self.check(shared_lexer.tk_rbrace()) and self.error == "" {
             arms.push(self.parse_match_arm());
         }
-        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close match");
+        self.expect(shared_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close match");
         let mutable children: Array<Expr> = [];
         children.push(scrutinee);
-        let mutable e: Expr = Expr(formatter_ast.ex_match(), 0, "", false, "", children);
+        let mutable e: Expr = Expr(shared_ast.ex_match(), 0, "", false, "", children);
         e.match_arms = arms;
         return e;
     }
@@ -834,35 +834,35 @@ public entity Parser {
         let mutable is_wild: Bool = false;
         let mutable variant: String = "";
         let mutable bindings: Array<String> = [];
-        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "match pattern");
+        let name_tok: Token = self.expect(shared_lexer.tk_ident(), "match pattern");
         if name_tok.text == "_" {
             is_wild = true;
         } else {
             variant = name_tok.text;
-            if self.check_consume(formatter_lexer.tk_lparen()) {
-                if not self.check(formatter_lexer.tk_rparen()) {
-                    let b0: Token = self.expect(formatter_lexer.tk_ident(), "pattern binding");
+            if self.check_consume(shared_lexer.tk_lparen()) {
+                if not self.check(shared_lexer.tk_rparen()) {
+                    let b0: Token = self.expect(shared_lexer.tk_ident(), "pattern binding");
                     bindings.push(b0.text);
-                    while self.check_consume(formatter_lexer.tk_comma()) {
-                        let bn: Token = self.expect(formatter_lexer.tk_ident(), "pattern binding");
+                    while self.check_consume(shared_lexer.tk_comma()) {
+                        let bn: Token = self.expect(shared_lexer.tk_ident(), "pattern binding");
                         bindings.push(bn.text);
                     }
                 }
-                self.expect(formatter_lexer.tk_rparen(), "')' to close pattern bindings");
+                self.expect(shared_lexer.tk_rparen(), "')' to close pattern bindings");
             }
         }
-        self.expect(formatter_lexer.tk_arrow(), "'=>' in match arm");
+        self.expect(shared_lexer.tk_arrow(), "'=>' in match arm");
         let body: Expr = self.parse_expr();
-        self.check_consume(formatter_lexer.tk_comma());
+        self.check_consume(shared_lexer.tk_comma());
         return MatchArm(variant, bindings, is_wild, body);
     }
 
     method parse_quantifier(kind: Int) returns Expr {
         self.advance();
-        let var_tok: Token = self.expect(formatter_lexer.tk_ident(), "quantifier variable");
-        self.expect(formatter_lexer.tk_ident(), "'in' in quantifier");
+        let var_tok: Token = self.expect(shared_lexer.tk_ident(), "quantifier variable");
+        self.expect(shared_lexer.tk_ident(), "'in' in quantifier");
         let domain: Expr = self.parse_range();
-        self.expect(formatter_lexer.tk_colon(), "':' in quantifier");
+        self.expect(shared_lexer.tk_colon(), "':' in quantifier");
         let body: Expr = self.parse_expr();
         let mutable children: Array<Expr> = [];
         children.push(domain);
@@ -872,42 +872,42 @@ public entity Parser {
 
     method parse_program() returns Program {
         let module_decl: ModuleDecl = self.parse_module_decl();
-        let mutable prog: Program = formatter_ast.empty_program(module_decl);
+        let mutable prog: Program = shared_ast.empty_program(module_decl);
         while not self.at_end() and self.error == "" {
             let cmts: Array<String> = self.tokens[self.position].comments_before;
-            if self.check(formatter_lexer.kw_import_marker()) {
+            if self.check(shared_lexer.kw_import_marker()) {
                 prog.imports.push(self.parse_import_decl(cmts));
             } else {
-                if self.check(formatter_lexer.kw_entity_marker()) {
+                if self.check(shared_lexer.kw_entity_marker()) {
                     prog.entities.push(self.parse_entity_decl(false, cmts));
                 } else {
-                    if self.check(formatter_lexer.kw_enum_marker()) {
+                    if self.check(shared_lexer.kw_enum_marker()) {
                         prog.enums.push(self.parse_enum_decl(false, cmts));
                     } else {
-                        if self.check(formatter_lexer.kw_trait_marker()) {
+                        if self.check(shared_lexer.kw_trait_marker()) {
                             prog.traits.push(self.parse_trait_decl(false, cmts));
                         } else {
-                            if self.check(formatter_lexer.kw_impl_marker()) {
+                            if self.check(shared_lexer.kw_impl_marker()) {
                                 prog.impls.push(self.parse_impl_decl(cmts));
                             } else {
-                                if self.check(formatter_lexer.kw_test_marker()) {
+                                if self.check(shared_lexer.kw_test_marker()) {
                                     prog.tests.push(self.parse_test_decl(cmts));
                                 } else {
-                                    if self.check(formatter_lexer.kw_extern_marker()) {
+                                    if self.check(shared_lexer.kw_extern_marker()) {
                                         prog.externs.push(self.parse_extern_decl(cmts));
                                     } else {
-                                        if self.check(formatter_lexer.kw_intent_marker()) {
+                                        if self.check(shared_lexer.kw_intent_marker()) {
                                             prog.intent_blocks.push(self.parse_intent_block(cmts));
                                         } else {
-                                            if self.check(formatter_lexer.kw_public_marker()) {
+                                            if self.check(shared_lexer.kw_public_marker()) {
                                                 self.advance();
-                                                if self.check(formatter_lexer.kw_entity_marker()) {
+                                                if self.check(shared_lexer.kw_entity_marker()) {
                                                     prog.entities.push(self.parse_entity_decl(true, cmts));
                                                 } else {
-                                                    if self.check(formatter_lexer.kw_enum_marker()) {
+                                                    if self.check(shared_lexer.kw_enum_marker()) {
                                                         prog.enums.push(self.parse_enum_decl(true, cmts));
                                                     } else {
-                                                        if self.check(formatter_lexer.kw_trait_marker()) {
+                                                        if self.check(shared_lexer.kw_trait_marker()) {
                                                             prog.traits.push(self.parse_trait_decl(true, cmts));
                                                         } else {
                                                             let mutable fd: FunctionDecl = self.parse_function_decl(cmts);
@@ -917,10 +917,10 @@ public entity Parser {
                                                     }
                                                 }
                                             } else {
-                                                if self.check(formatter_lexer.tk_at()) {
+                                                if self.check(shared_lexer.tk_at()) {
                                                     prog.tests.push(self.parse_annotated_test_decl(cmts));
                                                 } else {
-                                                    if self.check(formatter_lexer.kw_async_marker()) and self.peek_n(1) == formatter_lexer.kw_test_marker() {
+                                                    if self.check(shared_lexer.kw_async_marker()) and self.peek_n(1) == shared_lexer.kw_test_marker() {
                                                         self.advance();
                                                         let mutable td: TestDecl = self.parse_test_decl(cmts);
                                                         td.is_async = true;
@@ -953,51 +953,51 @@ public entity Parser {
     }
 
     method is_at_function_start() returns Bool {
-        if self.check(formatter_lexer.kw_function()) {
+        if self.check(shared_lexer.kw_function()) {
             return true;
         }
-        if self.check(formatter_lexer.kw_entry()) {
+        if self.check(shared_lexer.kw_entry()) {
             return true;
         }
-        if self.check(formatter_lexer.kw_async_marker()) {
+        if self.check(shared_lexer.kw_async_marker()) {
             return true;
         }
         return false;
     }
 
     method parse_entity_decl(is_public: Bool, leading_comments: Array<String>) returns EntityDecl {
-        let entity_tok: Token = self.expect(formatter_lexer.kw_entity_marker(), "'entity'");
+        let entity_tok: Token = self.expect(shared_lexer.kw_entity_marker(), "'entity'");
         let line: Int = entity_tok.line;
         let cmts: Array<String> = leading_comments;
-        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "entity name");
+        let name_tok: Token = self.expect(shared_lexer.tk_ident(), "entity name");
         let ent_type_params: Array<String> = self.parse_type_param_list();
-        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start entity body");
+        self.expect(shared_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start entity body");
         let mutable fields: Array<FieldDecl> = [];
         let mutable methods: Array<FunctionDecl> = [];
         let mutable has_ctor: Bool = false;
-        let mutable ctor: FunctionDecl = formatter_ast.empty_function_decl();
+        let mutable ctor: FunctionDecl = shared_ast.empty_function_decl();
         let mutable invariants: Array<Expr> = [];
-        while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
-            if self.check(formatter_lexer.kw_field_marker()) {
+        while not self.at_end() and not self.check(shared_lexer.tk_rbrace()) and self.error == "" {
+            if self.check(shared_lexer.kw_field_marker()) {
                 let fcmts: Array<String> = self.tokens[self.position].comments_before;
                 let mutable fd: FieldDecl = self.parse_field_decl();
                 fd.comments_before = fcmts;
                 fields.push(fd);
             } else {
-                if self.check(formatter_lexer.kw_constructor_marker()) {
+                if self.check(shared_lexer.kw_constructor_marker()) {
                     let ccmts: Array<String> = self.tokens[self.position].comments_before;
                     let mutable cd: FunctionDecl = self.parse_constructor_decl();
                     cd.comments_before = ccmts;
                     ctor = cd;
                     has_ctor = true;
                 } else {
-                    if self.check(formatter_lexer.kw_method_marker()) {
+                    if self.check(shared_lexer.kw_method_marker()) {
                         let mcmts: Array<String> = self.tokens[self.position].comments_before;
                         let mutable md: FunctionDecl = self.parse_method_decl();
                         md.comments_before = mcmts;
                         methods.push(md);
                     } else {
-                        if self.check(formatter_lexer.kw_invariant_marker()) {
+                        if self.check(shared_lexer.kw_invariant_marker()) {
                             invariants.push(self.parse_invariant_decl());
                         } else {
                             self.fail("expected 'field', 'constructor', 'method', or 'invariant' in entity body");
@@ -1012,7 +1012,7 @@ public entity Parser {
                 }
             }
         }
-        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close entity body");
+        self.expect(shared_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close entity body");
         let mutable ed: EntityDecl = EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line, cmts);
         ed.type_params = ent_type_params;
         ed.type_param_lines = self.tp_lines;
@@ -1022,29 +1022,29 @@ public entity Parser {
     }
 
     method parse_field_decl() returns FieldDecl {
-        self.expect(formatter_lexer.kw_field_marker(), "'field'");
-        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "field name");
-        self.expect(formatter_lexer.tk_colon(), "':' after field name");
+        self.expect(shared_lexer.kw_field_marker(), "'field'");
+        let name_tok: Token = self.expect(shared_lexer.tk_ident(), "field name");
+        self.expect(shared_lexer.tk_colon(), "':' after field name");
         let type_name: String = self.parse_type_name();
-        let semi: Token = self.expect(formatter_lexer.tk_semicolon(), "';' after field declaration");
+        let semi: Token = self.expect(shared_lexer.tk_semicolon(), "';' after field declaration");
         let mutable fd: FieldDecl = FieldDecl(name_tok.text, type_name);
         fd.comment_after = semi.comment_after;
         return fd;
     }
 
     method parse_constructor_decl() returns FunctionDecl {
-        let ctor_tok: Token = self.expect(formatter_lexer.kw_constructor_marker(), "'constructor'");
+        let ctor_tok: Token = self.expect(shared_lexer.kw_constructor_marker(), "'constructor'");
         let line: Int = ctor_tok.line;
         let mutable no_cmts: Array<String> = [];
-        self.expect(formatter_lexer.tk_lparen(), "'(' after 'constructor'");
+        self.expect(shared_lexer.tk_lparen(), "'(' after 'constructor'");
         let mutable params: Array<Param> = [];
-        if not self.check(formatter_lexer.tk_rparen()) {
+        if not self.check(shared_lexer.tk_rparen()) {
             params.push(self.parse_param());
-            while self.check_consume(formatter_lexer.tk_comma()) {
+            while self.check_consume(shared_lexer.tk_comma()) {
                 params.push(self.parse_param());
             }
         }
-        self.expect(formatter_lexer.tk_rparen(), "')' to close constructor params");
+        self.expect(shared_lexer.tk_rparen(), "')' to close constructor params");
         let mutable reqs: Array<Expr> = [];
         let mutable enss: Array<Expr> = [];
         let mutable decs: Array<Expr> = [];
@@ -1072,20 +1072,20 @@ public entity Parser {
     }
 
     method parse_method_decl() returns FunctionDecl {
-        let method_tok: Token = self.expect(formatter_lexer.kw_method_marker(), "'method'");
+        let method_tok: Token = self.expect(shared_lexer.kw_method_marker(), "'method'");
         let line: Int = method_tok.line;
         let mutable no_cmts: Array<String> = [];
-        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "method name");
-        self.expect(formatter_lexer.tk_lparen(), "'(' after method name");
+        let name_tok: Token = self.expect(shared_lexer.tk_ident(), "method name");
+        self.expect(shared_lexer.tk_lparen(), "'(' after method name");
         let mutable params: Array<Param> = [];
-        if not self.check(formatter_lexer.tk_rparen()) {
+        if not self.check(shared_lexer.tk_rparen()) {
             params.push(self.parse_param());
-            while self.check_consume(formatter_lexer.tk_comma()) {
+            while self.check_consume(shared_lexer.tk_comma()) {
                 params.push(self.parse_param());
             }
         }
-        self.expect(formatter_lexer.tk_rparen(), "')' to close method params");
-        self.expect(formatter_lexer.kw_returns(), "'returns' after method params");
+        self.expect(shared_lexer.tk_rparen(), "')' to close method params");
+        self.expect(shared_lexer.kw_returns(), "'returns' after method params");
         let ret: String = self.parse_type_name();
         let mutable reqs: Array<Expr> = [];
         let mutable enss: Array<Expr> = [];
@@ -1114,30 +1114,30 @@ public entity Parser {
     }
 
     method parse_invariant_decl() returns Expr {
-        self.expect(formatter_lexer.kw_invariant_marker(), "'invariant'");
+        self.expect(shared_lexer.kw_invariant_marker(), "'invariant'");
         let e: Expr = self.parse_expr();
-        self.expect(formatter_lexer.tk_semicolon(), "';' after invariant expression");
+        self.expect(shared_lexer.tk_semicolon(), "';' after invariant expression");
         return e;
     }
 
     method parse_enum_decl(is_public: Bool, leading_comments: Array<String>) returns EnumDecl {
-        let enum_tok: Token = self.expect(formatter_lexer.kw_enum_marker(), "'enum'");
+        let enum_tok: Token = self.expect(shared_lexer.kw_enum_marker(), "'enum'");
         let line: Int = enum_tok.line;
         let cmts: Array<String> = leading_comments;
-        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "enum name");
-        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start enum body");
+        let name_tok: Token = self.expect(shared_lexer.tk_ident(), "enum name");
+        self.expect(shared_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start enum body");
         let mutable variants: Array<EnumVariant> = [];
-        if not self.check(formatter_lexer.tk_rbrace()) {
+        if not self.check(shared_lexer.tk_rbrace()) {
             variants.push(self.parse_enum_variant());
-            while self.check_consume(formatter_lexer.tk_comma()) {
-                if self.check(formatter_lexer.tk_rbrace()) {
+            while self.check_consume(shared_lexer.tk_comma()) {
+                if self.check(shared_lexer.tk_rbrace()) {
                     self.fail_off();
                 } else {
                     variants.push(self.parse_enum_variant());
                 }
             }
         }
-        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close enum body");
+        self.expect(shared_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close enum body");
         let mutable en: EnumDecl = EnumDecl(name_tok.text, is_public, variants, line, cmts);
         en.column = enum_tok.column;
         return en;
@@ -1148,16 +1148,16 @@ public entity Parser {
     }
 
     method parse_enum_variant() returns EnumVariant {
-        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "enum variant name");
+        let name_tok: Token = self.expect(shared_lexer.tk_ident(), "enum variant name");
         let mutable params: Array<Param> = [];
-        if self.check_consume(formatter_lexer.tk_lparen()) {
-            if not self.check(formatter_lexer.tk_rparen()) {
+        if self.check_consume(shared_lexer.tk_lparen()) {
+            if not self.check(shared_lexer.tk_rparen()) {
                 params.push(self.parse_param());
-                while self.check_consume(formatter_lexer.tk_comma()) {
+                while self.check_consume(shared_lexer.tk_comma()) {
                     params.push(self.parse_param());
                 }
             }
-            self.expect(formatter_lexer.tk_rparen(), "')' to close variant params");
+            self.expect(shared_lexer.tk_rparen(), "')' to close variant params");
         }
         let mutable ev: EnumVariant = EnumVariant(name_tok.text, params);
         ev.line = name_tok.line;
@@ -1166,36 +1166,36 @@ public entity Parser {
     }
 
     method parse_trait_decl(is_public: Bool, leading_comments: Array<String>) returns TraitDecl {
-        let trait_tok: Token = self.expect(formatter_lexer.kw_trait_marker(), "'trait'");
+        let trait_tok: Token = self.expect(shared_lexer.kw_trait_marker(), "'trait'");
         let line: Int = trait_tok.line;
         let cmts: Array<String> = leading_comments;
-        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "trait name");
-        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start trait body");
+        let name_tok: Token = self.expect(shared_lexer.tk_ident(), "trait name");
+        self.expect(shared_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start trait body");
         let mutable methods: Array<TraitMethodSig> = [];
-        while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
+        while not self.at_end() and not self.check(shared_lexer.tk_rbrace()) and self.error == "" {
             methods.push(self.parse_trait_method_sig());
         }
-        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close trait body");
+        self.expect(shared_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close trait body");
         let mutable td: TraitDecl = TraitDecl(name_tok.text, is_public, methods, line, cmts);
         td.column = trait_tok.column;
         return td;
     }
 
     method parse_trait_method_sig() returns TraitMethodSig {
-        let method_kw_tok: Token = self.expect(formatter_lexer.kw_method_marker(), "'method' in trait body");
-        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "method name");
-        self.expect(formatter_lexer.tk_lparen(), "'(' after method name");
+        let method_kw_tok: Token = self.expect(shared_lexer.kw_method_marker(), "'method' in trait body");
+        let name_tok: Token = self.expect(shared_lexer.tk_ident(), "method name");
+        self.expect(shared_lexer.tk_lparen(), "'(' after method name");
         let mutable params: Array<Param> = [];
-        if not self.check(formatter_lexer.tk_rparen()) {
+        if not self.check(shared_lexer.tk_rparen()) {
             params.push(self.parse_param());
-            while self.check_consume(formatter_lexer.tk_comma()) {
+            while self.check_consume(shared_lexer.tk_comma()) {
                 params.push(self.parse_param());
             }
         }
-        self.expect(formatter_lexer.tk_rparen(), "')' to close method params");
-        self.expect(formatter_lexer.kw_returns(), "'returns' after method params");
+        self.expect(shared_lexer.tk_rparen(), "')' to close method params");
+        self.expect(shared_lexer.kw_returns(), "'returns' after method params");
         let ret: String = self.parse_type_name();
-        self.expect(formatter_lexer.tk_semicolon(), "';' to end trait method signature");
+        self.expect(shared_lexer.tk_semicolon(), "';' to end trait method signature");
         let mutable tms: TraitMethodSig = TraitMethodSig(name_tok.text, params, ret);
         tms.line = method_kw_tok.line;
         tms.column = method_kw_tok.column;
@@ -1203,31 +1203,31 @@ public entity Parser {
     }
 
     method parse_impl_decl(leading_comments: Array<String>) returns ImplDecl {
-        let impl_tok: Token = self.expect(formatter_lexer.kw_impl_marker(), "'impl'");
+        let impl_tok: Token = self.expect(shared_lexer.kw_impl_marker(), "'impl'");
         let line: Int = impl_tok.line;
         let cmts: Array<String> = leading_comments;
-        let trait_tok: Token = self.expect(formatter_lexer.tk_ident(), "trait name");
-        self.expect(formatter_lexer.kw_for_marker(), "'for' in impl declaration");
-        let entity_tok: Token = self.expect(formatter_lexer.tk_ident(), "entity name");
-        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start impl body");
+        let trait_tok: Token = self.expect(shared_lexer.tk_ident(), "trait name");
+        self.expect(shared_lexer.kw_for_marker(), "'for' in impl declaration");
+        let entity_tok: Token = self.expect(shared_lexer.tk_ident(), "entity name");
+        self.expect(shared_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start impl body");
         let mutable methods: Array<FunctionDecl> = [];
-        while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
+        while not self.at_end() and not self.check(shared_lexer.tk_rbrace()) and self.error == "" {
             let mcmts: Array<String> = self.tokens[self.position].comments_before;
             let mutable md: FunctionDecl = self.parse_method_decl();
             md.comments_before = mcmts;
             methods.push(md);
         }
-        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close impl body");
+        self.expect(shared_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close impl body");
         let mutable impl_decl: ImplDecl = ImplDecl(trait_tok.text, entity_tok.text, methods, line, cmts);
         impl_decl.column = impl_tok.column;
         return impl_decl;
     }
 
     method parse_test_decl(leading_comments: Array<String>) returns TestDecl {
-        let test_tok: Token = self.expect(formatter_lexer.kw_test_marker(), "'test'");
+        let test_tok: Token = self.expect(shared_lexer.kw_test_marker(), "'test'");
         let line: Int = test_tok.line;
         let cmts: Array<String> = leading_comments;
-        let name_tok: Token = self.expect(formatter_lexer.tk_string(), "test name (string literal)");
+        let name_tok: Token = self.expect(shared_lexer.tk_string(), "test name (string literal)");
         let body: Block = self.parse_block();
         let mutable tdecl: TestDecl = TestDecl(self.unquote(name_tok.text), body, line, cmts);
         tdecl.column = test_tok.column;
@@ -1239,20 +1239,20 @@ public entity Parser {
     // e.g. `@target_specific("rust", "js")`. Each arg is stored with double quotes.
     method parse_test_annotations() returns Array<String> {
         let mutable anns: Array<String> = [];
-        while self.check(formatter_lexer.tk_at()) {
+        while self.check(shared_lexer.tk_at()) {
             self.advance();
-            let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "annotation name after '@'");
-            self.expect(formatter_lexer.tk_lparen(), "'(' after annotation name");
+            let name_tok: Token = self.expect(shared_lexer.tk_ident(), "annotation name after '@'");
+            self.expect(shared_lexer.tk_lparen(), "'(' after annotation name");
             let mutable args: Array<String> = [];
-            if not self.check(formatter_lexer.tk_rparen()) {
-                let arg0: Token = self.expect(formatter_lexer.tk_string(), "annotation argument (string literal)");
+            if not self.check(shared_lexer.tk_rparen()) {
+                let arg0: Token = self.expect(shared_lexer.tk_string(), "annotation argument (string literal)");
                 args.push("\"" + self.unquote(arg0.text) + "\"");
-                while self.check_consume(formatter_lexer.tk_comma()) {
-                    let argn: Token = self.expect(formatter_lexer.tk_string(), "annotation argument (string literal)");
+                while self.check_consume(shared_lexer.tk_comma()) {
+                    let argn: Token = self.expect(shared_lexer.tk_string(), "annotation argument (string literal)");
                     args.push("\"" + self.unquote(argn.text) + "\"");
                 }
             }
-            self.expect(formatter_lexer.tk_rparen(), "')' to close annotation");
+            self.expect(shared_lexer.tk_rparen(), "')' to close annotation");
             let mutable ann: String = "@" + name_tok.text + "(";
             let mutable argi: Int = 0;
             while argi < len(args) {
@@ -1274,7 +1274,7 @@ public entity Parser {
     method parse_annotated_test_decl(leading_comments: Array<String>) returns TestDecl {
         let mutable anns: Array<String> = self.parse_test_annotations();
         let mutable is_async: Bool = false;
-        if self.check(formatter_lexer.kw_async_marker()) and self.peek_n(1) == formatter_lexer.kw_test_marker() {
+        if self.check(shared_lexer.kw_async_marker()) and self.peek_n(1) == shared_lexer.kw_test_marker() {
             self.advance();
             is_async = true;
         }
@@ -1285,24 +1285,24 @@ public entity Parser {
     }
 
     method parse_extern_decl(leading_comments: Array<String>) returns ExternDecl {
-        let extern_tok: Token = self.expect(formatter_lexer.kw_extern_marker(), "'extern'");
+        let extern_tok: Token = self.expect(shared_lexer.kw_extern_marker(), "'extern'");
         let line: Int = extern_tok.line;
         let cmts: Array<String> = leading_comments;
-        let target_tok: Token = self.expect(formatter_lexer.tk_string(), "target string literal");
-        self.expect(formatter_lexer.kw_function(), "'function' after extern target");
-        let name_tok: Token = self.expect(formatter_lexer.tk_ident(), "extern function name");
-        self.expect(formatter_lexer.tk_lparen(), "'(' after extern function name");
+        let target_tok: Token = self.expect(shared_lexer.tk_string(), "target string literal");
+        self.expect(shared_lexer.kw_function(), "'function' after extern target");
+        let name_tok: Token = self.expect(shared_lexer.tk_ident(), "extern function name");
+        self.expect(shared_lexer.tk_lparen(), "'(' after extern function name");
         let mutable params: Array<Param> = [];
-        if not self.check(formatter_lexer.tk_rparen()) {
+        if not self.check(shared_lexer.tk_rparen()) {
             params.push(self.parse_param());
-            while self.check_consume(formatter_lexer.tk_comma()) {
+            while self.check_consume(shared_lexer.tk_comma()) {
                 params.push(self.parse_param());
             }
         }
-        self.expect(formatter_lexer.tk_rparen(), "')' to close extern params");
-        self.expect(formatter_lexer.kw_returns(), "'returns' after extern params");
+        self.expect(shared_lexer.tk_rparen(), "')' to close extern params");
+        self.expect(shared_lexer.kw_returns(), "'returns' after extern params");
         let ret: String = self.parse_type_name();
-        self.expect(formatter_lexer.tk_semicolon(), "';' to end extern declaration");
+        self.expect(shared_lexer.tk_semicolon(), "';' to end extern declaration");
         let mutable ext: ExternDecl = ExternDecl(self.unquote(target_tok.text), name_tok.text, params, ret, line, cmts);
         ext.column = extern_tok.column;
         return ext;
@@ -1312,7 +1312,7 @@ public entity Parser {
         let mutable ref_s: String = "";
         let first: Token = self.advance();
         ref_s = ref_s + first.text;
-        while self.check_consume(formatter_lexer.tk_dot()) {
+        while self.check_consume(shared_lexer.tk_dot()) {
             let part: Token = self.advance();
             ref_s = ref_s + "." + part.text;
         }
@@ -1320,56 +1320,56 @@ public entity Parser {
     }
 
     method parse_intent_block(leading_comments: Array<String>) returns IntentBlock {
-        let intent_tok: Token = self.expect(formatter_lexer.kw_intent_marker(), "'intent'");
+        let intent_tok: Token = self.expect(shared_lexer.kw_intent_marker(), "'intent'");
         let line: Int = intent_tok.line;
         let cmts: Array<String> = leading_comments;
-        let desc_tok: Token = self.expect(formatter_lexer.tk_string(), "intent description (string literal)");
-        self.expect(formatter_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start intent block");
+        let desc_tok: Token = self.expect(shared_lexer.tk_string(), "intent description (string literal)");
+        self.expect(shared_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start intent block");
         let mutable goals: Array<String> = [];
         let mutable constraints: Array<String> = [];
         let mutable guarantees: Array<String> = [];
         let mutable verifs: Array<String> = [];
-        while not self.at_end() and not self.check(formatter_lexer.tk_rbrace()) and self.error == "" {
-            if self.check(formatter_lexer.tk_ident()) {
+        while not self.at_end() and not self.check(shared_lexer.tk_rbrace()) and self.error == "" {
+            if self.check(shared_lexer.tk_ident()) {
                 let kw: String = self.peek_text();
                 if kw == "goal" {
                     self.advance();
-                    self.check_consume(formatter_lexer.tk_colon());
-                    let s: Token = self.expect(formatter_lexer.tk_string(), "string after 'goal'");
-                    self.expect(formatter_lexer.tk_semicolon(), "';' after goal clause");
+                    self.check_consume(shared_lexer.tk_colon());
+                    let s: Token = self.expect(shared_lexer.tk_string(), "string after 'goal'");
+                    self.expect(shared_lexer.tk_semicolon(), "';' after goal clause");
                     goals.push(self.unquote(s.text));
                 } else {
                     if kw == "constraint" {
                         self.advance();
-                        self.check_consume(formatter_lexer.tk_colon());
-                        let s: Token = self.expect(formatter_lexer.tk_string(), "string after 'constraint'");
-                        self.expect(formatter_lexer.tk_semicolon(), "';' after constraint clause");
+                        self.check_consume(shared_lexer.tk_colon());
+                        let s: Token = self.expect(shared_lexer.tk_string(), "string after 'constraint'");
+                        self.expect(shared_lexer.tk_semicolon(), "';' after constraint clause");
                         constraints.push(self.unquote(s.text));
                     } else {
                         if kw == "guarantee" {
                             self.advance();
-                            self.check_consume(formatter_lexer.tk_colon());
-                            let s: Token = self.expect(formatter_lexer.tk_string(), "string after 'guarantee'");
-                            self.expect(formatter_lexer.tk_semicolon(), "';' after guarantee clause");
+                            self.check_consume(shared_lexer.tk_colon());
+                            let s: Token = self.expect(shared_lexer.tk_string(), "string after 'guarantee'");
+                            self.expect(shared_lexer.tk_semicolon(), "';' after guarantee clause");
                             guarantees.push(self.unquote(s.text));
                         } else {
                             if kw == "verified_by" {
                                 self.advance();
-                                self.check_consume(formatter_lexer.tk_colon());
-                                if self.check_consume(formatter_lexer.tk_lbracket()) {
-                                    if not self.check(formatter_lexer.tk_rbracket()) {
+                                self.check_consume(shared_lexer.tk_colon());
+                                if self.check_consume(shared_lexer.tk_lbracket()) {
+                                    if not self.check(shared_lexer.tk_rbracket()) {
                                         verifs.push(self.parse_intent_ref());
-                                        while self.check_consume(formatter_lexer.tk_comma()) {
-                                            if not self.check(formatter_lexer.tk_rbracket()) {
+                                        while self.check_consume(shared_lexer.tk_comma()) {
+                                            if not self.check(shared_lexer.tk_rbracket()) {
                                                 verifs.push(self.parse_intent_ref());
                                             }
                                         }
                                     }
-                                    self.expect(formatter_lexer.tk_rbracket(), "']' to close verified_by list");
+                                    self.expect(shared_lexer.tk_rbracket(), "']' to close verified_by list");
                                 } else {
                                     verifs.push(self.parse_intent_ref());
                                 }
-                                self.expect(formatter_lexer.tk_semicolon(), "';' after verified_by clause");
+                                self.expect(shared_lexer.tk_semicolon(), "';' after verified_by clause");
                             } else {
                                 self.fail("unexpected identifier '" + kw + "' in intent block");
                                 let mutable ib_err1: IntentBlock = IntentBlock(self.unquote(desc_tok.text), goals, constraints, guarantees, verifs, line, cmts);
@@ -1386,7 +1386,7 @@ public entity Parser {
                 return ib_err2;
             }
         }
-        self.expect(formatter_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close intent block");
+        self.expect(shared_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close intent block");
         let mutable ib: IntentBlock = IntentBlock(self.unquote(desc_tok.text), goals, constraints, guarantees, verifs, line, cmts);
         ib.column = intent_tok.column;
         return ib;
@@ -1527,8 +1527,8 @@ test "single return parses as one st_return statement" {
     assert_eq(prog.error, "");
     assert_eq(len(prog.functions[0].body.stmts), 1);
     let s: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(s.kind, formatter_ast.st_return());
-    assert_eq(s.expr.kind, formatter_ast.ex_int());
+    assert_eq(s.kind, shared_ast.st_return());
+    assert_eq(s.expr.kind, shared_ast.ex_int());
     assert_eq(s.expr.int_value, 0);
 }
 
@@ -1537,8 +1537,8 @@ test "return without value records ex_void" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let s: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(s.kind, formatter_ast.st_return());
-    assert_eq(s.expr.kind, formatter_ast.ex_void());
+    assert_eq(s.kind, shared_ast.st_return());
+    assert_eq(s.expr.kind, shared_ast.ex_void());
 }
 
 test "let with type annotation" {
@@ -1547,15 +1547,15 @@ test "let with type annotation" {
     assert_eq(prog.error, "");
     assert_eq(len(prog.functions[0].body.stmts), 2);
     let l: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(l.kind, formatter_ast.st_let());
+    assert_eq(l.kind, shared_ast.st_let());
     assert_eq(l.name, "x");
     assert_eq(l.type_name, "Int");
     assert_eq(l.is_mutable, false);
-    assert_eq(l.expr.kind, formatter_ast.ex_int());
+    assert_eq(l.expr.kind, shared_ast.ex_int());
     assert_eq(l.expr.int_value, 7);
     let r: Stmt = prog.functions[0].body.stmts[1];
-    assert_eq(r.kind, formatter_ast.st_return());
-    assert_eq(r.expr.kind, formatter_ast.ex_ident());
+    assert_eq(r.kind, shared_ast.st_return());
+    assert_eq(r.expr.kind, shared_ast.ex_ident());
     assert_eq(r.expr.name, "x");
 }
 
@@ -1564,11 +1564,11 @@ test "let mutable without annotation" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let l: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(l.kind, formatter_ast.st_let());
+    assert_eq(l.kind, shared_ast.st_let());
     assert_eq(l.name, "y");
     assert_eq(l.type_name, "");
     assert_eq(l.is_mutable, true);
-    assert_eq(l.expr.kind, formatter_ast.ex_int());
+    assert_eq(l.expr.kind, shared_ast.ex_int());
     assert_eq(l.expr.int_value, 0);
 }
 
@@ -1578,16 +1578,16 @@ test "expression statement is parsed as assignment binop" {
     assert_eq(prog.error, "");
     assert_eq(len(prog.functions[0].body.stmts), 3);
     let s: Stmt = prog.functions[0].body.stmts[1];
-    assert_eq(s.kind, formatter_ast.st_expr());
-    assert_eq(s.expr.kind, formatter_ast.ex_binop());
+    assert_eq(s.kind, shared_ast.st_expr());
+    assert_eq(s.expr.kind, shared_ast.ex_binop());
     assert_eq(s.expr.name, "=");
-    assert_eq(s.expr.children[0].kind, formatter_ast.ex_ident());
+    assert_eq(s.expr.children[0].kind, shared_ast.ex_ident());
     assert_eq(s.expr.children[0].name, "y");
     let rhs: Expr = s.expr.children[1];
-    assert_eq(rhs.kind, formatter_ast.ex_binop());
+    assert_eq(rhs.kind, shared_ast.ex_binop());
     assert_eq(rhs.name, "+");
     assert_eq(rhs.children[0].name, "y");
-    assert_eq(rhs.children[1].kind, formatter_ast.ex_int());
+    assert_eq(rhs.children[1].kind, shared_ast.ex_int());
     assert_eq(rhs.children[1].int_value, 1);
 }
 
@@ -1597,16 +1597,16 @@ test "if statement without else" {
     assert_eq(prog.error, "");
     assert_eq(len(prog.functions[0].body.stmts), 2);
     let iff: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(iff.kind, formatter_ast.st_if());
-    assert_eq(iff.expr.kind, formatter_ast.ex_binop());
+    assert_eq(iff.kind, shared_ast.st_if());
+    assert_eq(iff.expr.kind, shared_ast.ex_binop());
     assert_eq(iff.expr.name, ">");
     assert_eq(iff.expr.children[0].name, "x");
     assert_eq(iff.expr.children[1].int_value, 0);
     assert_eq(iff.has_else, false);
     assert_eq(len(iff.then_block.stmts), 1);
     let inner: Stmt = iff.then_block.stmts[0];
-    assert_eq(inner.kind, formatter_ast.st_return());
-    assert_eq(inner.expr.kind, formatter_ast.ex_int());
+    assert_eq(inner.kind, shared_ast.st_return());
+    assert_eq(inner.expr.kind, shared_ast.ex_int());
     assert_eq(inner.expr.int_value, 1);
 }
 
@@ -1615,11 +1615,11 @@ test "if-else statement" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let iff: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(iff.kind, formatter_ast.st_if());
+    assert_eq(iff.kind, shared_ast.st_if());
     assert_eq(iff.has_else, true);
     assert_eq(len(iff.else_block.stmts), 1);
     let else_ret: Stmt = iff.else_block.stmts[0];
-    assert_eq(else_ret.expr.kind, formatter_ast.ex_int());
+    assert_eq(else_ret.expr.kind, shared_ast.ex_int());
     assert_eq(else_ret.expr.int_value, 0);
 }
 
@@ -1628,12 +1628,12 @@ test "else if chains into nested if in else_block" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let outer: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(outer.kind, formatter_ast.st_if());
+    assert_eq(outer.kind, shared_ast.st_if());
     assert_eq(outer.has_else, true);
     assert_eq(len(outer.else_block.stmts), 1);
     let inner: Stmt = outer.else_block.stmts[0];
-    assert_eq(inner.kind, formatter_ast.st_if());
-    assert_eq(inner.expr.kind, formatter_ast.ex_binop());
+    assert_eq(inner.kind, shared_ast.st_if());
+    assert_eq(inner.expr.kind, shared_ast.ex_binop());
     assert_eq(inner.expr.name, "<");
     assert_eq(inner.has_else, true);
     assert_eq(inner.else_block.stmts[0].expr.int_value, 0);
@@ -1644,15 +1644,15 @@ test "while statement" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let w: Stmt = prog.functions[0].body.stmts[1];
-    assert_eq(w.kind, formatter_ast.st_while());
-    assert_eq(w.expr.kind, formatter_ast.ex_binop());
+    assert_eq(w.kind, shared_ast.st_while());
+    assert_eq(w.expr.kind, shared_ast.ex_binop());
     assert_eq(w.expr.name, "<");
     assert_eq(w.expr.children[0].name, "i");
     assert_eq(w.expr.children[1].int_value, 10);
     assert_eq(len(w.then_block.stmts), 1);
     let inc: Stmt = w.then_block.stmts[0];
-    assert_eq(inc.kind, formatter_ast.st_expr());
-    assert_eq(inc.expr.kind, formatter_ast.ex_binop());
+    assert_eq(inc.kind, shared_ast.st_expr());
+    assert_eq(inc.expr.kind, shared_ast.ex_binop());
     assert_eq(inc.expr.name, "=");
 }
 
@@ -1661,9 +1661,9 @@ test "call expression with arguments parses as ex_call" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let l: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(l.expr.kind, formatter_ast.ex_call());
+    assert_eq(l.expr.kind, shared_ast.ex_call());
     assert_eq(len(l.expr.children), 3);
-    assert_eq(l.expr.children[0].kind, formatter_ast.ex_ident());
+    assert_eq(l.expr.children[0].kind, shared_ast.ex_ident());
     assert_eq(l.expr.children[0].name, "add");
     assert_eq(l.expr.children[1].int_value, 1);
     assert_eq(l.expr.children[2].int_value, 2);
@@ -1674,10 +1674,10 @@ test "nested if inside if then-block" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let outer: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(outer.kind, formatter_ast.st_if());
+    assert_eq(outer.kind, shared_ast.st_if());
     let inner: Stmt = outer.then_block.stmts[0];
-    assert_eq(inner.kind, formatter_ast.st_if());
-    assert_eq(inner.expr.kind, formatter_ast.ex_binop());
+    assert_eq(inner.kind, shared_ast.st_if());
+    assert_eq(inner.expr.kind, shared_ast.ex_binop());
     assert_eq(inner.expr.name, ">");
     assert_eq(inner.expr.children[0].name, "y");
 }
@@ -1689,28 +1689,28 @@ test "missing semicolon after return is reported" {
 }
 
 test "parse_int converts decimal token text" {
-    assert_eq(formatter_ast.parse_int("0"), 0);
-    assert_eq(formatter_ast.parse_int("7"), 7);
-    assert_eq(formatter_ast.parse_int("42"), 42);
-    assert_eq(formatter_ast.parse_int("12345"), 12345);
+    assert_eq(shared_ast.parse_int("0"), 0);
+    assert_eq(shared_ast.parse_int("7"), 7);
+    assert_eq(shared_ast.parse_int("42"), 42);
+    assert_eq(shared_ast.parse_int("12345"), 12345);
 }
 
 test "integer literal expression" {
     let prog: Program = parse(wrap_in_let("99"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_int());
+    assert_eq(e.kind, shared_ast.ex_int());
     assert_eq(e.int_value, 99);
 }
 
 test "bool literals parse as ex_bool" {
     let prog_t: Program = parse(wrap_in_let("true"));
     let e_t: Expr = single_let_rhs(prog_t);
-    assert_eq(e_t.kind, formatter_ast.ex_bool());
+    assert_eq(e_t.kind, shared_ast.ex_bool());
     assert_eq(e_t.bool_value, true);
     let prog_f: Program = parse(wrap_in_let("false"));
     let e_f: Expr = single_let_rhs(prog_f);
-    assert_eq(e_f.kind, formatter_ast.ex_bool());
+    assert_eq(e_f.kind, shared_ast.ex_bool());
     assert_eq(e_f.bool_value, false);
 }
 
@@ -1718,7 +1718,7 @@ test "float literal expression" {
     let prog: Program = parse(wrap_in_let("3.14"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_float());
+    assert_eq(e.kind, shared_ast.ex_float());
     assert_eq(e.str_value, "3.14");
 }
 
@@ -1726,7 +1726,7 @@ test "float literal with exponent expression" {
     let prog: Program = parse(wrap_in_let("1.5e-3"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_float());
+    assert_eq(e.kind, shared_ast.ex_float());
     assert_eq(e.str_value, "1.5e-3");
 }
 
@@ -1734,7 +1734,7 @@ test "char literal expression" {
     let prog: Program = parse(wrap_in_let("'a'"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_char());
+    assert_eq(e.kind, shared_ast.ex_char());
     assert_eq(e.str_value, "'a'");
 }
 
@@ -1742,7 +1742,7 @@ test "char escape literal expression" {
     let prog: Program = parse(wrap_in_let("'\\n'"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_char());
+    assert_eq(e.kind, shared_ast.ex_char());
     assert_eq(e.str_value, "'\\n'");
 }
 
@@ -1751,7 +1751,7 @@ test "string literal preserves quotes-stripped value" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_string());
+    assert_eq(e.kind, shared_ast.ex_string());
     assert_eq(e.str_value, "hello");
 }
 
@@ -1759,9 +1759,9 @@ test "unary minus on int literal" {
     let prog: Program = parse(wrap_in_let("-5"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_unary());
+    assert_eq(e.kind, shared_ast.ex_unary());
     assert_eq(e.name, "-");
-    assert_eq(e.children[0].kind, formatter_ast.ex_int());
+    assert_eq(e.children[0].kind, shared_ast.ex_int());
     assert_eq(e.children[0].int_value, 5);
 }
 
@@ -1770,9 +1770,9 @@ test "unary not on bool" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_unary());
+    assert_eq(e.kind, shared_ast.ex_unary());
     assert_eq(e.name, "not");
-    assert_eq(e.children[0].kind, formatter_ast.ex_bool());
+    assert_eq(e.children[0].kind, shared_ast.ex_bool());
     assert_eq(e.children[0].bool_value, true);
 }
 
@@ -1780,11 +1780,11 @@ test "operator precedence: 1 + 2 * 3 binds * tighter" {
     let prog: Program = parse(wrap_in_let("1 + 2 * 3"));
     assert_eq(prog.error, "");
     let root: Expr = single_let_rhs(prog);
-    assert_eq(root.kind, formatter_ast.ex_binop());
+    assert_eq(root.kind, shared_ast.ex_binop());
     assert_eq(root.name, "+");
     assert_eq(root.children[0].int_value, 1);
     let rhs: Expr = root.children[1];
-    assert_eq(rhs.kind, formatter_ast.ex_binop());
+    assert_eq(rhs.kind, shared_ast.ex_binop());
     assert_eq(rhs.name, "*");
     assert_eq(rhs.children[0].int_value, 2);
     assert_eq(rhs.children[1].int_value, 3);
@@ -1795,7 +1795,7 @@ test "operator precedence: comparison binds tighter than and" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let root: Expr = single_let_rhs(prog);
-    assert_eq(root.kind, formatter_ast.ex_binop());
+    assert_eq(root.kind, shared_ast.ex_binop());
     assert_eq(root.name, "and");
     assert_eq(root.children[0].name, "<");
     assert_eq(root.children[1].name, ">");
@@ -1805,11 +1805,11 @@ test "parens override precedence" {
     let prog: Program = parse(wrap_in_let("(1 + 2) * 3"));
     assert_eq(prog.error, "");
     let root: Expr = single_let_rhs(prog);
-    assert_eq(root.kind, formatter_ast.ex_binop());
+    assert_eq(root.kind, shared_ast.ex_binop());
     assert_eq(root.name, "*");
-    assert_eq(root.children[0].kind, formatter_ast.ex_paren());
+    assert_eq(root.children[0].kind, shared_ast.ex_paren());
     let inner: Expr = root.children[0].children[0];
-    assert_eq(inner.kind, formatter_ast.ex_binop());
+    assert_eq(inner.kind, shared_ast.ex_binop());
     assert_eq(inner.name, "+");
 }
 
@@ -1818,11 +1818,11 @@ test "assignment is right-associative" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let s: Stmt = prog.functions[0].body.stmts[0];
-    assert_eq(s.expr.kind, formatter_ast.ex_binop());
+    assert_eq(s.expr.kind, shared_ast.ex_binop());
     assert_eq(s.expr.name, "=");
     assert_eq(s.expr.children[0].name, "a");
     let rhs: Expr = s.expr.children[1];
-    assert_eq(rhs.kind, formatter_ast.ex_binop());
+    assert_eq(rhs.kind, shared_ast.ex_binop());
     assert_eq(rhs.name, "=");
     assert_eq(rhs.children[0].name, "b");
     assert_eq(rhs.children[1].name, "c");
@@ -1833,9 +1833,9 @@ test "field access via dot" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_field());
+    assert_eq(e.kind, shared_ast.ex_field());
     assert_eq(e.name, "position");
-    assert_eq(e.children[0].kind, formatter_ast.ex_ident());
+    assert_eq(e.children[0].kind, shared_ast.ex_ident());
     assert_eq(e.children[0].name, "self");
 }
 
@@ -1844,9 +1844,9 @@ test "method call: x.to_string()" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_call());
+    assert_eq(e.kind, shared_ast.ex_call());
     let callee: Expr = e.children[0];
-    assert_eq(callee.kind, formatter_ast.ex_field());
+    assert_eq(callee.kind, shared_ast.ex_field());
     assert_eq(callee.name, "to_string");
     assert_eq(callee.children[0].name, "x");
 }
@@ -1855,7 +1855,7 @@ test "indexing: arr[0]" {
     let prog: Program = parse(wrap_in_let("arr[0]"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_index());
+    assert_eq(e.kind, shared_ast.ex_index());
     assert_eq(e.children[0].name, "arr");
     assert_eq(e.children[1].int_value, 0);
 }
@@ -1865,9 +1865,9 @@ test "slice: s[i..j] parses as index of range" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_index());
+    assert_eq(e.kind, shared_ast.ex_index());
     let idx: Expr = e.children[1];
-    assert_eq(idx.kind, formatter_ast.ex_range());
+    assert_eq(idx.kind, shared_ast.ex_range());
     assert_eq(idx.children[0].int_value, 1);
     assert_eq(idx.children[1].int_value, 5);
 }
@@ -1876,7 +1876,7 @@ test "array literal parses as ex_array" {
     let prog: Program = parse(wrap_in_let("[10, 20, 30]"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_array());
+    assert_eq(e.kind, shared_ast.ex_array());
     assert_eq(len(e.children), 3);
     assert_eq(e.children[0].int_value, 10);
     assert_eq(e.children[1].int_value, 20);
@@ -1887,7 +1887,7 @@ test "empty array literal" {
     let prog: Program = parse(wrap_in_let("[]"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_array());
+    assert_eq(e.kind, shared_ast.ex_array());
     assert_eq(len(e.children), 0);
 }
 
@@ -1895,7 +1895,7 @@ test "no-arg call: f()" {
     let prog: Program = parse(wrap_in_let("f()"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_call());
+    assert_eq(e.kind, shared_ast.ex_call());
     assert_eq(len(e.children), 1);
     assert_eq(e.children[0].name, "f");
 }
@@ -1904,10 +1904,10 @@ test "nested call f(g(x))" {
     let prog: Program = parse(wrap_in_let("f(g(x))"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_call());
+    assert_eq(e.kind, shared_ast.ex_call());
     assert_eq(e.children[0].name, "f");
     let arg: Expr = e.children[1];
-    assert_eq(arg.kind, formatter_ast.ex_call());
+    assert_eq(arg.kind, shared_ast.ex_call());
     assert_eq(arg.children[0].name, "g");
     assert_eq(arg.children[1].name, "x");
 }
@@ -1916,27 +1916,27 @@ test "method chain a.b().c() left-associates" {
     let prog: Program = parse(wrap_in_let("a.b().c()"));
     assert_eq(prog.error, "");
     let outer: Expr = single_let_rhs(prog);
-    assert_eq(outer.kind, formatter_ast.ex_call());
+    assert_eq(outer.kind, shared_ast.ex_call());
     let callee_c: Expr = outer.children[0];
-    assert_eq(callee_c.kind, formatter_ast.ex_field());
+    assert_eq(callee_c.kind, shared_ast.ex_field());
     assert_eq(callee_c.name, "c");
     let inner_call: Expr = callee_c.children[0];
-    assert_eq(inner_call.kind, formatter_ast.ex_call());
+    assert_eq(inner_call.kind, shared_ast.ex_call());
     let callee_b: Expr = inner_call.children[0];
-    assert_eq(callee_b.kind, formatter_ast.ex_field());
+    assert_eq(callee_b.kind, shared_ast.ex_field());
     assert_eq(callee_b.name, "b");
     assert_eq(callee_b.children[0].name, "a");
 }
 
 test "qualified call via module path: mod.func(arg)" {
-    let prog: Program = parse(wrap_in_let("formatter_lexer.tk_eof()"));
+    let prog: Program = parse(wrap_in_let("shared_lexer.tk_eof()"));
     assert_eq(prog.error, "");
     let e: Expr = single_let_rhs(prog);
-    assert_eq(e.kind, formatter_ast.ex_call());
+    assert_eq(e.kind, shared_ast.ex_call());
     let callee: Expr = e.children[0];
-    assert_eq(callee.kind, formatter_ast.ex_field());
+    assert_eq(callee.kind, shared_ast.ex_field());
     assert_eq(callee.name, "tk_eof");
-    assert_eq(callee.children[0].name, "formatter_lexer");
+    assert_eq(callee.children[0].name, "shared_lexer");
 }
 
 test "equality and comparison both parse" {
@@ -2010,7 +2010,7 @@ test "entity with invariant clauses" {
     assert_eq(prog.error, "");
     let e: EntityDecl = prog.entities[0];
     assert_eq(len(e.invariants), 2);
-    assert_eq(e.invariants[0].kind, formatter_ast.ex_binop());
+    assert_eq(e.invariants[0].kind, shared_ast.ex_binop());
     assert_eq(e.invariants[0].name, ">=");
 }
 
@@ -2123,11 +2123,11 @@ test "phase 37 dogfood: float + char literals + block comments parse end-to-end"
     assert_eq(fn_decl.name, "f");
     let stmts: Array<Stmt> = fn_decl.body.stmts;
     assert_eq(len(stmts), 4);
-    assert_eq(stmts[0].expr.kind, formatter_ast.ex_float());
+    assert_eq(stmts[0].expr.kind, shared_ast.ex_float());
     assert_eq(stmts[0].expr.str_value, "3.14");
-    assert_eq(stmts[1].expr.kind, formatter_ast.ex_float());
+    assert_eq(stmts[1].expr.kind, shared_ast.ex_float());
     assert_eq(stmts[1].expr.str_value, "1.5e-3");
-    assert_eq(stmts[2].expr.kind, formatter_ast.ex_char());
+    assert_eq(stmts[2].expr.kind, shared_ast.ex_char());
     assert_eq(stmts[2].expr.str_value, "'\\n'");
 }
 
@@ -2173,9 +2173,9 @@ test "generics: generic constructor call is ex_call with ident name including ty
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let rhs: Expr = prog.functions[0].body.stmts[0].expr;
-    assert_eq(rhs.kind, formatter_ast.ex_call());
+    assert_eq(rhs.kind, shared_ast.ex_call());
     let callee: Expr = rhs.children[0];
-    assert_eq(callee.kind, formatter_ast.ex_ident());
+    assert_eq(callee.kind, shared_ast.ex_ident());
     assert_eq(callee.name, "Stack<Int>");
 }
 
@@ -2184,7 +2184,7 @@ test "generics: generic call with args" {
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     let rhs: Expr = prog.functions[0].body.stmts[0].expr;
-    assert_eq(rhs.kind, formatter_ast.ex_call());
+    assert_eq(rhs.kind, shared_ast.ex_call());
     assert_eq(rhs.children[0].name, "Vec<String>");
     assert_eq(len(rhs.children), 3);
 }
