@@ -80,3 +80,51 @@ test "format_diags: two diags joined by newline with no trailing newline" {
     let out: String = checker.format_diags(two, "f.intent");
     assert_eq(out, "error[f.intent:1:1]: first\nerror[f.intent:2:3]: second");
 }
+
+// Helper: build a test block source string: `test "NAME" { BODY }`.
+function test_block(tname: String, body: String) returns String {
+    return "test \"" + tname + "\" " + lbrace() + " " + body + " " + rbrace();
+}
+
+test "dup variant: enum with two identical variant names produces one diag" {
+    let src: String = "module m version \"1.0\"; enum Color " + lbrace() + " Red, Red, " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "duplicate variant name 'Red' in enum 'Color'");
+}
+
+test "dup variant: enum with distinct variant names produces zero diags" {
+    let src: String = "module m version \"1.0\"; enum Color " + lbrace() + " Red, Green, " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "return-in-test: bare return in test body produces one diag" {
+    let src: String = "module m version \"1.0\"; " + test_block("t", "return;");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "'return' is not allowed inside a test body; test \"t\" has implicit Void return");
+}
+
+test "return-in-test: return nested inside if in test body fires" {
+    let if_src: String = "if true " + lbrace() + " return; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + test_block("t", if_src);
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "'return' is not allowed inside a test body; test \"t\" has implicit Void return");
+}
+
+test "return-in-test: clean test with no return produces zero diags" {
+    let src: String = "module m version \"1.0\"; " + test_block("t", "assert_eq(1, 1);");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "ordering: dup-function diag (register) appears before return-in-test diag (check)" {
+    let tb: String = test_block("t", "return;");
+    let src: String = "module m version \"1.0\"; function f() returns Void" + fn_body() + " function f() returns Void" + fn_body() + " " + tb;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 2);
+    assert_eq(diags[0].message, "function 'f' already defined");
+    assert_eq(diags[1].message, "'return' is not allowed inside a test body; test \"t\" has implicit Void return");
+}

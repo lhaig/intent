@@ -1,8 +1,11 @@
 // selfhost/checker/check.intent — Phase 45 / self-hosted checker scaffold.
 //
-// Semantic error model + duplicate top-level declaration detection.
-// Mirrors stage1 internal/checker/checker.go register passes in dispatch
-// order: enums → entities → traits → functions (checker.go lines 113-116).
+// Semantic error model + two-phase check dispatch mirroring stage1
+// internal/checker/checker.go Check() (lines 113-122):
+//
+//   Register phase  — registerEnums (+ variant dups) → registerEntities
+//                     → registerTraits → registerFunctions
+//   Check phase     — checkTests (return-in-test, ...)
 //
 // format_diags produces `error[file:line:col]: message` lines joined by "\n"
 // with NO trailing newline — matching diagnostic.Format in stage1 exactly.
@@ -63,21 +66,39 @@ function name_seen(seen: Array<String>, name: String) returns Bool {
     return false;
 }
 
-// --- Duplicate top-level declaration detection --------------------------------
-// Walks entities / enums / traits / functions in the same order as stage1
-// registerEnums → registerEntities → registerTraits → registerFunctions.
-// Reports the SECOND (duplicate) occurrence.
+// =============================================================================
+// REGISTER PHASE
+// Mirrors stage1 registerEnums → registerEntities → registerTraits →
+// registerFunctions. Reports dup at the SECOND occurrence.
+// =============================================================================
+
+// check_dup_enums also checks duplicate variant names within each enum.
+// Per-enum ordering: [enum-name dup check] then [variant dup checks for that
+// enum] — mirroring registerEnums which does both in one loop (checker.go
+// lines 662-728).
 
 function check_dup_enums(prog: Program) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
-    let mutable seen: Array<String> = [];
+    let mutable seen_enums: Array<String> = [];
     let mutable i: Int = 0;
     while i < len(prog.enums) {
         let e: EnumDecl = prog.enums[i];
-        if name_seen(seen, e.name) {
+        if name_seen(seen_enums, e.name) {
             diags.push(CheckDiag(e.line, e.column, "enum '" + e.name + "' already defined"));
         } else {
-            seen.push(e.name);
+            seen_enums.push(e.name);
+            // Check for duplicate variant names within this enum.
+            let mutable seen_variants: Array<String> = [];
+            let mutable vi: Int = 0;
+            while vi < len(e.variants) {
+                let v: EnumVariant = e.variants[vi];
+                if name_seen(seen_variants, v.name) {
+                    diags.push(CheckDiag(v.line, v.column, "duplicate variant name '" + v.name + "' in enum '" + e.name + "'"));
+                } else {
+                    seen_variants.push(v.name);
+                }
+                vi = vi + 1;
+            }
         }
         i = i + 1;
     }
@@ -132,12 +153,91 @@ function check_dup_functions(prog: Program) returns Array<CheckDiag> {
     return diags;
 }
 
-// --- Main dispatch ------------------------------------------------------------
-// check_program runs all implemented checks and returns diagnostics in the
-// same order stage1 produces them: enums → entities → traits → functions.
+// =============================================================================
+// CHECK PHASE
+// Mirrors stage1 checkTests (checker.go lines 982-1018). Runs AFTER the
+// register phase so register errors always precede check errors.
+// =============================================================================
+
+// find_returns_in_stmts walks stmts recursively and returns all st_return
+// statements, mirroring checkBlock's descent into if/while/for bodies.
+
+function find_returns_in_stmts(stmts: Array<Stmt>) returns Array<Stmt> {
+    let mutable out: Array<Stmt> = [];
+    let mutable i: Int = 0;
+    while i < len(stmts) {
+        let s: Stmt = stmts[i];
+        if s.kind == shared_ast.st_return() {
+            out.push(s);
+        }
+        if s.kind == shared_ast.st_if() {
+            let mutable ttmp: Array<Stmt> = find_returns_in_stmts(s.then_block.stmts);
+            let mutable ti: Int = 0;
+            while ti < len(ttmp) {
+                out.push(ttmp[ti]);
+                ti = ti + 1;
+            }
+            if s.has_else {
+                let mutable etmp: Array<Stmt> = find_returns_in_stmts(s.else_block.stmts);
+                let mutable ei: Int = 0;
+                while ei < len(etmp) {
+                    out.push(etmp[ei]);
+                    ei = ei + 1;
+                }
+            }
+        }
+        if s.kind == shared_ast.st_while() {
+            let mutable wtmp: Array<Stmt> = find_returns_in_stmts(s.then_block.stmts);
+            let mutable wi: Int = 0;
+            while wi < len(wtmp) {
+                out.push(wtmp[wi]);
+                wi = wi + 1;
+            }
+        }
+        if s.kind == shared_ast.st_for() {
+            let mutable ftmp: Array<Stmt> = find_returns_in_stmts(s.then_block.stmts);
+            let mutable fi: Int = 0;
+            while fi < len(ftmp) {
+                out.push(ftmp[fi]);
+                fi = fi + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+// check_return_in_tests emits an error for each `return` found inside a test
+// body. Message matches stage1 checker.go:1348 (Go %q wraps the name in
+// double quotes): `'return' is not allowed inside a test body; test "NAME"
+// has implicit Void return`.
+
+function check_return_in_tests(prog: Program) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
+    let mutable i: Int = 0;
+    while i < len(prog.tests) {
+        let t: TestDecl = prog.tests[i];
+        let mutable ret_stmts: Array<Stmt> = find_returns_in_stmts(t.body.stmts);
+        let mutable ri: Int = 0;
+        while ri < len(ret_stmts) {
+            let s: Stmt = ret_stmts[ri];
+            diags.push(CheckDiag(s.line, s.column, "'return' is not allowed inside a test body; test \"" + t.name + "\" has implicit Void return"));
+            ri = ri + 1;
+        }
+        i = i + 1;
+    }
+    return diags;
+}
+
+// =============================================================================
+// MAIN DISPATCH
+// Two-phase: register then check — matching stage1 Check() emit order.
+// =============================================================================
 
 public function check_program(prog: Program) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
+
+    // --- Register phase -------------------------------------------------------
     let mutable enums_d: Array<CheckDiag> = check_dup_enums(prog);
     let mutable ei: Int = 0;
     while ei < len(enums_d) {
@@ -162,5 +262,14 @@ public function check_program(prog: Program) returns Array<CheckDiag> {
         diags.push(fns_d[fi]);
         fi = fi + 1;
     }
+
+    // --- Check phase ----------------------------------------------------------
+    let mutable tests_d: Array<CheckDiag> = check_return_in_tests(prog);
+    let mutable tdi: Int = 0;
+    while tdi < len(tests_d) {
+        diags.push(tests_d[tdi]);
+        tdi = tdi + 1;
+    }
+
     return diags;
 }

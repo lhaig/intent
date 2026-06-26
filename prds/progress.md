@@ -952,3 +952,16 @@ st_continue stmt kinds in ast, parser support, formatter emit. This unblocks the
 outside-loop check AND keeps name-resolution faithful. Formatter must still round-trip
 error_handling.intent byte-equal (diff-formatter 22/22). Phase 45 grows 9 -> 11 tasks.
 45.3 (dup-variant + return-in-test) is unblocked and proceeds first.
+
+---
+
+## 2026-06-26 — Phase 45.3: dup enum variant + return-in-test
+
+check.intent now structured as register phase (dup-decl + dup-variant) then check
+phase (return-in-test, and later break/continue/undeclared/arity) to match stage1's
+unsorted emit order. dup-variant emitted inside the per-enum loop at the duplicate
+variant's line/col (`duplicate variant name 'X' in enum 'Y'`). return-in-test walks
+each test body recursively for st_return, message `'return' is not allowed inside a
+test body; test "NAME" has implicit Void return` (Go %q → double-quoted name). +6
+tests incl. a register-before-check ORDER lock; 120 passed rust+js. Gates green:
+selfcheck 4 EQUAL, diff-formatter 22/22, diff-linter 26/26.
