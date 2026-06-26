@@ -781,10 +781,16 @@ public entity Parser {
             if self.check(shared_lexer.tk_lt()) and self.lookahead_is_generic_call() {
                 let type_args: String = self.consume_generic_type_args();
                 let mutable children: Array<Expr> = [];
-                return Expr(shared_ast.ex_ident(), 0, "", false, tok.text + type_args, children);
+                let mutable e_g: Expr = Expr(shared_ast.ex_ident(), 0, "", false, tok.text + type_args, children);
+                e_g.line = tok.line;
+                e_g.column = tok.column;
+                return e_g;
             }
             let mutable children: Array<Expr> = [];
-            return Expr(shared_ast.ex_ident(), 0, "", false, tok.text, children);
+            let mutable e_i: Expr = Expr(shared_ast.ex_ident(), 0, "", false, tok.text, children);
+            e_i.line = tok.line;
+            e_i.column = tok.column;
+            return e_i;
         }
         if kind == shared_lexer.tk_lparen() {
             self.advance();

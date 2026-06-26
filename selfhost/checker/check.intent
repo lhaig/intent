@@ -196,6 +196,257 @@ public function build_global_scope(prog: Program) returns Scope {
     return s;
 }
 
+// =============================================================================
+// EXPRESSION NAME CHECKER
+//
+// check_expr_names walks an Expr in USE position and emits
+// `undeclared variable 'NAME'` for every ex_ident whose name is not visible
+// in the provided Scope (mirrors stage1 checkIdentifier, checker.go:2636).
+//
+// USE-position rules (conservative — mirrors stage1, avoids false positives):
+//   ex_ident     — check name; skip if scope_resolve returns true.
+//   ex_binop     — recurse both children.
+//   ex_unary     — recurse children[0].
+//   ex_array     — recurse all children.
+//   ex_index     — recurse children[0] (object) and children[1] (index).
+//   ex_range     — recurse children[0] and children[1].
+//   ex_paren     — recurse children[0].
+//   ex_call      — callee is children[0]:
+//                    • if callee is ex_ident → SKIP (function-call target
+//                      resolved via function/entity/enum registry, not scope).
+//                    • if callee is ex_field → recurse callee.children[0]
+//                      (the receiver); the field name is not a variable.
+//                    • otherwise → recurse callee.
+//                  Args are children[1..]. Recurse each.
+//   ex_field     — recurse children[0] (receiver). The field name is not a var.
+//   ex_match     — recurse children[0] (scrutinee). For each arm: recurse the
+//                  arm body in a child scope that has all arm bindings defined.
+//   ex_lambda    — recurse body (children[0]) in a child scope with all
+//                  lambda_params defined.
+//   ex_forall/ex_exists — the bound variable is in name; recurse children[0]
+//                  (domain) and children[1] (body) in a child scope with the
+//                  bound var defined.
+//   literals (ex_int, ex_float, ex_string, ex_bool, ex_char, ex_void) → skip.
+// =============================================================================
+
+function check_expr_names(e: Expr, scope: Scope) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
+    if e.kind == shared_ast.ex_ident() {
+        if not scope_resolve(scope, e.name) {
+            diags.push(CheckDiag(e.line, e.column, "undeclared variable '" + e.name + "'"));
+        }
+        return diags;
+    }
+    if e.kind == shared_ast.ex_binop() {
+        let mutable ld: Array<CheckDiag> = check_expr_names(e.children[0], scope);
+        let mutable li: Int = 0;
+        while li < len(ld) {
+            diags.push(ld[li]);
+            li = li + 1;
+        }
+        let mutable rd: Array<CheckDiag> = check_expr_names(e.children[1], scope);
+        let mutable ri: Int = 0;
+        while ri < len(rd) {
+            diags.push(rd[ri]);
+            ri = ri + 1;
+        }
+        return diags;
+    }
+    if e.kind == shared_ast.ex_unary() {
+        let mutable ud: Array<CheckDiag> = check_expr_names(e.children[0], scope);
+        let mutable ui: Int = 0;
+        while ui < len(ud) {
+            diags.push(ud[ui]);
+            ui = ui + 1;
+        }
+        return diags;
+    }
+    if e.kind == shared_ast.ex_paren() {
+        let mutable pd: Array<CheckDiag> = check_expr_names(e.children[0], scope);
+        let mutable pi: Int = 0;
+        while pi < len(pd) {
+            diags.push(pd[pi]);
+            pi = pi + 1;
+        }
+        return diags;
+    }
+    if e.kind == shared_ast.ex_array() {
+        let mutable ai: Int = 0;
+        while ai < len(e.children) {
+            let mutable ad: Array<CheckDiag> = check_expr_names(e.children[ai], scope);
+            let mutable adi: Int = 0;
+            while adi < len(ad) {
+                diags.push(ad[adi]);
+                adi = adi + 1;
+            }
+            ai = ai + 1;
+        }
+        return diags;
+    }
+    if e.kind == shared_ast.ex_index() {
+        let mutable od: Array<CheckDiag> = check_expr_names(e.children[0], scope);
+        let mutable oi: Int = 0;
+        while oi < len(od) {
+            diags.push(od[oi]);
+            oi = oi + 1;
+        }
+        let mutable id: Array<CheckDiag> = check_expr_names(e.children[1], scope);
+        let mutable ii: Int = 0;
+        while ii < len(id) {
+            diags.push(id[ii]);
+            ii = ii + 1;
+        }
+        return diags;
+    }
+    if e.kind == shared_ast.ex_range() {
+        let mutable rd0: Array<CheckDiag> = check_expr_names(e.children[0], scope);
+        let mutable ri0: Int = 0;
+        while ri0 < len(rd0) {
+            diags.push(rd0[ri0]);
+            ri0 = ri0 + 1;
+        }
+        let mutable rd1: Array<CheckDiag> = check_expr_names(e.children[1], scope);
+        let mutable ri1: Int = 0;
+        while ri1 < len(rd1) {
+            diags.push(rd1[ri1]);
+            ri1 = ri1 + 1;
+        }
+        return diags;
+    }
+    if e.kind == shared_ast.ex_field() {
+        // Recurse receiver (children[0]); the field name is not a variable.
+        let mutable fd: Array<CheckDiag> = check_expr_names(e.children[0], scope);
+        let mutable fi: Int = 0;
+        while fi < len(fd) {
+            diags.push(fd[fi]);
+            fi = fi + 1;
+        }
+        return diags;
+    }
+    if e.kind == shared_ast.ex_call() {
+        // children[0] is the callee; children[1..] are the arguments.
+        let callee: Expr = e.children[0];
+        if callee.kind == shared_ast.ex_ident() {
+            // Plain function call: callee is a function/entity/enum constructor
+            // name resolved via the registry, not a scope variable — SKIP it.
+        } else {
+            if callee.kind == shared_ast.ex_field() {
+                // Method call: recurse the receiver only (callee.children[0]).
+                // The method name is not a variable.
+                let mutable mrd: Array<CheckDiag> = check_expr_names(callee.children[0], scope);
+                let mutable mri: Int = 0;
+                while mri < len(mrd) {
+                    diags.push(mrd[mri]);
+                    mri = mri + 1;
+                }
+            } else {
+                // Closure-call or other callee form — recurse it.
+                let mutable ccd: Array<CheckDiag> = check_expr_names(callee, scope);
+                let mutable cci: Int = 0;
+                while cci < len(ccd) {
+                    diags.push(ccd[cci]);
+                    cci = cci + 1;
+                }
+            }
+        }
+        // Recurse arguments (children[1..]).
+        let mutable cai: Int = 1;
+        while cai < len(e.children) {
+            let mutable cad: Array<CheckDiag> = check_expr_names(e.children[cai], scope);
+            let mutable cadj: Int = 0;
+            while cadj < len(cad) {
+                diags.push(cad[cadj]);
+                cadj = cadj + 1;
+            }
+            cai = cai + 1;
+        }
+        return diags;
+    }
+    if e.kind == shared_ast.ex_match() {
+        // children[0] is the scrutinee.
+        let mutable scd: Array<CheckDiag> = check_expr_names(e.children[0], scope);
+        let mutable sci: Int = 0;
+        while sci < len(scd) {
+            diags.push(scd[sci]);
+            sci = sci + 1;
+        }
+        // Each arm's body is checked in a child scope with the arm bindings.
+        let mutable ami: Int = 0;
+        while ami < len(e.match_arms) {
+            let arm: MatchArm = e.match_arms[ami];
+            let mutable arm_scope: Scope = scope_enter(scope);
+            let mutable bi: Int = 0;
+            while bi < len(arm.bindings) {
+                arm_scope = scope_define(arm_scope, arm.bindings[bi]);
+                bi = bi + 1;
+            }
+            let mutable amd: Array<CheckDiag> = check_expr_names(arm.body, arm_scope);
+            let mutable amdi: Int = 0;
+            while amdi < len(amd) {
+                diags.push(amd[amdi]);
+                amdi = amdi + 1;
+            }
+            ami = ami + 1;
+        }
+        return diags;
+    }
+    if e.kind == shared_ast.ex_lambda() {
+        // Recurse body (children[0]) in a child scope with lambda params defined.
+        let mutable lam_scope: Scope = scope_enter(scope);
+        let mutable lpi: Int = 0;
+        while lpi < len(e.lambda_params) {
+            lam_scope = scope_define(lam_scope, e.lambda_params[lpi].name);
+            lpi = lpi + 1;
+        }
+        let mutable lamd: Array<CheckDiag> = check_expr_names(e.children[0], lam_scope);
+        let mutable lami: Int = 0;
+        while lami < len(lamd) {
+            diags.push(lamd[lami]);
+            lami = lami + 1;
+        }
+        return diags;
+    }
+    if e.kind == shared_ast.ex_forall() {
+        // Bound variable is e.name; domain = children[0], body = children[1].
+        let mutable qd_scope: Scope = scope_enter(scope);
+        qd_scope = scope_define(qd_scope, e.name);
+        let mutable qdd: Array<CheckDiag> = check_expr_names(e.children[0], qd_scope);
+        let mutable qddi: Int = 0;
+        while qddi < len(qdd) {
+            diags.push(qdd[qddi]);
+            qddi = qddi + 1;
+        }
+        let mutable qbd: Array<CheckDiag> = check_expr_names(e.children[1], qd_scope);
+        let mutable qbdi: Int = 0;
+        while qbdi < len(qbd) {
+            diags.push(qbd[qbdi]);
+            qbdi = qbdi + 1;
+        }
+        return diags;
+    }
+    if e.kind == shared_ast.ex_exists() {
+        // Same structure as ex_forall.
+        let mutable eqs: Scope = scope_enter(scope);
+        eqs = scope_define(eqs, e.name);
+        let mutable eqdd: Array<CheckDiag> = check_expr_names(e.children[0], eqs);
+        let mutable eqddi: Int = 0;
+        while eqddi < len(eqdd) {
+            diags.push(eqdd[eqddi]);
+            eqddi = eqddi + 1;
+        }
+        let mutable eqbd: Array<CheckDiag> = check_expr_names(e.children[1], eqs);
+        let mutable eqbdi: Int = 0;
+        while eqbdi < len(eqbd) {
+            diags.push(eqbd[eqbdi]);
+            eqbdi = eqbdi + 1;
+        }
+        return diags;
+    }
+    // Literals (ex_void, ex_int, ex_float, ex_string, ex_bool, ex_char) and
+    // any unrecognised kind — no names to check.
+    return diags;
+}
+
 // --- Diagnostic entity -------------------------------------------------------
 
 public entity CheckDiag {
@@ -339,14 +590,23 @@ function check_dup_functions(prog: Program) returns Array<CheckDiag> {
 // register errors always precede check errors.
 // =============================================================================
 
-// check_body_stmts walks statements in source order emitting:
-//   - break/continue outside loop (when loop_depth == 0)
-//   - return inside a test body (when in_test is true), using test_name
-// Mirrors stage1 checkStatement (checker.go:1221-1238) with loopDepth
-// incremented on while/for bodies and unchanged on if bodies.
+// check_body_stmts walks statements in source order, threading a Scope for
+// let-binding and undeclared-variable checks. Emits:
+//   - break/continue outside loop (loop_depth == 0)
+//   - return inside test body (in_test == true)
+//   - undeclared variable (via check_expr_names)
+//   - variable already defined in this scope (st_let redefinition)
+// Scope threading (pass-by-value, functional reassignment):
+//   - st_let: check RHS against current scope, then define name in scope.
+//   - st_expr / st_return: check expr against current scope.
+//   - st_if: recurse both branches in scope_enter(scope) child scopes.
+//   - st_while: check condition, recurse body in scope_enter + loop_depth+1.
+//   - st_for: check iterable, recurse body in scope_enter + loop var + depth+1.
+// Mirrors stage1 checkStatement (checker.go:1221-1254).
 
-function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, test_name: String) returns Array<CheckDiag> {
+function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, test_name: String, scope: Scope) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
+    let mutable cur_scope: Scope = scope;
     let mutable i: Int = 0;
     while i < len(stmts) {
         let s: Stmt = stmts[i];
@@ -364,17 +624,55 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
             if in_test {
                 diags.push(CheckDiag(s.line, s.column, "'return' is not allowed inside a test body; test \"" + test_name + "\" has implicit Void return"));
             }
+            // Check the return value expression (if any — st_return with
+            // ex_void has no names to check, but check_expr_names is safe).
+            let mutable retd: Array<CheckDiag> = check_expr_names(s.expr, cur_scope);
+            let mutable reti: Int = 0;
+            while reti < len(retd) {
+                diags.push(retd[reti]);
+                reti = reti + 1;
+            }
+        }
+        if s.kind == shared_ast.st_let() {
+            // Check RHS against the CURRENT scope (before the name is bound).
+            let mutable rhsd: Array<CheckDiag> = check_expr_names(s.expr, cur_scope);
+            let mutable rhsi: Int = 0;
+            while rhsi < len(rhsd) {
+                diags.push(rhsd[rhsi]);
+                rhsi = rhsi + 1;
+            }
+            // Redefinition check: already defined in this scope level?
+            if scope_resolve_local(cur_scope, s.name) {
+                diags.push(CheckDiag(s.line, s.column, "variable '" + s.name + "' already defined in this scope"));
+            } else {
+                cur_scope = scope_define(cur_scope, s.name);
+            }
+        }
+        if s.kind == shared_ast.st_expr() {
+            let mutable exprd: Array<CheckDiag> = check_expr_names(s.expr, cur_scope);
+            let mutable expri: Int = 0;
+            while expri < len(exprd) {
+                diags.push(exprd[expri]);
+                expri = expri + 1;
+            }
         }
         // Recurse into if bodies with the SAME loop depth (if does not add depth).
+        // Each branch gets its OWN child scope (bindings in then don't leak to else).
         if s.kind == shared_ast.st_if() {
-            let mutable ttmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth, in_test, test_name);
+            let mutable cond_d: Array<CheckDiag> = check_expr_names(s.expr, cur_scope);
+            let mutable cond_i: Int = 0;
+            while cond_i < len(cond_d) {
+                diags.push(cond_d[cond_i]);
+                cond_i = cond_i + 1;
+            }
+            let mutable ttmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth, in_test, test_name, scope_enter(cur_scope));
             let mutable ti: Int = 0;
             while ti < len(ttmp) {
                 diags.push(ttmp[ti]);
                 ti = ti + 1;
             }
             if s.has_else {
-                let mutable etmp: Array<CheckDiag> = check_body_stmts(s.else_block.stmts, loop_depth, in_test, test_name);
+                let mutable etmp: Array<CheckDiag> = check_body_stmts(s.else_block.stmts, loop_depth, in_test, test_name, scope_enter(cur_scope));
                 let mutable ei: Int = 0;
                 while ei < len(etmp) {
                     diags.push(etmp[ei]);
@@ -384,7 +682,13 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
         }
         // Recurse into while/for bodies with loop_depth + 1.
         if s.kind == shared_ast.st_while() {
-            let mutable wtmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth + 1, in_test, test_name);
+            let mutable wcond_d: Array<CheckDiag> = check_expr_names(s.expr, cur_scope);
+            let mutable wcond_i: Int = 0;
+            while wcond_i < len(wcond_d) {
+                diags.push(wcond_d[wcond_i]);
+                wcond_i = wcond_i + 1;
+            }
+            let mutable wtmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth + 1, in_test, test_name, scope_enter(cur_scope));
             let mutable wi: Int = 0;
             while wi < len(wtmp) {
                 diags.push(wtmp[wi]);
@@ -392,7 +696,17 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
             }
         }
         if s.kind == shared_ast.st_for() {
-            let mutable ftmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth + 1, in_test, test_name);
+            // Check the iterable expression against the current scope.
+            let mutable iter_d: Array<CheckDiag> = check_expr_names(s.expr, cur_scope);
+            let mutable iter_i: Int = 0;
+            while iter_i < len(iter_d) {
+                diags.push(iter_d[iter_i]);
+                iter_i = iter_i + 1;
+            }
+            // Body scope: child scope + loop variable defined (s.name holds
+            // the loop var per parse_for_stmt, which sets st_for name=var_tok).
+            let mutable for_scope: Scope = scope_define(scope_enter(cur_scope), s.name);
+            let mutable ftmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth + 1, in_test, test_name, for_scope);
             let mutable fti: Int = 0;
             while fti < len(ftmp) {
                 diags.push(ftmp[fti]);
@@ -404,15 +718,44 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
     return diags;
 }
 
-// check_functions walks each top-level function body (loop_depth=0,
-// in_test=false), mirroring stage1 checkFunctions (checker.go:907).
+// make_fn_scope — builds the initial scope for a function body: global scope
+// entered + all params defined. Mirrors stage1 checkFunction (line 920-940).
 
-function check_functions(prog: Program) returns Array<CheckDiag> {
+function make_fn_scope(f: FunctionDecl, global: Scope) returns Scope {
+    let mutable s: Scope = scope_enter(global);
+    let mutable i: Int = 0;
+    while i < len(f.params) {
+        s = scope_define(s, f.params[i].name);
+        i = i + 1;
+    }
+    return s;
+}
+
+// make_method_scope — builds the initial scope for a method/constructor body:
+// global scope entered + "self" + all params defined. Mirrors stage1
+// checkMethod/checkConstructor (lines 1112-1176).
+
+function make_method_scope(f: FunctionDecl, global: Scope) returns Scope {
+    let mutable s: Scope = scope_enter(global);
+    s = scope_define(s, "self");
+    let mutable i: Int = 0;
+    while i < len(f.params) {
+        s = scope_define(s, f.params[i].name);
+        i = i + 1;
+    }
+    return s;
+}
+
+// check_functions walks each top-level function body, mirroring stage1
+// checkFunctions (checker.go:907).
+
+function check_functions(prog: Program, global: Scope) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable i: Int = 0;
     while i < len(prog.functions) {
         let f: FunctionDecl = prog.functions[i];
-        let mutable fd: Array<CheckDiag> = check_body_stmts(f.body.stmts, 0, false, "");
+        let fn_scope: Scope = make_fn_scope(f, global);
+        let mutable fd: Array<CheckDiag> = check_body_stmts(f.body.stmts, 0, false, "", fn_scope);
         let mutable fi: Int = 0;
         while fi < len(fd) {
             diags.push(fd[fi]);
@@ -423,16 +766,17 @@ function check_functions(prog: Program) returns Array<CheckDiag> {
     return diags;
 }
 
-// check_entities walks each entity's constructor and methods (loop_depth=0,
-// in_test=false), mirroring stage1 checkEntities (checker.go:1054).
+// check_entities walks each entity's constructor and methods, mirroring
+// stage1 checkEntities (checker.go:1054).
 
-function check_entities(prog: Program) returns Array<CheckDiag> {
+function check_entities(prog: Program, global: Scope) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable i: Int = 0;
     while i < len(prog.entities) {
         let e: EntityDecl = prog.entities[i];
         if e.has_constructor {
-            let mutable cd: Array<CheckDiag> = check_body_stmts(e.ctor.body.stmts, 0, false, "");
+            let ctor_scope: Scope = make_method_scope(e.ctor, global);
+            let mutable cd: Array<CheckDiag> = check_body_stmts(e.ctor.body.stmts, 0, false, "", ctor_scope);
             let mutable ci: Int = 0;
             while ci < len(cd) {
                 diags.push(cd[ci]);
@@ -442,7 +786,8 @@ function check_entities(prog: Program) returns Array<CheckDiag> {
         let mutable mi: Int = 0;
         while mi < len(e.methods) {
             let m: FunctionDecl = e.methods[mi];
-            let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "");
+            let meth_scope: Scope = make_method_scope(m, global);
+            let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "", meth_scope);
             let mutable mdi: Int = 0;
             while mdi < len(md) {
                 diags.push(md[mdi]);
@@ -455,10 +800,10 @@ function check_entities(prog: Program) returns Array<CheckDiag> {
     return diags;
 }
 
-// check_impl_bodies walks each impl block's method bodies (loop_depth=0,
-// in_test=false), mirroring stage1 checkImplBlockBodies (traits.go:206).
+// check_impl_bodies walks each impl block's method bodies, mirroring stage1
+// checkImplBlockBodies (traits.go:206).
 
-function check_impl_bodies(prog: Program) returns Array<CheckDiag> {
+function check_impl_bodies(prog: Program, global: Scope) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable i: Int = 0;
     while i < len(prog.impls) {
@@ -466,7 +811,8 @@ function check_impl_bodies(prog: Program) returns Array<CheckDiag> {
         let mutable mi: Int = 0;
         while mi < len(ib.methods) {
             let m: FunctionDecl = ib.methods[mi];
-            let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "");
+            let meth_scope: Scope = make_method_scope(m, global);
+            let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "", meth_scope);
             let mutable mdi: Int = 0;
             while mdi < len(md) {
                 diags.push(md[mdi]);
@@ -479,16 +825,17 @@ function check_impl_bodies(prog: Program) returns Array<CheckDiag> {
     return diags;
 }
 
-// check_tests walks each test body (loop_depth=0, in_test=true), mirroring
-// stage1 checkTests (checker.go:975). Return-in-test and break/continue-
-// outside-loop both fire here if a test body has a bare break/return.
+// check_tests walks each test body, mirroring stage1 checkTests
+// (checker.go:975). Return-in-test, break/continue-outside-loop, and
+// undeclared-variable all fire here if triggered.
 
-function check_tests(prog: Program) returns Array<CheckDiag> {
+function check_tests(prog: Program, global: Scope) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable i: Int = 0;
     while i < len(prog.tests) {
         let t: TestDecl = prog.tests[i];
-        let mutable td: Array<CheckDiag> = check_body_stmts(t.body.stmts, 0, true, t.name);
+        let test_scope: Scope = scope_enter(global);
+        let mutable td: Array<CheckDiag> = check_body_stmts(t.body.stmts, 0, true, t.name, test_scope);
         let mutable tdi: Int = 0;
         while tdi < len(td) {
             diags.push(td[tdi]);
@@ -534,27 +881,29 @@ public function check_program(prog: Program) returns Array<CheckDiag> {
     }
 
     // --- Check phase ----------------------------------------------------------
+    // Build the global scope once; all body walkers share it.
     // Order mirrors stage1: checkFunctions → checkEntities →
     // checkImplBlockBodies → checkTests (checker.go lines 118-121).
-    let mutable fn_d: Array<CheckDiag> = check_functions(prog);
+    let global: Scope = build_global_scope(prog);
+    let mutable fn_d: Array<CheckDiag> = check_functions(prog, global);
     let mutable fni: Int = 0;
     while fni < len(fn_d) {
         diags.push(fn_d[fni]);
         fni = fni + 1;
     }
-    let mutable ent_d: Array<CheckDiag> = check_entities(prog);
+    let mutable ent_d: Array<CheckDiag> = check_entities(prog, global);
     let mutable enti2: Int = 0;
     while enti2 < len(ent_d) {
         diags.push(ent_d[enti2]);
         enti2 = enti2 + 1;
     }
-    let mutable impl_d: Array<CheckDiag> = check_impl_bodies(prog);
+    let mutable impl_d: Array<CheckDiag> = check_impl_bodies(prog, global);
     let mutable impli: Int = 0;
     while impli < len(impl_d) {
         diags.push(impl_d[impli]);
         impli = impli + 1;
     }
-    let mutable tests_d: Array<CheckDiag> = check_tests(prog);
+    let mutable tests_d: Array<CheckDiag> = check_tests(prog, global);
     let mutable tdi: Int = 0;
     while tdi < len(tests_d) {
         diags.push(tests_d[tdi]);

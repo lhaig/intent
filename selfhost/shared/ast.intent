@@ -188,6 +188,11 @@ public entity Expr {
     // Phase 44: parameters of an `ex_lambda` expression. Empty for every other
     // kind; defaulted in the constructor body so existing call sites don't change.
     field lambda_params: Array<Param>;
+    // Phase 45.7: source position of the expression's first token. Populated
+    // for ex_ident (the identifier token); defaulted to 0 for all other kinds
+    // (no constructor signature change).
+    field line: Int;
+    field column: Int;
 
     constructor(kind: Int, int_value: Int, str_value: String, bool_value: Bool, name: String, children: Array<Expr>) {
         self.kind = kind;
@@ -198,6 +203,8 @@ public entity Expr {
         self.children = children;
         self.match_arms = empty_matcharm_array();
         self.lambda_params = empty_param_array();
+        self.line = 0;
+        self.column = 0;
     }
 }
 

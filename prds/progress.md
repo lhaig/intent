@@ -1011,3 +1011,26 @@ timeout, char_from_codepoint. (Method-style builtins like push/get/set/remove ar
 seeded — they're resolved via field access, not bare identifiers.) +4 tests (132).
 Gates green. Foundation for 45.7 undeclared-variable; the no-false-positives gate
 (45.7/45.10) will catch any missing builtin on the corpus.
+
+---
+
+## 2026-06-26 — Phase 45.7: Expr position + undeclared-variable + redefinition
+
+Step 1: added line/column to the Expr entity (shared/ast.intent, defaulted 0 in ctor
+body) and populated them at the two ex_ident parse sites (parser.intent ~785/791) from
+the identifier token. Additive — selfcheck stayed 4 EQUAL, diff-formatter 22/22.
+Step 2: extended check_body_stmts to thread a Scope: st_let checks the initializer in
+the current scope, then resolve_local → `variable 'X' already defined in this scope`
+(at the let stmt) else scope_define; nested if/while/for get child scopes; for-loop var
+defined in the body scope. Step 3: check_expr_names walks expressions and emits
+`undeclared variable 'X'` at the ident's line/column for unresolved ex_ident in use
+position (skips plain-call callees + field names; recurses method receivers; defines
+lambda/match/forall bindings in child scopes). Initial scopes: function=global+params,
+method/ctor/impl=+self+params, test=global. +10 tests (142 rust+js). Gates green.
+
+NOTE: tried an early no-false-positives spot-check over the 22 examples via an
+`intentc test` probe calling check_program — it FAILS with a libtest stack overflow
+(the deep parse+check of large examples exceeds the 2 MB test-thread stack), exactly
+like the formatter/linter differentials. So the no-false-positives corpus sweep MUST
+use the built checker binary (45.9) and runs in 45.10; a revise loop handles any false
+positives surfaced there (module-qualified receivers are the main risk to watch).

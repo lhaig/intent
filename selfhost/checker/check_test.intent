@@ -217,3 +217,73 @@ test "scope: build_global_scope seeds declared names and builtins" {
     assert_eq(checker.scope_resolve(s, "None"), true);
     assert_eq(checker.scope_resolve(s, "nope"), false);
 }
+
+// =============================================================================
+// Undeclared variable and redefinition tests (45.7)
+// =============================================================================
+
+test "undeclared: bare reference to unknown name fires" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let x: Int = nope; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "undeclared variable 'nope'");
+}
+
+test "undeclared: let then use does NOT fire (let binds name)" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let x: Int = 1; let y: Int = x; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "undeclared: function param is visible in body" {
+    let src: String = "module m version \"1.0\"; function f(x: Int) returns Int " + lbrace() + " return x; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "undeclared: global function call target is NOT flagged undeclared" {
+    let src: String = "module m version \"1.0\"; function g() returns Void " + fn_body() + " function f() returns Void " + lbrace() + " g(); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "undeclared: builtin call target is NOT flagged undeclared" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " print(\"hi\"); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "undeclared: for-loop variable is visible in for body" {
+    let loop_src: String = "for x in items " + lbrace() + " let y: Int = x; " + rbrace();
+    let src: String = "module m version \"1.0\"; function f(items: Array<Int>) returns Void " + lbrace() + " " + loop_src + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "redefinition: let same name twice in same scope fires" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let x: Int = 1; let x: Int = 2; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "variable 'x' already defined in this scope");
+}
+
+test "redefinition: let same name in nested if block is ok (different scope)" {
+    let if_src: String = "if true " + lbrace() + " let x: Int = 2; " + rbrace();
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let x: Int = 1; " + if_src + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "undeclared: method body can use self without firing" {
+    let method_src: String = "method get_x() returns Int " + lbrace() + " return self.x; " + rbrace();
+    let src: String = "module m version \"1.0\"; entity Foo " + lbrace() + " field x: Int; " + method_src + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "undeclared: name used before let in same scope fires" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let y: Int = x; let x: Int = 1; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "undeclared variable 'x'");
+}
