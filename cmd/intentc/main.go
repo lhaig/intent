@@ -550,15 +550,22 @@ func stage2FormatterBinary() (string, error) {
 
 	cachePath := filepath.Join(os.TempDir(), "intent-stage2-fmt")
 
-	// Staleness check: rebuild if cached binary is missing or any
-	// selfhost/formatter/*.intent file is newer than the cache.
+	// Staleness check: rebuild if cached binary is missing or any .intent file
+	// in selfhost/formatter/ or selfhost/shared/ is newer than the cache.
 	needBuild := false
 	cacheInfo, err := os.Stat(cachePath)
 	if err != nil {
 		needBuild = true
 	} else {
-		entries, err := os.ReadDir(srcDir)
-		if err == nil {
+		sharedDir := filepath.Join("selfhost", "shared")
+		for _, scanDir := range []string{srcDir, sharedDir} {
+			if needBuild {
+				break
+			}
+			entries, err := os.ReadDir(scanDir)
+			if err != nil {
+				continue
+			}
 			for _, e := range entries {
 				if !strings.HasSuffix(e.Name(), ".intent") {
 					continue
@@ -816,8 +823,8 @@ func runStage2Linter(binaryPath, filePath string) (string, error) {
 
 // stage2LinterBinary returns the path to the stage2 linter binary, either from the
 // INTENT_STAGE2_LINT env override or by auto-building from
-// selfhost/formatter/lint_main.intent (cached in os.TempDir(), rebuilt when any
-// selfhost/formatter/*.intent file is newer than the cache).
+// selfhost/linter/lint_main.intent (cached in os.TempDir(), rebuilt when any
+// selfhost/linter/*.intent or selfhost/shared/*.intent file is newer than the cache).
 func stage2LinterBinary() (string, error) {
 	if envPath := os.Getenv("INTENT_STAGE2_LINT"); envPath != "" {
 		info, err := os.Stat(envPath)
@@ -830,23 +837,32 @@ func stage2LinterBinary() (string, error) {
 		return envPath, nil
 	}
 
-	srcDir := filepath.Join("selfhost", "formatter")
+	srcDir := filepath.Join("selfhost", "linter")
 	mainSrc := filepath.Join(srcDir, "lint_main.intent")
 	if _, err := os.Stat(mainSrc); err != nil {
 		return "", fmt.Errorf(
-			"stage2 linter sources not found at selfhost/formatter/lint_main.intent; run from the repo root or set INTENT_STAGE2_LINT to a prebuilt binary",
+			"stage2 linter sources not found at selfhost/linter/lint_main.intent; run from the repo root or set INTENT_STAGE2_LINT to a prebuilt binary",
 		)
 	}
 
 	cachePath := filepath.Join(os.TempDir(), "intent-stage2-lint")
 
+	// Staleness check: rebuild if cached binary is missing or any .intent file
+	// in selfhost/linter/ or selfhost/shared/ is newer than the cache.
 	needBuild := false
 	cacheInfo, err := os.Stat(cachePath)
 	if err != nil {
 		needBuild = true
 	} else {
-		entries, err := os.ReadDir(srcDir)
-		if err == nil {
+		sharedDir := filepath.Join("selfhost", "shared")
+		for _, scanDir := range []string{srcDir, sharedDir} {
+			if needBuild {
+				break
+			}
+			entries, err := os.ReadDir(scanDir)
+			if err != nil {
+				continue
+			}
 			for _, e := range entries {
 				if !strings.HasSuffix(e.Name(), ".intent") {
 					continue

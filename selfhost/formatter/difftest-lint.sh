@@ -4,7 +4,7 @@
 #
 # Compares the stage2 (Intent) linter against stage1 `intentc lint` across:
 #   - examples/*.intent  (22 files; the ADR 0050 baseline corpus)
-#   - selfhost/formatter/lint-fixtures/*.intent  (4 fixture files; non-corpus rules)
+#   - selfhost/linter/lint-fixtures/*.intent  (4 fixture files; non-corpus rules)
 #
 # For each file:
 #   1. Run stage1: ./intentc lint <file>
@@ -33,7 +33,8 @@ SKIP_PARSE_ERR="${SKIP_PARSE_ERR:-}"
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 INTENTC="$ROOT/intentc"
 FMT_DIR="$ROOT/selfhost/formatter"
-FIXTURES_DIR="$FMT_DIR/lint-fixtures"
+LINTER_DIR="$ROOT/selfhost/linter"
+FIXTURES_DIR="$LINTER_DIR/lint-fixtures"
 
 if [ ! -x "$INTENTC" ]; then
   echo "intentc not built; running make build..." >&2
@@ -44,7 +45,7 @@ fi
 BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/intent-difflint.XXXXXX")
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
-if ! ( cd "$BUILD_DIR" && "$INTENTC" build --target rust "$FMT_DIR/lint_main.intent" ) >"$BUILD_DIR/build.log" 2>&1; then
+if ! ( cd "$BUILD_DIR" && "$INTENTC" build --target rust "$LINTER_DIR/lint_main.intent" ) >"$BUILD_DIR/build.log" 2>&1; then
   echo "stage2 lint_main build failed:" >&2
   tail -20 "$BUILD_DIR/build.log" >&2
   exit 2

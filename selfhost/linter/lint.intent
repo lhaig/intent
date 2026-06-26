@@ -4,7 +4,7 @@
 // Emit order mirrors stage1 Lint(): functions → externs → entities → enums
 // → traits → impls → intent_blocks, so byte-equal output is achievable in
 // the differential gate (43.12).
-module formatter_linter version "0.1.0";
+module linter version "0.1.0";
 
 import "../shared/ast.intent";
 

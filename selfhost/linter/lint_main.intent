@@ -19,7 +19,7 @@
 //   1  usage error (no file argument)
 //   2  file could not be read
 //   3  parse error (the source is not valid Intent the stage2 parser accepts)
-module formatter_lint_main version "0.1.0";
+module lint_main version "0.1.0";
 
 import "lint.intent";
 import "../shared/parser.intent";
@@ -47,11 +47,11 @@ entry function main() returns Int {
         print("parse error: " + prog.error);
         return 3;
     }
-    let diags: Array<LintDiag> = formatter_linter.lint_program(prog);
+    let diags: Array<LintDiag> = linter.lint_program(prog);
     if len(diags) == 0 {
         print("No lint warnings.");
         return 0;
     }
-    print(formatter_linter.format_diags(diags, path) + len(diags).to_string() + " warning(s) found.");
+    print(linter.format_diags(diags, path) + len(diags).to_string() + " warning(s) found.");
     return 0;
 }

@@ -863,3 +863,23 @@ still in formatter/ but importing ../shared/); go test ./... pass; stage2 suites
 NOTE: linter still physically in selfhost/formatter/ — it relocates to selfhost/
 linter/ in 44.4 (imports already ../shared/, so the move won't change them since
 formatter/ and linter/ are both siblings of shared/).
+
+---
+
+## 2026-06-26 — Phase 44.4: relocate linter to selfhost/linter/
+
+git mv lint.intent / lint_main.intent / lint_test.intent / lint-fixtures/ →
+selfhost/linter/. Renamed modules formatter_linter→linter, formatter_linter_test→
+linter_test, formatter_lint_main→lint_main. The ../shared/ imports were unchanged
+(linter/ and formatter/ are both siblings of shared/). Updated difftest-lint.sh paths
+(lint_main + fixtures dir). Go shim cmd/intentc/main.go: stage2LinterBinary source →
+selfhost/linter/lint_main.intent; AND both stage2LinterBinary + stage2FormatterBinary
+staleness checks now ALSO scan selfhost/shared/ (so editing a shared file rebuilds the
+cached binary — a 44.3 oversight fixed here).
+
+Gates green: build, go test ./...; selfcheck 4 EQUAL; diff-formatter 22/22; diff-linter
+26/26; lint_test 188 rust+js; `lint --self-hosted` byte-identical to stage1;
+`fmt --self-hosted` OK.
+
+The selfhost/ restructure (shared/ + formatter/ + linter/) is structurally complete;
+44.5 is docs + final validate + push.
