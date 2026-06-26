@@ -60,20 +60,7 @@ Widened the stage2 parser beyond its self-hostable subset so it can format arbit
 
 ## Phase 43: Self-Hosted Linter (stage2) — 13 tasks completed 2026-06-24 (all 16 rule families; `make diff-linter` 26/26 byte-equal vs `intentc lint`; see [TASKS-archive.md](TASKS-archive.md))
 
-## Phase 44: selfhost/shared Restructure — ACTIVE
-
-Split the shared stage2 front-end (lexer/ast/parser) into `selfhost/shared/` and make
-`formatter/`, `linter/`, (later) `checker/` siblings importing it — the restructure
-ADR 0050 D1 deferred until a third tool (the checker) lands. Pure refactor; all four
-gates stay green. See [prd-phase-44-selfhost-shared-restructure.md](active/prd-phase-44-selfhost-shared-restructure.md) and ADR 0051.
-
-| # | Task | PRD | Status | Notes |
-|---|------|-----|--------|-------|
-| 44.1 | ADR 0051 — selfhost/shared restructure | [prd-phase-44-selfhost-shared-restructure.md](active/prd-phase-44-selfhost-shared-restructure.md) | DONE (2026-06-25) | docs/decisions/0051; D1 do-it-now, D2 shared+sibling dirs, D3 cross-dir imports, D4 shared_* rename, D5 pure-refactor |
-| 44.2 | Verify cross-directory imports (spike) | [prd-phase-44-selfhost-shared-restructure.md](active/prd-phase-44-selfhost-shared-restructure.md) | DONE (2026-06-25) | CONFIRMED: `import "../lib/x.intent"` builds + emits on rust AND js; restructure feasible, no stage1 change needed |
-| 44.3 | Create selfhost/shared/ + re-point formatter | [prd-phase-44-selfhost-shared-restructure.md](active/prd-phase-44-selfhost-shared-restructure.md) | DONE (2026-06-26) | lexer/ast/parser→shared/, modules→shared_*, formatter+linter import ../shared/, selfcheck/difftest updated; selfcheck 4 EQUAL, diff-formatter 22/22, diff-linter 26/26, go test + stage2 207/188 green |
-| 44.4 | Move linter to selfhost/linter/ | [prd-phase-44-selfhost-shared-restructure.md](active/prd-phase-44-selfhost-shared-restructure.md) | DONE (2026-06-26) | lint*.intent + fixtures → selfhost/linter/; modules linter/linter_test/lint_main; Go shim path + BOTH shims' staleness now scan ../shared; diff-linter 26/26, diff-formatter 22/22, selfcheck 4 EQUAL, go test, lint_test 188; lint/fmt --self-hosted verified |
-| 44.5 | Docs + final validate + push | [prd-phase-44-selfhost-shared-restructure.md](active/prd-phase-44-selfhost-shared-restructure.md) | TODO | READMEs + ROADMAP + NEXT-STEPS; all gates green; needs: 44.4 |
+## Phase 44: selfhost/shared Restructure — 5 tasks completed 2026-06-26 (shared/ + formatter/ + linter/ siblings; all gates green; see [TASKS-archive.md](TASKS-archive.md))
 
 ## Backlog
 

@@ -883,3 +883,19 @@ Gates green: build, go test ./...; selfcheck 4 EQUAL; diff-formatter 22/22; diff
 
 The selfhost/ restructure (shared/ + formatter/ + linter/) is structurally complete;
 44.5 is docs + final validate + push.
+
+---
+
+## 2026-06-26 — Phase 44.5: docs + final validate (PHASE 44 COMPLETE)
+
+selfhost/README.md updated to the shared/+formatter/+linter/ layout. New
+selfhost/shared/README.md and selfhost/linter/README.md; selfhost/formatter/README.md
+trimmed to formatter-only (front-end → ../shared/, linter → ../linter/). docs/ROADMAP.md
+Phase 44 entry. prds/NEXT-STEPS.md rewritten for Phase 44 complete + Phase 45 (checker)
+recon carried forward. PRD active/→done/. Phase 44 collapsed in TASKS.md → archive.
+
+FINAL VALIDATION (all green): make validate OK; selfcheck-formatter 4 EQUAL;
+diff-formatter 22/22; diff-linter 26/26.
+
+PHASE 44 COMPLETE. selfhost/ is now shared/ + formatter/ + linter/, each a clean
+sibling importing ../shared/. Ready for Phase 45 (self-hosted checker, ADR 0052).

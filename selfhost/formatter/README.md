@@ -1,16 +1,16 @@
 # selfhost/formatter/
 
-Stage2 Intent toolchain — Intent-implemented `intentc fmt` **and** `intentc lint`.
-Both live here because they share one stage2 lexer/parser/AST. They live alongside
-stage1's Go implementations (`internal/formatter/`, `internal/linter/`); each will
-eventually replace its stage1 counterpart once parity is reached.
+Stage2 Intent formatter — Intent-implemented `intentc fmt`. Reuses the shared
+front-end in [`../shared/`](../shared/) (lexer/ast/parser) and lives alongside
+stage1's Go formatter (`internal/formatter/`). As of Phase 44 the linter moved to
+[`../linter/`](../linter/) and the front-end to `../shared/` ([ADR 0051](../../docs/decisions/0051-selfhost-shared-restructure.md));
+this directory now holds the formatter only.
 
-**Status (2026-06-24):** Formatter **complete** — byte-for-byte parity with
+**Status (2026-06-26):** Formatter **complete** — byte-for-byte parity with
 `intentc fmt` on the full examples corpus (Phase 42, `make diff-formatter` 22/22) and
-a self-format fixpoint on its own four source files (`make selfcheck-formatter`).
-Linter **complete** (Phase 43) — all 16 Go-linter rule families ported, byte-for-byte
-parity with `intentc lint` across the corpus + fixtures (`make diff-linter` 26/26),
-wired as `intentc lint --self-hosted`. 269 in-language linter tests on rust + js.
+a self-format fixpoint on the stage2 source files (`make selfcheck-formatter` — now
+over `../shared/{lexer,ast,parser}` + `format.intent`). Wired as
+`intentc fmt --self-hosted`.
 
 ## Big picture
 
@@ -28,22 +28,17 @@ for the full multi-phase plan. The short version:
 ## Current layout
 
 ```
-selfhost/formatter/
-  intent.toml             # package manifest (Phase 30 / ADR 0039)
-  lexer.intent            # source → tokens                 (Phase 32 / 37 — shipped)
-  ast.intent              # AST entity declarations          (Phase 36 / 37 / 43 — shipped)
-  parser.intent           # tokens → AST (full grammar)     (Phases 33-37 / 43 — shipped)
-  format.intent           # AST → source                    (Phase 38 — shipped)
-  format_test.intent      # formatter tests + hello.intent dogfood
-  main.intent             # formatter entry (intentc fmt --self-hosted)  (Phase 42)
-  lint.intent             # AST → diagnostics (the linter)   (Phase 43 — shipped)
-  lint_test.intent        # linter tests (269 with imports)  (Phase 43)
-  lint_main.intent        # linter entry (intentc lint --self-hosted)    (Phase 43)
-  lint-fixtures/          # non-corpus-rule fixtures for make diff-linter (Phase 43)
-  difftest.sh             # make diff-formatter harness      (Phase 42)
-  difftest-lint.sh        # make diff-linter harness         (Phase 43)
-  selfcheck.sh            # make selfcheck-formatter harness  (Phase 42)
-  README.md               # (this file)
+selfhost/
+  shared/                 # lexer.intent, ast.intent, parser.intent (see ../shared/)
+  formatter/              # THIS directory:
+    format.intent         #   AST → source                  (Phase 38 — shipped)
+    format_test.intent    #   formatter tests + hello.intent dogfood
+    main.intent           #   entry (intentc fmt --self-hosted)  (Phase 42)
+    difftest.sh           #   make diff-formatter harness    (Phase 42)
+    difftest-lint.sh      #   make diff-linter harness (drives ../linter)  (Phase 43)
+    selfcheck.sh          #   make selfcheck-formatter harness  (Phase 42/44)
+    README.md             #   (this file)
+  linter/                 # lint.intent, lint_main.intent, ... (see ../linter)
 ```
 
 ## Target layout (eventual)

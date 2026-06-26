@@ -87,3 +87,18 @@ gated by `make diff-linter` (26/26). ADR 0050. Wired as `intentc lint --self-hos
 | 43.11 | `intentc lint --self-hosted` Go shim | [prd-phase-43-self-hosted-linter.md](done/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | parseLintFlags + stage2LinterBinary (INTENT_STAGE2_LINT override + build/cache) + runStage2Linter (verbatim); +Go tests |
 | 43.12 | Differential harness + fixtures + `make diff-linter` | [prd-phase-43-self-hosted-linter.md](done/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | difftest-lint.sh + 4 fixtures (R6/R7/R8/R9/R10/R11/R15/R15e) + Makefile target; 26/26 PASS; R4 unit-test-only (extern syntax differs) |
 | 43.13 | Docs (ROADMAP/NEXT-STEPS/README) + final validate | [prd-phase-43-self-hosted-linter.md](done/prd-phase-43-self-hosted-linter.md) | DONE (2026-06-24) | ROADMAP Phase 43 entry; NEXT-STEPS rewrite; both selfhost READMEs; make validate + all stage2 gates green |
+
+## Phase 44: selfhost/shared Restructure — COMPLETE (2026-06-26)
+
+Pure refactor splitting the shared stage2 front-end (lexer/ast/parser) into
+`selfhost/shared/` with `formatter/`, `linter/`, (later) `checker/` as siblings
+importing `../shared/…`. The ADR 0050 D1 "third-tool" trigger, paid down before the
+checker. ADR 0051. Zero behaviour change; all four gates green throughout.
+
+| # | Task | PRD | Status | Notes |
+|---|------|-----|--------|-------|
+| 44.1 | ADR 0051 — selfhost/shared restructure | [prd-phase-44-selfhost-shared-restructure.md](done/prd-phase-44-selfhost-shared-restructure.md) | DONE (2026-06-25) | D1 do-it-now, D2 shared+sibling dirs, D3 cross-dir imports, D4 shared_* rename, D5 pure-refactor |
+| 44.2 | Verify cross-directory imports (spike) | [prd-phase-44-selfhost-shared-restructure.md](done/prd-phase-44-selfhost-shared-restructure.md) | DONE (2026-06-25) | `import "../lib/x.intent"` builds+emits on rust AND js; no stage1 change needed |
+| 44.3 | Create selfhost/shared/ + re-point formatter | [prd-phase-44-selfhost-shared-restructure.md](done/prd-phase-44-selfhost-shared-restructure.md) | DONE (2026-06-26) | lexer/ast/parser→shared/, modules→shared_*, formatter+linter import ../shared/; selfcheck 4 EQUAL, diff-formatter 22/22, diff-linter 26/26, stage2 207/188 |
+| 44.4 | Move linter to selfhost/linter/ | [prd-phase-44-selfhost-shared-restructure.md](done/prd-phase-44-selfhost-shared-restructure.md) | DONE (2026-06-26) | lint*.intent+fixtures→selfhost/linter/; modules linter/linter_test/lint_main; Go shim path + both shims' staleness scan ../shared; gates green |
+| 44.5 | Docs + final validate + push | [prd-phase-44-selfhost-shared-restructure.md](done/prd-phase-44-selfhost-shared-restructure.md) | DONE (2026-06-26) | selfhost READMEs (shared/+linter/ new, formatter/ trimmed), ROADMAP Phase 44, NEXT-STEPS; make validate + all gates green; pushed |

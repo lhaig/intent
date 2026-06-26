@@ -12,18 +12,18 @@ multi-phase delivery plan.
 
 ```
 selfhost/
-  formatter/    Intent-implemented formatter AND linter — they share the stage2
-                lexer / parser / AST (see formatter/README.md)
+  shared/       the stage2 front-end shared by every tool: lexer.intent,
+                ast.intent, parser.intent  (modules shared_lexer/ast/parser)
+  formatter/    Intent-implemented `intentc fmt --self-hosted` (Phase 38-42)
+  linter/       Intent-implemented `intentc lint --self-hosted` (Phase 43)
+  (checker/     Phase 45 — first compiler subsystem)
 ```
 
-The **formatter** (Phase 38-42, `intentc fmt --self-hosted`) and the **linter**
-(Phase 43, `intentc lint --self-hosted`) both live in `selfhost/formatter/`
-because they share one stage2 lexer/parser/AST. Keeping them in a single
-directory uses the proven flat same-directory imports ([ADR 0050](../docs/decisions/0050-self-hosted-linter-strategy.md)
-D1); a `selfhost/shared/` split is deferred until a third stage2 tool lands.
-
-Future sibling: eventually `compiler/`. Each is its own Intent package with its
-own `intent.toml`.
+The shared front-end lives in `selfhost/shared/`; each tool is a sibling that
+imports it via `../shared/…` ([ADR 0051](../docs/decisions/0051-selfhost-shared-restructure.md),
+Phase 44). This split was deferred (ADR 0050 D1) until a third stage2 tool — the
+checker — was about to land, then done as a pure refactor before the checker
+arrived. Future sibling: eventually a fuller `compiler/`.
 
 ## How stage2 is built
 
