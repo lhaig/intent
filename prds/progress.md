@@ -899,3 +899,19 @@ diff-formatter 22/22; diff-linter 26/26.
 
 PHASE 44 COMPLETE. selfhost/ is now shared/ + formatter/ + linter/, each a clean
 sibling importing ../shared/. Ready for Phase 45 (self-hosted checker, ADR 0052).
+
+---
+
+## 2026-06-26 — Phase 45.1: ADR 0052 self-hosted checker strategy
+
+Kicked off Phase 45 (self-hosted checker — first compiler subsystem). New
+selfhost/checker/ sibling reusing ../shared/. ADR 0052 records: D1 first-slice scope
+(structural + name-resolution + arity, NO type inference), D2 type inference deferred
+(needs structured TypeRef/Type entity), D3 Array-based scope stack (no Map), D4
+two-directional differential (invalid fixtures byte-equal + no-false-positives on the
+22 valid examples, which produce zero errors), D5 faithful gate-protected port.
+
+Verified `intentc check` output contract (main.go:220-266): valid → "No errors found.\n"
+stdout exit 0; invalid → diag.Format() (error[f:l:c]: msg, \n-joined, NO trailing) on
+STDERR exit 1; not sorted (walk order). check_main prints stdout-only, so the shim +
+differential reconcile the stderr/stdout split + exit code. PRD in active/, 9 tasks.
