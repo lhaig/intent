@@ -833,3 +833,13 @@ types are flat Strings, no symbol table, no Map (only Array). Structural checks
 need an Array-based scope stack. Checker errors use the same diagnostic.Format ->
 `error[file:line:col]: message`. Valid corpus produces ZERO errors, so the Phase 45
 differential needs INVALID fixtures + a no-false-positives-on-corpus direction.
+
+---
+
+## 2026-06-25 — Phase 44.2: cross-directory import spike — CONFIRMED
+
+Built a throwaway app/main.intent with `import "../lib/mathx.intent"` and a sibling
+lib/. `intentc build --target rust --emit` and `--target js --emit` both succeeded —
+the `../` cross-directory module import resolves correctly (registry.go:509 joins the
+entry file's dir + import path, `..` handled by filepath.Clean). The selfhost/shared
+restructure needs NO stage1 change. Greenlight for 44.3.
