@@ -981,3 +981,16 @@ Gate-CRITICAL result: examples/error_handling.intent (uses break;/continue; at l
 diff-linter 26/26. stage2 suites: parser 108, format_test 210, lint_test 190,
 check_test 122; go test ./... green. This unblocks 45.5 (break/continue-outside-loop)
 and removes the undeclared-var false-positive risk for 45.7.
+
+---
+
+## 2026-06-26 — Phase 45.5: break/continue-outside-loop (unified body walker)
+
+Refactored the check phase into a single recursive check_body_stmts(stmts, loop_depth,
+in_test, test_name) walker emitting both break/continue-outside-loop (when loop_depth==0:
+`break statement outside loop` / `continue statement outside loop`) AND return-in-test
+(when in_test), in source order. loop_depth increments inside while/for bodies only (not
+if). Called per body in stage1 check order: functions → entity methods+ctors → impl
+methods → tests. +8 tests (128 rust+js) incl. nested if-in-while (no fire) and a
+return-before-break order lock. Gates green: selfcheck 4 EQUAL, diff-formatter 22/22,
+diff-linter 26/26.

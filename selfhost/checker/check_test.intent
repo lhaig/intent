@@ -128,3 +128,54 @@ test "ordering: dup-function diag (register) appears before return-in-test diag 
     assert_eq(diags[0].message, "function 'f' already defined");
     assert_eq(diags[1].message, "'return' is not allowed inside a test body; test \"t\" has implicit Void return");
 }
+
+// Helper: function with a body containing the given statements.
+function fn_with_body(body: String) returns String {
+    return "function f() returns Void " + lbrace() + " " + body + " " + rbrace();
+}
+
+test "break outside loop: bare break in function top level fires" {
+    let src: String = "module m version \"1.0\"; " + fn_with_body("break;");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "break statement outside loop");
+}
+
+test "break outside loop: break inside while loop does not fire" {
+    let loop_src: String = "while true " + lbrace() + " break; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + fn_with_body(loop_src);
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "continue outside loop: bare continue in function top level fires" {
+    let src: String = "module m version \"1.0\"; " + fn_with_body("continue;");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "continue statement outside loop");
+}
+
+test "break outside loop: break inside if NOT in loop fires (if adds no depth)" {
+    let if_src: String = "if true " + lbrace() + " break; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + fn_with_body(if_src);
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "break statement outside loop");
+}
+
+test "break outside loop: break inside if inside while does not fire" {
+    let if_src: String = "if true " + lbrace() + " break; " + rbrace();
+    let loop_src: String = "while true " + lbrace() + " " + if_src + " " + rbrace();
+    let src: String = "module m version \"1.0\"; " + fn_with_body(loop_src);
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "ordering: in unified walk return-in-test fires before break-outside-loop in same test body" {
+    let body: String = "return; break;";
+    let src: String = "module m version \"1.0\"; " + test_block("t", body);
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 2);
+    assert_eq(diags[0].message, "'return' is not allowed inside a test body; test \"t\" has implicit Void return");
+    assert_eq(diags[1].message, "break statement outside loop");
+}

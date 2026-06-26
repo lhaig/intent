@@ -5,7 +5,8 @@
 //
 //   Register phase  — registerEnums (+ variant dups) → registerEntities
 //                     → registerTraits → registerFunctions
-//   Check phase     — checkTests (return-in-test, ...)
+//   Check phase     — checkFunctions → checkEntities → checkImplBlockBodies
+//                     → checkTests
 //
 // format_diags produces `error[file:line:col]: message` lines joined by "\n"
 // with NO trailing newline — matching diagnostic.Format in stage1 exactly.
@@ -155,74 +156,165 @@ function check_dup_functions(prog: Program) returns Array<CheckDiag> {
 
 // =============================================================================
 // CHECK PHASE
-// Mirrors stage1 checkTests (checker.go lines 982-1018). Runs AFTER the
-// register phase so register errors always precede check errors.
+// Mirrors stage1 checkFunctions → checkEntities → checkImplBlockBodies →
+// checkTests (checker.go lines 118-121). Runs AFTER the register phase so
+// register errors always precede check errors.
 // =============================================================================
 
-// find_returns_in_stmts walks stmts recursively and returns all st_return
-// statements, mirroring checkBlock's descent into if/while/for bodies.
+// check_body_stmts walks statements in source order emitting:
+//   - break/continue outside loop (when loop_depth == 0)
+//   - return inside a test body (when in_test is true), using test_name
+// Mirrors stage1 checkStatement (checker.go:1221-1238) with loopDepth
+// incremented on while/for bodies and unchanged on if bodies.
 
-function find_returns_in_stmts(stmts: Array<Stmt>) returns Array<Stmt> {
-    let mutable out: Array<Stmt> = [];
+function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, test_name: String) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
     let mutable i: Int = 0;
     while i < len(stmts) {
         let s: Stmt = stmts[i];
-        if s.kind == shared_ast.st_return() {
-            out.push(s);
+        if s.kind == shared_ast.st_break() {
+            if loop_depth == 0 {
+                diags.push(CheckDiag(s.line, s.column, "break statement outside loop"));
+            }
         }
+        if s.kind == shared_ast.st_continue() {
+            if loop_depth == 0 {
+                diags.push(CheckDiag(s.line, s.column, "continue statement outside loop"));
+            }
+        }
+        if s.kind == shared_ast.st_return() {
+            if in_test {
+                diags.push(CheckDiag(s.line, s.column, "'return' is not allowed inside a test body; test \"" + test_name + "\" has implicit Void return"));
+            }
+        }
+        // Recurse into if bodies with the SAME loop depth (if does not add depth).
         if s.kind == shared_ast.st_if() {
-            let mutable ttmp: Array<Stmt> = find_returns_in_stmts(s.then_block.stmts);
+            let mutable ttmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth, in_test, test_name);
             let mutable ti: Int = 0;
             while ti < len(ttmp) {
-                out.push(ttmp[ti]);
+                diags.push(ttmp[ti]);
                 ti = ti + 1;
             }
             if s.has_else {
-                let mutable etmp: Array<Stmt> = find_returns_in_stmts(s.else_block.stmts);
+                let mutable etmp: Array<CheckDiag> = check_body_stmts(s.else_block.stmts, loop_depth, in_test, test_name);
                 let mutable ei: Int = 0;
                 while ei < len(etmp) {
-                    out.push(etmp[ei]);
+                    diags.push(etmp[ei]);
                     ei = ei + 1;
                 }
             }
         }
+        // Recurse into while/for bodies with loop_depth + 1.
         if s.kind == shared_ast.st_while() {
-            let mutable wtmp: Array<Stmt> = find_returns_in_stmts(s.then_block.stmts);
+            let mutable wtmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth + 1, in_test, test_name);
             let mutable wi: Int = 0;
             while wi < len(wtmp) {
-                out.push(wtmp[wi]);
+                diags.push(wtmp[wi]);
                 wi = wi + 1;
             }
         }
         if s.kind == shared_ast.st_for() {
-            let mutable ftmp: Array<Stmt> = find_returns_in_stmts(s.then_block.stmts);
-            let mutable fi: Int = 0;
-            while fi < len(ftmp) {
-                out.push(ftmp[fi]);
-                fi = fi + 1;
+            let mutable ftmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth + 1, in_test, test_name);
+            let mutable fti: Int = 0;
+            while fti < len(ftmp) {
+                diags.push(ftmp[fti]);
+                fti = fti + 1;
             }
         }
         i = i + 1;
     }
-    return out;
+    return diags;
 }
 
-// check_return_in_tests emits an error for each `return` found inside a test
-// body. Message matches stage1 checker.go:1348 (Go %q wraps the name in
-// double quotes): `'return' is not allowed inside a test body; test "NAME"
-// has implicit Void return`.
+// check_functions walks each top-level function body (loop_depth=0,
+// in_test=false), mirroring stage1 checkFunctions (checker.go:907).
 
-function check_return_in_tests(prog: Program) returns Array<CheckDiag> {
+function check_functions(prog: Program) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
+    let mutable i: Int = 0;
+    while i < len(prog.functions) {
+        let f: FunctionDecl = prog.functions[i];
+        let mutable fd: Array<CheckDiag> = check_body_stmts(f.body.stmts, 0, false, "");
+        let mutable fi: Int = 0;
+        while fi < len(fd) {
+            diags.push(fd[fi]);
+            fi = fi + 1;
+        }
+        i = i + 1;
+    }
+    return diags;
+}
+
+// check_entities walks each entity's constructor and methods (loop_depth=0,
+// in_test=false), mirroring stage1 checkEntities (checker.go:1054).
+
+function check_entities(prog: Program) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
+    let mutable i: Int = 0;
+    while i < len(prog.entities) {
+        let e: EntityDecl = prog.entities[i];
+        if e.has_constructor {
+            let mutable cd: Array<CheckDiag> = check_body_stmts(e.ctor.body.stmts, 0, false, "");
+            let mutable ci: Int = 0;
+            while ci < len(cd) {
+                diags.push(cd[ci]);
+                ci = ci + 1;
+            }
+        }
+        let mutable mi: Int = 0;
+        while mi < len(e.methods) {
+            let m: FunctionDecl = e.methods[mi];
+            let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "");
+            let mutable mdi: Int = 0;
+            while mdi < len(md) {
+                diags.push(md[mdi]);
+                mdi = mdi + 1;
+            }
+            mi = mi + 1;
+        }
+        i = i + 1;
+    }
+    return diags;
+}
+
+// check_impl_bodies walks each impl block's method bodies (loop_depth=0,
+// in_test=false), mirroring stage1 checkImplBlockBodies (traits.go:206).
+
+function check_impl_bodies(prog: Program) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
+    let mutable i: Int = 0;
+    while i < len(prog.impls) {
+        let ib: ImplDecl = prog.impls[i];
+        let mutable mi: Int = 0;
+        while mi < len(ib.methods) {
+            let m: FunctionDecl = ib.methods[mi];
+            let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "");
+            let mutable mdi: Int = 0;
+            while mdi < len(md) {
+                diags.push(md[mdi]);
+                mdi = mdi + 1;
+            }
+            mi = mi + 1;
+        }
+        i = i + 1;
+    }
+    return diags;
+}
+
+// check_tests walks each test body (loop_depth=0, in_test=true), mirroring
+// stage1 checkTests (checker.go:975). Return-in-test and break/continue-
+// outside-loop both fire here if a test body has a bare break/return.
+
+function check_tests(prog: Program) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable i: Int = 0;
     while i < len(prog.tests) {
         let t: TestDecl = prog.tests[i];
-        let mutable ret_stmts: Array<Stmt> = find_returns_in_stmts(t.body.stmts);
-        let mutable ri: Int = 0;
-        while ri < len(ret_stmts) {
-            let s: Stmt = ret_stmts[ri];
-            diags.push(CheckDiag(s.line, s.column, "'return' is not allowed inside a test body; test \"" + t.name + "\" has implicit Void return"));
-            ri = ri + 1;
+        let mutable td: Array<CheckDiag> = check_body_stmts(t.body.stmts, 0, true, t.name);
+        let mutable tdi: Int = 0;
+        while tdi < len(td) {
+            diags.push(td[tdi]);
+            tdi = tdi + 1;
         }
         i = i + 1;
     }
@@ -264,7 +356,27 @@ public function check_program(prog: Program) returns Array<CheckDiag> {
     }
 
     // --- Check phase ----------------------------------------------------------
-    let mutable tests_d: Array<CheckDiag> = check_return_in_tests(prog);
+    // Order mirrors stage1: checkFunctions → checkEntities →
+    // checkImplBlockBodies → checkTests (checker.go lines 118-121).
+    let mutable fn_d: Array<CheckDiag> = check_functions(prog);
+    let mutable fni: Int = 0;
+    while fni < len(fn_d) {
+        diags.push(fn_d[fni]);
+        fni = fni + 1;
+    }
+    let mutable ent_d: Array<CheckDiag> = check_entities(prog);
+    let mutable enti2: Int = 0;
+    while enti2 < len(ent_d) {
+        diags.push(ent_d[enti2]);
+        enti2 = enti2 + 1;
+    }
+    let mutable impl_d: Array<CheckDiag> = check_impl_bodies(prog);
+    let mutable impli: Int = 0;
+    while impli < len(impl_d) {
+        diags.push(impl_d[impli]);
+        impli = impli + 1;
+    }
+    let mutable tests_d: Array<CheckDiag> = check_tests(prog);
     let mutable tdi: Int = 0;
     while tdi < len(tests_d) {
         diags.push(tests_d[tdi]);
