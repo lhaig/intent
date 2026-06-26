@@ -1,0 +1,53 @@
+// selfhost/checker/check_main.intent — Phase 45.9 / stage2 runnable checker.
+//
+// The stage2 checker as an invokable CLI tool. Reads a single file path from
+// args()[1] (ADR 0045), reads the file, parses it, and prints semantic
+// diagnostics to stdout matching stage1 `intentc check` output exactly.
+//
+// Output format (byte-equal with stage1):
+//   - Zero diags: "No errors found.\n"
+//   - N > 0 diags: "error[path:line:col]: message\n" for each (joined by "\n",
+//     no trailing newline from format_diags); print() appends the final "\n".
+//
+// Note: format_diags has NO trailing newline (unlike the linter's format_diags).
+// print() adds exactly one trailing newline, giving the correct final output.
+//
+// Exit codes:
+//   0  clean (no errors)
+//   1  anything wrong: usage error, file read error, parse error, or diagnostics found
+module check_main version "0.1.0";
+
+import "check.intent";
+import "../shared/parser.intent";
+import "../shared/ast.intent";
+import "../shared/lexer.intent";
+
+entry function main() returns Int {
+    let argv: Array<String> = args();
+    if len(argv) < 2 {
+        print("usage: intent-check <file.intent>");
+        return 1;
+    }
+    let path: String = argv[1];
+    let r: Result<String, String> = read_file(path);
+    if r.is_err() {
+        print("error: cannot read file: " + path);
+        return 1;
+    }
+    let src: String = match r {
+        Ok(s) => s,
+        Err(_) => "",
+    };
+    let prog: Program = shared_parser.parse(src);
+    if prog.error != "" {
+        print("parse error: " + prog.error);
+        return 1;
+    }
+    let diags: Array<CheckDiag> = checker.check_program(prog);
+    if len(diags) == 0 {
+        print("No errors found.");
+        return 0;
+    }
+    print(checker.format_diags(diags, path));
+    return 1;
+}

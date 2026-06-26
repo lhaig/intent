@@ -28,7 +28,7 @@ const usage = `intentc - The Intent language compiler
 
 Usage:
   intentc build [--target <target>] [--emit] <file.intent>    Compile to binary or source
-  intentc check <file.intent>                                  Parse and type-check only
+  intentc check [--self-hosted] <file.intent>                  Parse and type-check only
   intentc verify <file.intent>                                 Verify contracts using Z3 SMT solver
   intentc test-gen [--emit] <file.intent>                      Generate Intent test blocks from contracts
   intentc test [--target <t>] [--all-targets] [--filter <s>] [--list] [--quiet] <file.intent>
@@ -71,6 +71,7 @@ Examples:
   intentc build --target wasm hello.intent      Build hello.intent -> hello.wasm
   intentc build main.intent                     Build multi-file project (auto-detects imports)
   intentc check hello.intent                    Check for errors without building
+  intentc check --self-hosted hello.intent      Check using stage2 (Intent) checker
   intentc verify hello.intent                   Verify contracts with Z3 (requires z3 on PATH)
   intentc test-gen fibonacci.intent             Generate Intent test blocks to stdout
   intentc test-gen --emit fibonacci.intent      Write to fibonacci_test.intent
@@ -217,13 +218,60 @@ func handleBuild(args []string) {
 	}
 }
 
+func parseCheckFlags(args []string) (selfHosted bool, filePath, errMsg string) {
+	for _, arg := range args {
+		switch arg {
+		case "--self-hosted":
+			selfHosted = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				errMsg = "Unknown option: " + arg
+				return
+			}
+			filePath = arg
+		}
+	}
+	return
+}
+
 func handleCheck(args []string) {
-	if len(args) == 0 {
+	selfHosted, filePath, errMsg := parseCheckFlags(args)
+	if errMsg != "" {
+		fmt.Fprintln(os.Stderr, errMsg)
+		os.Exit(1)
+	}
+
+	if filePath == "" {
 		fmt.Fprintln(os.Stderr, "Error: no input file specified")
 		os.Exit(1)
 	}
 
-	filePath := args[0]
+	// --self-hosted delegates to the stage2 (Intent) checker binary, which emits
+	// output byte-identical to the stage1 (Go) checker below. No silent fallback:
+	// a stage2 build/parse failure is surfaced and exits non-zero.
+	if selfHosted {
+		binPath, err := stage2CheckerBinary()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "stage2 checker: %s\n", err)
+			os.Exit(1)
+		}
+		stdout, exitCode, err := runStage2Checker(binPath, filePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			os.Exit(1)
+		}
+		if exitCode == 0 {
+			// Clean: "No errors found.\n" — emit verbatim to stdout.
+			fmt.Print(stdout)
+			return
+		}
+		// Errors found: stage2 stdout holds the diagnostic block with no trailing
+		// newline (format_diags has no trailing newline; print() adds one). Stage1
+		// writes diag.Format() to stderr via Fprintf with no trailing newline, so
+		// we strip the one that print() added before forwarding to stderr.
+		fmt.Fprintf(os.Stderr, "%s", strings.TrimRight(stdout, "\n"))
+		os.Exit(1)
+	}
 
 	// Check if this is a multi-file project
 	isMulti, err := compiler.IsMultiFile(filePath)
@@ -914,6 +962,130 @@ func stage2LinterBinary() (string, error) {
 	if err := os.Rename(builtBin, cachePath); err != nil {
 		if copyErr := copyFile(builtBin, cachePath, 0755); copyErr != nil {
 			return "", fmt.Errorf("could not install stage2 linter binary: %w", copyErr)
+		}
+	}
+
+	return cachePath, nil
+}
+
+// runStage2Checker runs the prebuilt stage2 checker binary on filePath and
+// returns its stdout and exit code. Unlike runStage2Linter, a non-zero exit
+// does NOT mean an error in running the binary — it means the checker found
+// semantic errors. The caller distinguishes exit 0 (clean) from exit 1 (diags).
+func runStage2Checker(binaryPath, filePath string) (stdout string, exitCode int, err error) {
+	cmd := exec.Command(binaryPath, filePath)
+	var outBuf, errBuf strings.Builder
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	runErr := cmd.Run()
+	out := outBuf.String()
+	if runErr != nil {
+		if exitErr, ok := runErr.(*exec.ExitError); ok {
+			return out, exitErr.ExitCode(), nil
+		}
+		// Binary failed to run (not just non-zero exit) — surface as error.
+		combined := strings.TrimSpace(out + errBuf.String())
+		if combined == "" {
+			return "", -1, fmt.Errorf("stage2 checker failed: %w", runErr)
+		}
+		return "", -1, fmt.Errorf("%s", combined)
+	}
+	return out, 0, nil
+}
+
+// stage2CheckerBinary returns the path to the stage2 checker binary, either
+// from the INTENT_STAGE2_CHECK env override or by auto-building from
+// selfhost/checker/check_main.intent (cached in os.TempDir(), rebuilt when any
+// selfhost/checker/*.intent or selfhost/shared/*.intent file is newer than the cache).
+func stage2CheckerBinary() (string, error) {
+	if envPath := os.Getenv("INTENT_STAGE2_CHECK"); envPath != "" {
+		info, err := os.Stat(envPath)
+		if err != nil {
+			return "", fmt.Errorf("INTENT_STAGE2_CHECK=%q: %w", envPath, err)
+		}
+		if info.IsDir() || info.Mode()&0111 == 0 {
+			return "", fmt.Errorf("INTENT_STAGE2_CHECK=%q is not an executable file", envPath)
+		}
+		return envPath, nil
+	}
+
+	srcDir := filepath.Join("selfhost", "checker")
+	mainSrc := filepath.Join(srcDir, "check_main.intent")
+	if _, err := os.Stat(mainSrc); err != nil {
+		return "", fmt.Errorf(
+			"stage2 checker sources not found at selfhost/checker/check_main.intent; run from the repo root or set INTENT_STAGE2_CHECK to a prebuilt binary",
+		)
+	}
+
+	cachePath := filepath.Join(os.TempDir(), "intent-stage2-check")
+
+	// Staleness check: rebuild if cached binary is missing or any .intent file
+	// in selfhost/checker/ or selfhost/shared/ is newer than the cache.
+	needBuild := false
+	cacheInfo, err := os.Stat(cachePath)
+	if err != nil {
+		needBuild = true
+	} else {
+		sharedDir := filepath.Join("selfhost", "shared")
+		for _, scanDir := range []string{srcDir, sharedDir} {
+			if needBuild {
+				break
+			}
+			entries, err := os.ReadDir(scanDir)
+			if err != nil {
+				continue
+			}
+			for _, e := range entries {
+				if !strings.HasSuffix(e.Name(), ".intent") {
+					continue
+				}
+				fi, err := e.Info()
+				if err != nil {
+					continue
+				}
+				if fi.ModTime().After(cacheInfo.ModTime()) {
+					needBuild = true
+					break
+				}
+			}
+		}
+	}
+
+	if !needBuild {
+		return cachePath, nil
+	}
+
+	intentc, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("could not determine intentc path: %w", err)
+	}
+
+	absSrc, err := filepath.Abs(mainSrc)
+	if err != nil {
+		return "", fmt.Errorf("could not resolve check_main.intent path: %w", err)
+	}
+
+	buildDir, err := os.MkdirTemp("", "intent-stage2-check-build-*")
+	if err != nil {
+		return "", fmt.Errorf("could not create build temp dir: %w", err)
+	}
+	defer os.RemoveAll(buildDir)
+
+	buildCmd := exec.Command(intentc, "build", "--target", "rust", absSrc)
+	buildCmd.Dir = buildDir
+	buildOut, buildErr := buildCmd.CombinedOutput()
+	if buildErr != nil {
+		return "", fmt.Errorf("stage2 checker build failed: %w\n%s", buildErr, strings.TrimSpace(string(buildOut)))
+	}
+
+	builtBin := filepath.Join(buildDir, "check_main")
+	if _, err := os.Stat(builtBin); err != nil {
+		return "", fmt.Errorf("stage2 checker build succeeded but binary not found at %s: %w", builtBin, err)
+	}
+
+	if err := os.Rename(builtBin, cachePath); err != nil {
+		if copyErr := copyFile(builtBin, cachePath, 0755); copyErr != nil {
+			return "", fmt.Errorf("could not install stage2 checker binary: %w", copyErr)
 		}
 	}
 

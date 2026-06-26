@@ -716,3 +716,142 @@ func TestLintSelfHostedEnvOverride(t *testing.T) {
 		}
 	})
 }
+
+// --- tests for --self-hosted check (phase 45.9) ---
+
+// TestParseCheckFlags tests flag parsing for the check subcommand.
+func TestParseCheckFlags(t *testing.T) {
+	cases := []struct {
+		name       string
+		args       []string
+		wantSelf   bool
+		wantFile   string
+		wantErrMsg string
+	}{
+		{name: "no flags", args: []string{"hello.intent"}, wantSelf: false, wantFile: "hello.intent"},
+		{name: "self-hosted", args: []string{"--self-hosted", "bar.intent"}, wantSelf: true, wantFile: "bar.intent"},
+		{name: "self-hosted after file", args: []string{"baz.intent", "--self-hosted"}, wantSelf: true, wantFile: "baz.intent"},
+		{name: "unknown flag errors", args: []string{"--bogus", "x.intent"}, wantErrMsg: "Unknown option: --bogus"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotSelf, gotFile, gotErr := parseCheckFlags(tc.args)
+			if tc.wantErrMsg != "" {
+				if !strings.Contains(gotErr, tc.wantErrMsg) {
+					t.Errorf("expected errMsg containing %q, got %q", tc.wantErrMsg, gotErr)
+				}
+				return
+			}
+			if gotErr != "" {
+				t.Errorf("unexpected error: %s", gotErr)
+			}
+			if gotSelf != tc.wantSelf {
+				t.Errorf("selfHosted: got %v, want %v", gotSelf, tc.wantSelf)
+			}
+			if gotFile != tc.wantFile {
+				t.Errorf("filePath: got %q, want %q", gotFile, tc.wantFile)
+			}
+		})
+	}
+}
+
+// TestRunStage2Checker tests the runStage2Checker helper with fake binaries.
+// Unlike runStage2Linter, a non-zero exit is NOT an error — it means the
+// checker found semantic errors. The caller inspects (stdout, exitCode).
+func TestRunStage2Checker(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummyFile := filepath.Join(tmpDir, "dummy.intent")
+	if err := os.WriteFile(dummyFile, []byte("anything"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("exit 0: stdout returned verbatim", func(t *testing.T) {
+		content := "No errors found.\n"
+		binPath := makeFakeFormatter(t, tmpDir, "check-ok", content, 0)
+		out, code, err := runStage2Checker(binPath, dummyFile)
+		if err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+		if code != 0 {
+			t.Errorf("expected exit code 0, got %d", code)
+		}
+		if out != content {
+			t.Errorf("expected verbatim output\ngot:  %q\nwant: %q", out, content)
+		}
+	})
+
+	t.Run("exit 1: stdout returned verbatim with exit code 1", func(t *testing.T) {
+		content := "error[foo.intent:2:1]: function 'f' already defined\n"
+		binPath := makeFakeFormatter(t, tmpDir, "check-err", content, 1)
+		out, code, err := runStage2Checker(binPath, dummyFile)
+		if err != nil {
+			t.Fatalf("expected no error (non-zero exit is not a run error), got: %v", err)
+		}
+		if code != 1 {
+			t.Errorf("expected exit code 1, got %d", code)
+		}
+		if out != content {
+			t.Errorf("expected verbatim output\ngot:  %q\nwant: %q", out, content)
+		}
+	})
+}
+
+// TestCheckSelfHostedEnvOverride tests `intentc check --self-hosted` with
+// INTENT_STAGE2_CHECK set, exercising the full CLI path without needing cargo.
+func TestCheckSelfHostedEnvOverride(t *testing.T) {
+	binary := buildTestBinary(t)
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "hello.intent")
+	src := "module hello version \"1.0\";\n\nentry function main() returns Int {\n    return 0;\n}\n"
+	if err := os.WriteFile(srcPath, []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("INTENT_STAGE2_CHECK non-existent binary errors", func(t *testing.T) {
+		cmd := exec.Command(binary, "check", "--self-hosted", srcPath)
+		cmd.Env = append(os.Environ(), "INTENT_STAGE2_CHECK=/nonexistent/path/to/check")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatal("expected non-zero exit, got success")
+		}
+		if !strings.Contains(string(out), "INTENT_STAGE2_CHECK") {
+			t.Errorf("expected error mentioning INTENT_STAGE2_CHECK, got: %s", out)
+		}
+	})
+
+	t.Run("INTENT_STAGE2_CHECK fake binary clean: stdout No errors found.", func(t *testing.T) {
+		want := "No errors found.\n"
+		fakeBin := makeFakeFormatter(t, tmpDir, "fake-check-ok", want, 0)
+		cmd := exec.Command(binary, "check", "--self-hosted", srcPath)
+		cmd.Env = append(os.Environ(), "INTENT_STAGE2_CHECK="+fakeBin)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("expected success, got %v\noutput: %s", err, out)
+		}
+		if string(out) != want {
+			t.Errorf("got %q, want %q", string(out), want)
+		}
+	})
+
+	t.Run("INTENT_STAGE2_CHECK fake binary errors: routed to stderr, non-zero exit", func(t *testing.T) {
+		diagBlock := "error[hello.intent:2:1]: function 'f' already defined\n"
+		fakeBin := makeFakeFormatter(t, tmpDir, "fake-check-err", diagBlock, 1)
+		cmd := exec.Command(binary, "check", "--self-hosted", srcPath)
+		cmd.Env = append(os.Environ(), "INTENT_STAGE2_CHECK="+fakeBin)
+		stdoutBuf, stderrBuf := &strings.Builder{}, &strings.Builder{}
+		cmd.Stdout = stdoutBuf
+		cmd.Stderr = stderrBuf
+		err := cmd.Run()
+		if err == nil {
+			t.Fatal("expected non-zero exit when checker reports errors")
+		}
+		if stdoutBuf.String() != "" {
+			t.Errorf("expected empty stdout, got %q", stdoutBuf.String())
+		}
+		// Stderr should contain the diagnostic (trailing newline stripped by shim, then
+		// Fprintf adds none — so the diag block minus its trailing newline is on stderr).
+		if !strings.Contains(stderrBuf.String(), "function 'f' already defined") {
+			t.Errorf("expected diag block on stderr, got: %q", stderrBuf.String())
+		}
+	})
+}

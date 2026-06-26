@@ -1047,3 +1047,23 @@ callee ident position and SKIP recursing args (matches stage1's early return); e
 recurse args for undeclared. builtin arity (~20 bespoke messages) and method arity
 (needs receiver type) DEFERRED to later phases. +8 tests incl. early-return lock
 (150 rust+js). Gates green: selfcheck 4 EQUAL, diff-formatter 22/22, diff-linter 26/26.
+
+---
+
+## 2026-06-26 — Phase 45.9: check_main.intent + intentc check --self-hosted shim
+
+selfhost/checker/check_main.intent (entry main: args/read_file/parse/check_program;
+exit 0 + "No errors found." when clean, exit 1 + format_diags otherwise; all output to
+stdout). Go shim (cmd/intentc/main.go) mirrors the lint shim: parseCheckFlags,
+stage2CheckerBinary (INTENT_STAGE2_CHECK override; builds check_main.intent to cached
+intent-stage2-check; staleness scans selfhost/checker/ + selfhost/shared/),
+runStage2Checker (returns stdout+exitCode, exit 1 = errors-found not failure), and
+handleCheck --self-hosted routing: exit 0 → stdout; exit !=0 → stdout to STDERR with one
+trailing newline stripped (matches stage1 diag.Format via Fprintf) + os.Exit(1).
++Go tests (parseCheckFlags, runStage2Checker fake-binary, INTENT_STAGE2_CHECK CLI).
+/check_main + /check_main.js gitignored.
+
+VERIFIED byte-identical: `intentc check --self-hosted` vs `intentc check` on
+examples/hello.intent (both "No errors found.", exit 0) and a dup-function file (both
+`error[...:4:1]: function 'f' already defined`, exit 1). Gates: build, go test, selfcheck
+4 EQUAL, diff-formatter 22/22, diff-linter 26/26 all green.

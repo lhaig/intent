@@ -39,3 +39,5 @@ target/
 .aiki/
 /main.js
 /lint_main.js
+/check_main.js
+/check_main
