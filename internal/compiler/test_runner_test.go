@@ -588,3 +588,47 @@ func TestAnnotationSkipReasonFormat(t *testing.T) {
 		t.Errorf("annotationSkipReason: got %q want %q", got, want)
 	}
 }
+
+// A crate that fails to compile produces no `test ... ok/FAILED` lines, so the
+// verdict count is 0 even though a placeholder row is emitted per declared
+// test. runRustTests gates the "surface the cargo error" path on this count.
+func TestParseCargoTestOutputBuildFailure(t *testing.T) {
+	declared := []string{"addition works", "div by zero"}
+	out := "error[E0308]: mismatched types\n --> src/main.rs:42:5\n" +
+		"error: could not compile `intent_output` due to 1 previous error\n"
+	results, ran := parseCargoTestOutput(out, declared)
+	if ran != 0 {
+		t.Errorf("ran = %d, want 0 on build failure", ran)
+	}
+	if len(results) != len(declared) {
+		t.Fatalf("results = %d, want %d placeholder rows", len(results), len(declared))
+	}
+	for _, r := range results {
+		if r.Passed || r.Error != "test did not run (build or harness failure)" {
+			t.Errorf("expected placeholder row, got %+v", r)
+		}
+	}
+}
+
+// Real libtest verdict lines yield a non-zero count and per-test pass/fail.
+func TestParseCargoTestOutputRealVerdicts(t *testing.T) {
+	declared := []string{"addition works", "div by zero"}
+	// sanitiseTestName("addition works") == "addition_works" (see rustbe).
+	out := "running 2 tests\n" +
+		"test __test_addition_works ... ok\n" +
+		"test __test_div_by_zero ... FAILED\n"
+	results, ran := parseCargoTestOutput(out, declared)
+	if ran != 2 {
+		t.Errorf("ran = %d, want 2", ran)
+	}
+	byName := make(map[string]TestResult, len(results))
+	for _, r := range results {
+		byName[r.Name] = r
+	}
+	if !byName["addition works"].Passed {
+		t.Errorf("'addition works' should pass, got %+v", byName["addition works"])
+	}
+	if byName["div by zero"].Passed {
+		t.Errorf("'div by zero' should fail, got %+v", byName["div by zero"])
+	}
+}

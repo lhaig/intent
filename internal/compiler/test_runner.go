@@ -420,9 +420,13 @@ func runRustTests(mod *ir.Module, prog *ir.Program, declared []string) ([]TestRe
 	out, runErr := cmd.CombinedOutput()
 	// runErr is non-nil when any test fails; we still parse the output.
 
-	results := parseCargoTestOutput(string(out), declared)
-	if len(results) == 0 && runErr != nil {
-		// Compilation or harness failure — surface raw output.
+	results, ran := parseCargoTestOutput(string(out), declared)
+	if ran == 0 && runErr != nil {
+		// No test produced a verdict and cargo errored: a compile or harness
+		// failure. parseCargoTestOutput still returns one placeholder row per
+		// declared test, so len(results) is non-zero — gate on `ran` (the count
+		// of real verdicts) instead, and surface the raw cargo output which
+		// carries the compiler error.
 		return nil, fmt.Errorf("cargo test failed and produced no parseable results: %w\n%s", runErr, out)
 	}
 	return results, nil
@@ -435,8 +439,11 @@ func runRustTests(mod *ir.Module, prog *ir.Program, declared []string) ([]TestRe
 //	test __test_div_by_zero ... FAILED
 //
 // The declared list is used to map back from sanitised names to the
-// human-readable Intent test names.
-func parseCargoTestOutput(out string, declared []string) []TestResult {
+// human-readable Intent test names. The second return value is the number of
+// tests that produced a real verdict in the output; it is 0 when the crate
+// failed to compile (no `test ... ok/FAILED` lines), letting the caller
+// distinguish a build failure from genuine test results.
+func parseCargoTestOutput(out string, declared []string) ([]TestResult, int) {
 	sanitisedToName := make(map[string]string, len(declared))
 	for _, n := range declared {
 		sanitisedToName[rustbe.SanitiseTestNameExternal(n)] = n
@@ -491,7 +498,7 @@ func parseCargoTestOutput(out string, declared []string) []TestResult {
 			})
 		}
 	}
-	return results
+	return results, len(resultByName)
 }
 
 // runJSTests writes the generated JS to a temp file, appends a driver that
