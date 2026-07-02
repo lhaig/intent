@@ -1385,3 +1385,44 @@ checker README, PRD prds/done/prd-phase-47-builtin-arity.md, TASKS.md Phase 47 C
 Next: Phase 48 — expression type inference (type-carrying scope + infer_expr_type over
 every Expr kind, built behind the diff-checker gate), then the type-rule checks +
 method-call arity + builtin argument typing hang off it.
+
+---
+
+## 2026-07-02 — Phase 48 foundation: inference engine + condition-boolean + let-mismatch
+
+Autonomous run. ADR 0056: `infer_expr_type` is SOUND but INCOMPLETE — returns a concrete
+Type only when certain stage1 would agree, else an Unknown sentinel (name==""). Type-rule
+checks fire ONLY on a confident result (Unknown→skip, mirroring stage1's `condType!=nil`
+guard), so each is corpus-safe the moment it lands regardless of how incomplete inference
+still is.
+
+- **48a** (commit 8198ce5): infer_expr_type — literals; comparison/logical binops→Bool;
+  arithmetic→operand type when both operands the same known primitive; unary (not→Bool,
+  -→operand); paren→inner. ident/call/method/field/index/match/array/range→Unknown (need
+  a typed scope). type_unknown/is_unknown_type helpers.
+- **48b** (8198ce5): `if/while condition must be boolean, got X` — emit on confident
+  non-Bool (e.g. `if 5`, `while "x"`, `if 1+2`); comparisons/idents/calls→skip. 2 fixtures
+  + 6 tests.
+- **48c** (e156de7): `let` type-mismatch `cannot assign X to Y` — declared type vs a
+  confidently-inferred RHS (`let a: Int = "hi"`); Unknown RHS→skip (matches stage1
+  valueType!=nil, so an undeclared RHS isn't also a mismatch). 1 fixture + 4 tests.
+
+All slices byte-equal + pushed. diff-checker 47/47, 198 checker tests rust+js, all
+formatter/linter/selfcheck gates + full Go suite + make validate green throughout.
+
+Discovery: stage1 checkReturnStmt does NOT compare the return value to the declared return
+type — no return-type-mismatch diagnostic exists to port.
+
+Phase 48 is a large, open-ended phase (full stage1 type-system parity). Foundation +
+first two type-rule checks shipped; CHECKPOINTED here (clean, pushed, multi-check state).
+Remaining (TASKS.md 48d-48f), each best done fresh with full care:
+- **48d — type-carrying scope** (the keystone): a TypeEnv threaded through check_body_stmts
+  so infer_expr_type resolves idents/params/self/let-inferred. Correctness-sensitive — a
+  wrong scope type would false-positive. Unlocks argument-type mismatch + broader coverage.
+- **48e — operator-typing** (needs an ex_binop-positions front-end change, ADR 0054
+  pattern; low real-bug value).
+- **48f — argument-type mismatch, method-call arity (receiver type), match-arm
+  consistency, contract well-typedness**; plus builtin argument typing + await_*
+  async-context deferred from Phase 47.
+
+Next: 48d (type-carrying scope), built behind the diff-checker gate.

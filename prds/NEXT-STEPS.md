@@ -1,11 +1,19 @@
-# Pickup Notes — 2026-07-02 (Phase 47 COMPLETE: builtin-call arity)
+# Pickup Notes — 2026-07-02 (Phase 48 IN PROGRESS: expression inference foundation shipped)
 
 ## Where we are
 
-**Phase 47 (Self-Hosted Checker — builtin-call arity) — COMPLETE.** Closed the
-builtin-call arity gap deferred from Phase 45: all 23 stage1 builtins are arity-checked
-(arg count only) with byte-equal messages in three shapes. `make diff-checker` → **44/44**
-(22 examples clean + 22 fixtures). ADR 0055. **188** checker tests.
+**Phase 48 (Expression type inference + type-rule checks) — FOUNDATION SHIPPED, IN
+PROGRESS.** ADR 0056: `infer_expr_type` is SOUND but INCOMPLETE (a Type only when certain,
+else an Unknown sentinel); type-rule checks fire only on a confident result, so each is
+corpus-safe while inference grows. Shipped + pushed: **48a** the inference engine
+(literals + operator result types; idents/calls/etc.→Unknown pending a typed scope),
+**48b** `if/while condition must be boolean`, **48c** `let` type-mismatch. `make
+diff-checker` → **47/47**, **198** checker tests. This is a large, open-ended phase (full
+stage1 type-system parity); the foundation + first two checks are done, the rest (48d-48f)
+are the continuation below.
+
+**Phase 47 (builtin-call arity) — COMPLETE** (prior): all 23 builtins arity-checked, three
+message shapes, byte-equal. ADR 0055.
 
 **Phase 46 (type foundation + `unknown type`) — COMPLETE** (prior): a structured `Type` +
 `parse_type` + `type_is_known` resolver, and `unknown type 'X'` across every corpus
@@ -17,7 +25,7 @@ selfhost/
   shared/    lexer · ast · parser
   formatter/ intentc fmt   --self-hosted   (Phase 42, diff-formatter 22/22)
   linter/    intentc lint  --self-hosted   (Phase 43, diff-linter 26/26)
-  checker/   intentc check --self-hosted   (Phase 45-47, diff-checker 44/44)
+  checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 47/47)
 ```
 
 ### What Phase 46 shipped
@@ -36,22 +44,28 @@ selfhost/
   result) passed to an `Array`/`Map` (`&Vec`) param (was E0308); the `intentc test` runner
   now surfaces swallowed Rust compile errors instead of a bare "did not run".
 
-## Next: Phase 48 — Expression type inference (the big build on the foundation)
+## Next: Phase 48d — type-carrying scope (the keystone), then more type-rule checks
 
-The remaining checker diagnostics are inference-heavy and need the scope to carry **types**
-(not just names) and inference over every `Expr` kind. Natural next steps:
+The inference engine (48a) + condition-boolean (48b) + let-mismatch (48c) are shipped.
+`infer_expr_type` currently returns Unknown for idents/calls/fields/etc. because there is
+no type-carrying scope yet — that is the next and highest-value step:
 
-1. **Expression type inference** — infer a `Type` for each `Expr` (literals, idents via a
-   type-carrying scope, binops, calls, field/index, match, etc.), storing results (the Go
-   checker keeps `exprTypes`). Build it behind the diff-checker gate (keep 44/44 until a
-   new diagnostic is wired in). This gates every type-rule check.
-2. **Type-rule checks** — assignability (`type mismatch`), operator typing, condition-
-   must-be-boolean, argument-type mismatch (incl. the deferred **builtin argument typing**
-   + `await_*` async-context from Phase 47), return-type, generic instantiation, match
-   exhaustiveness + arm-type consistency, contract well-typedness. Each a `make diff-checker`
-   fixture + corpus no-false-positive coverage.
-3. **method-call arity** — needs the receiver type (a first, self-contained use of the
-   inference engine: infer the object's entity type, look up the method's arity).
+1. **48d — type-carrying scope** (keystone): a `TypeEnv` (name → `Type`) threaded through
+   `check_body_stmts`, seeded with function/method params + `self` + let-inferred bindings,
+   so `infer_expr_type(e, tenv)` resolves idents. Build it behind the diff-checker gate
+   (stays 47/47 until wired). CORRECTNESS-SENSITIVE — inference must stay sound (a wrong
+   scope type would false-positive), so mirror `Scope`'s local/outer shadowing carefully.
+   Unlocks argument-type mismatch + broader let/condition coverage.
+2. **48e — operator-typing** (`operator '+' not defined for X and Y`, `requires boolean
+   operands`): needs an **ex_binop-positions front-end change** (ADR 0054 pattern — the
+   parser sets `Expr.line/column` at binop nodes; currently 0). Low real-bug value; emit
+   only when both operands are confidently known and invalid.
+3. **48f** — argument-type mismatch, **method-call arity** (needs the receiver's entity
+   type), match-arm consistency, contract well-typedness; plus the **builtin argument
+   typing** + `await_*` async-context deferred from Phase 47.
+
+Note: stage1 `checkReturnStmt` does NOT compare the return value to the declared return
+type — there is no return-type-mismatch diagnostic to port.
 
 Smaller tracked gaps (independent): **extern param/return `unknown type`** (0 corpus usage;
 stage2 parses `ExternDecl` — TASKS.md 46.4b.5) and the stage2 **trait-method contract**
@@ -59,10 +73,12 @@ parser gap.
 
 ## How to resume
 
-1. `git log --oneline -20`, then read this file + `prds/TASKS.md`.
-2. Scope Phase 48 (start with a type-carrying scope + expression inference — it gates all
-   type-rule checks), write its ADR, add TASKS.md rows, then proceed. The checker lives in
-   `selfhost/checker/`; reuse `Type` / `parse_type` / `type_is_known` from Phase 46 and the
-   builtin table from Phase 47 (hang argument typing off it).
+1. `git log --oneline -20`, then read this file + `prds/TASKS.md` (Phase 48 rows) + ADR 0056.
+2. Continue Phase 48 at **48d** — the type-carrying scope. Add a `TypeEnv` seeded from
+   params/`self`/let bindings, thread it through `check_body_stmts` alongside the name
+   `Scope`, and give `infer_expr_type` a `tenv` param so idents resolve. Keep it SOUND
+   (Unknown when unsure). Build behind the gate (47/47) until a new check is wired, then
+   add argument-type mismatch etc. Reuse `Type`/`parse_type`/`type_is_known` (Phase 46) and
+   the builtin table (Phase 47).
 3. Validate with `make validate`, `make selfcheck-formatter`, `make diff-formatter`,
-   `make diff-linter`, `make diff-checker`.
+   `make diff-linter`, `make diff-checker` after every slice.

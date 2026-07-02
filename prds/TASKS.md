@@ -99,6 +99,25 @@ async-context deferred to Phase 48). ADR 0055. Gated by `make diff-checker`.
 | 47.4 | fixtures + tests + no-false-positives | [prd-phase-47-builtin-arity.md](done/prd-phase-47-builtin-arity.md) | DONE (2026-07-02) | 3 shape fixtures byte-equal; +5 tests incl. plural + early-return; 22 examples clean. diff-checker 44/44, 188 tests |
 | 47.5 | docs + validate + push | [prd-phase-47-builtin-arity.md](done/prd-phase-47-builtin-arity.md) | DONE (2026-07-02) | ROADMAP + NEXT-STEPS + checker README + PRD; make validate + all gates green; committed + pushed |
 
+## Phase 48: Expression Type Inference + Type-Rule Checks — IN PROGRESS (foundation shipped 2026-07-02)
+
+Sound-but-incomplete `infer_expr_type` (returns a Type only when certain, else an
+Unknown sentinel), with type-rule checks layered on incrementally behind the diff-checker
+gate. ADR 0056. A large, open-ended phase (full stage1 type-system parity). Foundation +
+first two checks shipped + pushed; the rest are the continuation.
+
+| # | Task | PRD | Status | Notes |
+|---|------|-----|--------|-------|
+| 48a | `infer_expr_type` engine (sound/incomplete) | ADR 0056 | DONE (2026-07-02) | literals + comparison/logical→Bool + arithmetic(operand type when both same known) + unary + paren; ident/call/method/field/index/match/array/range → Unknown (need typed scope). type_unknown/is_unknown_type. commit 8198ce5 |
+| 48b | condition-must-be-boolean (if/while) | ADR 0056 | DONE (2026-07-02) | emit on confident non-Bool, Unknown→skip (stage1 condType!=nil). 2 fixtures + 6 tests. commit 8198ce5 |
+| 48c | `let` type-mismatch | ADR 0056 | DONE (2026-07-02) | declared type vs confidently-inferred RHS (`cannot assign X to Y`); Unknown RHS→skip. 1 fixture + 4 tests. commit e156de7 |
+| 48d | type-carrying scope (idents/params/self/let-inferred) | — | TODO | The keystone: a TypeEnv threaded through check_body_stmts so infer_expr_type resolves idents. Correctness-sensitive (a wrong scope type → false positive). Unlocks argument-type mismatch, broader let/condition coverage |
+| 48e | operator-typing errors | — | TODO | checkBinaryExpr messages ("operator '+' not defined for X and Y", "requires boolean operands"). Needs an ex_binop-positions front-end change (ADR 0054 pattern; parser sets Expr.line/col at binop). Low real-bug value; emit only when both operands confidently known + invalid |
+| 48f | argument-type mismatch, method-call arity, match-arm consistency, contract well-typedness | — | TODO | Each builds on 48d (needs expression/receiver types). method-call arity needs the receiver's entity type. Also: builtin argument typing + await_* async-context deferred from Phase 47 |
+
+**NOTE:** stage1 `checkReturnStmt` does NOT compare the return value to the declared
+return type — there is no return-type-mismatch diagnostic to port.
+
 ## Backlog
 
 | # | Task | PRD | Status | Notes |
