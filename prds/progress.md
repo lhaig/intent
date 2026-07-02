@@ -1285,3 +1285,27 @@ No false positives — every corpus entity field/method resolves.
 Next: 46.4b step 3 — enum-variant field types (registerEnums quirk: runs before entities
 registered, resolves against an EMPTY entity set; verify variant Param positions), then
 `let`-stmt types (check phase), then externs.
+
+---
+
+## 2026-07-02 — Phase 46.4b step 3a: `let` statement unknown-types
+
+Restructured the `st_let` handling in check_body_stmts to stage1 checkLetStmt order
+(checker.go:1248-1301): redefinition → unknown-type → RHS → define, each an early return.
+So an unknown declared type now suppresses both the RHS undeclared-variable check AND the
+scope define (verified byte-equal: `let x: Widget = nope;` emits ONLY `unknown type
+'Widget'`). stage1 resolves the `let` annotation with PLAIN ResolveType — NO type params
+(1259) — so a `no_tp` empty list is passed (a bare generic param in a `let` does not
+resolve, matching stage1; corpus has none, else it'd be invalid).
+
+Threading: added entity_names/enum_names params to check_body_stmts and its 4 recursive
+calls; the 5 top-level caller sites pass collect_entity_names(prog)/collect_enum_names(prog)
+directly — call-result args to Array<T> (&Vec) params, which only compile since BE-1 was
+fixed earlier this session (nice payoff).
+
++3 in-language tests (180 pass rust+js) + 1 fixture (let 4:5). diff-checker 40/40;
+diff-formatter 22/22; diff-linter 26/26; selfcheck 4 EQUAL; go test (14 pkgs); validate OK.
+No false positives — every corpus `let` type resolves.
+
+Next: 46.4b step 4 — enum-variant field types (the registerEnums-before-entities quirk;
+verify variant Param positions) + externs. That completes the unknown-type coverage.

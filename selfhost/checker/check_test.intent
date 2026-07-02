@@ -576,3 +576,30 @@ test "unknown type: an entity field typed by another declared entity is clean" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+// --- Phase 46.4b: `let` statement types -----------------------------------
+
+test "unknown type: let statement with an undeclared type" {
+    let body: String = "let x: Widget = 0;";
+    let src: String = "module m version \"1.0\"; " + fn_f_body(body);
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "unknown type 'Widget'");
+}
+
+test "unknown type: an unknown let type suppresses the RHS check (stage1 early return)" {
+    // stage1 checkLetStmt returns right after the unknown-type diag, so the
+    // undeclared RHS `nope` is NOT reported — exactly one diagnostic.
+    let body: String = "let x: Widget = nope;";
+    let src: String = "module m version \"1.0\"; " + fn_f_body(body);
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "unknown type 'Widget'");
+}
+
+test "unknown type: a let with a known type is clean (no false positive)" {
+    let body: String = "let x: Int = 5;";
+    let src: String = "module m version \"1.0\"; " + fn_f_body(body);
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

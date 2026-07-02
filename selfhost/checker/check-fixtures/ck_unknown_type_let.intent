@@ -1,0 +1,9 @@
+// check-fixtures/ck_unknown_type_let.intent — Phase 46.4b / unknown-type on a
+// `let` statement type annotation.
+//
+// stage1: error[...]: unknown type 'Widget'
+module ck_unknown_type_let version "0.1.0";
+
+function f() returns Void {
+    let x: Widget = 0;
+}
