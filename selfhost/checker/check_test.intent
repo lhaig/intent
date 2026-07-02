@@ -702,12 +702,18 @@ test "condition boolean: a bool literal condition is clean" {
     assert_eq(len(diags), 0);
 }
 
-test "condition boolean: an ident condition is Unknown and skipped (no false positive)" {
-    // No type-carrying scope yet — a bare variable infers Unknown, so the check
-    // is skipped (stage1 would infer Bool; both emit nothing).
+test "condition boolean: a Bool param condition is clean (48d typed scope)" {
+    // With the typed scope, `b` resolves to Bool → no error (no false positive).
     let src: String = "module m version \"1.0\"; function f(b: Bool) returns Void " + lbrace() + " if b " + fn_body() + " " + rbrace();
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
+}
+
+test "condition boolean: an Int param condition errors (48d typed scope)" {
+    let src: String = "module m version \"1.0\"; function f(n: Int) returns Void " + lbrace() + " if n " + fn_body() + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "if condition must be boolean, got Int");
 }
 
 // --- Phase 48c: let type mismatch -----------------------------------------
@@ -732,8 +738,21 @@ test "let mismatch: matching literal type is clean" {
     assert_eq(len(diags), 0);
 }
 
-test "let mismatch: Unknown RHS (ident) is skipped (no false positive)" {
+test "let mismatch: a typed param RHS is now caught (48d typed scope)" {
+    // With the typed scope, `x` resolves to Int, so assigning it to a Bool `let`
+    // is a mismatch (byte-equal with stage1).
     let src: String = "module m version \"1.0\"; function f(x: Int) returns Void " + lbrace() + " let y: Bool = x; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "type mismatch: cannot assign Int to Bool");
+}
+
+test "let mismatch: a call-result RHS is still Unknown → skipped (documented gap)" {
+    // Call-return inference is not implemented yet, so an unresolvable RHS is
+    // skipped (sound: no false positive). stage1 would infer g()'s Int here;
+    // this is a tracked incompleteness, not a divergence on any fixture/corpus.
+    let g: String = "function g() returns Int " + lbrace() + " return 1; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + g + " function f() returns Void " + lbrace() + " let y: Bool = g(); " + rbrace();
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }

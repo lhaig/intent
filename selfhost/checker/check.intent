@@ -34,27 +34,44 @@ import "../shared/lexer.intent";
 // scope_resolve_local(s, n) — true if n is in local only (mirrors ResolveLocal).
 // =============================================================================
 
+// Phase 48d: the Scope carries a parallel type array for each name tier
+// (local_types[i] ↔ local_names[i]) so expression inference can look up a
+// variable's Type. Name behaviour is unchanged — scope_define still records a
+// name; it just also records an Unknown type. scope_define_typed records a
+// KNOWN type (used for params). Names default to Unknown so name-resolution
+// (undeclared/redefinition) stays byte-identical to before.
 public entity Scope {
     field local_names: Array<String>;
     field outer_names: Array<String>;
+    field local_types: Array<Type>;
+    field outer_types: Array<Type>;
 
-    constructor(local_names: Array<String>, outer_names: Array<String>) {
+    constructor(local_names: Array<String>, outer_names: Array<String>, local_types: Array<Type>, outer_types: Array<Type>) {
         self.local_names = local_names;
         self.outer_names = outer_names;
+        self.local_types = local_types;
+        self.outer_types = outer_types;
     }
 }
 
 // scope_empty — a fresh, empty scope with no names in any tier.
 
 public function scope_empty() returns Scope {
-    return Scope(shared_ast.empty_string_array(), shared_ast.empty_string_array());
+    return Scope(shared_ast.empty_string_array(), shared_ast.empty_string_array(), empty_type_array(), empty_type_array());
 }
 
-// scope_define — returns a new Scope with `name` added to local_names.
-// Caller is responsible for checking scope_resolve_local first if redefinition
-// detection is needed (used in 45.7).
+// scope_define — returns a new Scope with `name` added to local_names, typed
+// Unknown (its value-type is not tracked). Caller checks scope_resolve_local
+// first if redefinition detection is needed (45.7).
 
 public function scope_define(s: Scope, name: String) returns Scope {
+    return scope_define_typed(s, name, type_unknown());
+}
+
+// scope_define_typed — like scope_define but records a known Type for `name`
+// (Phase 48d; used to seed function/method parameters from their annotations).
+
+public function scope_define_typed(s: Scope, name: String, ty: Type) returns Scope {
     let mutable new_local: Array<String> = [];
     let mutable i: Int = 0;
     while i < len(s.local_names) {
@@ -62,11 +79,18 @@ public function scope_define(s: Scope, name: String) returns Scope {
         i = i + 1;
     }
     new_local.push(name);
-    return Scope(new_local, s.outer_names);
+    let mutable new_local_t: Array<Type> = [];
+    let mutable ti: Int = 0;
+    while ti < len(s.local_types) {
+        new_local_t.push(s.local_types[ti]);
+        ti = ti + 1;
+    }
+    new_local_t.push(ty);
+    return Scope(new_local, s.outer_names, new_local_t, s.outer_types);
 }
 
-// scope_enter — open a child scope. Flattens local_names into outer_names so
-// the parent names remain resolvable in the child.
+// scope_enter — open a child scope. Flattens local (names AND types) into the
+// outer tier so parent bindings remain visible in the child.
 
 public function scope_enter(s: Scope) returns Scope {
     let mutable new_outer: Array<String> = [];
@@ -80,7 +104,48 @@ public function scope_enter(s: Scope) returns Scope {
         new_outer.push(s.local_names[j]);
         j = j + 1;
     }
-    return Scope(shared_ast.empty_string_array(), new_outer);
+    let mutable new_outer_t: Array<Type> = [];
+    let mutable oi: Int = 0;
+    while oi < len(s.outer_types) {
+        new_outer_t.push(s.outer_types[oi]);
+        oi = oi + 1;
+    }
+    let mutable oj: Int = 0;
+    while oj < len(s.local_types) {
+        new_outer_t.push(s.local_types[oj]);
+        oj = oj + 1;
+    }
+    return Scope(shared_ast.empty_string_array(), new_outer, empty_type_array(), new_outer_t);
+}
+
+// scope_type_of — the inferred Type bound to `name`, or Unknown if not found or
+// not typed. The current (local) tier shadows enclosing (outer); within a tier
+// the innermost (last-defined) binding wins. Phase 48d.
+
+public function scope_type_of(s: Scope, name: String) returns Type {
+    let lt: Int = scope_last_index(s.local_names, name);
+    if lt >= 0 {
+        return s.local_types[lt];
+    }
+    let ot: Int = scope_last_index(s.outer_names, name);
+    if ot >= 0 {
+        return s.outer_types[ot];
+    }
+    return type_unknown();
+}
+
+// scope_last_index — index of the LAST occurrence of `name` in `names`, or -1.
+
+function scope_last_index(names: Array<String>, name: String) returns Int {
+    let mutable found_idx: Int = 0 - 1;
+    let mutable i: Int = 0;
+    while i < len(names) {
+        if names[i] == name {
+            found_idx = i;
+        }
+        i = i + 1;
+    }
+    return found_idx;
 }
 
 // scope_resolve — true if `name` is visible in the current or any enclosing
@@ -379,7 +444,7 @@ function is_arith_op(op: String) returns Bool {
     return op == "+" or op == "-" or op == "*" or op == "/" or op == "%";
 }
 
-public function infer_expr_type(e: Expr) returns Type {
+public function infer_expr_type(e: Expr, scope: Scope) returns Type {
     if e.kind == shared_ast.ex_int() {
         return type_named("Int");
     }
@@ -395,15 +460,21 @@ public function infer_expr_type(e: Expr) returns Type {
     if e.kind == shared_ast.ex_char() {
         return type_named("Char");
     }
+    if e.kind == shared_ast.ex_ident() {
+        // Phase 48d: resolve the variable's type from the scope (params seeded
+        // from their annotations; let bindings carry Unknown until later). A
+        // name not in scope, or bound Unknown, yields Unknown → sound skip.
+        return scope_type_of(scope, e.name);
+    }
     if e.kind == shared_ast.ex_paren() {
-        return infer_expr_type(e.children[0]);
+        return infer_expr_type(e.children[0], scope);
     }
     if e.kind == shared_ast.ex_unary() {
         // `not x` is Bool; unary `-x` has the operand's numeric type.
         if e.name == "not" {
             return type_named("Bool");
         }
-        return infer_expr_type(e.children[0]);
+        return infer_expr_type(e.children[0], scope);
     }
     if e.kind == shared_ast.ex_binop() {
         // Comparisons and logical operators yield Bool (for VALID operands; an
@@ -415,8 +486,8 @@ public function infer_expr_type(e: Expr) returns Type {
         // Arithmetic: the operand type when both operands are the same known
         // primitive; Unknown otherwise (sound — never guesses).
         if is_arith_op(e.name) {
-            let lt: Type = infer_expr_type(e.children[0]);
-            let rt: Type = infer_expr_type(e.children[1]);
+            let lt: Type = infer_expr_type(e.children[0], scope);
+            let rt: Type = infer_expr_type(e.children[1], scope);
             if is_unknown_type(lt) or is_unknown_type(rt) {
                 return type_unknown();
             }
@@ -426,8 +497,8 @@ public function infer_expr_type(e: Expr) returns Type {
             return type_unknown();
         }
     }
-    // ident / call / method / field / index / match / array / range / lambda /
-    // try / await / spawn — deferred (need a type-carrying scope). Unknown.
+    // call / method / field / index / match / array / range / lambda / try /
+    // await / spawn — deferred (need field/call-return inference). Unknown.
     return type_unknown();
 }
 
@@ -1342,7 +1413,7 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
                     // also a mismatch). Phase 48c, ADR 0056.
                     if s.type_name != "" {
                         let decl_t: Type = parse_type(s.type_name);
-                        let rhs_t: Type = infer_expr_type(s.expr);
+                        let rhs_t: Type = infer_expr_type(s.expr, cur_scope);
                         if not is_unknown_type(rhs_t) {
                             if rhs_t.name != decl_t.name {
                                 diags.push(CheckDiag(s.line, s.column, "type mismatch: cannot assign " + rhs_t.name + " to " + decl_t.name));
@@ -1373,7 +1444,7 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
             // Condition must be boolean (stage1 checkIfStmt:1359). Emit only on
             // a confident non-Bool inference; Unknown → skip (stage1 skips when
             // condType == nil). Phase 48b, ADR 0056.
-            let if_ct: Type = infer_expr_type(s.expr);
+            let if_ct: Type = infer_expr_type(s.expr, cur_scope);
             if not is_unknown_type(if_ct) {
                 if if_ct.name != "Bool" {
                     diags.push(CheckDiag(s.line, s.column, "if condition must be boolean, got " + if_ct.name));
@@ -1403,7 +1474,7 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
                 wcond_i = wcond_i + 1;
             }
             // Condition must be boolean (stage1 checkWhileStmt:1380). Phase 48b.
-            let wh_ct: Type = infer_expr_type(s.expr);
+            let wh_ct: Type = infer_expr_type(s.expr, cur_scope);
             if not is_unknown_type(wh_ct) {
                 if wh_ct.name != "Bool" {
                     diags.push(CheckDiag(s.line, s.column, "while condition must be boolean, got " + wh_ct.name));
@@ -1446,7 +1517,9 @@ function make_fn_scope(f: FunctionDecl, global: Scope) returns Scope {
     let mutable s: Scope = scope_enter(global);
     let mutable i: Int = 0;
     while i < len(f.params) {
-        s = scope_define(s, f.params[i].name);
+        // Phase 48d: seed each param with its declared type so infer_expr_type
+        // can resolve the variable when it is used.
+        s = scope_define_typed(s, f.params[i].name, parse_type(f.params[i].type_name));
         i = i + 1;
     }
     return s;
@@ -1458,10 +1531,12 @@ function make_fn_scope(f: FunctionDecl, global: Scope) returns Scope {
 
 function make_method_scope(f: FunctionDecl, global: Scope) returns Scope {
     let mutable s: Scope = scope_enter(global);
+    // `self` is left Unknown-typed for now (field/method inference is a later
+    // slice; a bare `self` in a condition/let is not a corpus case).
     s = scope_define(s, "self");
     let mutable i: Int = 0;
     while i < len(f.params) {
-        s = scope_define(s, f.params[i].name);
+        s = scope_define_typed(s, f.params[i].name, parse_type(f.params[i].type_name));
         i = i + 1;
     }
     return s;

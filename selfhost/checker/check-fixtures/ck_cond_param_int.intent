@@ -1,0 +1,8 @@
+// check-fixtures/ck_cond_param_int.intent — Phase 48d / typed scope: an Int
+// parameter used as a condition. stage1: if condition must be boolean, got Int
+module ck_cond_param_int version "0.1.0";
+
+function f(n: Int) returns Void {
+    if n {
+    }
+}
