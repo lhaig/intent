@@ -749,32 +749,51 @@ public entity Parser {
         if kind == shared_lexer.tk_int() {
             let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(shared_ast.ex_int(), shared_ast.parse_int(tok.text), "", false, "", children);
+            // ADR 0054: literal positions (for arg-type / condition anchoring).
+            let mutable e_int: Expr = Expr(shared_ast.ex_int(), shared_ast.parse_int(tok.text), "", false, "", children);
+            e_int.line = tok.line;
+            e_int.column = tok.column;
+            return e_int;
         }
         if kind == shared_lexer.tk_string() {
             let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(shared_ast.ex_string(), 0, self.unquote(tok.text), false, "", children);
+            let mutable e_str: Expr = Expr(shared_ast.ex_string(), 0, self.unquote(tok.text), false, "", children);
+            e_str.line = tok.line;
+            e_str.column = tok.column;
+            return e_str;
         }
         if kind == shared_lexer.tk_float() {
             let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(shared_ast.ex_float(), 0, tok.text, false, "", children);
+            let mutable e_flt: Expr = Expr(shared_ast.ex_float(), 0, tok.text, false, "", children);
+            e_flt.line = tok.line;
+            e_flt.column = tok.column;
+            return e_flt;
         }
         if kind == shared_lexer.tk_char() {
             let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(shared_ast.ex_char(), 0, tok.text, false, "", children);
+            let mutable e_chr: Expr = Expr(shared_ast.ex_char(), 0, tok.text, false, "", children);
+            e_chr.line = tok.line;
+            e_chr.column = tok.column;
+            return e_chr;
         }
         if kind == shared_lexer.kw_true() {
-            self.advance();
+            let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(shared_ast.ex_bool(), 0, "", true, "", children);
+            let mutable e_t: Expr = Expr(shared_ast.ex_bool(), 0, "", true, "", children);
+            e_t.line = tok.line;
+            e_t.column = tok.column;
+            return e_t;
         }
         if kind == shared_lexer.kw_false() {
-            self.advance();
+            let tok: Token = self.advance();
             let mutable children: Array<Expr> = [];
-            return Expr(shared_ast.ex_bool(), 0, "", false, "", children);
+            let mutable e_f: Expr = Expr(shared_ast.ex_bool(), 0, "", false, "", children);
+            e_f.line = tok.line;
+            e_f.column = tok.column;
+            return e_f;
         }
         if kind == shared_lexer.tk_ident() {
             let tok: Token = self.advance();
