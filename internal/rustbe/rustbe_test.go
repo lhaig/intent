@@ -1353,3 +1353,33 @@ entry function main() returns Int {
 		t.Errorf("expected `let snap: Vec<i64> = self.xs.clone();`, got:\n%s", output)
 	}
 }
+
+// Array/Map params are always emitted as `&Vec`/`&HashMap`, so an owned
+// temporary passed as such an argument — here a call result — must be borrowed
+// at the call site, not just place expressions. Previously only VarRef/field/
+// index args were borrowed, so `takes(names())` emitted `Vec` where `&Vec` was
+// expected (E0308).
+func TestGenerateBorrowsCallResultArrayArg(t *testing.T) {
+	src := `module hello version "1.0";
+
+function names() returns Array<String> {
+    let xs: Array<String> = [];
+    return xs;
+}
+
+function takes(xs: Array<String>) returns Int {
+    return len(xs);
+}
+
+entry function main() returns Int {
+    return takes(names());
+}
+`
+	out := generateFromSource(t, "borrow-call-result", src)
+	if !strings.Contains(out, "takes(&names())") {
+		t.Errorf("expected call-result Array arg to be borrowed as `takes(&names())`, got:\n%s", out)
+	}
+	if strings.Contains(out, "takes(names())") {
+		t.Errorf("call-result Array arg was passed un-borrowed (E0308), got:\n%s", out)
+	}
+}

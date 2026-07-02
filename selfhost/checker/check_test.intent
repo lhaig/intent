@@ -427,89 +427,85 @@ test "parse_type: generic over an entity name Option<Widget>" {
 // ---------------------------------------------------------------------------
 // Phase 46.3: type_is_known — resolver mirroring stage1 ResolveType (nil ==
 // unknown). Booleans below track exactly what checker.go's `unknown type` sites
-// would fire on. Name lists are bound to `let` variables before the call: the
-// rust backend passes Array<T> params by reference and only auto-borrows an
-// lvalue, not a call-result temporary.
+// would fire on. no_names() returns an empty name list; passing it inline also
+// exercises the rust backend's borrow of a call-result argument to an
+// Array<T> (&Vec) param (fixed with BE-1).
 // ---------------------------------------------------------------------------
 
+// no_names — an empty entity/enum/type-param name list.
+function no_names() returns Array<String> {
+    let mutable a: Array<String> = [];
+    return a;
+}
+
 test "type_is_known: primitive is always known" {
-    let none: Array<String> = [];
-    let known: Bool = checker.type_is_known(checker.parse_type("Int"), none, none, none);
+    let known: Bool = checker.type_is_known(checker.parse_type("Int"), no_names(), no_names(), no_names());
     assert_eq(known, true);
 }
 
 test "type_is_known: unknown bare name with no decls is not known" {
-    let none: Array<String> = [];
-    let known: Bool = checker.type_is_known(checker.parse_type("Widget"), none, none, none);
+    let known: Bool = checker.type_is_known(checker.parse_type("Widget"), no_names(), no_names(), no_names());
     assert_eq(known, false);
 }
 
 test "type_is_known: an entity name in scope is known" {
-    let none: Array<String> = [];
     let ents: Array<String> = ["Widget"];
-    let known: Bool = checker.type_is_known(checker.parse_type("Widget"), ents, none, none);
+    let known: Bool = checker.type_is_known(checker.parse_type("Widget"), ents, no_names(), no_names());
     assert_eq(known, true);
 }
 
 test "type_is_known: an enum name in scope is known" {
-    let none: Array<String> = [];
     let enums: Array<String> = ["Color"];
-    let known: Bool = checker.type_is_known(checker.parse_type("Color"), none, enums, none);
+    let known: Bool = checker.type_is_known(checker.parse_type("Color"), no_names(), enums, no_names());
     assert_eq(known, true);
 }
 
 test "type_is_known: a type parameter in scope is known" {
-    let none: Array<String> = [];
     let tps: Array<String> = ["T"];
-    let known: Bool = checker.type_is_known(checker.parse_type("T"), none, none, tps);
+    let known: Bool = checker.type_is_known(checker.parse_type("T"), no_names(), no_names(), tps);
     assert_eq(known, true);
     // ...and not known when the parameter is absent.
-    let unknown: Bool = checker.type_is_known(checker.parse_type("T"), none, none, none);
+    let unknown: Bool = checker.type_is_known(checker.parse_type("T"), no_names(), no_names(), no_names());
     assert_eq(unknown, false);
 }
 
 test "type_is_known: Array<String> is known, Array<Widget> is not (nested unknown)" {
-    let none: Array<String> = [];
-    let ok: Bool = checker.type_is_known(checker.parse_type("Array<String>"), none, none, none);
+    let ok: Bool = checker.type_is_known(checker.parse_type("Array<String>"), no_names(), no_names(), no_names());
     assert_eq(ok, true);
-    let nested_unknown: Bool = checker.type_is_known(checker.parse_type("Array<Widget>"), none, none, none);
+    let nested_unknown: Bool = checker.type_is_known(checker.parse_type("Array<Widget>"), no_names(), no_names(), no_names());
     assert_eq(nested_unknown, false);
     // Declaring Widget makes the nested type resolve.
     let ents: Array<String> = ["Widget"];
-    let now_ok: Bool = checker.type_is_known(checker.parse_type("Array<Widget>"), ents, none, none);
+    let now_ok: Bool = checker.type_is_known(checker.parse_type("Array<Widget>"), ents, no_names(), no_names());
     assert_eq(now_ok, true);
 }
 
 test "type_is_known: wrong builtin-generic arity is not known" {
-    let none: Array<String> = [];
-    let arr2: Bool = checker.type_is_known(checker.parse_type("Array<Int, Int>"), none, none, none);
+    let arr2: Bool = checker.type_is_known(checker.parse_type("Array<Int, Int>"), no_names(), no_names(), no_names());
     assert_eq(arr2, false);
-    let map1: Bool = checker.type_is_known(checker.parse_type("Map<Int>"), none, none, none);
+    let map1: Bool = checker.type_is_known(checker.parse_type("Map<Int>"), no_names(), no_names(), no_names());
     assert_eq(map1, false);
 }
 
 test "type_is_known: Map with a valid key is known, unhashable key is not" {
-    let none: Array<String> = [];
-    let ok: Bool = checker.type_is_known(checker.parse_type("Map<String, Int>"), none, none, none);
+    let ok: Bool = checker.type_is_known(checker.parse_type("Map<String, Int>"), no_names(), no_names(), no_names());
     assert_eq(ok, true);
-    let bad_key: Bool = checker.type_is_known(checker.parse_type("Map<Float, Int>"), none, none, none);
+    let bad_key: Bool = checker.type_is_known(checker.parse_type("Map<Float, Int>"), no_names(), no_names(), no_names());
     assert_eq(bad_key, false);
 }
 
 test "type_is_known: Result<Int, String> known; Result arity enforced" {
-    let none: Array<String> = [];
-    let ok: Bool = checker.type_is_known(checker.parse_type("Result<Int, String>"), none, none, none);
+    let ok: Bool = checker.type_is_known(checker.parse_type("Result<Int, String>"), no_names(), no_names(), no_names());
     assert_eq(ok, true);
-    let one_arg: Bool = checker.type_is_known(checker.parse_type("Result<Int>"), none, none, none);
+    let one_arg: Bool = checker.type_is_known(checker.parse_type("Result<Int>"), no_names(), no_names(), no_names());
     assert_eq(one_arg, false);
 }
 
 test "type_is_known: Fn is known when every part resolves, else not" {
-    let none: Array<String> = [];
-    let ok: Bool = checker.type_is_known(checker.parse_type("Fn(Int, Int) -> Int"), none, none, none);
+    let ok: Bool = checker.type_is_known(checker.parse_type("Fn(Int, Int) -> Int"), no_names(), no_names(), no_names());
     assert_eq(ok, true);
-    let bad_param: Bool = checker.type_is_known(checker.parse_type("Fn(Widget) -> Int"), none, none, none);
+    let bad_param: Bool = checker.type_is_known(checker.parse_type("Fn(Widget) -> Int"), no_names(), no_names(), no_names());
     assert_eq(bad_param, false);
-    let bad_ret: Bool = checker.type_is_known(checker.parse_type("Fn(Int) -> Widget"), none, none, none);
+    let bad_ret: Bool = checker.type_is_known(checker.parse_type("Fn(Int) -> Widget"), no_names(), no_names(), no_names());
     assert_eq(bad_ret, false);
 }

@@ -1182,3 +1182,32 @@ NOT fixed here — out of 46.3 scope):
 
 Next: 46.4 — wire the `unknown type 'X'` check into check_program (param/field/return/
 let annotations; base name = outer ref; thread decl type_params).
+
+---
+
+## 2026-07-02 — Bug fixes BE-1 + HARN-1 (found in 46.3), before 46.4
+
+User opted to fix both latent bugs before resuming 46.4.
+
+**HARN-1** (test runner swallowed rust compile errors): `parseCargoTestOutput` now
+returns `(results, ran)` where `ran` = number of real libtest verdicts parsed.
+`runRustTests` gates the error path on `ran==0 && runErr!=nil` (was `len(results)==0`,
+which never tripped because a build failure still yields one placeholder row per test).
+Now a rust compile failure surfaces the raw cargo/rustc output. +2 go tests
+(build-failure → ran 0; real verdicts → ran 2 + pass/fail). internal/compiler.
+
+**BE-1** (rust backend didn't borrow owned-temporary args to `Array<T>`/`Map` params):
+Array/Map params are ALWAYS emitted as `&Vec`/`&HashMap`, so every arg must be a
+reference. THREE arg-borrow sites in internal/rustbe only borrowed place expressions —
+extern call (VarRef only), plain function call (VarRef/field/index), and module-qualified
+call `generateMethodCallExpr` (VarRef only). A call-result / literal / other temporary
+was left as `Vec` → E0308. The checker's cross-module `checker.type_is_known(...)` calls
+hit the module-call site. Fix: at all three sites, borrow any Array/Map arg not already
+`&` (cloneIfNeeded already no-ops on a leading `&`). +1 rustbe unit test
+(TestGenerateBorrowsCallResultArrayArg). End-to-end proof: 46.3 checker tests reverted
+from the `let`-var workaround to inline `no_names()` call-result args — 168 pass rust+js.
+
+Both DONE (TASKS.md backlog rows updated to DONE). Full sweep green: go test (14 pkgs),
+diff-checker 34/34, diff-formatter 22/22, diff-linter 26/26, selfcheck 4 EQUAL, validate OK.
+
+Next: resume 46.4 — wire unknown type 'X' into check_program.

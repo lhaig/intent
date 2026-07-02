@@ -1717,10 +1717,8 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[strin
 				argStr := g.generateExpr(arg, arrayRefParams)
 				if i < len(ext.Params) && ext.Params[i].Type != nil {
 					tn := ext.Params[i].Type.Name
-					if tn == "Array" || tn == "Map" {
-						if _, ok := arg.(*ir.VarRef); ok {
-							argStr = "&" + argStr
-						}
+					if (tn == "Array" || tn == "Map") && !strings.HasPrefix(argStr, "&") {
+						argStr = "&" + argStr
 					}
 				}
 				argStr = g.cloneIfNeeded(argStr, arg)
@@ -1736,15 +1734,17 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[strin
 		}
 		for i, arg := range expr.Args {
 			argStr := g.generateExpr(arg, arrayRefParams)
-			// Pass arrays/maps by reference. Function signature is
-			// `&Vec<T>` / `&HashMap<K,V>`; the call site must match.
-			// VarRef, FieldAccess, and IndexExpr all produce place
-			// expressions we can borrow directly; cloneIfNeeded below sees
-			// the leading `&` and leaves them alone.
+			// Pass arrays/maps by reference. The function signature always
+			// emits Array/Map params as `&Vec<T>` / `&HashMap<K,V>` (see
+			// param emission), so the call site must pass a reference for
+			// EVERY arg kind — place expressions (VarRef/field/index) and
+			// owned temporaries alike (a call result, an array literal, a
+			// method call). Borrow unless the generated expression is already
+			// a reference; cloneIfNeeded below sees the leading `&` and leaves
+			// it alone.
 			if funcDef != nil && i < len(funcDef.Params) {
 				if funcDef.Params[i].Type != nil && (funcDef.Params[i].Type.Name == "Array" || funcDef.Params[i].Type.Name == "Map") {
-					switch arg.(type) {
-					case *ir.VarRef, *ir.FieldAccessExpr, *ir.IndexExpr:
+					if !strings.HasPrefix(argStr, "&") {
 						argStr = "&" + argStr
 					}
 				}
@@ -1987,7 +1987,10 @@ func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr, arrayRefPara
 			argStr := g.generateExpr(arg, arrayRefParams)
 			if funcDecl != nil && i < len(funcDecl.Params) {
 				if funcDecl.Params[i].Type != nil && (funcDecl.Params[i].Type.Name == "Array" || funcDecl.Params[i].Type.Name == "Map") {
-					if _, ok := arg.(*ir.VarRef); ok {
+					// Array/Map params are `&Vec`/`&HashMap`; borrow every arg
+					// kind (place expressions and owned temporaries such as a
+					// call result) unless it is already a reference.
+					if !strings.HasPrefix(argStr, "&") {
 						argStr = "&" + argStr
 					}
 				}
