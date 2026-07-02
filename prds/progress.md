@@ -1123,3 +1123,30 @@ examples = resolver must resolve every corpus type); D4 faithful port of Resolve
 Recon: corpus types = primitives + Array/Map/Result/Option/Future<...> + Fn(..)->R +
 entity/enum names + generic type params; stage1 ResolveType returns nil on unknown base
 → `unknown type '<base>'` (base name, not full string), anchored at the declaration.
+
+---
+
+## 2026-07-02 — Phase 46.2: Type entity + parse_type(string)
+
+Added the structured type foundation to `selfhost/checker/check.intent` (additive; NO
+front-end change, per ADR 0053 D1). New TYPE REPRESENTATION section: `public entity Type`
+{name, type_args: Array<Type>, fn_param_count}; `empty_type_array()`; `type_is_ident_char`;
+a `TypeParser` entity — a recursive-descent scanner over the type string that mutates
+`self.pos` in place across calls (same pattern as the shared Lexer, incl. a Void
+`skip_spaces`); and `public function parse_type(s) returns Type`.
+
+parse_type mirrors the exact forms `shared/parser.intent parse_type_name` emits: bare
+(`Int`/`Widget`), generic (`Array<String>`), two-arg (`Map<String, Int>` with `, `
+separators), nested (`Array<Map<String, Int>>`), and function (`Fn(Int, Int) -> Int`).
+
+Fn modelling (ADR 0053 open question, decided here): name == "Fn",
+type_args = [param1..paramN, return], fn_param_count = N (so type_args[N] is the return).
+fn_param_count is meaningful ONLY when name == "Fn" (0 otherwise). Resolution (46.3) can
+treat every type_arg uniformly; the count is kept for the inference phases (47+).
+
++8 tests in check_test.intent (primitive, entity name, single/two-arg/nested generic,
+Fn(..)->.., zero-param Fn, generic-over-entity). All green: checker tests 158 passed
+(rust+js), diff-checker 34/34, diff-formatter 22/22, diff-linter 26/26, selfcheck 4
+EQUAL, `make validate` OK. Not yet wired into check_program (that begins at 46.4).
+
+Next: 46.3 — resolver `type_is_known` (port stage1 ResolveType semantics).

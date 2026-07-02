@@ -353,3 +353,73 @@ test "arity: variant check fires before function check (variants win on name col
     assert_eq(len(diags), 1);
     assert_eq(diags[0].message, "variant 'Wrap' expects 1 arguments, got 0");
 }
+
+// ---------------------------------------------------------------------------
+// Phase 46.2: parse_type — structured Type tree from the AST's type strings.
+// Mirrors the forms shared/parser.intent parse_type_name emits.
+// ---------------------------------------------------------------------------
+
+test "parse_type: primitive is a bare Type with no args" {
+    let t: Type = checker.parse_type("Int");
+    assert_eq(t.name, "Int");
+    assert_eq(len(t.type_args), 0);
+}
+
+test "parse_type: an entity name is a bare Type with no args" {
+    let t: Type = checker.parse_type("Widget");
+    assert_eq(t.name, "Widget");
+    assert_eq(len(t.type_args), 0);
+}
+
+test "parse_type: single generic Array<String>" {
+    let t: Type = checker.parse_type("Array<String>");
+    assert_eq(t.name, "Array");
+    assert_eq(len(t.type_args), 1);
+    assert_eq(t.type_args[0].name, "String");
+    assert_eq(len(t.type_args[0].type_args), 0);
+}
+
+test "parse_type: two-arg generic Map<String, Int>" {
+    let t: Type = checker.parse_type("Map<String, Int>");
+    assert_eq(t.name, "Map");
+    assert_eq(len(t.type_args), 2);
+    assert_eq(t.type_args[0].name, "String");
+    assert_eq(t.type_args[1].name, "Int");
+}
+
+test "parse_type: nested generic Array<Map<String, Int>>" {
+    let t: Type = checker.parse_type("Array<Map<String, Int>>");
+    assert_eq(t.name, "Array");
+    assert_eq(len(t.type_args), 1);
+    let inner: Type = t.type_args[0];
+    assert_eq(inner.name, "Map");
+    assert_eq(len(inner.type_args), 2);
+    assert_eq(inner.type_args[0].name, "String");
+    assert_eq(inner.type_args[1].name, "Int");
+}
+
+test "parse_type: function type Fn(Int, Int) -> Int" {
+    let t: Type = checker.parse_type("Fn(Int, Int) -> Int");
+    assert_eq(t.name, "Fn");
+    // type_args = [param1, param2, return]; fn_param_count marks the split.
+    assert_eq(len(t.type_args), 3);
+    assert_eq(t.fn_param_count, 2);
+    assert_eq(t.type_args[0].name, "Int");
+    assert_eq(t.type_args[1].name, "Int");
+    assert_eq(t.type_args[2].name, "Int");
+}
+
+test "parse_type: zero-param function type Fn() -> Bool" {
+    let t: Type = checker.parse_type("Fn() -> Bool");
+    assert_eq(t.name, "Fn");
+    assert_eq(t.fn_param_count, 0);
+    assert_eq(len(t.type_args), 1);
+    assert_eq(t.type_args[0].name, "Bool");
+}
+
+test "parse_type: generic over an entity name Option<Widget>" {
+    let t: Type = checker.parse_type("Option<Widget>");
+    assert_eq(t.name, "Option");
+    assert_eq(len(t.type_args), 1);
+    assert_eq(t.type_args[0].name, "Widget");
+}

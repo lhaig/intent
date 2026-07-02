@@ -101,6 +101,169 @@ public function scope_resolve_local(s: Scope, name: String) returns Bool {
 }
 
 // =============================================================================
+// TYPE REPRESENTATION (Phase 46, ADR 0053)
+//
+// A structured type tree built from the flat type strings the AST already
+// carries (Param.type_name, FieldDecl.type_name, FunctionDecl.return_type,
+// `let` Stmt.type_name), per ADR 0053 D1 — NO parser/AST/formatter change.
+// parse_type mirrors the exact forms shared/parser.intent parse_type_name emits:
+//   - bare name:      `Int`, `Widget`
+//   - generic:        `Array<String>`, `Map<String, Int>` (", " arg separators)
+//   - nested generic: `Array<Map<String, Int>>`
+//   - function type:  `Fn(Int, Int) -> Int`  ("Fn(" params ") -> " ret)
+//
+// Fn modelling (ADR 0053 open question, decided here): a Fn is name == "Fn" with
+// type_args = [param1, .., paramN, return] and fn_param_count = N, so
+// type_args[N] is the return type. fn_param_count is meaningful ONLY when
+// name == "Fn" (it is 0 for every other type). Resolution (Phase 46.3) treats
+// every type_arg uniformly, so it never needs to split params from the return;
+// the count is retained for the expression-inference phases (47+).
+// =============================================================================
+
+public entity Type {
+    field name: String;
+    field type_args: Array<Type>;
+    field fn_param_count: Int;
+
+    constructor(name: String, type_args: Array<Type>, fn_param_count: Int) {
+        self.name = name;
+        self.type_args = type_args;
+        self.fn_param_count = fn_param_count;
+    }
+}
+
+// empty_type_array — a fresh, empty Array<Type> (leaf types carry no args).
+
+public function empty_type_array() returns Array<Type> {
+    let mutable a: Array<Type> = [];
+    return a;
+}
+
+// type_is_ident_char — characters parse_type treats as part of a base name:
+// alphanumerics plus '_', mirroring the lexer's identifier rule.
+
+function type_is_ident_char(c: Char) returns Bool {
+    return c.is_alphanumeric() or c == '_';
+}
+
+// TypeParser — a tiny recursive-descent scanner over a type string. Mutates
+// self.pos in place across method calls, the same pattern as the shared Lexer.
+
+entity TypeParser {
+    field src: String;
+    field pos: Int;
+
+    constructor(src: String) {
+        self.src = src;
+        self.pos = 0;
+    }
+
+    method at_end() returns Bool {
+        return self.pos >= len(self.src);
+    }
+
+    // Char at the current position, or '\0' at end (so callers can compare
+    // against delimiters without a separate at_end guard).
+    method peek() returns Char {
+        if self.at_end() {
+            return '\0';
+        }
+        return self.src[self.pos];
+    }
+
+    method skip_spaces() returns Void {
+        while not self.at_end() and self.peek() == ' ' {
+            self.pos = self.pos + 1;
+        }
+    }
+
+    // Read a base identifier at the current position ([A-Za-z0-9_]+).
+    method read_ident() returns String {
+        let start: Int = self.pos;
+        while not self.at_end() and type_is_ident_char(self.peek()) {
+            self.pos = self.pos + 1;
+        }
+        return self.src[start..self.pos];
+    }
+
+    // Parse one full type at the current position.
+    method parse() returns Type {
+        self.skip_spaces();
+        let base: String = self.read_ident();
+        if base == "Fn" and self.peek() == '(' {
+            return self.parse_fn();
+        }
+        if self.peek() == '<' {
+            return self.parse_generic(base);
+        }
+        return Type(base, empty_type_array(), 0);
+    }
+
+    // Parse `<arg1, arg2, ...>` following an already-read base name.
+    method parse_generic(base: String) returns Type {
+        self.pos = self.pos + 1;
+        let mutable args: Array<Type> = [];
+        self.skip_spaces();
+        while not self.at_end() and self.peek() != '>' {
+            let arg: Type = self.parse();
+            args.push(arg);
+            self.skip_spaces();
+            if self.peek() == ',' {
+                self.pos = self.pos + 1;
+                self.skip_spaces();
+            }
+        }
+        if self.peek() == '>' {
+            self.pos = self.pos + 1;
+        }
+        return Type(base, args, 0);
+    }
+
+    // Parse `(p1, p2, ...) -> R` following an already-read `Fn` base name.
+    method parse_fn() returns Type {
+        self.pos = self.pos + 1;
+        let mutable args: Array<Type> = [];
+        let mutable param_count: Int = 0;
+        self.skip_spaces();
+        while not self.at_end() and self.peek() != ')' {
+            let p: Type = self.parse();
+            args.push(p);
+            param_count = param_count + 1;
+            self.skip_spaces();
+            if self.peek() == ',' {
+                self.pos = self.pos + 1;
+                self.skip_spaces();
+            }
+        }
+        if self.peek() == ')' {
+            self.pos = self.pos + 1;
+        }
+        self.skip_spaces();
+        // consume the thin arrow `->`
+        if self.peek() == '-' {
+            self.pos = self.pos + 1;
+            if self.peek() == '>' {
+                self.pos = self.pos + 1;
+            }
+        }
+        self.skip_spaces();
+        let ret: Type = self.parse();
+        args.push(ret);
+        return Type("Fn", args, param_count);
+    }
+}
+
+// parse_type — build a Type tree from one of the type strings the AST carries.
+// Mirrors the forms shared/parser.intent parse_type_name emits (see banner).
+// Unrecognised leading characters yield a bare Type with the scanned (possibly
+// empty) base name.
+
+public function parse_type(s: String) returns Type {
+    let mutable p: TypeParser = TypeParser(s);
+    return p.parse();
+}
+
+// =============================================================================
 // GLOBAL SCOPE BUILDER
 //
 // Populates a Scope with every top-level declaration name (entities, enums,
