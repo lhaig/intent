@@ -7,9 +7,9 @@ PROGRESS.** ADR 0056: `infer_expr_type` is SOUND but INCOMPLETE (a Type only whe
 else an Unknown sentinel); type-rule checks fire only on a confident result, so each is
 corpus-safe while inference grows. Shipped + pushed: **48a** the inference engine
 (literals + operator result types), **48b** `if/while condition must be boolean`, **48c**
-`let` type-mismatch, and **48d** the type-carrying scope (params typed, so idents resolve).
-`make diff-checker` → **48/48**, **200** checker tests. This is a large, open-ended phase (full
-stage1 type-system parity); the foundation + first two checks are done, the rest (48d-48f)
+`let` type-mismatch, **48d** the type-carrying scope (params typed), **48d+** let-var binding, and
+**48f** function argument-type mismatch. `make diff-checker` → **49/49**, **207** checker tests. This is a large, open-ended phase (full
+stage1 type-system parity); the foundation + these checks are shipped, the rest (48g+)
 are the continuation below.
 
 **Phase 47 (builtin-call arity) — COMPLETE** (prior): all 23 builtins arity-checked, three
@@ -25,7 +25,7 @@ selfhost/
   shared/    lexer · ast · parser
   formatter/ intentc fmt   --self-hosted   (Phase 42, diff-formatter 22/22)
   linter/    intentc lint  --self-hosted   (Phase 43, diff-linter 26/26)
-  checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 48/48)
+  checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 49/49)
 ```
 
 ### What Phase 46 shipped
@@ -51,14 +51,13 @@ type-carrying scope (48d — params typed, so idents resolve) are shipped. `infe
 now resolves literals, operators, and param idents; `self`/field/call-return are still
 Unknown (sound skip). Next steps, in rough value order:
 
-- **48f (recommended next) — argument-type mismatch**: buildable NOW with current
-  inference — add a function param-TYPES lookup (like the arity registries), then at a
-  user function/variant call compare each confidently-inferred arg to the param type
-  (`function g(x: Int)…; g(b)` for Bool `b` → mismatch). No front-end change. stage1 sites
-  in `checkCallExpr` (~2140-2180).
-- **48d+ — extend the typed scope**: let-inferred bindings (`let x = 5` → x:Int),
-  `self` → entity type + field-access inference → unlocks method-call arity (receiver type)
-  and much more.
+- **48g (recommended next) — variant-constructor arg-types**: analogous to the shipped
+  function arg-type check (48f done) but for variant calls (`variant 'V' field 'f' expects
+  X, got Y`); reuses prog + infer, look up variant field types from prog.enums.
+- **48h — assignment-stmt type-mismatch** (`x = expr`; needs the target's scope type).
+- **48i — extend the typed scope further**: `self` → entity type + field-access inference
+  (`self.field` → field type) → unlocks method-call arity (receiver type) and more.
+  (Params + let-bindings are already typed.)
 - **48e — operator-typing** (`operator '+' not defined for X and Y`, `requires boolean
    operands`): needs an **ex_binop-positions front-end change** (ADR 0054 pattern — the
    parser sets `Expr.line/column` at binop nodes; currently 0). Low real-bug value; emit
@@ -76,9 +75,9 @@ parser gap.
 ## How to resume
 
 1. `git log --oneline -20`, then read this file + `prds/TASKS.md` (Phase 48 rows) + ADR 0056.
-2. Continue Phase 48 at **48f** — argument-type mismatch (buildable now: add a function
-   param-TYPES lookup, compare confidently-inferred call args to param types). Then extend
-   the typed scope (let-inferred, `self`/field → method-call arity) and 48e operator-typing
-   (needs an ex_binop-positions front-end change). Keep inference SOUND (Unknown skips).
+2. Continue Phase 48 at **48g** — variant-constructor arg-types (reuses 48f's pattern).
+   Then 48h assignment-mismatch, 48e operator-typing (ex_binop positions), 48i method-call
+   arity (needs self/field-access inference), 48j match/contract typing, then phase-53 gaps.
+   Keep inference SOUND (Unknown skips); one check per slice, gate after each.
 3. Validate with `make validate`, `make selfcheck-formatter`, `make diff-formatter`,
    `make diff-linter`, `make diff-checker` after every slice.

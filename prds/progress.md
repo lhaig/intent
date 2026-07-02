@@ -1457,3 +1457,40 @@ pushed base and the script never reaches origin. The untracked PRDs (useful) + s
 
 Next: 48e (operator-typing — needs an ex_binop-positions front-end change) or 48f
 (argument-type mismatch — buildable now via a param-types lookup + current inference).
+
+---
+
+## 2026-07-02 — Phase 48/51: literal positions, argument-type mismatch, let-var binding
+
+Continued the autonomous grind through the PRDs. Three more shipped slices, each byte-equal
++ pushed, gates green throughout:
+
+- **literal Expr positions** (c97d936): parser now sets line/column on Int/Float/String/
+  Char/Bool literals (previously only ex_ident). Additive/formatter-inert (ADR 0054);
+  enables arg-type anchoring at literal args.
+- **function argument-type mismatch** (ea8d60e): threaded `prog` into check_body_stmts +
+  check_expr_names (via a `lookup_function` helper); at a correctly-arity'd NON-generic
+  call, compares each confidently-inferred, positioned arg to the param's declared type →
+  `argument N to 'fn': expected X, got Y` at the arg (stage1 checkCallExpr order). Generic
+  fns skipped (stage1 substitutes; skip = sound), Unknown args skip. +1 fixture + 4 tests.
+- **let-variable binding** (9f3df8a): `let` now records its type in the scope (declared
+  when annotated — matching stage1 even on a mismatch — else inferred RHS), so
+  condition-boolean / let-mismatch / arg-type all extend to let-bound vars downstream
+  (`let n: Int = 5; if n` errors; `let s: String; g(s)` catches it). +3 tests.
+
+Cumulative Phase 48 state: infer_expr_type (literals + operators + idents via typed
+scope), condition-must-be-boolean, let type-mismatch, function argument-type mismatch —
+all covering params AND let-bound vars. diff-checker 49/49, 207 checker tests, all gates
++ validate green.
+
+Threading note: the broad `replace_all` for prog also hit check_program's 4 dispatch
+calls (check_functions/entities/impl/tests share the `var_names, var_counts)` ending) —
+caught by the build (arg-count error) and reverted; those keep 6 args (they already have
+prog as their first param).
+
+STATUS: Phase 48/51 has a strong, coherent foundation shipped. Remaining PRD work
+(phases 50-53 to full stage1 parity) is genuinely multi-session — each needs more
+machinery. Next buildable slices: variant-constructor arg-types (reuses the pattern +
+prog), assignment-stmt type-mismatch, then operator-typing (needs ex_binop positions),
+method-call arity (needs self/field-access inference), match-arm consistency, contract
+typing, and the phase-53 gaps (extern unknown-type, generic-entity arity, trait contracts).
