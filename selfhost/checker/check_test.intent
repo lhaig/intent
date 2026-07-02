@@ -666,3 +666,46 @@ test "unknown type: an entity-typed variant field STILL errors (registerEnums qu
     assert_eq(len(diags), 1);
     assert_eq(diags[0].message, "unknown type 'W'");
 }
+
+// --- Phase 48: expression inference + condition-must-be-boolean -----------
+
+test "condition boolean: an Int-literal if condition errors" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " if 5 " + fn_body() + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "if condition must be boolean, got Int");
+}
+
+test "condition boolean: a String-literal while condition errors" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " while \"x\" " + fn_body() + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "while condition must be boolean, got String");
+}
+
+test "condition boolean: an arithmetic if condition infers Int and errors" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " if 1 + 2 " + fn_body() + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "if condition must be boolean, got Int");
+}
+
+test "condition boolean: a comparison condition is Bool (no false positive)" {
+    let src: String = "module m version \"1.0\"; function f(x: Int) returns Void " + lbrace() + " if x < 3 " + fn_body() + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "condition boolean: a bool literal condition is clean" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " if true " + fn_body() + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "condition boolean: an ident condition is Unknown and skipped (no false positive)" {
+    // No type-carrying scope yet — a bare variable infers Unknown, so the check
+    // is skipped (stage1 would infer Bool; both emit nothing).
+    let src: String = "module m version \"1.0\"; function f(b: Bool) returns Void " + lbrace() + " if b " + fn_body() + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

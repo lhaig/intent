@@ -1,0 +1,8 @@
+// check-fixtures/ck_cond_if_int.intent — Phase 48 / if condition must be boolean.
+// stage1: if condition must be boolean, got Int
+module ck_cond_if_int version "0.1.0";
+
+function f() returns Void {
+    if 5 {
+    }
+}

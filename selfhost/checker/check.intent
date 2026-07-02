@@ -338,6 +338,100 @@ public function type_is_known(t: Type, entity_names: Array<String>, enum_names: 
 }
 
 // =============================================================================
+// EXPRESSION TYPE INFERENCE (Phase 48, ADR 0056)
+//
+// infer_expr_type is SOUND but may be INCOMPLETE: it returns a concrete Type
+// only when it is certain stage1 checkExpression would return the same, else
+// the Unknown sentinel (a Type with name == ""). Type-rule checks fire ONLY on
+// a confident (non-Unknown) result, so they never false-positive while
+// inference grows. This first slice: literals + operator result types; no
+// scope, so idents / calls / method calls / field / index / match / array /
+// range / lambda all yield Unknown.
+// =============================================================================
+
+// type_unknown / is_unknown_type — the "could not infer" sentinel.
+
+public function type_unknown() returns Type {
+    return Type("", empty_type_array(), 0);
+}
+
+public function is_unknown_type(t: Type) returns Bool {
+    return t.name == "";
+}
+
+// type_named — a leaf Type with the given name (no type args).
+
+function type_named(name: String) returns Type {
+    return Type(name, empty_type_array(), 0);
+}
+
+// Operator classes — op strings are the token text stored in ex_binop's name.
+
+function is_comparison_op(op: String) returns Bool {
+    return op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=";
+}
+
+function is_logical_op(op: String) returns Bool {
+    return op == "and" or op == "or" or op == "implies";
+}
+
+function is_arith_op(op: String) returns Bool {
+    return op == "+" or op == "-" or op == "*" or op == "/" or op == "%";
+}
+
+public function infer_expr_type(e: Expr) returns Type {
+    if e.kind == shared_ast.ex_int() {
+        return type_named("Int");
+    }
+    if e.kind == shared_ast.ex_float() {
+        return type_named("Float");
+    }
+    if e.kind == shared_ast.ex_string() {
+        return type_named("String");
+    }
+    if e.kind == shared_ast.ex_bool() {
+        return type_named("Bool");
+    }
+    if e.kind == shared_ast.ex_char() {
+        return type_named("Char");
+    }
+    if e.kind == shared_ast.ex_paren() {
+        return infer_expr_type(e.children[0]);
+    }
+    if e.kind == shared_ast.ex_unary() {
+        // `not x` is Bool; unary `-x` has the operand's numeric type.
+        if e.name == "not" {
+            return type_named("Bool");
+        }
+        return infer_expr_type(e.children[0]);
+    }
+    if e.kind == shared_ast.ex_binop() {
+        // Comparisons and logical operators yield Bool (for VALID operands; an
+        // invalid comparison is stage1's operator-typing error, a later slice,
+        // and does not occur in the valid corpus).
+        if is_comparison_op(e.name) or is_logical_op(e.name) {
+            return type_named("Bool");
+        }
+        // Arithmetic: the operand type when both operands are the same known
+        // primitive; Unknown otherwise (sound — never guesses).
+        if is_arith_op(e.name) {
+            let lt: Type = infer_expr_type(e.children[0]);
+            let rt: Type = infer_expr_type(e.children[1]);
+            if is_unknown_type(lt) or is_unknown_type(rt) {
+                return type_unknown();
+            }
+            if lt.name == rt.name {
+                return type_named(lt.name);
+            }
+            return type_unknown();
+        }
+    }
+    // ident / call / method / field / index / match / array / range / lambda /
+    // try / await / spawn — deferred (need a type-carrying scope). Unknown.
+    return type_unknown();
+}
+
+// =============================================================================
 // GLOBAL SCOPE BUILDER
 //
 // Populates a Scope with every top-level declaration name (entities, enums,
@@ -1262,6 +1356,15 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
                 diags.push(cond_d[cond_i]);
                 cond_i = cond_i + 1;
             }
+            // Condition must be boolean (stage1 checkIfStmt:1359). Emit only on
+            // a confident non-Bool inference; Unknown → skip (stage1 skips when
+            // condType == nil). Phase 48b, ADR 0056.
+            let if_ct: Type = infer_expr_type(s.expr);
+            if not is_unknown_type(if_ct) {
+                if if_ct.name != "Bool" {
+                    diags.push(CheckDiag(s.line, s.column, "if condition must be boolean, got " + if_ct.name));
+                }
+            }
             let mutable ttmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth, in_test, test_name, scope_enter(cur_scope), fn_names, fn_counts, var_names, var_counts, entity_names, enum_names);
             let mutable ti: Int = 0;
             while ti < len(ttmp) {
@@ -1284,6 +1387,13 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
             while wcond_i < len(wcond_d) {
                 diags.push(wcond_d[wcond_i]);
                 wcond_i = wcond_i + 1;
+            }
+            // Condition must be boolean (stage1 checkWhileStmt:1380). Phase 48b.
+            let wh_ct: Type = infer_expr_type(s.expr);
+            if not is_unknown_type(wh_ct) {
+                if wh_ct.name != "Bool" {
+                    diags.push(CheckDiag(s.line, s.column, "while condition must be boolean, got " + wh_ct.name));
+                }
             }
             let mutable wtmp: Array<CheckDiag> = check_body_stmts(s.then_block.stmts, loop_depth + 1, in_test, test_name, scope_enter(cur_scope), fn_names, fn_counts, var_names, var_counts, entity_names, enum_names);
             let mutable wi: Int = 0;

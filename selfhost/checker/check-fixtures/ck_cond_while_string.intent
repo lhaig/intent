@@ -1,0 +1,8 @@
+// check-fixtures/ck_cond_while_string.intent — Phase 48 / while condition boolean.
+// stage1: while condition must be boolean, got String
+module ck_cond_while_string version "0.1.0";
+
+function f() returns Void {
+    while "x" {
+    }
+}
