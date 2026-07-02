@@ -1,0 +1,7 @@
+// check-fixtures/ck_let_type_mismatch.intent — Phase 48 / let type mismatch.
+// stage1: type mismatch: cannot assign String to Int
+module ck_let_type_mismatch version "0.1.0";
+
+function f() returns Void {
+    let a: Int = "hi";
+}

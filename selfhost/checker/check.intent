@@ -1335,6 +1335,20 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
                         diags.push(rhsd[rhsi]);
                         rhsi = rhsi + 1;
                     }
+                    // Type mismatch (stage1 checkLetStmt:1279): a known declared
+                    // type + a confidently-inferred RHS whose type differs →
+                    // cannot assign. RHS Unknown → skip (stage1 guards on
+                    // valueType != nil, so an undeclared/unknowable RHS is not
+                    // also a mismatch). Phase 48c, ADR 0056.
+                    if s.type_name != "" {
+                        let decl_t: Type = parse_type(s.type_name);
+                        let rhs_t: Type = infer_expr_type(s.expr);
+                        if not is_unknown_type(rhs_t) {
+                            if rhs_t.name != decl_t.name {
+                                diags.push(CheckDiag(s.line, s.column, "type mismatch: cannot assign " + rhs_t.name + " to " + decl_t.name));
+                            }
+                        }
+                    }
                     cur_scope = scope_define(cur_scope, s.name);
                 }
             }

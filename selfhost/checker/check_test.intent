@@ -709,3 +709,31 @@ test "condition boolean: an ident condition is Unknown and skipped (no false pos
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+// --- Phase 48c: let type mismatch -----------------------------------------
+
+test "let mismatch: String RHS assigned to Int declared type" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let a: Int = \"hi\"; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "type mismatch: cannot assign String to Int");
+}
+
+test "let mismatch: Int RHS assigned to Bool (no implicit conversion)" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let b: Bool = 5; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "type mismatch: cannot assign Int to Bool");
+}
+
+test "let mismatch: matching literal type is clean" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let n: Int = 1 + 2; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "let mismatch: Unknown RHS (ident) is skipped (no false positive)" {
+    let src: String = "module m version \"1.0\"; function f(x: Int) returns Void " + lbrace() + " let y: Bool = x; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
