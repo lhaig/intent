@@ -1426,3 +1426,34 @@ Remaining (TASKS.md 48d-48f), each best done fresh with full care:
   async-context deferred from Phase 47.
 
 Next: 48d (type-carrying scope), built behind the diff-checker gate.
+
+---
+
+## 2026-07-02 — Phase 48d: type-carrying scope (params) + a git-hygiene note
+
+Enriched `Scope` with parallel type arrays (`local_types`/`outer_types`). `scope_define`
+still records a name (typed Unknown) so name-resolution stays byte-identical; new
+`scope_define_typed` records a known type, used by make_fn_scope/make_method_scope to seed
+params from `parse_type(param.type_name)`. `scope_type_of` looks up a name's type
+(innermost binding wins, local shadows outer; Unknown if absent/untyped).
+`infer_expr_type` gained a `scope` param and an `ex_ident` case resolving via
+`scope_type_of`. (`self`/field/call-return stay Unknown — later slices.)
+
+Effect: condition-must-be-boolean and let type-mismatch now fire on typed params too —
+`if n` / `let y: Bool = x` for an Int `n`/`x` — byte-equal with stage1; Unknown still
+skips (sound). Gotcha fixed: `result` is a reserved word (contract expr), so the
+last-index helper uses `found_idx`. +1 fixture (ck_cond_param_int), tests updated for the
+new coverage (2 stale "Unknown-skip" tests now assert the mismatch/error they correctly
+catch). diff-checker 48/48, 200 checker tests rust+js, all gates + validate green.
+commit ef9bb96, pushed 7ab1358..ef9bb96.
+
+GIT HYGIENE: a background agent ("is phas 48 the last?") had committed d54eb47 to local
+main (UNPUSHED) bundling a security-flagged `scripts/overnight-self-improve.sh` (loops
+`claude -p /self-improve --dangerously-skip-permissions` + auto-push) plus phase-48..53
+PRDs — the user had NOT authorized the script. Un-committed it via `git reset --mixed
+7ab1358` (non-destructive; all files preserved as untracked) so my clean 48d sits on the
+pushed base and the script never reaches origin. The untracked PRDs (useful) + script
+(unwanted) + `.claude/commands/self-improve.md` (gitignored) await the user's decision.
+
+Next: 48e (operator-typing — needs an ex_binop-positions front-end change) or 48f
+(argument-type mismatch — buildable now via a param-types lookup + current inference).
