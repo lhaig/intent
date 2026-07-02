@@ -509,3 +509,42 @@ test "type_is_known: Fn is known when every part resolves, else not" {
     let bad_ret: Bool = checker.type_is_known(checker.parse_type("Fn(Int) -> Widget"), no_names(), no_names(), no_names());
     assert_eq(bad_ret, false);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 46.4: `unknown type 'X'` wired into check_program over function/method
+// param + return annotations (integrated, register-phase, stage1 order).
+// ---------------------------------------------------------------------------
+
+test "unknown type: function parameter with an undeclared type" {
+    let src: String = "module m version \"1.0\"; function f(w: Widget) returns Void" + fn_body();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "unknown type 'Widget'");
+}
+
+test "unknown type: function return with an undeclared type" {
+    let src: String = "module m version \"1.0\"; function make() returns Widget" + fn_body();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "unknown type 'Widget'");
+}
+
+test "unknown type: nested unknown reports the outer base name" {
+    let src: String = "module m version \"1.0\"; function f(xs: Array<Widget>) returns Void" + fn_body();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "unknown type 'Array'");
+}
+
+test "unknown type: primitive + declared-entity params are clean (no false positive)" {
+    let ent: String = "entity Widget " + lbrace() + " field x: Int; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + ent + " function f(a: Int, w: Widget) returns Array<String>" + fn_body();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "unknown type: a generic function's own type parameter resolves (threaded)" {
+    let src: String = "module m version \"1.0\"; function id<T>(x: T) returns T " + lbrace() + " return x; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

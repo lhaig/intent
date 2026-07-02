@@ -945,16 +945,78 @@ function check_dup_traits(prog: Program) returns Array<CheckDiag> {
     return diags;
 }
 
+// collect_entity_names / collect_enum_names — the declared entity resp. enum
+// names, as parse_type/type_is_known expect them. By registerFunctions time
+// (dispatch order enums→entities→traits→functions) stage1's c.entities and
+// c.enums hold ALL such names, so the full program lists are correct here.
+
+function collect_entity_names(prog: Program) returns Array<String> {
+    let mutable names: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(prog.entities) {
+        names.push(prog.entities[i].name);
+        i = i + 1;
+    }
+    return names;
+}
+
+function collect_enum_names(prog: Program) returns Array<String> {
+    let mutable names: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(prog.enums) {
+        names.push(prog.enums[i].name);
+        i = i + 1;
+    }
+    return names;
+}
+
+// check_fn_signature_types — emit `unknown type 'BASE'` for any param or return
+// annotation on `f` that does not resolve. Mirrors stage1 registerFunctions
+// (checker.go:750-769): params first (anchored at the param position), then the
+// return type (anchored at the function position). BASE is the OUTER ref name
+// (stage1's `ref.Name`) — parse_type(...).name. `f.type_params` is threaded so
+// a generic function's own type parameters resolve. Phase 46.4.
+
+function check_fn_signature_types(f: FunctionDecl, entity_names: Array<String>, enum_names: Array<String>) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
+    let type_params: Array<String> = f.type_params;
+    let mutable i: Int = 0;
+    while i < len(f.params) {
+        let p: Param = f.params[i];
+        let pt: Type = parse_type(p.type_name);
+        if not type_is_known(pt, entity_names, enum_names, type_params) {
+            diags.push(CheckDiag(p.line, p.column, "unknown type '" + pt.name + "'"));
+        }
+        i = i + 1;
+    }
+    if f.return_type != "" {
+        let rt: Type = parse_type(f.return_type);
+        if not type_is_known(rt, entity_names, enum_names, type_params) {
+            diags.push(CheckDiag(f.line, f.column, "unknown type '" + rt.name + "'"));
+        }
+    }
+    return diags;
+}
+
 function check_dup_functions(prog: Program) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable seen: Array<String> = [];
+    let entity_names: Array<String> = collect_entity_names(prog);
+    let enum_names: Array<String> = collect_enum_names(prog);
     let mutable i: Int = 0;
     while i < len(prog.functions) {
         let f: FunctionDecl = prog.functions[i];
         if name_seen(seen, f.name) {
+            // stage1 `continue`s on a duplicate — no signature-type resolution.
             diags.push(CheckDiag(f.line, f.column, "function '" + f.name + "' already defined"));
         } else {
             seen.push(f.name);
+            let sig_diags: Array<CheckDiag> = check_fn_signature_types(f, entity_names, enum_names);
+            let mutable j: Int = 0;
+            while j < len(sig_diags) {
+                diags.push(sig_diags[j]);
+                j = j + 1;
+            }
         }
         i = i + 1;
     }

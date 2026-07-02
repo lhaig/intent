@@ -1,0 +1,8 @@
+// check-fixtures/ck_unknown_type_nested.intent — Phase 46.4 / nested unknown
+// type reports the OUTER base name (stage1 ref.Name), not the inner unknown.
+//
+// stage1: error[...]: unknown type 'Array'  (Array<Widget>, Widget unknown)
+module ck_unknown_type_nested version "0.1.0";
+
+function f(xs: Array<Widget>) returns Void {
+}

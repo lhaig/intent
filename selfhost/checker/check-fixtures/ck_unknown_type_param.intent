@@ -1,0 +1,8 @@
+// check-fixtures/ck_unknown_type_param.intent — Phase 46.4 / unknown-type on a
+// function parameter annotation.
+//
+// stage1: error[...]: unknown type 'Widget'  (anchored at the param `w`)
+module ck_unknown_type_param version "0.1.0";
+
+function f(w: Widget) returns Void {
+}

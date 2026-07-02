@@ -1211,3 +1211,32 @@ Both DONE (TASKS.md backlog rows updated to DONE). Full sweep green: go test (14
 diff-checker 34/34, diff-formatter 22/22, diff-linter 26/26, selfcheck 4 EQUAL, validate OK.
 
 Next: resume 46.4 — wire unknown type 'X' into check_program.
+
+---
+
+## 2026-07-02 — Phase 46.4a: unknown type 'X' — function param + return (first slice)
+
+Wired the first `unknown type 'X'` emissions into check_program. Interleaved into
+check_dup_functions to preserve stage1's registerFunctions order (checker.go:731-769):
+per function, dup-name → emit + `continue` (no sig resolution); else resolve each param
+(anchored at the param position) then the return (anchored at the function position).
+Base name is the OUTER ref (stage1 `ref.Name`) = parse_type(annotation).name, so
+`Array<Widget>` → `unknown type 'Array'`. Threads `f.type_params` so a generic
+function's own params resolve. New helpers collect_entity_names/collect_enum_names
+(full program lists are correct here — enums+entities are registered before functions).
+
++5 in-language tests (173 pass rust+js) + 3 diff fixtures (param 7:12, return 7:1,
+nested→outer-name 7:12) byte-equal vs stage1. diff-checker 37/37; diff-formatter 22/22;
+diff-linter 26/26; selfcheck 4 EQUAL; go test (14 pkgs); make validate OK.
+
+DEFERRED to 46.4b (see TASKS.md), each needing care beyond a plain append:
+- entity FIELD types: FieldDecl has NO line/column → needs a small additive front-end
+  change (parser populates them; 45.7 precedent). ADR 0053 D1 was about type
+  REPRESENTATION (no structured types in the AST), not positions, so this is orthogonal.
+- entity method + constructor sig types (interleave into check_dup_entities, entity.type_params).
+- enum-variant field types (registerEnums runs BEFORE entities are registered — a quirk to
+  match; also parser:830 builds some Params without positions — verify variant fields).
+- `let` stmt types (check phase — thread the enclosing decl's type_params into check_body_stmts).
+- externs (ExternDecl) if the stage2 parser emits them.
+
+Next: 46.4b (remaining sites), then extend 46.5 fixtures + 46.6 docs/push.
