@@ -885,9 +885,22 @@ function name_seen(seen: Array<String>, name: String) returns Bool {
 // enum] — mirroring registerEnums which does both in one loop (checker.go
 // lines 662-728).
 
+// check_dup_enums — enum duplicate-name + duplicate-variant detection AND
+// variant-field `unknown type` checks. Mirrors stage1 registerEnums
+// (checker.go:661-727): per enum (skip if dup name), per variant (dup-variant
+// check, else resolve its field types). Variant fields resolve the way stage1
+// does here — a QUIRK worth stating: registerEnums runs BEFORE registerEntities
+// (dispatch order), so c.entities is EMPTY, and the current enum is added to
+// c.enums only AFTER its variant loop, so its field types see only enums
+// declared strictly earlier (`enums_so_far`), never itself. Plain ResolveType,
+// no type params. Phase 46.4b.
+
 function check_dup_enums(prog: Program) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable seen_enums: Array<String> = [];
+    let mutable enums_so_far: Array<String> = [];
+    let no_entities: Array<String> = [];
+    let no_tp: Array<String> = [];
     let mutable i: Int = 0;
     while i < len(prog.enums) {
         let e: EnumDecl = prog.enums[i];
@@ -895,7 +908,6 @@ function check_dup_enums(prog: Program) returns Array<CheckDiag> {
             diags.push(CheckDiag(e.line, e.column, "enum '" + e.name + "' already defined"));
         } else {
             seen_enums.push(e.name);
-            // Check for duplicate variant names within this enum.
             let mutable seen_variants: Array<String> = [];
             let mutable vi: Int = 0;
             while vi < len(e.variants) {
@@ -904,9 +916,22 @@ function check_dup_enums(prog: Program) returns Array<CheckDiag> {
                     diags.push(CheckDiag(v.line, v.column, "duplicate variant name '" + v.name + "' in enum '" + e.name + "'"));
                 } else {
                     seen_variants.push(v.name);
+                    // Resolve this variant's field types (entities empty, enums
+                    // = those declared before this one, no type params).
+                    let mutable fj: Int = 0;
+                    while fj < len(v.params) {
+                        let vp: Param = v.params[fj];
+                        let vt: Type = parse_type(vp.type_name);
+                        if not type_is_known(vt, no_entities, enums_so_far, no_tp) {
+                            diags.push(CheckDiag(vp.line, vp.column, "unknown type '" + vt.name + "'"));
+                        }
+                        fj = fj + 1;
+                    }
                 }
                 vi = vi + 1;
             }
+            // stage1 registers the enum only after its variant loop.
+            enums_so_far.push(e.name);
         }
         i = i + 1;
     }

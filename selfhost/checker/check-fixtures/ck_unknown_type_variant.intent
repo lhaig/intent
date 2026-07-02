@@ -1,0 +1,9 @@
+// check-fixtures/ck_unknown_type_variant.intent — Phase 46.4b / unknown-type on an
+// enum variant field annotation (entities are not yet registered here).
+//
+// stage1: error[...]: unknown type 'Widget'
+module ck_unknown_type_variant version "0.1.0";
+
+enum E {
+    V(x: Widget),
+}

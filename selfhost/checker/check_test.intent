@@ -603,3 +603,28 @@ test "unknown type: a let with a known type is clean (no false positive)" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+// --- Phase 46.4b: enum variant field types --------------------------------
+
+test "unknown type: enum variant field with an undeclared type" {
+    let src: String = "module m version \"1.0\"; enum E " + lbrace() + " V(x: Widget), " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "unknown type 'Widget'");
+}
+
+test "unknown type: enum variant field with a primitive is clean (no false positive)" {
+    let src: String = "module m version \"1.0\"; enum E " + lbrace() + " V(x: Int), " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "unknown type: an entity-typed variant field STILL errors (registerEnums quirk)" {
+    // stage1 registerEnums runs before entities are registered, so a variant
+    // field typed by a declared entity does not resolve — matched byte-for-byte.
+    let ent: String = "entity W " + lbrace() + " field a: Int; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + ent + " enum E " + lbrace() + " V(x: W), " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "unknown type 'W'");
+}

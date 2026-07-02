@@ -1309,3 +1309,28 @@ No false positives — every corpus `let` type resolves.
 
 Next: 46.4b step 4 — enum-variant field types (the registerEnums-before-entities quirk;
 verify variant Param positions) + externs. That completes the unknown-type coverage.
+
+---
+
+## 2026-07-02 — Phase 46.4b step 4: enum-variant field unknown-types
+
+Interleaved variant-field `unknown type` into check_dup_enums, faithfully matching the
+stage1 registerEnums quirk (checker.go:661-727): it runs BEFORE registerEntities, so
+c.entities is EMPTY, and each enum is added to c.enums only AFTER its own variant loop —
+so variant field types resolve against an empty entity set + only enums declared strictly
+before this one (`enums_so_far`), never the enum itself. Plain ResolveType (no type
+params). Anchored at the variant Param position (parse_param already populates it; the
+parser:830 gap noted earlier was the LAMBDA parser, unrelated).
+
+Verified the quirk byte-for-byte: an enum variant field typed by a DECLARED entity still
+emits `unknown type 'W'` in both stage1 and stage2. +3 in-language tests (incl. the quirk)
+→ 183 pass rust+js, +1 fixture (variant 8:7). diff-checker 41/41 (all 36 corpus variant
+fields resolve — no false positives), all gates + validate green.
+
+The `unknown type` check now covers every annotation site that appears in the corpus:
+function params/returns, entity fields, entity methods, `let` statements, and enum-variant
+fields. Only externs remain (46.4b.5) — 0 corpus usage, deferred as a documented gap.
+
+Next: formally close Phase 46 — 46.5 (fixtures are largely in place: 7 unknown-type
+fixtures across param/return/nested/field/method/let/variant) + 46.6 (README/ROADMAP/
+NEXT-STEPS + push).
