@@ -1456,7 +1456,17 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
                             }
                         }
                     }
-                    cur_scope = scope_define(cur_scope, s.name);
+                    // Bind with the variable's type so later uses resolve: the
+                    // declared type when annotated (what stage1 uses, even on a
+                    // mismatch), else the inferred RHS type (may be Unknown).
+                    // Phase 48d+, ADR 0056.
+                    let mutable bind_type: Type = type_unknown();
+                    if s.type_name != "" {
+                        bind_type = parse_type(s.type_name);
+                    } else {
+                        bind_type = infer_expr_type(s.expr, cur_scope);
+                    }
+                    cur_scope = scope_define_typed(cur_scope, s.name, bind_type);
                 }
             }
         }

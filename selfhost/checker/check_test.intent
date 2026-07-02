@@ -790,3 +790,30 @@ test "arg type: a generic function's args are not checked (sound skip)" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+// --- Phase 48d+: let-bound variables resolve downstream -------------------
+
+test "let-bound var: an Int let used as a condition errors downstream" {
+    let body: String = "let n: Int = 5; if n " + fn_body();
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " " + body + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "if condition must be boolean, got Int");
+}
+
+test "let-bound var: a String let passed where Int expected errors downstream" {
+    let g: String = "function g(x: Int) returns Void " + fn_body();
+    let body: String = "let s: String = \"hi\"; g(s);";
+    let src: String = "module m version \"1.0\"; " + g + " function f() returns Void " + lbrace() + " " + body + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "argument 1 to 'g': expected Int, got String");
+}
+
+test "let-bound var: correct downstream use is clean (no false positive)" {
+    let g: String = "function g(x: Int) returns Void " + fn_body();
+    let body: String = "let n: Int = 5; g(n);";
+    let src: String = "module m version \"1.0\"; " + g + " function f() returns Void " + lbrace() + " " + body + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
