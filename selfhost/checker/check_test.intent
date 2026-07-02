@@ -756,3 +756,37 @@ test "let mismatch: a call-result RHS is still Unknown → skipped (documented g
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+// --- Phase 48/51: function argument-type mismatch -------------------------
+
+test "arg type: a String literal passed where Int expected" {
+    let g: String = "function g(x: Int) returns Void " + fn_body();
+    let src: String = "module m version \"1.0\"; " + g + " function f() returns Void " + lbrace() + " g(\"hi\"); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "argument 1 to 'g': expected Int, got String");
+}
+
+test "arg type: a Bool param passed where Int expected (2nd arg position)" {
+    let g: String = "function g(a: Int, b: Int) returns Void " + fn_body();
+    let src: String = "module m version \"1.0\"; " + g + " function f(flag: Bool) returns Void " + lbrace() + " g(1, flag); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "argument 2 to 'g': expected Int, got Bool");
+}
+
+test "arg type: matching argument types are clean (no false positive)" {
+    let g: String = "function g(x: Int) returns Void " + fn_body();
+    let src: String = "module m version \"1.0\"; " + g + " function f(n: Int) returns Void " + lbrace() + " g(n); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "arg type: a generic function's args are not checked (sound skip)" {
+    // id<T>(x: T) — the param type is a type parameter; stage1 substitutes, we
+    // skip generics entirely to stay sound (no false positive).
+    let id: String = "function id<T>(x: T) returns T " + lbrace() + " return x; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + id + " function f() returns Void " + lbrace() + " let r: Int = id(5); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

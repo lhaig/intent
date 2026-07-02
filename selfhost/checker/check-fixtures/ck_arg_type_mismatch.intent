@@ -1,0 +1,10 @@
+// check-fixtures/ck_arg_type_mismatch.intent — Phase 48 / function argument-type
+// mismatch. stage1: argument 1 to 'g': expected Int, got String
+module ck_arg_type_mismatch version "0.1.0";
+
+function g(x: Int) returns Void {
+}
+
+function f() returns Void {
+    g("hi");
+}
