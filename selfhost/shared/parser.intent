@@ -1055,13 +1055,17 @@ public entity Parser {
     }
 
     method parse_field_decl() returns FieldDecl {
-        self.expect(shared_lexer.kw_field_marker(), "'field'");
+        // ADR 0054: anchor the field at its `field` keyword, matching stage1
+        // FieldDecl.Pos() so the checker's `unknown type` diagnostic aligns.
+        let field_tok: Token = self.expect(shared_lexer.kw_field_marker(), "'field'");
         let name_tok: Token = self.expect(shared_lexer.tk_ident(), "field name");
         self.expect(shared_lexer.tk_colon(), "':' after field name");
         let type_name: String = self.parse_type_name();
         let semi: Token = self.expect(shared_lexer.tk_semicolon(), "';' after field declaration");
         let mutable fd: FieldDecl = FieldDecl(name_tok.text, type_name);
         fd.comment_after = semi.comment_after;
+        fd.line = field_tok.line;
+        fd.column = field_tok.column;
         return fd;
     }
 

@@ -1240,3 +1240,25 @@ DEFERRED to 46.4b (see TASKS.md), each needing care beyond a plain append:
 - externs (ExternDecl) if the stage2 parser emits them.
 
 Next: 46.4b (remaining sites), then extend 46.5 fixtures + 46.6 docs/push.
+
+---
+
+## 2026-07-02 — Phase 46.4b step 1: FieldDecl positions + ADR 0054
+
+Isolated front-end change, validated on its own before any checker work (as planned).
+Added additive `line`/`column` to `FieldDecl` (ast.intent; defaulted 0, no constructor
+signature change) and populated them in `parse_field_decl` from the `field` KEYWORD
+token — matching stage1 `FieldDecl.Pos()` (parser.go:484 anchors at `field`, not the
+name), so the step-2 entity-field `unknown type` diagnostic will be byte-equal.
+
+ADR 0054 records the decision: additive AST position fields are permitted (distinct from
+ADR 0053 D1, which forbade structured TYPES in the AST). The dividing line is the
+formatter — structured types force string reconstruction (byte-equal-self-format risk);
+position ints are inert to the formatter. Precedent: Phase 45.7 (Expr positions).
+
+Validated: selfcheck-formatter 4 EQUAL + diff-formatter 22/22 (proves positions inert),
+diff-checker 37/37, diff-linter 26/26, checker tests 173 (rust+js), go test (14 pkgs),
+make validate OK. No checker use of the new positions yet — that is 46.4b step 2.
+
+Next: 46.4b step 2 — entity fields + methods (interleave into check_dup_entities;
+fields before methods per entity, using the field position + entity.type_params).

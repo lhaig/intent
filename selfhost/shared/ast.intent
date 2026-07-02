@@ -388,12 +388,21 @@ public entity FieldDecl {
     // inline comment after its `;`. Defaulted; the parser assigns them.
     field comments_before: Array<String>;
     field comment_after: String;
+    // ADR 0054 (Phase 46.4b): source position of the field's `field` keyword,
+    // matching stage1 FieldDecl.Pos() (parser.go anchors at the `field` token),
+    // so the checker's `unknown type` diagnostic on a field annotation lands at
+    // the same spot. Additive (defaulted to 0, no constructor signature change,
+    // formatter ignores it) — same pattern as Expr positions (Phase 45.7).
+    field line: Int;
+    field column: Int;
 
     constructor(name: String, type_name: String) {
         self.name = name;
         self.type_name = type_name;
         self.comments_before = empty_string_array();
         self.comment_after = "";
+        self.line = 0;
+        self.column = 0;
     }
 }
 
