@@ -263,6 +263,80 @@ public function parse_type(s: String) returns Type {
     return p.parse();
 }
 
+// type_is_known — true exactly when stage1 ResolveType (types.go:84) would
+// resolve `t` to a non-nil Type. Every `unknown type '%s'` emit site in
+// checker.go is `if ResolveType(...) == nil { emit }`, so this boolean IS the
+// unknown-type predicate (the message base name — the OUTER ref name — is the
+// caller's concern, Phase 46.4). Rules ported from ResolveTypeWithParams:
+//   - primitives Int/Float/String/Bool/Void/Char             → known
+//   - Array<T> (1 arg), Option<T> (1), Future<T> (1)         → arg known
+//   - Result<T, E> (2 args), Map<K, V> (2 args)              → both known
+//     Map additionally rejects unhashable keys Float/Array/Map (types.go:198)
+//   - Fn(..) -> R                                            → all parts known
+//     (no arity restriction; type_args = params ++ [return])
+//   - a name in type_params / entity_names / enum_names, then every type arg
+//     resolves too (generic entity instantiation, e.g. Box<Int>)
+// Simplification vs stage1 (bounded by this phase's signature — no entity
+// type-param counts are threaded): generic-entity arity is not checked and a
+// non-generic entity's stray type args are still recursed rather than ignored.
+// Neither case appears in the corpus or the 46.5 fixtures, so the gates hold.
+
+public function type_is_known(t: Type, entity_names: Array<String>, enum_names: Array<String>, type_params: Array<String>) returns Bool {
+    let n: String = t.name;
+    if n == "Int" or n == "Float" or n == "String" or n == "Bool" or n == "Void" or n == "Char" {
+        return true;
+    }
+    if n == "Array" or n == "Option" or n == "Future" {
+        if len(t.type_args) != 1 {
+            return false;
+        }
+        return type_is_known(t.type_args[0], entity_names, enum_names, type_params);
+    }
+    if n == "Result" {
+        if len(t.type_args) != 2 {
+            return false;
+        }
+        if not type_is_known(t.type_args[0], entity_names, enum_names, type_params) {
+            return false;
+        }
+        return type_is_known(t.type_args[1], entity_names, enum_names, type_params);
+    }
+    if n == "Map" {
+        if len(t.type_args) != 2 {
+            return false;
+        }
+        let key: Type = t.type_args[0];
+        if key.name == "Float" or key.name == "Array" or key.name == "Map" {
+            return false;
+        }
+        if not type_is_known(key, entity_names, enum_names, type_params) {
+            return false;
+        }
+        return type_is_known(t.type_args[1], entity_names, enum_names, type_params);
+    }
+    if n == "Fn" {
+        let mutable i: Int = 0;
+        while i < len(t.type_args) {
+            if not type_is_known(t.type_args[i], entity_names, enum_names, type_params) {
+                return false;
+            }
+            i = i + 1;
+        }
+        return true;
+    }
+    if not (name_seen(type_params, n) or name_seen(entity_names, n) or name_seen(enum_names, n)) {
+        return false;
+    }
+    let mutable j: Int = 0;
+    while j < len(t.type_args) {
+        if not type_is_known(t.type_args[j], entity_names, enum_names, type_params) {
+            return false;
+        }
+        j = j + 1;
+    }
+    return true;
+}
+
 // =============================================================================
 // GLOBAL SCOPE BUILDER
 //

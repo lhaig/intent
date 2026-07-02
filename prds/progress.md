@@ -1150,3 +1150,35 @@ Fn(..)->.., zero-param Fn, generic-over-entity). All green: checker tests 158 pa
 EQUAL, `make validate` OK. Not yet wired into check_program (that begins at 46.4).
 
 Next: 46.3 — resolver `type_is_known` (port stage1 ResolveType semantics).
+
+---
+
+## 2026-07-02 — Phase 46.3: resolver type_is_known
+
+Added `public function type_is_known(t, entity_names, enum_names, type_params) -> Bool`
+to `selfhost/checker/check.intent` — a faithful port of stage1
+`ResolveTypeWithParams` (types.go:84). type_is_known == "ResolveType returns non-nil":
+every `unknown type '%s'` site in checker.go is `if ResolveType(...) == nil { emit }`,
+and the message base name is the OUTER ref name (`field.Type.Name`), so a nested unknown
+like `Array<Widget>` reports `unknown type 'Array'` (relevant for 46.4). Rules: primitives
+(Int/Float/String/Bool/Void/Char); Array/Option/Future (1 arg); Result/Map (2 args, Map
+rejects unhashable keys Float/Array/Map per types.go:198); Fn (all type_args resolve, no
+arity limit); else a name in type_params/entity_names/enum_names, then recurse into args.
+Documented simplification vs stage1 (no entity type-param counts threaded → generic-entity
+arity unchecked); not exercised by corpus or 46.5 fixtures.
+
++11 tests. All green: checker tests 168 passed (rust+js), diff-checker 34/34,
+diff-formatter 22/22, diff-linter 26/26, selfcheck 4 EQUAL, `make validate` OK.
+
+Two latent bugs surfaced while getting rust green (both logged in TASKS.md backlog,
+NOT fixed here — out of 46.3 scope):
+- **rustbe BE-1**: passing a call-result (e.g. `no_names()`) as an `Array<T>` param
+  emits `f(vec)` not `f(&vec)` → E0308 (the backend passes Array params by reference
+  and only auto-borrows lvalues). Tests now bind name lists to `let` vars — which is
+  also how 46.4's check_program will call type_is_known, so no production impact.
+- **test-runner HARN-1**: a rust crate that fails to compile is reported as N "did not
+  run (build or harness failure)" rows, so the runner's `len(results)==0` guard never
+  fires and the real `cargo test` error is swallowed. Had to keep the tmpdir to read it.
+
+Next: 46.4 — wire the `unknown type 'X'` check into check_program (param/field/return/
+let annotations; base name = outer ref; thread decl type_params).
