@@ -548,3 +548,31 @@ test "unknown type: a generic function's own type parameter resolves (threaded)"
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+// --- Phase 46.4b: entity field + method signature types -------------------
+
+test "unknown type: entity field with an undeclared type" {
+    let src: String = "module m version \"1.0\"; entity E " + lbrace() + " field w: Widget; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "unknown type 'Widget'");
+}
+
+test "unknown type: entity method parameter with an undeclared type" {
+    let src: String = "module m version \"1.0\"; entity E " + lbrace() + " field x: Int; method use(w: Widget) returns Void " + fn_body() + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "unknown type 'Widget'");
+}
+
+test "unknown type: a generic entity's own type parameter resolves in a field (threaded)" {
+    let src: String = "module m version \"1.0\"; entity Box<T> " + lbrace() + " field val: T; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "unknown type: an entity field typed by another declared entity is clean" {
+    let src: String = "module m version \"1.0\"; entity Inner " + lbrace() + " field x: Int; " + rbrace() + " entity Outer " + lbrace() + " field inner: Inner; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

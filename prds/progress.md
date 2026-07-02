@@ -1262,3 +1262,26 @@ make validate OK. No checker use of the new positions yet — that is 46.4b step
 
 Next: 46.4b step 2 — entity fields + methods (interleave into check_dup_entities;
 fields before methods per entity, using the field position + entity.type_params).
+
+---
+
+## 2026-07-02 — Phase 46.4b step 2: entity field + method unknown-types
+
+check_dup_entities is now two-pass, mirroring stage1 registerEntities (checker.go:562-657):
+pass 1 emits all `entity 'X' already defined`; pass 2, per entity, resolves FIELD types
+(anchored at the `field` keyword via the 46.4b.1 positions) then METHOD signatures
+(params then return), threading the ENTITY's type_params (methods carry none of their
+own). The CONSTRUCTOR is intentionally excluded — stage1 resolves it only in
+checkConstructor, which does NOT emit `unknown type` (verified: the ctor is not in
+entity.Methods, and checkConstructor/checkMethod resolve silently for scope only).
+Refactored check_fn_signature_types to take explicit type_params (function's own for a
+top-level fn; the entity's for a method).
+
++4 in-language tests (177 pass rust+js) + 2 fixtures byte-equal vs stage1: entity field
+(8:5, anchored at `field`) and entity method param (10:16). diff-checker 39/39;
+diff-formatter 22/22; diff-linter 26/26; selfcheck 4 EQUAL; go test (14 pkgs); validate OK.
+No false positives — every corpus entity field/method resolves.
+
+Next: 46.4b step 3 — enum-variant field types (registerEnums quirk: runs before entities
+registered, resolves against an EMPTY entity set; verify variant Param positions), then
+`let`-stmt types (check phase), then externs.

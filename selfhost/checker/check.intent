@@ -913,9 +913,21 @@ function check_dup_enums(prog: Program) returns Array<CheckDiag> {
     return diags;
 }
 
+// check_dup_entities — entity duplicate-name detection AND field/method
+// signature `unknown type` checks. Mirrors stage1 registerEntities' two passes
+// (checker.go:562-657): pass 1 emits every `entity 'X' already defined` first,
+// THEN pass 2 resolves each entity's field types (anchored at the `field`
+// keyword) followed by its method signatures (params then return), threading
+// the entity's own type params. The CONSTRUCTOR is intentionally excluded —
+// stage1 resolves it only in checkConstructor, which does NOT emit `unknown
+// type` (Phase 46.4b).
+
 function check_dup_entities(prog: Program) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable seen: Array<String> = [];
+    let entity_names: Array<String> = collect_entity_names(prog);
+    let enum_names: Array<String> = collect_enum_names(prog);
+    // Pass 1: duplicate-name detection.
     let mutable i: Int = 0;
     while i < len(prog.entities) {
         let e: EntityDecl = prog.entities[i];
@@ -925,6 +937,33 @@ function check_dup_entities(prog: Program) returns Array<CheckDiag> {
             seen.push(e.name);
         }
         i = i + 1;
+    }
+    // Pass 2: field then method signature-type resolution, per entity.
+    let mutable j: Int = 0;
+    while j < len(prog.entities) {
+        let e2: EntityDecl = prog.entities[j];
+        let tps: Array<String> = e2.type_params;
+        let mutable fi: Int = 0;
+        while fi < len(e2.fields) {
+            let fld: FieldDecl = e2.fields[fi];
+            let ft: Type = parse_type(fld.type_name);
+            if not type_is_known(ft, entity_names, enum_names, tps) {
+                diags.push(CheckDiag(fld.line, fld.column, "unknown type '" + ft.name + "'"));
+            }
+            fi = fi + 1;
+        }
+        let mutable mi: Int = 0;
+        while mi < len(e2.methods) {
+            let m: FunctionDecl = e2.methods[mi];
+            let sig: Array<CheckDiag> = check_fn_signature_types(m, entity_names, enum_names, tps);
+            let mutable si: Int = 0;
+            while si < len(sig) {
+                diags.push(sig[si]);
+                si = si + 1;
+            }
+            mi = mi + 1;
+        }
+        j = j + 1;
     }
     return diags;
 }
@@ -972,14 +1011,15 @@ function collect_enum_names(prog: Program) returns Array<String> {
 
 // check_fn_signature_types — emit `unknown type 'BASE'` for any param or return
 // annotation on `f` that does not resolve. Mirrors stage1 registerFunctions
-// (checker.go:750-769): params first (anchored at the param position), then the
-// return type (anchored at the function position). BASE is the OUTER ref name
-// (stage1's `ref.Name`) — parse_type(...).name. `f.type_params` is threaded so
-// a generic function's own type parameters resolve. Phase 46.4.
+// (checker.go:750-769) / registerEntities method resolution (627-656): params
+// first (anchored at the param position), then the return type (anchored at the
+// function position). BASE is the OUTER ref name (stage1's `ref.Name`) —
+// parse_type(...).name. `type_params` is the enclosing declaration's generic
+// type parameters (a function's own for a top-level function; the ENTITY's for
+// a method, since methods carry none of their own). Phase 46.4.
 
-function check_fn_signature_types(f: FunctionDecl, entity_names: Array<String>, enum_names: Array<String>) returns Array<CheckDiag> {
+function check_fn_signature_types(f: FunctionDecl, entity_names: Array<String>, enum_names: Array<String>, type_params: Array<String>) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
-    let type_params: Array<String> = f.type_params;
     let mutable i: Int = 0;
     while i < len(f.params) {
         let p: Param = f.params[i];
@@ -1011,7 +1051,7 @@ function check_dup_functions(prog: Program) returns Array<CheckDiag> {
             diags.push(CheckDiag(f.line, f.column, "function '" + f.name + "' already defined"));
         } else {
             seen.push(f.name);
-            let sig_diags: Array<CheckDiag> = check_fn_signature_types(f, entity_names, enum_names);
+            let sig_diags: Array<CheckDiag> = check_fn_signature_types(f, entity_names, enum_names, f.type_params);
             let mutable j: Int = 0;
             while j < len(sig_diags) {
                 diags.push(sig_diags[j]);

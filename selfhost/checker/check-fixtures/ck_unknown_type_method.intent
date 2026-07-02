@@ -1,0 +1,12 @@
+// check-fixtures/ck_unknown_type_method.intent — Phase 46.4b / unknown-type on an
+// entity method parameter annotation.
+//
+// stage1: error[...]: unknown type 'Widget'
+module ck_unknown_type_method version "0.1.0";
+
+entity E {
+    field x: Int;
+
+    method use(w: Widget) returns Void {
+    }
+}
