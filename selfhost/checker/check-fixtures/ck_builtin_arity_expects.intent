@@ -1,0 +1,7 @@
+// check-fixtures/ck_builtin_arity_expects.intent — Phase 47 / builtin arity
+// ("expects" shape, assert family). stage1: print() expects 1 argument, got 2
+module ck_builtin_arity_expects version "0.1.0";
+
+function f() returns Void {
+    print(1, 2);
+}

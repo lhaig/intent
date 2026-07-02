@@ -1357,3 +1357,31 @@ every corpus annotation site, byte-equal with stage1. Additive `FieldDecl` posit
 test-runner error surfacing). Deferred to Phase 47: expression type inference + all
 type-rule checks. Small tracked gaps: extern unknown-types (0 corpus usage), method/
 builtin call arity.
+
+---
+
+## 2026-07-02 — Phase 47: builtin-call arity (COMPLETE)
+
+Autonomous phase choice (user asked me to drive): took the bounded, no-inference win —
+builtin-call arity, deferred from Phase 45 — before the larger expression-inference phase.
+ADR 0055. Added a name→count table for all 23 stage1 builtins + a message helper producing
+the three verbatim shapes ("NAME() expects N argument(s)" for the assert family,
+"NAME() requires exactly N argument(s)", "NAME() takes no arguments"; singular at N=1).
+Wired into check_expr_names FIRST in the ex_call/ex_ident branch (stage1 checkCallExpr
+checks builtins before variant/function), anchored at the callee, early-returning on
+mismatch (a wrong-arity builtin's args aren't also flagged undeclared). Argument TYPE
+checks + await_* async-context are deferred to Phase 48 (inference) — corpus-invisible
+false negatives, gate-safe.
+
+3 fixtures (one per shape) byte-equal + 5 in-language tests (incl. plural assert_eq and the
+early-return case); renamed the stale "builtin not checked" test. diff-checker 44/44 (22
+examples clean — builtins called at correct arity), 188 checker tests rust+js, all
+formatter/linter/selfcheck gates + full Go suite + make validate green. Ok/Err/Some/None
+stay on the variant path (unchanged).
+
+Docs: ROADMAP Phase 47 entry, NEXT-STEPS (Phase 48 = expression inference next),
+checker README, PRD prds/done/prd-phase-47-builtin-arity.md, TASKS.md Phase 47 COMPLETE.
+
+Next: Phase 48 — expression type inference (type-carrying scope + infer_expr_type over
+every Expr kind, built behind the diff-checker gate), then the type-rule checks +
+method-call arity + builtin argument typing hang off it.

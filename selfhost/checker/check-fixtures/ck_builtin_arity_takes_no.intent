@@ -1,0 +1,7 @@
+// check-fixtures/ck_builtin_arity_takes_no.intent — Phase 47 / builtin arity
+// ("takes no" shape, 0-arg). stage1: timestamp_ms() takes no arguments, got 1
+module ck_builtin_arity_takes_no version "0.1.0";
+
+function f() returns Int {
+    return timestamp_ms(9);
+}

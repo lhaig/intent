@@ -6,9 +6,9 @@ front-end in [`../shared/`](../shared/) and lives alongside stage1's Go checker
 
 **Status (Phase 46, [ADR 0053](../../docs/decisions/0053-self-hosted-checker-type-foundation.md)):**
 type-representation foundation + the `unknown type` diagnostic — byte-equal with stage1
-`intentc check` across the examples corpus + fixtures (`make diff-checker` 41/41: 22 valid
-examples produce no errors, 19 invalid fixtures match byte-for-byte). Wired as `intentc
-check --self-hosted`. 183 in-language tests (rust + js). (Phase 45,
+`intentc check` across the examples corpus + fixtures (`make diff-checker` 44/44: 22 valid
+examples produce no errors, 22 invalid fixtures match byte-for-byte). Wired as `intentc
+check --self-hosted`. 188 in-language tests (rust + js). (Phase 45,
 [ADR 0052](../../docs/decisions/0052-self-hosted-checker-strategy.md), shipped the first
 slice — the checks below needing no type inference.)
 
@@ -21,7 +21,8 @@ Structural / name-resolution / arity (Phase 45):
 - `break`/`continue` statement outside loop
 - `return` inside a test body
 - Undeclared variable (`undeclared variable 'X'`) + variable redefinition in a scope
-- Call arity: function (`function 'X' expects N arguments, got M`) and variant
+- Call arity: function (`function 'X' expects N arguments, got M`), variant, and
+  builtin (Phase 47, ADR 0055 — 23 builtins, e.g. `print() expects 1 argument, got 2`)
 
 Type foundation + `unknown type` (Phase 46, ADR 0053 + 0054):
 
@@ -34,8 +35,10 @@ Type foundation + `unknown type` (Phase 46, ADR 0053 + 0054):
 
 Deferred: expression type inference and all type-rule checks (assignability, operators,
 generics substitution, match exhaustiveness, contracts) — Phase 47. Extern param/return
-`unknown type` (0 corpus usage), method-call arity, and builtin-call arity remain small
-tracked gaps. Multi-file `CheckAll` is also later.
+`unknown type` (0 corpus usage) and method-call arity (needs the receiver type) remain
+small tracked gaps, along with builtin argument *typing* (`print() cannot print type …`,
+`assert() argument must be Bool`, the `await_*` async-context checks — Phase 48). Multi-file
+`CheckAll` is also later.
 
 | File | Module | Purpose |
 |------|--------|---------|
@@ -46,7 +49,7 @@ tracked gaps. Multi-file `CheckAll` is also later.
 
 ```bash
 intentc test --all-targets selfhost/checker/check_test.intent   # checker tests
-make diff-checker                                               # vs stage1 intentc check (41/41)
+make diff-checker                                               # vs stage1 intentc check (44/44)
 intentc check --self-hosted <file.intent>                       # run the stage2 checker
 ```
 

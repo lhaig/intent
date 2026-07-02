@@ -1,0 +1,7 @@
+// check-fixtures/ck_builtin_arity_requires.intent — Phase 47 / builtin arity
+// ("requires exactly" shape). stage1: len() requires exactly 1 argument, got 0
+module ck_builtin_arity_requires version "0.1.0";
+
+function f() returns Int {
+    return len();
+}

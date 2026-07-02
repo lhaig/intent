@@ -86,6 +86,19 @@ no false positives on the 22 valid examples). See [prd-phase-46-checker-type-fou
 | 46.5 | diff-checker fixtures + no-false-positives | [prd-phase-46-checker-type-foundation.md](done/prd-phase-46-checker-type-foundation.md) | DONE (2026-07-02) | 7 unknown-type fixtures (param/return/nested/field/method/let/variant), all byte-equal; 22 valid examples stay clean. diff-checker 41/41 |
 | 46.6 | docs + final validate + push | [prd-phase-46-checker-type-foundation.md](done/prd-phase-46-checker-type-foundation.md) | DONE (2026-07-02) | checker README + ROADMAP (Phase 46 entry) + NEXT-STEPS (Phase 47 next) + ADR 0054; PRD active→done. make validate + all gates green; committed + pushed |
 
+## Phase 47: Self-Hosted Checker — Builtin-Call Arity — COMPLETE (2026-07-02)
+
+Closes the builtin-call arity gap deferred from Phase 45 (arity only; argument typing +
+async-context deferred to Phase 48). ADR 0055. Gated by `make diff-checker`.
+
+| # | Task | PRD | Status | Notes |
+|---|------|-----|--------|-------|
+| 47.1 | ADR 0055 — builtin-arity strategy | [prd-phase-47-builtin-arity.md](done/prd-phase-47-builtin-arity.md) | DONE (2026-07-02) | D1 arity-only (defer typing/async to Phase 48); D2 name/count table + 3 message shapes; D3 builtins-first, callee-anchored, early-return; D4 diff-checker gate |
+| 47.2 | builtin-arity table + message helper | [prd-phase-47-builtin-arity.md](done/prd-phase-47-builtin-arity.md) | DONE (2026-07-02) | 23 builtins; builtin_arity/-1, builtin_uses_expects_verb, builtin_arity_message (expects/requires-exactly/takes-no, singular at N=1) |
+| 47.3 | wire into check_expr_names | [prd-phase-47-builtin-arity.md](done/prd-phase-47-builtin-arity.md) | DONE (2026-07-02) | first in ex_call/ex_ident branch (stage1 builtin-before-variant/function); emit+return on mismatch, recurse args on match; callee anchor |
+| 47.4 | fixtures + tests + no-false-positives | [prd-phase-47-builtin-arity.md](done/prd-phase-47-builtin-arity.md) | DONE (2026-07-02) | 3 shape fixtures byte-equal; +5 tests incl. plural + early-return; 22 examples clean. diff-checker 44/44, 188 tests |
+| 47.5 | docs + validate + push | [prd-phase-47-builtin-arity.md](done/prd-phase-47-builtin-arity.md) | DONE (2026-07-02) | ROADMAP + NEXT-STEPS + checker README + PRD; make validate + all gates green; committed + pushed |
+
 ## Backlog
 
 | # | Task | PRD | Status | Notes |

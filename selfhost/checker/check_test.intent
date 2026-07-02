@@ -339,10 +339,48 @@ test "arity: early return — wrong-arity call with undeclared arg emits only ar
     assert_eq(diags[0].message, "function 'g' expects 1 arguments, got 2");
 }
 
-test "arity: builtin call is not checked for arity (no false positive)" {
+test "builtin arity: a correctly-called builtin is clean (no false positive)" {
     let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " print(\"hi\"); " + rbrace();
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
+}
+
+// --- Phase 47: builtin-call arity -----------------------------------------
+
+test "builtin arity: print expects 1 argument (expects shape, singular)" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " print(1, 2); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "print() expects 1 argument, got 2");
+}
+
+test "builtin arity: assert_eq expects 2 arguments (expects shape, plural)" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " assert_eq(1); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "assert_eq() expects 2 arguments, got 1");
+}
+
+test "builtin arity: len requires exactly 1 argument (requires shape)" {
+    let src: String = "module m version \"1.0\"; function f() returns Int " + lbrace() + " return len(); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "len() requires exactly 1 argument, got 0");
+}
+
+test "builtin arity: timestamp_ms takes no arguments (takes-no shape)" {
+    let src: String = "module m version \"1.0\"; function f() returns Int " + lbrace() + " return timestamp_ms(9); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "timestamp_ms() takes no arguments, got 1");
+}
+
+test "builtin arity: a wrong-arity builtin arg is not also reported undeclared (early return)" {
+    // stage1 returns after the arity error, so `nope` is not also flagged.
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " print(nope, extra); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "print() expects 1 argument, got 2");
 }
 
 test "arity: variant check fires before function check (variants win on name collision)" {

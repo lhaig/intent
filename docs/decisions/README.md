@@ -86,3 +86,4 @@ What follows from this decision? Trade-offs accepted.
 | 0052 | [Self-hosted checker strategy](0052-self-hosted-checker-strategy.md) | 2026-06-26 | accepted (Phase 45) |
 | 0053 | [Self-hosted checker — type representation foundation](0053-self-hosted-checker-type-foundation.md) | 2026-06-26 | accepted (Phase 46) |
 | 0054 | [Additive AST position fields for checker diagnostics](0054-additive-ast-positions-for-diagnostics.md) | 2026-07-02 | accepted (Phase 46.4b) |
+| 0055 | [Self-hosted checker — builtin-call arity](0055-self-hosted-builtin-arity.md) | 2026-07-02 | accepted (Phase 47) |
