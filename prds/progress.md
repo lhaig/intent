@@ -1334,3 +1334,26 @@ fields. Only externs remain (46.4b.5) — 0 corpus usage, deferred as a document
 Next: formally close Phase 46 — 46.5 (fixtures are largely in place: 7 unknown-type
 fixtures across param/return/nested/field/method/let/variant) + 46.6 (README/ROADMAP/
 NEXT-STEPS + push).
+
+---
+
+## 2026-07-02 — Phase 46.5 + 46.6: CLOSEOUT (PHASE 46 COMPLETE)
+
+46.5: the 7 unknown-type fixtures (param/return/nested/field/method/let/variant) are all
+byte-equal vs stage1 and the 22 valid examples stay clean — `make diff-checker` 41/41.
+46.6: updated selfhost/checker/README.md (Phase 46 status + type foundation + unknown-type
+coverage), docs/ROADMAP.md (new Phase 46 SHIPPED entry), prds/NEXT-STEPS.md (Phase 46
+complete + Phase 47 = expression inference), TASKS.md (Phase 46 → COMPLETE, links → done/),
+and moved the PRD active/ → done/. ADR 0054 already landed in 46.4b.1.
+
+FINAL VALIDATION (all green): make validate OK; selfcheck-formatter 4 EQUAL;
+diff-formatter 22/22; diff-linter 26/26; diff-checker 41/41; checker tests 183 rust+js;
+full Go suite (14 pkgs).
+
+PHASE 46 COMPLETE. The self-hosted checker now has a structured type representation
+(`Type` + `parse_type` + `type_is_known`, ADR 0053) and emits `unknown type 'X'` across
+every corpus annotation site, byte-equal with stage1. Additive `FieldDecl` positions
+(ADR 0054). Two latent backend/harness bugs fixed en route (BE-1 rustbe borrow, HARN-1
+test-runner error surfacing). Deferred to Phase 47: expression type inference + all
+type-rule checks. Small tracked gaps: extern unknown-types (0 corpus usage), method/
+builtin call arity.

@@ -4,13 +4,17 @@ Stage2 Intent semantic checker — Intent-implemented `intentc check`. Reuses th
 front-end in [`../shared/`](../shared/) and lives alongside stage1's Go checker
 (`internal/checker/`). The first compiler subsystem to be self-hosted.
 
-**Status (Phase 45, [ADR 0052](../../docs/decisions/0052-self-hosted-checker-strategy.md)):**
-first slice — byte-equal with stage1 `intentc check` across the examples corpus +
-fixtures (`make diff-checker` 34/34: 22 valid examples produce no errors, 12 invalid
-fixtures match byte-for-byte). Wired as `intentc check --self-hosted`. ~150 in-language
-tests (rust + js).
+**Status (Phase 46, [ADR 0053](../../docs/decisions/0053-self-hosted-checker-type-foundation.md)):**
+type-representation foundation + the `unknown type` diagnostic — byte-equal with stage1
+`intentc check` across the examples corpus + fixtures (`make diff-checker` 41/41: 22 valid
+examples produce no errors, 19 invalid fixtures match byte-for-byte). Wired as `intentc
+check --self-hosted`. 183 in-language tests (rust + js). (Phase 45,
+[ADR 0052](../../docs/decisions/0052-self-hosted-checker-strategy.md), shipped the first
+slice — the checks below needing no type inference.)
 
-## Implemented checks (no type inference yet — see ADR 0052 D1/D2)
+## Implemented checks
+
+Structural / name-resolution / arity (Phase 45):
 
 - Duplicate top-level declaration (`entity/enum/function/trait 'X' already defined`)
 - Duplicate enum variant (`duplicate variant name 'X' in enum 'Y'`)
@@ -19,9 +23,19 @@ tests (rust + js).
 - Undeclared variable (`undeclared variable 'X'`) + variable redefinition in a scope
 - Call arity: function (`function 'X' expects N arguments, got M`) and variant
 
-Deferred to later phases: all type inference (assignability, operators, generics,
-traits, match exhaustiveness, contracts), method-call arity (needs receiver type), and
-builtin-call arity (~20 bespoke messages). Multi-file `CheckAll` is also later.
+Type foundation + `unknown type` (Phase 46, ADR 0053 + 0054):
+
+- `Type` tree + `parse_type(s)` (parses the flat type strings the AST carries) +
+  `type_is_known` resolver (ports stage1 `ResolveTypeWithParams`).
+- `unknown type 'X'` over every annotation site the corpus uses — function param/return,
+  entity field, entity method param/return, `let` statement, and enum-variant field —
+  each byte-equal with stage1 (outer-ref base name; `registerEnums`-before-entities
+  quirk matched).
+
+Deferred: expression type inference and all type-rule checks (assignability, operators,
+generics substitution, match exhaustiveness, contracts) — Phase 47. Extern param/return
+`unknown type` (0 corpus usage), method-call arity, and builtin-call arity remain small
+tracked gaps. Multi-file `CheckAll` is also later.
 
 | File | Module | Purpose |
 |------|--------|---------|
@@ -32,13 +46,16 @@ builtin-call arity (~20 bespoke messages). Multi-file `CheckAll` is also later.
 
 ```bash
 intentc test --all-targets selfhost/checker/check_test.intent   # checker tests
-make diff-checker                                               # vs stage1 intentc check (34/34)
+make diff-checker                                               # vs stage1 intentc check (41/41)
 intentc check --self-hosted <file.intent>                       # run the stage2 checker
 ```
 
 Design notes: the symbol table is a flattened `Scope` (local + outer name `Array`s, no
 recursive field, no `Map`) since stage2 lacks those; the global scope seeds all decl
-names + enum variant names + free builtins. Two front-end prerequisites were added in
-Phase 45: real `break`/`continue` statements and source positions on `Expr` (so
-`undeclared variable` can anchor at the identifier). The differential's no-false-
-positives direction (valid corpus → zero errors) is what keeps name resolution honest.
+names + enum variant names + free builtins. Types are a `Type` tree built by `parse_type`
+from the strings the AST already carries (ADR 0053 D1 — no structured types in the AST).
+Front-end prerequisites added gap-driven: `break`/`continue` statements + `Expr`
+positions (Phase 45), and `FieldDecl` positions ([ADR 0054](../../docs/decisions/0054-additive-ast-positions-for-diagnostics.md),
+Phase 46 — additive positions are inert to the formatter). The differential's
+no-false-positives direction (valid corpus → zero errors) is what keeps the resolver
+honest.
