@@ -1876,3 +1876,34 @@ rejects Int, accepts Fn() -> Void param — 260). All differential gates, go tes
 needs .String() rendering), and the async await_*/timeout builtins (need an
 inAsyncFunc flag threaded through the checker — not yet modeled). Then the phase-53
 gaps.
+
+---
+
+## 2026-07-03 — Phase 48j-c2c: assert_eq() argument typing (mismatch + Float)
+
+Follow-on commit: assert_eq(actual, expected) is a cross-argument check (stage1
+checker.go:1691), so it runs once after the per-arg recursion loop rather than
+per-arg. When BOTH args are confidently inferred, no-type_args simple types —
+where stage1's Type.Equal reduces to name equality and .String()==.name (verified
+in types.go:255) — two branches fire byte-equal:
+- different names → `assert_eq() type mismatch: actual is X, expected is Y`
+  (stage1 returns immediately after this; we emit only it via if/else);
+- same name Float → `assert_eq does not support Float; use assert_close(actual,
+  expected, epsilon) for floating-point comparisons` (the most common
+  assertEqUnsupportedReason case).
+
+The remaining comparable-set rules — entity `eq` method presence + signature,
+Map/Future rejection, and generic-type-param recursion — need entity/method
+lookup or generic .String() rendering and are deferred as sound, corpus-invisible
+false negatives. Matching supported types (Int/Bool/String/Char/enum) stay clean.
+
++2 fixtures (ck_builtin_assert_eq_mismatch, ck_builtin_assert_eq_float —
+diff-checker 79/79), +3 tests (mismatch, Float-reject, matching-supported clean —
+263). All differential gates, go test ./..., and make validate green.
+
+48j-c now covers uniform-type builtins, print, assert_close, len, assert_panics,
+and assert_eq (mismatch + Float) — 23 stage1 type-rule diagnostics byte-equal
+overall. The LAST 48j-c2 item is the async await_*/timeout builtins, which need an
+inAsyncFunc flag threaded through the checker (not yet modeled) — that flag is the
+real unlock and also gates the deferred `await`-outside-async check. Then the
+phase-53 gaps (generic-entity arity, extern unknown-type, trait contracts).

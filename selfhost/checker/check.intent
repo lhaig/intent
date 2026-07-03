@@ -1034,9 +1034,9 @@ function builtin_arity_message(name: String, got: Int) returns String {
 // are not one uniform simple type. Only builtins with a uniform String/Int/Bool
 // arg + the "argument [N ]must be T, got X" message shape are listed; print
 // (accepts-set message), assert_close (labeled Float), len (accepts-set:
-// String/Array/Map), assert_panics (Fn() -> Void), assert_eq (compound types),
-// the async await_*/timeout builtins, and the zero-arg builtins are handled
-// elsewhere or deferred. Phase 48j-c, ADR 0056.
+// String/Array/Map), assert_panics (Fn() -> Void), assert_eq (cross-arg
+// mismatch + comparable-set), the async await_*/timeout builtins, and the
+// zero-arg builtins are handled elsewhere or deferred. Phase 48j-c, ADR 0056.
 
 function builtin_arg_type(name: String) returns String {
     if name == "assert" {
@@ -1356,6 +1356,30 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                         }
                     }
                     bai = bai + 1;
+                }
+                // assert_eq(actual, expected): a cross-argument check (stage1
+                // checker.go:1691), so it runs once after per-arg recursion.
+                // When BOTH args are confidently inferred, no-type_args simple
+                // types (Equal on those reduces to name equality; .String()==.name):
+                //   - different names → `assert_eq() type mismatch: actual is X,
+                //     expected is Y` (stage1 returns after this; we emit only it);
+                //   - same name Float → `assert_eq does not support Float; ...`
+                //     (the most common assertEqUnsupportedReason case).
+                // The remaining comparable-set rules (entity eq method, Map/Future,
+                // generic recursion) need entity/method lookup or generic .String()
+                // and are deferred — sound corpus-invisible false negatives. 48j-c2c.
+                if callee.name == "assert_eq" and len(e.children) == 3 {
+                    let aet: Type = infer_expr_type(e.children[1], scope, prog);
+                    let eet: Type = infer_expr_type(e.children[2], scope, prog);
+                    if (not is_unknown_type(aet)) and (not is_unknown_type(eet)) and len(aet.type_args) == 0 and len(eet.type_args) == 0 {
+                        if aet.name != eet.name {
+                            diags.push(CheckDiag(callee.line, callee.column, "assert_eq() type mismatch: actual is " + aet.name + ", expected is " + eet.name));
+                        } else {
+                            if aet.name == "Float" {
+                                diags.push(CheckDiag(callee.line, callee.column, "assert_eq does not support Float; use assert_close(actual, expected, epsilon) for floating-point comparisons"));
+                            }
+                        }
+                    }
                 }
                 return diags;
             }

@@ -488,6 +488,26 @@ test "builtin arg type: assert_panics accepts a Fn() -> Void param (no false pos
     assert_eq(len(diags), 0);
 }
 
+test "builtin arg type: assert_eq flags a type mismatch between its two args" {
+    let src: String = "module m version \"1.0\"; function f(a: Int, b: Bool) returns Void " + lbrace() + " assert_eq(a, b); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "assert_eq() type mismatch: actual is Int, expected is Bool");
+}
+
+test "builtin arg type: assert_eq rejects Float args (comparable set)" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " assert_eq(1.0, 2.0); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "assert_eq does not support Float; use assert_close(actual, expected, epsilon) for floating-point comparisons");
+}
+
+test "builtin arg type: assert_eq with matching supported types is clean (no false positive)" {
+    let src: String = "module m version \"1.0\"; function f(a: Int) returns Void " + lbrace() + " assert_eq(a, 5); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
 // ---------------------------------------------------------------------------
 // Phase 46.2: parse_type — structured Type tree from the AST's type strings.
 // Mirrors the forms shared/parser.intent parse_type_name emits.

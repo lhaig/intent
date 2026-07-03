@@ -1,0 +1,8 @@
+// check-fixtures/ck_builtin_assert_eq_mismatch.intent — Phase 48j-c2c.
+// assert_eq() flags two confidently-inferred, differently-typed arguments.
+// stage1: assert_eq() type mismatch: actual is Int, expected is Bool
+module ck_builtin_assert_eq_mismatch version "0.1.0";
+
+function f(a: Int, b: Bool) returns Void {
+    assert_eq(a, b);
+}
