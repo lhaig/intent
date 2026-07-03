@@ -45,19 +45,27 @@ public entity Scope {
     field outer_names: Array<String>;
     field local_types: Array<Type>;
     field outer_types: Array<Type>;
+    // Phase 48j-c2d: async context. True inside an async function/test body (and
+    // every child scope it opens), mirroring stage1's c.inAsyncFunc, which the
+    // await_*/timeout builtins and the `await` expression consult. Riding it on
+    // the already-threaded Scope avoids adding a parameter to every checker
+    // helper; scope_enter/scope_define_typed preserve it, scope_set_async flips
+    // it once per function/test entry.
+    field in_async: Bool;
 
-    constructor(local_names: Array<String>, outer_names: Array<String>, local_types: Array<Type>, outer_types: Array<Type>) {
+    constructor(local_names: Array<String>, outer_names: Array<String>, local_types: Array<Type>, outer_types: Array<Type>, in_async: Bool) {
         self.local_names = local_names;
         self.outer_names = outer_names;
         self.local_types = local_types;
         self.outer_types = outer_types;
+        self.in_async = in_async;
     }
 }
 
 // scope_empty — a fresh, empty scope with no names in any tier.
 
 public function scope_empty() returns Scope {
-    return Scope(shared_ast.empty_string_array(), shared_ast.empty_string_array(), empty_type_array(), empty_type_array());
+    return Scope(shared_ast.empty_string_array(), shared_ast.empty_string_array(), empty_type_array(), empty_type_array(), false);
 }
 
 // scope_define — returns a new Scope with `name` added to local_names, typed
@@ -86,7 +94,16 @@ public function scope_define_typed(s: Scope, name: String, ty: Type) returns Sco
         ti = ti + 1;
     }
     new_local_t.push(ty);
-    return Scope(new_local, s.outer_names, new_local_t, s.outer_types);
+    return Scope(new_local, s.outer_names, new_local_t, s.outer_types, s.in_async);
+}
+
+// scope_set_async — a copy of `s` with its async-context flag set to `flag`.
+// Called once per function/test entry to seed the body scope from the
+// declaration's is_async (methods/constructors keep the inherited false, since
+// stage1 does not set c.inAsyncFunc during entity/impl checking). Phase 48j-c2d.
+
+public function scope_set_async(s: Scope, flag: Bool) returns Scope {
+    return Scope(s.local_names, s.outer_names, s.local_types, s.outer_types, flag);
 }
 
 // scope_enter — open a child scope. Flattens local (names AND types) into the
@@ -115,7 +132,7 @@ public function scope_enter(s: Scope) returns Scope {
         new_outer_t.push(s.local_types[oj]);
         oj = oj + 1;
     }
-    return Scope(shared_ast.empty_string_array(), new_outer, empty_type_array(), new_outer_t);
+    return Scope(shared_ast.empty_string_array(), new_outer, empty_type_array(), new_outer_t, s.in_async);
 }
 
 // scope_type_of — the inferred Type bound to `name`, or Unknown if not found or
@@ -1035,7 +1052,8 @@ function builtin_arity_message(name: String, got: Int) returns String {
 // arg + the "argument [N ]must be T, got X" message shape are listed; print
 // (accepts-set message), assert_close (labeled Float), len (accepts-set:
 // String/Array/Map), assert_panics (Fn() -> Void), assert_eq (cross-arg
-// mismatch + comparable-set), the async await_*/timeout builtins, and the
+// mismatch + comparable-set), the async await_*/timeout builtins (async-context
+// check done; their Array<Future<T>> arg typing still deferred), and the
 // zero-arg builtins are handled elsewhere or deferred. Phase 48j-c, ADR 0056.
 
 function builtin_arg_type(name: String) returns String {
@@ -1082,6 +1100,15 @@ function assert_close_label(argnum: Int) returns String {
         return "expected";
     }
     return "epsilon";
+}
+
+// is_async_only_builtin — the builtins that may appear only inside an async
+// function/test (stage1 checker.go:1956/1983/2009). Each emits `<name> can only
+// be used inside async functions` (no parens) when c.inAsyncFunc is false, after
+// its arity check passes. Phase 48j-c2d.
+
+function is_async_only_builtin(name: String) returns Bool {
+    return name == "await_all" or name == "await_any" or name == "timeout";
 }
 
 // =============================================================================
@@ -1287,6 +1314,15 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                 if arg_count != bexp {
                     diags.push(CheckDiag(callee.line, callee.column, builtin_arity_message(callee.name, arg_count)));
                     return diags;
+                }
+                // await_all/await_any/timeout may appear only in an async
+                // function/test. stage1 emits this AFTER the arity check passes
+                // and BEFORE recursing the arguments (checker.go:1956/1983/2009),
+                // and does NOT return — so it precedes any arg-recursion
+                // diagnostics but the arg-type checks (Array<Future<T>>, deferred)
+                // still follow. Phase 48j-c2d.
+                if is_async_only_builtin(callee.name) and (not scope.in_async) {
+                    diags.push(CheckDiag(callee.line, callee.column, callee.name + " can only be used inside async functions"));
                 }
                 let breq: String = builtin_arg_type(callee.name);
                 let mutable bai: Int = 1;
@@ -2302,7 +2338,9 @@ function check_functions(prog: Program, global: Scope, fn_names: Array<String>, 
     let mutable i: Int = 0;
     while i < len(prog.functions) {
         let f: FunctionDecl = prog.functions[i];
-        let fn_scope: Scope = make_fn_scope(f, global);
+        // Seed the body scope's async context from the declaration (stage1
+        // checkFunction:927 c.inAsyncFunc = fn.IsAsync). Phase 48j-c2d.
+        let fn_scope: Scope = scope_set_async(make_fn_scope(f, global), f.is_async);
         // Contracts (requires then ensures) before the body, matching stage1.
         let mutable fcd: Array<CheckDiag> = check_fn_contracts(f, fn_scope, prog);
         let mutable fci: Int = 0;
@@ -2417,7 +2455,9 @@ function check_tests(prog: Program, global: Scope, fn_names: Array<String>, fn_c
     let mutable i: Int = 0;
     while i < len(prog.tests) {
         let t: TestDecl = prog.tests[i];
-        let test_scope: Scope = scope_enter(global);
+        // Async tests set the context too (stage1 checkTest:1002
+        // c.inAsyncFunc = t.IsAsync). Phase 48j-c2d.
+        let test_scope: Scope = scope_set_async(scope_enter(global), t.is_async);
         let mutable td: Array<CheckDiag> = check_body_stmts(t.body.stmts, 0, true, t.name, test_scope, fn_names, fn_counts, var_names, var_counts, collect_entity_names(prog), collect_enum_names(prog), prog);
         let mutable tdi: Int = 0;
         while tdi < len(td) {

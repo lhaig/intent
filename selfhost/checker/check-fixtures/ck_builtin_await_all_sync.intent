@@ -1,0 +1,9 @@
+// check-fixtures/ck_builtin_await_all_sync.intent — Phase 48j-c2d.
+// await_all() outside an async function is rejected (stage1 checker.go:1956).
+// The arg is a valid Array<Future<T>>, so only the async-context error fires.
+// stage1: await_all can only be used inside async functions
+module ck_builtin_await_all_sync version "0.1.0";
+
+function f(fs: Array<Future<Int>>) returns Void {
+    let r: Array<Int> = await_all(fs);
+}

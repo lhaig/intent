@@ -1,0 +1,11 @@
+// check-fixtures/ck_builtin_await_all_async.intent — Phase 48j-c2d.
+// The same await_all() call inside an async function is accepted: the
+// async-context flag rides the scope into the body. A no-false-positive guard
+// that the flag actually suppresses the error (async functions, unlike async
+// tests, get no 'declared async but no await' warning, so this stays clean).
+// stage1: No errors found.
+module ck_builtin_await_all_async version "0.1.0";
+
+async function f(fs: Array<Future<Int>>) returns Void {
+    let r: Array<Int> = await_all(fs);
+}

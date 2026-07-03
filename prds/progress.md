@@ -1907,3 +1907,40 @@ overall. The LAST 48j-c2 item is the async await_*/timeout builtins, which need 
 inAsyncFunc flag threaded through the checker (not yet modeled) — that flag is the
 real unlock and also gates the deferred `await`-outside-async check. Then the
 phase-53 gaps (generic-entity arity, extern unknown-type, trait contracts).
+
+---
+
+## 2026-07-03 — Phase 48j-c2d: await_*/timeout async-context check (ADR 0057)
+
+The async-only builtins await_all/await_any/timeout emit `<name> can only be used
+inside async functions` after their arity check passes (stage1
+checker.go:1956/1983/2009). Stage1 tracks this via a mutable c.inAsyncFunc set per
+function/test; the self-hosted checker is pure functions threading an immutable
+Scope, so ADR 0057 rides the flag ON the Scope rather than adding a parameter to
+~40 check_expr_names/check_body_stmts call sites:
+- new `field in_async: Bool` on Scope; scope_empty seeds false; scope_enter and
+  scope_define_typed PRESERVE it (so it flows into nested blocks/arms/lambdas,
+  matching stage1 which never resets inAsyncFunc there);
+- `scope_set_async(s, flag)` flips it once per entry — check_functions from
+  f.is_async, check_tests from t.is_async. Methods/constructors/impl bodies build
+  on scope_enter(global) and inherit false, exactly as stage1 leaves inAsyncFunc
+  false during entity/impl checking (so await_* in a method is rejected).
+- the check reads scope.in_async in the builtin path, emitted before arg recursion
+  and unconditional on the flag (not gated on inference confidence) — byte-equal
+  because scope.in_async is computed identically to stage1's inAsyncFunc.
+
++3 fixtures (ck_builtin_await_all_sync + ck_builtin_timeout_sync errors,
+ck_builtin_await_all_async clean — diff-checker 82/82), +6 tests (await_all/
+await_any/timeout rejected in sync fn, await_all clean in async fn, context
+propagates into a nested block, method body is non-async — 269). All differential
+gates, go test ./..., and make validate green. ADR 0057 written.
+
+Phase 48j-c is now COMPLETE for builtin arg typing (uniform group, print,
+assert_close, len, assert_panics, assert_eq mismatch+Float) AND the async-context
+builtins — 26 stage1 type-rule diagnostics byte-equal overall. The inAsyncFunc
+flag (scope.in_async) also unlocks the deferred `await` EXPRESSION async check (a
+straightforward reuse). Remaining Phase 48 gaps: the await-expression check,
+assert_eq's entity-eq/Map/Future/generic comparable-set rules, the async-test
+no-await warning (needs testSawAwait), unary operator-typing. Then phase-53 gaps
+(generic-entity arity — mind the let-mismatch caveat, extern unknown-type, trait
+contracts).

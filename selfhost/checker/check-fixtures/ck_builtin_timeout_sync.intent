@@ -1,0 +1,10 @@
+// check-fixtures/ck_builtin_timeout_sync.intent — Phase 48j-c2d.
+// The multi-arg async builtin timeout() is also async-only (stage1
+// checker.go:2009). Arity (2) matches and both args are valid, so only the
+// async-context error fires.
+// stage1: timeout can only be used inside async functions
+module ck_builtin_timeout_sync version "0.1.0";
+
+function f(fut: Future<Int>) returns Void {
+    let r: Result<Int, String> = timeout(fut, 5);
+}

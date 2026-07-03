@@ -508,6 +508,46 @@ test "builtin arg type: assert_eq with matching supported types is clean (no fal
     assert_eq(len(diags), 0);
 }
 
+test "async builtin: await_all outside an async function is rejected" {
+    let src: String = "module m version \"1.0\"; function f(fs: Array<Future<Int>>) returns Void " + lbrace() + " let r: Array<Int> = await_all(fs); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "await_all can only be used inside async functions");
+}
+
+test "async builtin: await_all inside an async function is clean (no false positive)" {
+    let src: String = "module m version \"1.0\"; async function f(fs: Array<Future<Int>>) returns Void " + lbrace() + " let r: Array<Int> = await_all(fs); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "async builtin: await_any outside an async function is rejected" {
+    let src: String = "module m version \"1.0\"; function f(fs: Array<Future<Int>>) returns Void " + lbrace() + " let r: Int = await_any(fs); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "await_any can only be used inside async functions");
+}
+
+test "async builtin: timeout outside an async function is rejected" {
+    let src: String = "module m version \"1.0\"; function f(fut: Future<Int>) returns Void " + lbrace() + " let r: Result<Int, String> = timeout(fut, 5); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "timeout can only be used inside async functions");
+}
+
+test "async builtin: the async context propagates into a nested block" {
+    let src: String = "module m version \"1.0\"; async function f(fs: Array<Future<Int>>, b: Bool) returns Void " + lbrace() + " if b " + lbrace() + " let r: Array<Int> = await_all(fs); " + rbrace() + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "async builtin: a method body is a non-async context (await_all rejected)" {
+    let src: String = "module m version \"1.0\"; entity E " + lbrace() + " field x: Int; method run(fs: Array<Future<Int>>) returns Void " + lbrace() + " let r: Array<Int> = await_all(fs); " + rbrace() + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "await_all can only be used inside async functions");
+}
+
 // ---------------------------------------------------------------------------
 // Phase 46.2: parse_type — structured Type tree from the AST's type strings.
 // Mirrors the forms shared/parser.intent parse_type_name emits.

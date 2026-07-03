@@ -1,4 +1,4 @@
-# Pickup Notes — 2026-07-03 (Phase 48 IN PROGRESS: builtin arg typing, len/assert_panics/assert_eq done)
+# Pickup Notes — 2026-07-03 (Phase 48 IN PROGRESS: builtin arg typing + async-context DONE)
 
 ## Where we are
 
@@ -9,10 +9,12 @@ so each is corpus-safe while inference grows. Shipped + pushed: **48a-48h** (inf
 condition-boolean, let-mismatch, typed scope, function/variant arg-type, assignment mismatch),
 **48i.1/48i.2** (self + field access, method-call arity/arg-types), **48e** binary operator
 typing, **48j-b** contract well-typedness, **48j-a/48j-a2** the complete match checking (all
-seven checkMatchExpr diagnostics), and **48j-c/48j-c2a-c** builtin argument typing
+seven checkMatchExpr diagnostics), **48j-c/48j-c2a-c** builtin argument typing
 for the uniform-type group + print + assert_close + len + assert_panics + assert_eq
-(mismatch + Float). `make diff-checker` → **79/79**, **263** checker tests. Full stage1
-type-system parity is a large, open-ended goal; the rest (48j-c2 / phase-53) is below.
+(mismatch + Float), and **48j-c2d** the async-context builtins (await_all/await_any/
+timeout, ADR 0057 — async flag threaded on the Scope). `make diff-checker` → **82/82**,
+**269** checker tests. Full stage1 type-system parity is a large, open-ended goal; the
+rest (remaining Phase 48 gaps / phase-53) is below.
 
 **Phase 47 (builtin-call arity) — COMPLETE**. ADR 0055.
 **Phase 46 (type foundation + `unknown type`) — COMPLETE**. ADR 0053 + ADR 0054.
@@ -23,7 +25,7 @@ selfhost/
   shared/    lexer · ast · parser
   formatter/ intentc fmt   --self-hosted   (Phase 42, diff-formatter 22/22)
   linter/    intentc lint  --self-hosted   (Phase 43, diff-linter 26/26)
-  checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 79/79)
+  checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 82/82)
 ```
 
 ## What 48j-c shipped (this session)
@@ -45,16 +47,21 @@ Also pushed this session: **48i.2** method calls, **48e** binary operators, **48
 
 Remaining, in rough value order:
 
-- **48j-c2 — `await_*` async-context (LAST 48j-c2 item)**: the async builtins
-  await_all/await_any/timeout emit `<name> can only be used inside async functions` —
-  this needs an async-context flag threaded through the checker (stage1 c.inAsyncFunc), which
-  stage2 does NOT track yet; that flag is the real unlock (also gates the deferred `await`
-  expression check). Hang off builtin_arity / a new table.
-  - DONE this session: len() (48j-c2a), assert_panics (48j-c2b), assert_eq (48j-c2c —
-    `assert_eq() type mismatch: actual is X, expected is Y` + the Float-unsupported
-    message). Deferred within assert_eq: the entity-eq / Map/Future / generic-recursion
-    comparable-set rules (need entity/method lookup or generic .String() — sound false
-    negatives).
+- **Builtin arg typing + async-context — DONE this session**: len() (48j-c2a),
+  assert_panics (48j-c2b), assert_eq mismatch+Float (48j-c2c), and the async-only builtins
+  await_all/await_any/timeout (48j-c2d, ADR 0057 — `<name> can only be used inside async
+  functions`; async flag `scope.in_async` threaded on the Scope rather than as a ~40-site
+  parameter). That flag is now available for reuse.
+- **Remaining Phase 48 gaps** (all sound false negatives / corpus-invisible today):
+  - **`await` EXPRESSION async check** — stage1 checker.go:3161 emits `await can only be
+    used inside async functions`. Now a straightforward REUSE of `scope.in_async` (ADR
+    0057); wire it into check_expr_names' ex_await case (needs the await keyword position —
+    check whether ex_await carries a stamped position, else add one per ADR 0054 first).
+  - **assert_eq comparable-set rules** — entity `eq` method presence + signature, Map/Future
+    rejection, generic-type-param recursion (need entity/method lookup or generic .String()).
+  - **async-test no-await warning** — stage1 `test "…" declared 'async' but contains no
+    'await' expression` (checker.go:1009); needs testSawAwait tracking (a warning, distinct
+    from the async-context errors).
 - **phase-53 gaps** (independent, smaller): **generic-entity-instantiation arity** (stage1
   checker.go:2068 `generic entity 'X' requires type arguments` / `entity 'X' expects N type
   arguments, got M`), **extern param/return `unknown type`** (0 corpus usage; stage2 parses
@@ -87,12 +94,13 @@ assignment/push (needs mutability tracking in Scope).
 
 ## How to resume
 
-1. `git log --oneline -20`, then read this file + `prds/TASKS.md` (Phase 48 rows) + ADR 0056.
-2. Continue Phase 48 at **48j-c2** — the LAST builtin-arg item is the async await_*/timeout
-   builtins, which need an inAsyncFunc flag threaded through the checker first (the real
-   unlock, also gates the deferred `await`-outside-async check). (len/assert_panics/assert_eq
-   arg typing are DONE — 48j-c2a-c.) Or pick a phase-53 gap (generic-entity arity is
-   well-scoped, but mind the let-mismatch caveat above). Keep inference SOUND (Unknown skips);
-   one check per slice, gate after each.
+1. `git log --oneline -20`, then read this file + `prds/TASKS.md` (Phase 48 rows) + ADR 0056
+   (+ ADR 0057 for the Scope async flag).
+2. All builtin arg typing + async-context is DONE (48j-c/48j-c2a-d). Best next slices:
+   the **`await` EXPRESSION async check** (a clean reuse of `scope.in_async` from ADR 0057 —
+   just check ex_await's position handling), then the remaining Phase 48 gaps (assert_eq
+   comparable-set, async-test no-await warning). Or pick a **phase-53 gap** (generic-entity
+   arity is well-scoped, but mind the let-mismatch caveat below). Keep inference SOUND
+   (Unknown skips); one check per slice, gate after each.
 3. Validate with `make validate`, `make selfcheck-formatter`, `make diff-formatter`,
    `make diff-linter`, `make diff-checker` after every slice.
