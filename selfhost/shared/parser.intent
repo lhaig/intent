@@ -520,23 +520,31 @@ public entity Parser {
         return self.parse_assign();
     }
 
+    // make_binop — builds an ex_binop for `op_tok` with `lhs`/`rhs` children,
+    // positioned at the operator token. Matches stage1 BinaryExpr.Pos() (the
+    // operator token) so the checker's operator-typing diagnostics anchor at the
+    // operator. Additive/inert to the formatter (ADR 0054).
+    method make_binop(op_tok: Token, lhs: Expr, rhs: Expr) returns Expr {
+        let mutable children: Array<Expr> = [];
+        children.push(lhs);
+        children.push(rhs);
+        let mutable e: Expr = Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
+        e.line = op_tok.line;
+        e.column = op_tok.column;
+        return e;
+    }
+
     method parse_assign() returns Expr {
         let lhs: Expr = self.parse_or();
         if self.check(shared_lexer.kw_implies_marker()) {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_assign();
-            let mutable children: Array<Expr> = [];
-            children.push(lhs);
-            children.push(rhs);
-            return Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            return self.make_binop(op_tok, lhs, rhs);
         }
         if self.check(shared_lexer.tk_assign()) {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_assign();
-            let mutable children: Array<Expr> = [];
-            children.push(lhs);
-            children.push(rhs);
-            return Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            return self.make_binop(op_tok, lhs, rhs);
         }
         return lhs;
     }
@@ -546,10 +554,7 @@ public entity Parser {
         while self.check(shared_lexer.kw_or()) {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_and();
-            let mutable children: Array<Expr> = [];
-            children.push(lhs);
-            children.push(rhs);
-            lhs = Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = self.make_binop(op_tok, lhs, rhs);
         }
         return lhs;
     }
@@ -559,10 +564,7 @@ public entity Parser {
         while self.check(shared_lexer.kw_and()) {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_eq();
-            let mutable children: Array<Expr> = [];
-            children.push(lhs);
-            children.push(rhs);
-            lhs = Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = self.make_binop(op_tok, lhs, rhs);
         }
         return lhs;
     }
@@ -572,10 +574,7 @@ public entity Parser {
         while self.check(shared_lexer.tk_eq()) or self.check(shared_lexer.tk_neq()) {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_cmp();
-            let mutable children: Array<Expr> = [];
-            children.push(lhs);
-            children.push(rhs);
-            lhs = Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = self.make_binop(op_tok, lhs, rhs);
         }
         return lhs;
     }
@@ -585,10 +584,7 @@ public entity Parser {
         while self.is_cmp_op() {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_range();
-            let mutable children: Array<Expr> = [];
-            children.push(lhs);
-            children.push(rhs);
-            lhs = Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = self.make_binop(op_tok, lhs, rhs);
         }
         return lhs;
     }
@@ -626,10 +622,7 @@ public entity Parser {
         while self.check(shared_lexer.tk_plus()) or self.check(shared_lexer.tk_minus()) {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_mul();
-            let mutable children: Array<Expr> = [];
-            children.push(lhs);
-            children.push(rhs);
-            lhs = Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = self.make_binop(op_tok, lhs, rhs);
         }
         return lhs;
     }
@@ -639,10 +632,7 @@ public entity Parser {
         while self.is_mul_op() {
             let op_tok: Token = self.advance();
             let rhs: Expr = self.parse_unary();
-            let mutable children: Array<Expr> = [];
-            children.push(lhs);
-            children.push(rhs);
-            lhs = Expr(shared_ast.ex_binop(), 0, "", false, op_tok.text, children);
+            lhs = self.make_binop(op_tok, lhs, rhs);
         }
         return lhs;
     }
