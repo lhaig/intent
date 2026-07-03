@@ -1681,3 +1681,53 @@ consistency/exhaustiveness (48j-a — needs match-expr inference), builtin argum
 await_* (48j-c), and phase-53 gaps (extern unknown-type, generic-entity-instantiation
 arity, trait contracts). Deferred: contract-clause recursion, impl-method contracts,
 method-call RETURN-type inference, unary operator-typing, immutable-assignment/push.
+
+---
+
+## 2026-07-03 — Phase 48j-a: match-arm structural checks
+
+Two commits, both byte-equal + pushed:
+- **match-pos front-end** (88807f7): MatchArm gains line/column (set to the pattern's first
+  token — variant name or `_` — by parse_match_arm), and parse_match_expr anchors the
+  ex_match node at the `match` keyword. Matches stage1 MatchArm/MatchPattern.Pos() (the
+  variant/wildcard token) and MatchExpr.Pos() (the keyword). Additive/inert — ast.intent +
+  parser.intent stay formatter fixpoints (selfcheck EQUAL), all gates unchanged.
+- **48j-a match checks** (80b6857): ports stage1 checkMatchExpr (checker.go:2915) for a
+  scrutinee confidently typed as a known USER enum (find_enum_index over prog.enums):
+  - `variant 'V' is not a variant of enum 'E'` (unknown variant in a pattern),
+  - `duplicate match arm for variant 'V'`,
+  - `variant 'V' has N fields but pattern has M bindings` (binding-count; note stage1's
+    un-pluralized "1 fields"),
+  - `unreachable pattern after wildcard '_'`,
+  - `non-exhaustive match on enum 'E': missing variants: v1, v2` (enum-declaration order,
+    comma-joined, anchored at the `match` keyword).
+  New helpers: find_enum_index, enum_has_variant, variant_field_count, and check_arm_body
+  (shared arm-body recursion in a child scope with the pattern bindings). Per stage1, an
+  unreachable or unknown-variant arm does NOT recurse its body (early `continue`); valid-
+  variant and wildcard arms do.
+
+Deferred (sound skips, corpus-invisible): **arm-type consistency** (`match arm type
+mismatch: expected X, got Y` — needs arm-body inference to type each arm and compare to the
+first) and **scrutinee-must-be-enum** (`match scrutinee must be an enum type, got X` —
+needs certainty that a type is NOT an enum; Option/Result are enums stage2 doesn't model in
+prog.enums, so flagging non-user-enum scrutinees would false-positive). Option/Result and
+any non-user-enum / unknown scrutinee take the FALLBACK path (arm-body name checking only) —
+so e.g. a non-exhaustive Result match is not flagged by stage2 (stage1 would; a tracked
+false negative). The corpus Option/Result matches (result_option, try_operator) exercise the
+fallback and stay byte-equal.
+
+Fixtures (+5 → diff-checker 68/68): ck_match_nonexhaustive (missing Running, Complete at
+12:18 = the match keyword), ck_match_duplicate, ck_match_unknown_variant,
+ck_match_binding_count ("1 fields"), ck_match_unreachable — all byte-identical vs stage1,
+positions included. +8 in-language tests (incl. exhaustive-clean, wildcard-exhaustive-clean,
+correct-data-bindings-clean) → 242 checker tests. go test ./..., all four differential
+gates, and make validate green.
+
+Cumulative Phase 48: expression inference for literals, operators, idents, `self`, field
+access; type-rule diagnostics byte-equal now cover condition-boolean, let-mismatch, function
+arg-type, variant arg-type, assignment mismatch, method-call arity, method-call arg-type,
+binary operator typing, contract well-typedness, and the FIVE match-arm structural checks.
+Remaining: match arm-type consistency + scrutinee-must-be-enum (48j-a2), builtin argument
+typing + await_* (48j-c), phase-53 gaps (extern unknown-type, generic-entity arity, trait
+contracts). Deferred: contract-clause recursion, impl-method contracts, method-call RETURN
+type inference, unary operator-typing, immutable-assignment/push.

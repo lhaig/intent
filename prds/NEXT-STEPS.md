@@ -1,18 +1,18 @@
-# Pickup Notes — 2026-07-03 (Phase 48 IN PROGRESS: contract typing shipped)
+# Pickup Notes — 2026-07-03 (Phase 48 IN PROGRESS: match-arm checks shipped)
 
 ## Where we are
 
-**Phase 48 (Expression type inference + type-rule checks) — FOUNDATION + NINE CHECKS
+**Phase 48 (Expression type inference + type-rule checks) — FOUNDATION + 14 CHECKS
 SHIPPED, IN PROGRESS.** ADR 0056: `infer_expr_type` is SOUND but INCOMPLETE (a Type only
 when certain, else an Unknown sentinel); type-rule checks fire only on a confident result,
 so each is corpus-safe while inference grows. Shipped + pushed: **48a** the inference engine,
 **48b** `if/while condition must be boolean`, **48c** `let` type-mismatch, **48d/48d+** the
-type-carrying scope (params + let-bound vars), **48f** function arg-type, **48g** variant
-arg-type, **48h** assignment mismatch, **48i.1** `self` + field-access inference, **48i.2**
-method-call arity + arg-types, **48e** binary operator typing, and **48j-b** contract
-well-typedness (requires/ensures/invariant must be boolean). `make diff-checker` →
-**63/63**, **234** checker tests. Full stage1 type-system parity is a large, open-ended
-goal; the rest (48j-a onward) is the continuation below.
+type-carrying scope, **48f** function arg-type, **48g** variant arg-type, **48h** assignment
+mismatch, **48i.1** `self` + field-access inference, **48i.2** method-call arity + arg-types,
+**48e** binary operator typing, **48j-b** contract well-typedness, and **48j-a** the five
+match-arm structural checks (variant-exists, duplicate, binding-count, unreachable,
+exhaustiveness). `make diff-checker` → **68/68**, **242** checker tests. Full stage1
+type-system parity is a large, open-ended goal; the rest (48j-a2 onward) is below.
 
 **Phase 47 (builtin-call arity) — COMPLETE**. ADR 0055.
 **Phase 46 (type foundation + `unknown type`) — COMPLETE**. ADR 0053 + ADR 0054.
@@ -23,37 +23,40 @@ selfhost/
   shared/    lexer · ast · parser
   formatter/ intentc fmt   --self-hosted   (Phase 42, diff-formatter 22/22)
   linter/    intentc lint  --self-hosted   (Phase 43, diff-linter 26/26)
-  checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 63/63)
+  checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 68/68)
 ```
 
-## What 48j-b shipped (this session)
+## What 48j-a shipped (this session)
 
-- **contract-pos front-end** (bc060ae, ADR 0054): the 3 contract-clause parse loops +
-  parse_invariant_decl stamp the clause Expr with the requires/ensures/invariant KEYWORD
-  position (stage1 RequiresClause/Invariant.Pos() is the keyword, not the predicate).
-  Additive/inert (parser.intent stays a formatter fixpoint; all gates unchanged).
-- **48j-b contract typing** (7ca2dab): `check_bool_contracts` infers each requires/ensures/
-  invariant clause and emits `<kind> clause must be boolean, got X` / `invariant must be
-  boolean, got X` at the clause keyword when confidently non-Bool; Unknown skips (old()/
-  result/quantifiers/calls infer Unknown). check_functions + check_entities check contracts
-  before bodies in stage1 order; check_entities now skips generic entities (stage1
-  checkEntities:1057). Impl-method contracts deferred (trait+impl clause mix; parser gap).
+- **match-pos front-end** (88807f7, ADR 0054): MatchArm gains line/col (the pattern's first
+  token); parse_match_expr anchors ex_match at the `match` keyword (stage1 MatchArm/
+  MatchPattern.Pos() + MatchExpr.Pos()). Additive/inert (ast.intent + parser.intent stay
+  formatter fixpoints; all gates unchanged).
+- **48j-a match checks** (80b6857): ports stage1 checkMatchExpr for a confident USER-enum
+  scrutinee — `variant 'V' is not a variant of enum 'E'`, `duplicate match arm for variant
+  'V'`, `variant 'V' has N fields but pattern has M bindings`, `unreachable pattern after
+  wildcard '_'`, `non-exhaustive match on enum 'E': missing variants: ...` (enum order, at
+  the match keyword). Helpers find_enum_index/enum_has_variant/variant_field_count/
+  check_arm_body. Unreachable/unknown-variant arms don't recurse their body (stage1 early
+  `continue`). Option/Result + non-user-enum/unknown scrutinees take the fallback.
 
 Earlier this session (also pushed): **48i.2** method-call arity/arg-types (587f084, +fld-pos
-033e7dd) and **48e** binary operator typing (e2a986f, +binop-pos b77bdf3).
+033e7dd), **48e** binary operator typing (e2a986f, +binop-pos b77bdf3), and **48j-b**
+contract well-typedness (7ca2dab, +contract-pos bc060ae).
 
-## Next: Phase 48j-a — match-arm consistency/exhaustiveness, then the phase-53 gaps
+## Next: Phase 48j-a2 / phase-53 gaps
 
 Remaining, in rough value order:
 
-- **48j-a (recommended next) — match-arm consistency / exhaustiveness**: stage1
-  `checkMatchExpr` (checker.go:2915) emits `duplicate match arm for variant 'V'`,
-  `match arm type mismatch: expected X, got Y`, and `non-exhaustive match on enum 'E':
-  missing variants: ...`. Needs match-expr inference: the scrutinee's enum type, each arm
-  body's type (arm-consistency), and variant coverage (exhaustiveness). `infer_expr_type`
-  currently returns Unknown for ex_match. Likely multiple slices: duplicate-arm (no types
-  needed — pure structural) is the easiest first; then exhaustiveness (needs the scrutinee
-  enum); then arm-type consistency (needs arm-body inference). Keep each SOUND.
+- **48j-a2 — match arm-type consistency + scrutinee-must-be-enum**: the two match
+  diagnostics deferred from 48j-a. `match arm type mismatch: expected X, got Y` needs
+  arm-body inference — type each arm body (in the arm scope, with bindings TYPED from the
+  variant's field types) and compare to the first arm's type; emit on a confident mismatch
+  (stage1 checkMatchExpr:2996). `match scrutinee must be an enum type, got X` needs certainty
+  that the scrutinee type is NOT an enum — safe only for confident PRIMITIVES (Int/Float/
+  String/Bool/Char), since Option/Result are enums stage2 doesn't have in prog.enums and
+  must not be flagged. This also means `infer_expr_type(ex_match)` could return the arm
+  result type (unlocking match-as-let-RHS mismatch) — but only when confident.
 - **phase-53 gaps** (independent, smaller): **generic-entity-instantiation arity** (stage1
   checker.go:2068 `generic entity 'X' requires type arguments` / `entity 'X' expects N type
   arguments, got M`), **extern param/return `unknown type`** (0 corpus usage; stage2 parses
@@ -88,10 +91,9 @@ assignment/push (needs mutability tracking in Scope).
 ## How to resume
 
 1. `git log --oneline -20`, then read this file + `prds/TASKS.md` (Phase 48 rows) + ADR 0056.
-2. Continue Phase 48 at **48j-a** — match-arm checking. Read stage1 checkMatchExpr first;
-   start with the pure-structural `duplicate match arm` (no inference needed), then
-   exhaustiveness, then arm-type consistency. Or pick a phase-53 gap (generic-entity arity
-   is well-scoped) for a smaller win. Keep inference SOUND (Unknown skips); one check per
-   slice, gate after each.
+2. Continue Phase 48 at **48j-a2** — match arm-type consistency (needs arm-body inference
+   with typed bindings) + scrutinee-must-be-enum (confident primitives only). Or pick a
+   phase-53 gap (generic-entity arity is well-scoped, but mind the let-mismatch caveat
+   above). Keep inference SOUND (Unknown skips); one check per slice, gate after each.
 3. Validate with `make validate`, `make selfcheck-formatter`, `make diff-formatter`,
    `make diff-linter`, `make diff-checker` after every slice.
