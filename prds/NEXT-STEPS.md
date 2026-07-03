@@ -8,7 +8,7 @@ else an Unknown sentinel); type-rule checks fire only on a confident result, so 
 corpus-safe while inference grows. Shipped + pushed: **48a** the inference engine
 (literals + operator result types), **48b** `if/while condition must be boolean`, **48c**
 `let` type-mismatch, **48d** the type-carrying scope (params typed), **48d+** let-var binding, and
-**48f** function argument-type mismatch. `make diff-checker` → **49/49**, **207** checker tests. This is a large, open-ended phase (full
+**48f** function arg-type, **48g** variant arg-type, **48h** assignment mismatch. `make diff-checker` → **51/51**, **211** checker tests. This is a large, open-ended phase (full
 stage1 type-system parity); the foundation + these checks are shipped, the rest (48g+)
 are the continuation below.
 
@@ -25,7 +25,7 @@ selfhost/
   shared/    lexer · ast · parser
   formatter/ intentc fmt   --self-hosted   (Phase 42, diff-formatter 22/22)
   linter/    intentc lint  --self-hosted   (Phase 43, diff-linter 26/26)
-  checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 49/49)
+  checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 51/51)
 ```
 
 ### What Phase 46 shipped
@@ -44,20 +44,17 @@ selfhost/
   result) passed to an `Array`/`Map` (`&Vec`) param (was E0308); the `intentc test` runner
   now surfaces swallowed Rust compile errors instead of a bare "did not run".
 
-## Next: Phase 48e/48f — more type-rule checks on the inference foundation
+## Next: Phase 48i — `self`/field-access inference, then the rest
 
-The inference engine (48a) + condition-boolean (48b) + let-mismatch (48c) + the
-type-carrying scope (48d — params typed, so idents resolve) are shipped. `infer_expr_type`
-now resolves literals, operators, and param idents; `self`/field/call-return are still
-Unknown (sound skip). Next steps, in rough value order:
+Shipped: inference engine (literals + operators + idents via the typed scope for params &
+let-bindings), condition-must-be-boolean, let/assignment type-mismatch, and function &
+variant argument-type mismatch. `infer_expr_type` still returns Unknown for `self`, field
+access, and call results (sound skip). Next steps, in rough value order:
 
-- **48g (recommended next) — variant-constructor arg-types**: analogous to the shipped
-  function arg-type check (48f done) but for variant calls (`variant 'V' field 'f' expects
-  X, got Y`); reuses prog + infer, look up variant field types from prog.enums.
-- **48h — assignment-stmt type-mismatch** (`x = expr`; needs the target's scope type).
-- **48i — extend the typed scope further**: `self` → entity type + field-access inference
-  (`self.field` → field type) → unlocks method-call arity (receiver type) and more.
-  (Params + let-bindings are already typed.)
+- **48i (recommended next) — `self` + field-access inference**: type `self` as the
+  enclosing entity and infer `self.field` / `x.field` → the field's type. This is the next
+  big unlock — it enables method-call arity + arg-types (receiver type). (Params + let
+  bindings already typed; function/variant arg-types + assignment mismatch shipped.)
 - **48e — operator-typing** (`operator '+' not defined for X and Y`, `requires boolean
    operands`): needs an **ex_binop-positions front-end change** (ADR 0054 pattern — the
    parser sets `Expr.line/column` at binop nodes; currently 0). Low real-bug value; emit
@@ -75,9 +72,9 @@ parser gap.
 ## How to resume
 
 1. `git log --oneline -20`, then read this file + `prds/TASKS.md` (Phase 48 rows) + ADR 0056.
-2. Continue Phase 48 at **48g** — variant-constructor arg-types (reuses 48f's pattern).
-   Then 48h assignment-mismatch, 48e operator-typing (ex_binop positions), 48i method-call
-   arity (needs self/field-access inference), 48j match/contract typing, then phase-53 gaps.
-   Keep inference SOUND (Unknown skips); one check per slice, gate after each.
+2. Continue Phase 48 at **48i** — `self`/field-access inference (unlocks method-call
+   arity/arg-types). Then 48e operator-typing (ex_binop positions), 48j match/contract
+   typing, phase-53 gaps. Keep inference SOUND (Unknown skips); one check per slice, gate
+   after each.
 3. Validate with `make validate`, `make selfcheck-formatter`, `make diff-formatter`,
    `make diff-linter`, `make diff-checker` after every slice.

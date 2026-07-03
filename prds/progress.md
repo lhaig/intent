@@ -1494,3 +1494,25 @@ machinery. Next buildable slices: variant-constructor arg-types (reuses the patt
 prog), assignment-stmt type-mismatch, then operator-typing (needs ex_binop positions),
 method-call arity (needs self/field-access inference), match-arm consistency, contract
 typing, and the phase-53 gaps (extern unknown-type, generic-entity arity, trait contracts).
+
+---
+
+## 2026-07-03 — Phase 48g/48h: variant + assignment type-mismatch
+
+Two more type-rule checks, byte-equal + pushed:
+- **48g variant-constructor arg-types** (1da6fc1): `variant 'V' field 'f' expects X, got Y`
+  at a correctly-arity'd variant call; find_variant_params(prog) reads field types from
+  prog.enums; confident+positioned arg vs field type; Unknown skips. +1 fixture + 2 tests.
+- **48h assignment type-mismatch** (39c3da6): an assignment parses as an ex_binop op "="
+  in an st_expr; target scope-type vs inferred value → `type mismatch: cannot assign X to
+  Y` at the statement pos (stage1 anchors at the target start). Unknown sides skip. +1
+  fixture + 2 tests. (The immutable-target check needs mutability tracking in Scope —
+  deferred.)
+
+Cumulative type-rule checks now byte-equal: condition-must-be-boolean, let-mismatch,
+function arg-type, variant arg-type, assignment mismatch — all covering params AND
+let-bound vars (typed scope). diff-checker 51/51, 211 checker tests, all gates + validate.
+
+Next big unlock: 48i — `self` typed as the enclosing entity + field-access inference
+(self.field → field type), which enables method-call arity/arg-types. Then operator-typing
+(needs ex_binop positions), match-arm consistency, contract typing, phase-53 gaps.
