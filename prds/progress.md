@@ -1731,3 +1731,43 @@ Remaining: match arm-type consistency + scrutinee-must-be-enum (48j-a2), builtin
 typing + await_* (48j-c), phase-53 gaps (extern unknown-type, generic-entity arity, trait
 contracts). Deferred: contract-clause recursion, impl-method contracts, method-call RETURN
 type inference, unary operator-typing, immutable-assignment/push.
+
+---
+
+## 2026-07-03 — Phase 48j-a2: match arm-type consistency + scrutinee-must-be-enum
+
+Two commits, completing the match-arm checks (no front-end change needed — MatchArm/
+ex_match positions already shipped in 48j-a):
+- **scrutinee-must-be-enum** (e65292f): a match scrutinee confidently inferred to a
+  PRIMITIVE (Int/Float/String/Bool/Char, new is_primitive_type) is definitely not an enum →
+  emit `match scrutinee must be an enum type, got X` at the match keyword and return without
+  processing arms (stage1 checkMatchExpr:2926 returns nil). Restricted to primitives so
+  Option/Result/entity/collection scrutinees (which stage2 can't confirm are non-enums) fall
+  to the arm-body fallback — a sound false negative. `.String()==.name` for primitives, so
+  byte-equal. +1 fixture, +1 test.
+- **arm-type consistency** (d461273): completes stage1 checkMatchExpr:2996. In the user-enum
+  branch, each reached arm's body is inferred in arm_typed_scope — a child scope with the
+  pattern bindings TYPED from the variant's field types (variant_fields), defining only
+  bindings with a matching field (index < field count), exactly like stage1. Arm 0's body
+  type is the baseline (stage1's `resultType`, set only at i==0 — a skipped or untypeable
+  arm 0 leaves it Unknown, which suppresses ALL comparisons, matching stage1's nil guard); a
+  later arm whose body is confidently a DIFFERENT type emits `match arm type mismatch:
+  expected X, got Y` at that arm. Restricted to types with no type_args — whose stage1
+  Type.String() equals the bare name (Fn types always carry type_args = the return, so they
+  are excluded too) — so the message renders byte-equally; generic/Fn/Unknown arm types are
+  skipped soundly. The name-check now runs in the typed scope as well (identical for name
+  resolution; also fixes a latent binding-count-mismatch scope difference — extra bindings
+  now stay undefined, like stage1). +1 fixture, +3 tests (incl. typed-binding inference: an
+  `A(x) => x` / `B(y) => y` match over `enum E { A(x: Int), B(y: String) }` is flagged).
+
+Fixtures (+2 → diff-checker 70/70): ck_match_scrutinee_not_enum (got Int at the match
+keyword), ck_match_arm_type (expected Int, got String at the mismatched arm). +4 tests →
+246 checker tests. go test ./..., all four differential gates, and make validate green.
+
+Phase 48 match checking is now COMPLETE: all seven stage1 checkMatchExpr diagnostics are
+byte-equal (scrutinee-not-enum, unreachable, variant-not-found, duplicate, binding-count,
+arm-type mismatch, non-exhaustive). Remaining Phase 48: builtin argument typing + await_*
+async-context (48j-c), and phase-53 gaps (extern unknown-type, generic-entity-instantiation
+arity — mind the let-mismatch caveat, trait contracts). Deferred: contract-clause recursion,
+impl-method contracts, method-call RETURN-type inference, unary operator-typing,
+immutable-assignment/push.
