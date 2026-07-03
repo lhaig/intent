@@ -1034,9 +1034,9 @@ function builtin_arity_message(name: String, got: Int) returns String {
 // are not one uniform simple type. Only builtins with a uniform String/Int/Bool
 // arg + the "argument [N ]must be T, got X" message shape are listed; print
 // (accepts-set message), assert_close (labeled Float), len (accepts-set:
-// String/Array/Map), assert_eq/assert_panics (compound types), the async
-// await_*/timeout builtins, and the zero-arg builtins are handled elsewhere or
-// deferred. Phase 48j-c, ADR 0056.
+// String/Array/Map), assert_panics (Fn() -> Void), assert_eq (compound types),
+// the async await_*/timeout builtins, and the zero-arg builtins are handled
+// elsewhere or deferred. Phase 48j-c, ADR 0056.
 
 function builtin_arg_type(name: String) returns String {
     if name == "assert" {
@@ -1338,6 +1338,21 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                         let lat: Type = infer_expr_type(e.children[bai], scope, prog);
                         if (not is_unknown_type(lat)) and len(lat.type_args) == 0 and lat.name != "String" {
                             diags.push(CheckDiag(callee.line, callee.column, "len() requires Array, Map, or String argument, got " + lat.name));
+                        }
+                    }
+                    // assert_panics() requires a `Fn() -> Void` argument (stage1
+                    // checker.go:1728). A Fn type always carries type_args (at least
+                    // its return), so a confidently-inferred no-type_args type is
+                    // definitely a non-function that stage1 rejects → emit
+                    // `assert_panics() argument must be Fn() -> Void, got X` at the
+                    // call. Fn-typed args (correct or not) and lambdas skip soundly:
+                    // a lambda infers Unknown, and a `Fn(...) -> ...` param has
+                    // type_args (a wrong-shape one is a deferred false negative that
+                    // would need Fn .String() rendering). Phase 48j-c2b.
+                    if callee.name == "assert_panics" {
+                        let pat2: Type = infer_expr_type(e.children[bai], scope, prog);
+                        if (not is_unknown_type(pat2)) and len(pat2.type_args) == 0 {
+                            diags.push(CheckDiag(callee.line, callee.column, "assert_panics() argument must be Fn() -> Void, got " + pat2.name));
                         }
                     }
                     bai = bai + 1;

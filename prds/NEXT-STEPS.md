@@ -1,4 +1,4 @@
-# Pickup Notes — 2026-07-03 (Phase 48 IN PROGRESS: builtin arg typing, len() done)
+# Pickup Notes — 2026-07-03 (Phase 48 IN PROGRESS: builtin arg typing, len + assert_panics done)
 
 ## Where we are
 
@@ -9,10 +9,10 @@ so each is corpus-safe while inference grows. Shipped + pushed: **48a-48h** (inf
 condition-boolean, let-mismatch, typed scope, function/variant arg-type, assignment mismatch),
 **48i.1/48i.2** (self + field access, method-call arity/arg-types), **48e** binary operator
 typing, **48j-b** contract well-typedness, **48j-a/48j-a2** the complete match checking (all
-seven checkMatchExpr diagnostics), and **48j-c/48j-c2a** builtin argument typing for the
-uniform-type group + print + assert_close + len. `make diff-checker` → **76/76**, **258**
-checker tests. Full stage1 type-system parity is a large, open-ended goal; the rest
-(48j-c2 / phase-53) is below.
+seven checkMatchExpr diagnostics), and **48j-c/48j-c2a/48j-c2b** builtin argument typing
+for the uniform-type group + print + assert_close + len + assert_panics. `make diff-checker`
+→ **77/77**, **260** checker tests. Full stage1 type-system parity is a large, open-ended
+goal; the rest (48j-c2 / phase-53) is below.
 
 **Phase 47 (builtin-call arity) — COMPLETE**. ADR 0055.
 **Phase 46 (type foundation + `unknown type`) — COMPLETE**. ADR 0053 + ADR 0054.
@@ -23,7 +23,7 @@ selfhost/
   shared/    lexer · ast · parser
   formatter/ intentc fmt   --self-hosted   (Phase 42, diff-formatter 22/22)
   linter/    intentc lint  --self-hosted   (Phase 43, diff-linter 26/26)
-  checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 76/76)
+  checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 77/77)
 ```
 
 ## What 48j-c shipped (this session)
@@ -47,10 +47,11 @@ Remaining, in rough value order:
 
 - **48j-c2 — remaining builtin arg typing + `await_*` async-context**: assert_eq
   (`assert_eq() type mismatch: actual is X, expected is Y` + the entity-eq / comparable-set
-  rules — complex, uses .String()), assert_panics (`Fn() -> Void`). (len() is DONE —
-  48j-c2a: `len() requires Array, Map, or String argument, got X`, dedicated accepts-set
-  branch, confident no-type_args args only; generic rejected args like Option<Int> deferred
-  as they'd need generic .String() rendering.) The async builtins
+  rules — the last and most complex, uses .String()). (len() DONE — 48j-c2a:
+  `len() requires Array, Map, or String argument, got X`. assert_panics DONE — 48j-c2b:
+  `assert_panics() argument must be Fn() -> Void, got X`, fires on confident no-type_args
+  args since a Fn always carries type_args; wrong-shape Fn params deferred as they'd need
+  Fn .String() rendering.) The async builtins
   await_all/await_any/timeout emit `<name> can only be used inside async functions` —
   this needs an async-context flag threaded through the checker (stage1 c.inAsyncFunc), which
   stage2 does NOT track yet; that flag is the real unlock (also gates the deferred `await`

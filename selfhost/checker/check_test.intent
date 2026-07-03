@@ -475,6 +475,19 @@ test "builtin arg type: len accepts a generic Array (no false positive)" {
     assert_eq(len(diags), 0);
 }
 
+test "builtin arg type: assert_panics rejects a non-function argument (Int)" {
+    let src: String = "module m version \"1.0\"; function f(n: Int) returns Void " + lbrace() + " assert_panics(n); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "assert_panics() argument must be Fn() -> Void, got Int");
+}
+
+test "builtin arg type: assert_panics accepts a Fn() -> Void param (no false positive)" {
+    let src: String = "module m version \"1.0\"; function f(cb: Fn() -> Void) returns Void " + lbrace() + " assert_panics(cb); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
 // ---------------------------------------------------------------------------
 // Phase 46.2: parse_type — structured Type tree from the AST's type strings.
 // Mirrors the forms shared/parser.intent parse_type_name emits.

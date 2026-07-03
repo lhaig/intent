@@ -1851,3 +1851,28 @@ type-rule diagnostics byte-equal overall. Remaining builtin arg typing (48j-c2):
 assert_eq (Equal + comparable-set + entity eq), assert_panics (Fn()->Void), and the
 async await_*/timeout builtins (need an inAsyncFunc flag threaded through the
 checker — not yet modeled). Then the phase-53 gaps.
+
+---
+
+## 2026-07-03 — Phase 48j-c2b: assert_panics() argument typing
+
+Follow-on commit: assert_panics() requires a `Fn() -> Void` argument (stage1
+checker.go:1728). In the self-hosted Type model a Fn always carries type_args (at
+least its return), so a confidently-inferred no-type_args type is definitely a
+non-function that stage1 rejects — emit `assert_panics() argument must be
+Fn() -> Void, got X` at the call (a dedicated branch, its Fn-shape requirement
+doesn't fit the uniform builtin_arg_type table). Fn-typed params and lambdas skip
+soundly: a lambda infers Unknown, and a wrong-shape `Fn(Int) -> Void` param has
+type_args (a deferred false negative that would need Fn .String() rendering to stay
+byte-equal). Simple rejected types render byte-equal via .name.
+
++1 fixture (ck_builtin_assert_panics, diff-checker 77/77), +2 tests (assert_panics
+rejects Int, accepts Fn() -> Void param — 260). All differential gates, go test
+./..., and make validate green.
+
+48j-c now covers uniform-type builtins, print, assert_close, len, and assert_panics
+— 21 stage1 type-rule diagnostics byte-equal overall. Remaining builtin arg typing
+(48j-c2): assert_eq (Equal + comparable-set + entity eq — the last and most complex,
+needs .String() rendering), and the async await_*/timeout builtins (need an
+inAsyncFunc flag threaded through the checker — not yet modeled). Then the phase-53
+gaps.

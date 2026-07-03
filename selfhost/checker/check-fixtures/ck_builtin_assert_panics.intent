@@ -1,0 +1,9 @@
+// check-fixtures/ck_builtin_assert_panics.intent — Phase 48j-c2b.
+// assert_panics() requires a Fn() -> Void argument; a confidently-inferred
+// non-function simple type is rejected.
+// stage1: assert_panics() argument must be Fn() -> Void, got Int
+module ck_builtin_assert_panics version "0.1.0";
+
+function f(n: Int) returns Void {
+    assert_panics(n);
+}
