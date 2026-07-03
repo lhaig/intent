@@ -1126,3 +1126,27 @@ test "match: a primitive scrutinee must be an enum type" {
     assert_eq(len(diags), 1);
     assert_eq(diags[0].message, "match scrutinee must be an enum type, got Int");
 }
+
+test "match: arms of different types are flagged (arm-type consistency)" {
+    let src: String = "module m version \"1.0\"; " + status_enum() + " " + fn_match_status("Pending => 0, Running => \"hi\", Complete => 2,");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "match arm type mismatch: expected Int, got String");
+}
+
+test "match: a typed pattern binding participates in arm-type inference" {
+    let en: String = "enum E " + lbrace() + " A(x: Int), B(y: String), " + rbrace();
+    let fn_src: String = "function f(e: E) returns Void " + lbrace() + " let n: Int = match e " + lbrace() + " A(x) => x, B(y) => y, " + rbrace() + "; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + en + " " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "match arm type mismatch: expected Int, got String");
+}
+
+test "match: consistent typed-binding arms are clean (no false positive)" {
+    let en: String = "enum E " + lbrace() + " A(x: Int), B(y: Int), " + rbrace();
+    let fn_src: String = "function f(e: E) returns Void " + lbrace() + " let n: Int = match e " + lbrace() + " A(x) => x, B(y) => y, " + rbrace() + "; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + en + " " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

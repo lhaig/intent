@@ -1,0 +1,19 @@
+// check-fixtures/ck_match_arm_type.intent — Phase 48j-a2 / match arm-type
+// consistency. Arm 0 sets the expected type (Int); a later arm of a different
+// type is flagged (at that arm).
+// stage1: match arm type mismatch: expected Int, got String
+module ck_match_arm_type version "0.1.0";
+
+enum Status {
+    Pending,
+    Running,
+    Complete,
+}
+
+function f(s: Status) returns Void {
+    let x: Int = match s {
+        Pending => 0,
+        Running => "hi",
+        Complete => 2,
+    };
+}

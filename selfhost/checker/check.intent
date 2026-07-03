@@ -926,6 +926,20 @@ function variant_field_count(ed: EnumDecl, name: String) returns Int {
     return 0;
 }
 
+// variant_fields — the declared fields (Params) of variant `name` on enum `ed`,
+// or empty. Used to TYPE match-arm bindings for arm-body inference (48j-a2).
+
+function variant_fields(ed: EnumDecl, name: String) returns Array<Param> {
+    let mutable i: Int = 0;
+    while i < len(ed.variants) {
+        if ed.variants[i].name == name {
+            return ed.variants[i].params;
+        }
+        i = i + 1;
+    }
+    return shared_ast.empty_param_array();
+}
+
 // entity_method_decls — every method named `method_name` on entity
 // `entity_name`, gathered from the entity BODY and from impl blocks for that
 // entity (stage1 merges trait-impl methods into Entity.Methods, so a call may
@@ -1068,6 +1082,29 @@ function check_arm_body(arm: MatchArm, scope: Scope, fn_names: Array<String>, fn
         bi = bi + 1;
     }
     return check_expr_names(arm.body, arm_scope, fn_names, fn_counts, var_names, var_counts, prog);
+}
+
+// arm_typed_scope — the child scope for a match arm's body with its pattern
+// bindings TYPED from the variant's field types (stage1 checkMatchExpr:2979).
+// Only bindings with a matching field (index < field count) are defined — exactly
+// like stage1 — so extra bindings from a binding-count mismatch stay undefined.
+// Used by the user-enum branch for both name checking and arm-body inference
+// (arm-type consistency, 48j-a2). A wildcard arm has no bindings.
+
+function arm_typed_scope(arm: MatchArm, ed: EnumDecl, scope: Scope) returns Scope {
+    let mutable s: Scope = scope_enter(scope);
+    if arm.is_wildcard {
+        return s;
+    }
+    let vparams: Array<Param> = variant_fields(ed, arm.variant);
+    let mutable bi: Int = 0;
+    while bi < len(arm.bindings) {
+        if bi < len(vparams) {
+            s = scope_define_typed(s, arm.bindings[bi], parse_type(vparams[bi].type_name));
+        }
+        bi = bi + 1;
+    }
+    return s;
 }
 
 function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_counts: Array<Int>, var_names: Array<String>, var_counts: Array<Int>, prog: Program) returns Array<CheckDiag> {
@@ -1402,6 +1439,11 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
             let ed: EnumDecl = prog.enums[enum_idx];
             let mutable covered: Array<String> = [];
             let mutable has_wildcard: Bool = false;
+            // Arm-type consistency baseline (stage1 `resultType`, set only at
+            // i==0). An arm 0 that is skipped (unknown-variant) leaves it Unknown →
+            // no comparisons anywhere; an Unknown arm-body type also suppresses
+            // comparison (sound). Phase 48j-a2.
+            let mutable result_t: Type = type_unknown();
             let mutable ami: Int = 0;
             while ami < len(e.match_arms) {
                 let arm: MatchArm = e.match_arms[ami];
@@ -1410,11 +1452,22 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                 } else {
                     if arm.is_wildcard {
                         has_wildcard = true;
-                        let mutable wbd: Array<CheckDiag> = check_arm_body(arm, scope, fn_names, fn_counts, var_names, var_counts, prog);
+                        let wscope: Scope = arm_typed_scope(arm, ed, scope);
+                        let mutable wbd: Array<CheckDiag> = check_expr_names(arm.body, wscope, fn_names, fn_counts, var_names, var_counts, prog);
                         let mutable wbi: Int = 0;
                         while wbi < len(wbd) {
                             diags.push(wbd[wbi]);
                             wbi = wbi + 1;
+                        }
+                        let warm_t: Type = infer_expr_type(arm.body, wscope, prog);
+                        if ami == 0 {
+                            result_t = warm_t;
+                        } else {
+                            if (not is_unknown_type(warm_t)) and (not is_unknown_type(result_t)) and len(warm_t.type_args) == 0 and len(result_t.type_args) == 0 {
+                                if warm_t.name != result_t.name {
+                                    diags.push(CheckDiag(arm.line, arm.column, "match arm type mismatch: expected " + result_t.name + ", got " + warm_t.name));
+                                }
+                            }
                         }
                     } else {
                         if not enum_has_variant(ed, arm.variant) {
@@ -1428,11 +1481,22 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                             if len(arm.bindings) != vfc {
                                 diags.push(CheckDiag(arm.line, arm.column, "variant '" + arm.variant + "' has " + vfc.to_string() + " fields but pattern has " + len(arm.bindings).to_string() + " bindings"));
                             }
-                            let mutable vbd: Array<CheckDiag> = check_arm_body(arm, scope, fn_names, fn_counts, var_names, var_counts, prog);
+                            let vscope: Scope = arm_typed_scope(arm, ed, scope);
+                            let mutable vbd: Array<CheckDiag> = check_expr_names(arm.body, vscope, fn_names, fn_counts, var_names, var_counts, prog);
                             let mutable vbi: Int = 0;
                             while vbi < len(vbd) {
                                 diags.push(vbd[vbi]);
                                 vbi = vbi + 1;
+                            }
+                            let varm_t: Type = infer_expr_type(arm.body, vscope, prog);
+                            if ami == 0 {
+                                result_t = varm_t;
+                            } else {
+                                if (not is_unknown_type(varm_t)) and (not is_unknown_type(result_t)) and len(varm_t.type_args) == 0 and len(result_t.type_args) == 0 {
+                                    if varm_t.name != result_t.name {
+                                        diags.push(CheckDiag(arm.line, arm.column, "match arm type mismatch: expected " + result_t.name + ", got " + varm_t.name));
+                                    }
+                                }
                             }
                         }
                     }
