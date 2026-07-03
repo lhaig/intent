@@ -1944,3 +1944,33 @@ assert_eq's entity-eq/Map/Future/generic comparable-set rules, the async-test
 no-await warning (needs testSawAwait), unary operator-typing. Then phase-53 gaps
 (generic-entity arity — mind the let-mismatch caveat, extern unknown-type, trait
 contracts).
+
+---
+
+## 2026-07-03 — Phase 48j-c2e: await-expression async-context check
+
+Two commits (ADR 0054 additive-positions discipline):
+- **fd191c3** (front-end, inert): stamped the `await` keyword position on the
+  ex_await Expr in parse_unary (previously line/column defaulted to 0), matching
+  stage1 AwaitExpr.Pos(). Verified inert to every gate on its own before adding
+  the check.
+- **checker**: a new ex_await case in check_expr_names emits `await can only be
+  used inside async functions` (stage1 checkAwaitExpr:3161) when scope.in_async is
+  false (the flag from ADR 0057), anchored at the stamped keyword position. It
+  then recurses the operand for name-checking — matching stage1's order (async
+  error THEN checkExpression(operand)) and closing the pre-existing gap where
+  await operands were never recursed (byte-equal on the valid corpus; verified an
+  undeclared var inside await is now caught byte-equal). The operand's Future<T>
+  type check stays deferred (needs generic inference).
+
++1 fixture (ck_await_expr_sync, diff-checker 83/83), +3 tests (await rejected in a
+sync fn, clean in an async fn, operand still name-checked — 272). All differential
+gates, go test ./..., and make validate green.
+
+The async-context work (ADR 0057) is now complete for both the await_*/timeout
+builtins AND the await expression — 27 stage1 type-rule diagnostics byte-equal
+overall. Remaining Phase 48 gaps: assert_eq's entity-eq/Map/Future/generic
+comparable-set rules, the async-test no-await warning (testSawAwait), unary
+operator-typing, and spawn/try operand recursion (the same latent gap await just
+closed). Then phase-53 (generic-entity arity — mind the let-mismatch caveat,
+extern unknown-type, trait contracts).

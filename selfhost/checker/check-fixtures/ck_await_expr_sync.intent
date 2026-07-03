@@ -1,0 +1,11 @@
+// check-fixtures/ck_await_expr_sync.intent — Phase 48j-c2e.
+// The `await` EXPRESSION is valid only inside an async function/test (stage1
+// checkAwaitExpr:3161). In a plain function it is rejected, anchored at the
+// await keyword. The operand is a valid Future<Int>, so only the async-context
+// error fires (the Future-type check is deferred).
+// stage1: await can only be used inside async functions
+module ck_await_expr_sync version "0.1.0";
+
+function f(fut: Future<Int>) returns Int {
+    return await fut;
+}

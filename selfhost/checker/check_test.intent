@@ -548,6 +548,26 @@ test "async builtin: a method body is a non-async context (await_all rejected)" 
     assert_eq(diags[0].message, "await_all can only be used inside async functions");
 }
 
+test "await expression: rejected outside an async function" {
+    let src: String = "module m version \"1.0\"; function f(fut: Future<Int>) returns Int " + lbrace() + " return await fut; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "await can only be used inside async functions");
+}
+
+test "await expression: clean inside an async function (no false positive)" {
+    let src: String = "module m version \"1.0\"; async function f(fut: Future<Int>) returns Int " + lbrace() + " return await fut; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "await expression: the operand is still name-checked (undeclared var)" {
+    let src: String = "module m version \"1.0\"; async function f() returns Int " + lbrace() + " return await bogus; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "undeclared variable 'bogus'");
+}
+
 // ---------------------------------------------------------------------------
 // Phase 46.2: parse_type — structured Type tree from the AST's type strings.
 // Mirrors the forms shared/parser.intent parse_type_name emits.

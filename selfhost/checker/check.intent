@@ -1247,6 +1247,23 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
         }
         return diags;
     }
+    if e.kind == shared_ast.ex_await() {
+        // `await` is valid only inside an async function/test (stage1
+        // checkAwaitExpr:3161). Emit at the await keyword (ADR 0054 stamped
+        // position) BEFORE recursing the operand, matching stage1's order; the
+        // async flag rides the scope (ADR 0057). The operand's Future<T> type
+        // check is deferred (needs generic inference). Phase 48j-c2e.
+        if not scope.in_async {
+            diags.push(CheckDiag(e.line, e.column, "await can only be used inside async functions"));
+        }
+        let mutable awd: Array<CheckDiag> = check_expr_names(e.children[0], scope, fn_names, fn_counts, var_names, var_counts, prog);
+        let mutable awi: Int = 0;
+        while awi < len(awd) {
+            diags.push(awd[awi]);
+            awi = awi + 1;
+        }
+        return diags;
+    }
     if e.kind == shared_ast.ex_array() {
         let mutable ai: Int = 0;
         while ai < len(e.children) {
