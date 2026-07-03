@@ -1,0 +1,20 @@
+// check-fixtures/ck_method_arity.intent — Phase 48i.2 / method-call arity.
+// stage1: method 'bump' expects 1 arguments, got 0 (anchored at the method name)
+module ck_method_arity version "0.1.0";
+
+entity Counter {
+    field n: Int;
+
+    constructor(n: Int) {
+        self.n = n;
+    }
+
+    method bump(amount: Int) returns Void {
+        self.n = self.n + amount;
+    }
+}
+
+function f() returns Void {
+    let c: Counter = Counter(0);
+    c.bump();
+}

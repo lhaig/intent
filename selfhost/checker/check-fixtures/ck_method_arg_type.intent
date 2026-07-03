@@ -1,0 +1,21 @@
+// check-fixtures/ck_method_arg_type.intent — Phase 48i.2 / method-call
+// argument-type mismatch. stage1: argument 1 to method 'bump': expected Int,
+// got String (anchored at the string-literal argument).
+module ck_method_arg_type version "0.1.0";
+
+entity Counter {
+    field n: Int;
+
+    constructor(n: Int) {
+        self.n = n;
+    }
+
+    method bump(amount: Int) returns Void {
+        self.n = self.n + amount;
+    }
+}
+
+function f() returns Void {
+    let c: Counter = Counter(0);
+    c.bump("hi");
+}

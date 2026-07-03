@@ -1,0 +1,28 @@
+// check-fixtures/ck_method_arity_impl.intent — Phase 48i.2 / method-call arity
+// on a TRAIT-IMPL method (stage1 merges impl methods into Entity.Methods, so
+// the call resolves even though the entity body declares no `run`).
+// stage1: method 'run' expects 1 arguments, got 0 (anchored at the method name)
+module ck_method_arity_impl version "0.1.0";
+
+entity Ctx {
+    field v: Int;
+
+    constructor(v: Int) {
+        self.v = v;
+    }
+}
+
+trait Runnable {
+    method run(x: Int) returns Int;
+}
+
+impl Runnable for Ctx {
+    method run(x: Int) returns Int {
+        return self.v + x;
+    }
+}
+
+function f() returns Void {
+    let c: Ctx = Ctx(1);
+    c.run();
+}

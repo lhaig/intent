@@ -872,3 +872,61 @@ test "field access: a Bool field used as a condition is clean (no false positive
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+// --- Phase 48i.2: method-call arity + argument types ----------------------
+
+// Helper: the Counter entity used by the method-call tests below — a
+// non-generic entity with a one-Int-param `bump` method.
+function counter_entity() returns String {
+    return "entity Counter " + lbrace() + " field n: Int; constructor(n: Int) " + lbrace() + " self.n = n; " + rbrace() + " method bump(amount: Int) returns Void " + lbrace() + " self.n = self.n + amount; " + rbrace() + " " + rbrace();
+}
+
+test "method arity: too few arguments fires" {
+    let src: String = "module m version \"1.0\"; " + counter_entity() + " " + fn_f_body("let c: Counter = Counter(0); c.bump();");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "method 'bump' expects 1 arguments, got 0");
+}
+
+test "method arity: correct arg count is clean (no false positive)" {
+    let src: String = "module m version \"1.0\"; " + counter_entity() + " " + fn_f_body("let c: Counter = Counter(0); c.bump(5);");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "method arg type: String passed where an Int param is expected" {
+    let src: String = "module m version \"1.0\"; " + counter_entity() + " " + fn_f_body("let c: Counter = Counter(0); c.bump(\"hi\");");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "argument 1 to method 'bump': expected Int, got String");
+}
+
+test "method arg type: matching arg type is clean (no false positive)" {
+    let src: String = "module m version \"1.0\"; " + counter_entity() + " " + fn_f_body("let c: Counter = Counter(0); c.bump(7);");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "method arity: early return — wrong-arity call with undeclared arg emits only arity diag" {
+    let src: String = "module m version \"1.0\"; " + counter_entity() + " " + fn_f_body("let c: Counter = Counter(0); c.bump(nope, extra);");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "method 'bump' expects 1 arguments, got 2");
+}
+
+test "method arg type: a generic entity's type-param arg is skipped (no false positive)" {
+    let ent: String = "entity Box<T> " + lbrace() + " field value: T; constructor(value: T) " + lbrace() + " self.value = value; " + rbrace() + " method replace(x: T) returns Void " + lbrace() + " self.value = x; " + rbrace() + " " + rbrace();
+    let src: String = "module m version \"1.0\"; " + ent + " function f(b: Box<Int>) returns Void " + lbrace() + " b.replace(\"hi\"); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "method arity: a trait-impl method resolves via the impl (arity fires)" {
+    let ent: String = "entity Ctx " + lbrace() + " field v: Int; constructor(v: Int) " + lbrace() + " self.v = v; " + rbrace() + " " + rbrace();
+    let tr: String = "trait Runnable " + lbrace() + " method run(x: Int) returns Int; " + rbrace();
+    let im: String = "impl Runnable for Ctx " + lbrace() + " method run(x: Int) returns Int " + lbrace() + " return self.v + x; " + rbrace() + " " + rbrace();
+    let src: String = "module m version \"1.0\"; " + ent + " " + tr + " " + im + " " + fn_f_body("let c: Ctx = Ctx(1); c.run();");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "method 'run' expects 1 arguments, got 0");
+}

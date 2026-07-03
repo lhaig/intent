@@ -753,6 +753,57 @@ function find_variant_params(prog: Program, name: String) returns Array<Param> {
     return shared_ast.empty_param_array();
 }
 
+// find_entity_index — index of the entity named `name` in prog.entities, or -1.
+// Used to resolve a method-call receiver's declaring entity (and its generics).
+
+function find_entity_index(prog: Program, name: String) returns Int {
+    let mutable i: Int = 0;
+    while i < len(prog.entities) {
+        if prog.entities[i].name == name {
+            return i;
+        }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+// entity_method_decls — every method named `method_name` on entity
+// `entity_name`, gathered from the entity BODY and from impl blocks for that
+// entity (stage1 merges trait-impl methods into Entity.Methods, so a call may
+// resolve to either). The method-call check acts only when EXACTLY ONE match
+// exists, so a name collision across body/impls is a sound skip, not a wrong
+// pick. Used by check_expr_names for method-call arity/arg-type checks.
+
+function entity_method_decls(prog: Program, entity_name: String, method_name: String) returns Array<FunctionDecl> {
+    let mutable out: Array<FunctionDecl> = [];
+    let idx: Int = find_entity_index(prog, entity_name);
+    if idx >= 0 {
+        let ent: EntityDecl = prog.entities[idx];
+        let mutable mi: Int = 0;
+        while mi < len(ent.methods) {
+            if ent.methods[mi].name == method_name {
+                out.push(ent.methods[mi]);
+            }
+            mi = mi + 1;
+        }
+    }
+    let mutable ii: Int = 0;
+    while ii < len(prog.impls) {
+        if prog.impls[ii].entity_name == entity_name {
+            let ib: ImplDecl = prog.impls[ii];
+            let mutable imi: Int = 0;
+            while imi < len(ib.methods) {
+                if ib.methods[imi].name == method_name {
+                    out.push(ib.methods[imi]);
+                }
+                imi = imi + 1;
+            }
+        }
+        ii = ii + 1;
+    }
+    return out;
+}
+
 // =============================================================================
 // BUILTIN CALL ARITY (Phase 47, ADR 0055)
 //
@@ -1049,13 +1100,69 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
             // recurse args for undeclared-variable.
         } else {
             if callee.kind == shared_ast.ex_field() {
-                // Method call: recurse the receiver only (callee.children[0]).
-                // The method name is not a variable.
-                let mutable mrd: Array<CheckDiag> = check_expr_names(callee.children[0], scope, fn_names, fn_counts, var_names, var_counts, prog);
+                // Method call `recv.method(args)`: recurse the receiver only
+                // (callee.children[0]); the method name is not a variable.
+                let recv: Expr = callee.children[0];
+                let mutable mrd: Array<CheckDiag> = check_expr_names(recv, scope, fn_names, fn_counts, var_names, var_counts, prog);
                 let mutable mri: Int = 0;
                 while mri < len(mrd) {
                     diags.push(mrd[mri]);
                     mri = mri + 1;
+                }
+                // Phase 48i.2: when the receiver is confidently a known USER
+                // entity and the method name resolves to exactly one declared
+                // method (body or trait-impl), check arity + argument types like
+                // stage1 checkMethodCallExpr (checker.go:2504-2542). Sound skips:
+                // unknown/primitive/collection receivers (builtin Array/Map/
+                // String/Char methods handled by stage1's earlier branches),
+                // unresolved or ambiguous names ("no method" is NOT emitted —
+                // trait methods live in impls that stage2 does not fully model),
+                // and arg-types on a generic entity (its params may be type
+                // params). Arity/name errors anchor at the ex_field method-name
+                // position, matching stage1 MethodCallExpr.Pos().
+                let recv_t: Type = infer_expr_type(recv, scope, prog);
+                if not is_unknown_type(recv_t) {
+                    let ent_idx: Int = find_entity_index(prog, recv_t.name);
+                    if ent_idx >= 0 {
+                        let methods: Array<FunctionDecl> = entity_method_decls(prog, recv_t.name, callee.name);
+                        if len(methods) == 1 {
+                            let m: FunctionDecl = methods[0];
+                            let mparam_count: Int = len(m.params);
+                            if arg_count != mparam_count {
+                                diags.push(CheckDiag(callee.line, callee.column, "method '" + callee.name + "' expects " + mparam_count.to_string() + " arguments, got " + arg_count.to_string()));
+                                return diags;
+                            }
+                            // Correct arity — per arg: recurse for undeclared,
+                            // then arg-type (only for a NON-generic entity, whose
+                            // method params carry no type params → sound skip for
+                            // generics, mirroring the function path).
+                            let is_generic: Bool = len(prog.entities[ent_idx].type_params) > 0;
+                            let mutable mai: Int = 1;
+                            while mai < len(e.children) {
+                                let marg: Expr = e.children[mai];
+                                let mutable mad: Array<CheckDiag> = check_expr_names(marg, scope, fn_names, fn_counts, var_names, var_counts, prog);
+                                let mutable madj: Int = 0;
+                                while madj < len(mad) {
+                                    diags.push(mad[madj]);
+                                    madj = madj + 1;
+                                }
+                                if not is_generic {
+                                    let mpidx: Int = mai - 1;
+                                    if mpidx < mparam_count {
+                                        let mptype: Type = parse_type(m.params[mpidx].type_name);
+                                        let matype: Type = infer_expr_type(marg, scope, prog);
+                                        if not is_unknown_type(matype) and marg.line > 0 {
+                                            if matype.name != mptype.name {
+                                                diags.push(CheckDiag(marg.line, marg.column, "argument " + (mpidx + 1).to_string() + " to method '" + callee.name + "': expected " + mptype.name + ", got " + matype.name));
+                                            }
+                                        }
+                                    }
+                                }
+                                mai = mai + 1;
+                            }
+                            return diags;
+                        }
+                    }
                 }
             } else {
                 // Closure-call or other callee form — recurse it.
