@@ -1630,3 +1630,54 @@ arity, trait contracts). Deferred: unary operator-typing (+ tightening unary inf
 corpus-invisible), method-call RETURN-type inference (needs generic substitution), builtin
 argument typing + await_* async-context (Phase 47), immutable-assignment/push (needs
 mutability tracking in Scope).
+
+---
+
+## 2026-07-03 — Phase 48j-b: contract well-typedness
+
+Two commits, both byte-equal + pushed:
+- **contract-pos front-end** (bc060ae): the three contract-clause parse loops
+  (function/constructor/method) and parse_invariant_decl now stamp the clause Expr's
+  line/column with the requires/ensures/invariant KEYWORD token — stage1's
+  RequiresClause/EnsuresClause/Invariant.Pos() is the keyword, not the predicate. (My
+  first fixtures diverged: stage1 anchored at col 5 = `requires`, stage2 at the predicate.)
+  Additive/inert — parser.intent stays a formatter fixpoint (selfcheck EQUAL), all gates
+  unchanged.
+- **48j-b contract typing** (7ca2dab): check_bool_contracts infers each requires/ensures/
+  invariant clause and emits `requires clause must be boolean, got X` / `ensures clause
+  must be boolean, got X` / `invariant must be boolean, got X` at the clause keyword when
+  the clause is confidently non-Bool; Unknown skips (a clause using old()/result/
+  quantifiers/calls infers Unknown — stage1 guards on exprType != nil, so those are not
+  flagged). check_functions and check_entities now check contracts BEFORE bodies, in stage1
+  order (entity: invariants → constructor(req/ens/body) → methods(req/ens/body)).
+
+check_entities now SKIPS generic entities entirely, matching stage1 checkEntities:1057
+(type params are placeholders). Previously stage2 checked generic entity bodies — an inert
+difference (they produce no diagnostics); the guard aligns us and keeps the new contract
+checks off generic entities (verified by an in-language test: a generic Box<T> with a
+deliberately non-Bool invariant emits nothing). Impl-block-method contracts are DEFERRED:
+stage1 checks the trait method's clauses first then the impl's, and stage2 has a
+trait-method-contract parser gap — a separate follow-up. The corpus impl methods
+(handler_trait) carry no contracts, so deferral is byte-equal.
+
+Note on the contract-expression blind spot (pre-existing, unchanged): the self-hosted
+checker does NOT recurse contract clauses for undeclared-var / arg-type / operator errors
+(only the boolean-typedness check runs on them). stage1's checkExpression does. On the
+valid corpus, contracts are error-free so both emit nothing; a contract with an internal
+error is a corpus-invisible false negative. Recursing clauses via check_expr_names is a
+follow-up (needs old()/result/quantifier-binding scope handling to avoid false positives).
+
+Fixtures (+4 → diff-checker 63/63): ck_contract_requires, ck_contract_ensures,
+ck_contract_invariant, ck_contract_method — all byte-identical vs stage1 at the clause
+keyword (6:5 / 8:5 / 14:9). +7 in-language tests (incl. a valid boolean requires clean, an
+Unknown-clause skip, and the generic-entity skip) → 234 checker tests. go test ./..., all
+four differential gates, and make validate green.
+
+Cumulative Phase 48: expression inference for literals, operators (sound), idents, `self`,
+field access; NINE type-rule diagnostics byte-equal (condition-boolean, let-mismatch,
+function arg-type, variant arg-type, assignment mismatch, method-call arity, method-call
+arg-type, binary operator typing, contract well-typedness). Remaining: match-arm
+consistency/exhaustiveness (48j-a — needs match-expr inference), builtin argument typing +
+await_* (48j-c), and phase-53 gaps (extern unknown-type, generic-entity-instantiation
+arity, trait contracts). Deferred: contract-clause recursion, impl-method contracts,
+method-call RETURN-type inference, unary operator-typing, immutable-assignment/push.
