@@ -1540,3 +1540,46 @@ let-bound), `self`, and field access; SIX type-rule diagnostics byte-equal
 mismatch — all covering field access now). Remaining: method-call arity/arg-types (48i.2,
 uses the receiver type), operator-typing (needs ex_binop positions), match-arm
 consistency, contract typing, phase-53 gaps.
+
+---
+
+## 2026-07-03 — Phase 48i.2: method-call arity + argument types
+
+Two commits, both byte-equal + pushed:
+- **fld-pos front-end** (033e7dd): parser now sets ex_field's line/column to the
+  field/method-name token (mirrors stage1 FieldAccessExpr/MethodCallExpr.Pos(); was 0).
+  Additive/inert — diff-formatter 22/22, selfcheck EQUAL, diff-linter 26/26, diff-checker
+  unchanged at 52/52. Prerequisite so method-call diagnostics anchor at the method name.
+  (Same pattern as lit-pos c97d936.)
+- **48i.2 method-call check** (587f084): in check_expr_names' ex_call-with-ex_field-callee
+  branch, infer the receiver via infer_expr_type; when it is confidently a known USER
+  entity whose method name resolves to EXACTLY ONE declared method — searched across the
+  entity body AND impl blocks via the new entity_method_decls (stage1 merges trait-impl
+  methods into Entity.Methods) — port stage1 checkMethodCallExpr's user-entity path:
+  `method 'M' expects N arguments, got A` at the method name (early return, args not
+  recursed), then `argument i to method 'M': expected X, got Y` at each arg. Arg-types are
+  checked only for NON-generic entities (a generic entity's method params may be type
+  params → sound skip, mirroring stage1's `!IsTypeParam` and the function path). Sound
+  skips: unknown/primitive/collection receivers (builtin Array/Map/String/Char methods
+  deferred — `self.items.push(x)` sees Array, not a user entity), and unresolved/ambiguous
+  names (`entity has no method` is NOT emitted, since trait methods live in impls that
+  stage2 does not fully model — deferring it is a corpus-invisible false negative).
+
+New helpers: find_entity_index (entity index by name) and entity_method_decls (all methods
+of a name on an entity, body + impls; the "exactly one" caller rule makes a name collision
+across body/impls a sound skip rather than a wrong pick).
+
+Fixtures (+3 → diff-checker 55/55): ck_method_arity (too-few args), ck_method_arg_type
+(String where Int), ck_method_arity_impl (arity on a TRAIT-impl method — proves
+entity_method_decls resolves through impls). All byte-identical vs stage1 (positions
+19:7 / 20:12 / 27:7). +7 in-language tests → 220 checker tests. go test ./..., all four
+differential gates, and make validate green.
+
+Cumulative Phase 48: expression inference for literals, operators, idents (params +
+let-bound), `self`, and field access; SEVEN type-rule diagnostics byte-equal
+(condition-boolean, let-mismatch, function arg-type, variant arg-type, assignment
+mismatch, method-call arity, method-call arg-type). Remaining: operator-typing (needs
+ex_binop positions — the next front-end change), match-arm consistency, contract typing,
+phase-53 gaps (extern unknown-type, generic-entity-instantiation arity, trait contracts).
+Method-call RETURN-type inference is still deferred (infer_expr_type on a method call
+stays Unknown — needs generic type-param substitution).
