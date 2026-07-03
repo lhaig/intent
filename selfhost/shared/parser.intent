@@ -333,7 +333,13 @@ public entity Parser {
         while self.is_contract_kw() and self.error == "" {
             let kw_tok: Token = self.advance();
             let kw: String = kw_tok.text;
-            let pred: Expr = self.parse_expr();
+            // Stamp the clause with the keyword position so the checker's
+            // contract-typing diagnostics anchor at requires/ensures (matching
+            // stage1 RequiresClause/EnsuresClause.Pos(), the keyword). Inert to
+            // the formatter (ADR 0054).
+            let mutable pred: Expr = self.parse_expr();
+            pred.line = kw_tok.line;
+            pred.column = kw_tok.column;
             if kw == "requires" {
                 reqs.push(pred);
             } else {
@@ -1104,7 +1110,13 @@ public entity Parser {
         while self.is_contract_kw() and self.error == "" {
             let kw_tok: Token = self.advance();
             let kw: String = kw_tok.text;
-            let pred: Expr = self.parse_expr();
+            // Stamp the clause with the keyword position so the checker's
+            // contract-typing diagnostics anchor at requires/ensures (matching
+            // stage1 RequiresClause/EnsuresClause.Pos(), the keyword). Inert to
+            // the formatter (ADR 0054).
+            let mutable pred: Expr = self.parse_expr();
+            pred.line = kw_tok.line;
+            pred.column = kw_tok.column;
             if kw == "requires" {
                 reqs.push(pred);
             } else {
@@ -1146,7 +1158,13 @@ public entity Parser {
         while self.is_contract_kw() and self.error == "" {
             let kw_tok: Token = self.advance();
             let kw: String = kw_tok.text;
-            let pred: Expr = self.parse_expr();
+            // Stamp the clause with the keyword position so the checker's
+            // contract-typing diagnostics anchor at requires/ensures (matching
+            // stage1 RequiresClause/EnsuresClause.Pos(), the keyword). Inert to
+            // the formatter (ADR 0054).
+            let mutable pred: Expr = self.parse_expr();
+            pred.line = kw_tok.line;
+            pred.column = kw_tok.column;
             if kw == "requires" {
                 reqs.push(pred);
             } else {
@@ -1167,8 +1185,12 @@ public entity Parser {
     }
 
     method parse_invariant_decl() returns Expr {
-        self.expect(shared_lexer.kw_invariant_marker(), "'invariant'");
-        let e: Expr = self.parse_expr();
+        let inv_tok: Token = self.expect(shared_lexer.kw_invariant_marker(), "'invariant'");
+        // Stamp the invariant keyword position so the checker's `invariant must
+        // be boolean` diagnostic anchors at `invariant` (stage1 Invariant.Pos()).
+        let mutable e: Expr = self.parse_expr();
+        e.line = inv_tok.line;
+        e.column = inv_tok.column;
         self.expect(shared_lexer.tk_semicolon(), "';' after invariant expression");
         return e;
     }
