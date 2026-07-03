@@ -1583,3 +1583,50 @@ ex_binop positions — the next front-end change), match-arm consistency, contra
 phase-53 gaps (extern unknown-type, generic-entity-instantiation arity, trait contracts).
 Method-call RETURN-type inference is still deferred (infer_expr_type on a method call
 stays Unknown — needs generic type-param substitution).
+
+---
+
+## 2026-07-03 — Phase 48e: binary operator typing
+
+Two commits, both byte-equal + pushed:
+- **binop-pos front-end** (b77bdf3): all 8 ex_binop construction sites in parser.intent
+  now route through a new Parser.make_binop helper that anchors the node at the operator
+  token (matches stage1 BinaryExpr.Pos()). Additive/inert — parser.intent stays a
+  formatter fixpoint (selfcheck EQUAL), diff-formatter 22/22, diff-linter 26/26,
+  diff-checker unchanged at 55/55, 108 parser tests pass. Prerequisite so operator errors
+  anchor at the operator (empirically: `a - b` error at the `-` column).
+- **48e operator typing** (e2a986f): ports stage1 checkBinaryExpr's operator diagnostics.
+  New binop_result_type mirrors checker.go:1564-1621 (the Type each operator yields for
+  its operands, or Unknown when undefined). infer_expr_type's ex_binop case now delegates
+  to it — so a comparison/logical op yields Bool ONLY for valid operands and Unknown for
+  invalid ones, instead of the previous eager unconditional Bool. That eager Bool was
+  latently unsound: `let n: Int = a < b` (a:Int,b:String) would have inferred Bool and
+  fired a spurious `cannot assign Bool to Int` where stage1 emits only the operator error.
+  Tightening is corpus-safe (valid code produces no errors from these checks either way).
+  check_expr_names' ex_binop case emits the operator error at the operator token when BOTH
+  operands are confidently inferred and binop_result_type is Unknown; an Unknown operand
+  skips (stage1 returns nil on a nil operand — a sound false negative).
+
+Message quirk reproduced verbatim: stage1 formats the operator with `%s` on
+BinaryExpr.Op (a TokenType), so the message shows the token NAME — `operator 'MINUS' not
+defined`, `'STAR'`, `'EQ'`, `'LT'`, `'AND'`, … — EXCEPT `+`, which is a literal in the
+format string (`operator '+' not defined`). operator_display encodes this mapping.
+Assignment `=` is excluded (a statement via checkAssignStmt, never checkBinaryExpr).
+Removed the now-dead is_comparison_op/is_logical_op/is_arith_op helpers.
+
+Fixtures (+4 → diff-checker 59/59): ck_operator_arith (MINUS), ck_operator_plus (literal
+'+'), ck_operator_logical (AND requires boolean), ck_operator_compare (LT). All
+byte-identical vs stage1. +7 in-language tests (incl. EQ on mismatched types, a valid
+Int+Int clean, and an Unknown-operand sound skip) → 227 checker tests. go test ./..., all
+four differential gates, and make validate green.
+
+Cumulative Phase 48: expression inference for literals, operators (now sound — Bool only
+for valid comparison/logical operands), idents (params + let-bound), `self`, and field
+access; EIGHT type-rule diagnostics byte-equal (condition-boolean, let-mismatch, function
+arg-type, variant arg-type, assignment mismatch, method-call arity, method-call arg-type,
+binary operator typing). Remaining: match-arm consistency/exhaustiveness, contract
+well-typedness, and phase-53 gaps (extern unknown-type, generic-entity-instantiation
+arity, trait contracts). Deferred: unary operator-typing (+ tightening unary inference —
+corpus-invisible), method-call RETURN-type inference (needs generic substitution), builtin
+argument typing + await_* async-context (Phase 47), immutable-assignment/push (needs
+mutability tracking in Scope).
