@@ -13,8 +13,9 @@ seven checkMatchExpr diagnostics), **48j-c/48j-c2a-c** builtin argument typing
 for the uniform-type group + print + assert_close + len + assert_panics + assert_eq
 (mismatch + Float), and **48j-c2d/e** the async-context checks (await_all/await_any/
 timeout builtins + the `await` expression, ADR 0057 — async flag threaded on the
-Scope). `make diff-checker` → **83/83**, **272** checker tests. Full stage1 type-system
-parity is a large, open-ended goal; the rest (remaining Phase 48 gaps / phase-53) is below.
+Scope), plus **48j-c2f** the assert_eq entity no-eq-method comparable-set rule.
+`make diff-checker` → **84/84**, **274** checker tests. Full stage1 type-system parity
+is a large, open-ended goal; the rest (remaining Phase 48 gaps / phase-53) is below.
 
 **Phase 47 (builtin-call arity) — COMPLETE**. ADR 0055.
 **Phase 46 (type foundation + `unknown type`) — COMPLETE**. ADR 0053 + ADR 0054.
@@ -25,7 +26,7 @@ selfhost/
   shared/    lexer · ast · parser
   formatter/ intentc fmt   --self-hosted   (Phase 42, diff-formatter 22/22)
   linter/    intentc lint  --self-hosted   (Phase 43, diff-linter 26/26)
-  checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 83/83)
+  checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 84/84)
 ```
 
 ## What 48j-c shipped (this session)
@@ -55,8 +56,9 @@ Remaining, in rough value order:
   stamped the ex_await keyword position first per ADR 0054, then added the ex_await case that
   also recurses the operand, closing the latent await-operand recursion gap).
 - **Remaining Phase 48 gaps** (all sound false negatives / corpus-invisible today):
-  - **assert_eq comparable-set rules** — entity `eq` method presence + signature, Map/Future
-    rejection, generic-type-param recursion (need entity/method lookup or generic .String()).
+  - **assert_eq comparable-set — remainder** (entity no-eq-method is DONE, 48j-c2f): the
+    eq-method SIGNATURE sub-checks (wrong return / param count / param type), plus Map/Future
+    rejection and generic-type-param recursion (need generic .String() rendering).
   - **async-test no-await warning** — stage1 `test "…" declared 'async' but contains no
     'await' expression` (checker.go:1009); needs testSawAwait tracking (a warning, distinct
     from the async-context errors).

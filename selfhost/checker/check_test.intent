@@ -508,6 +508,19 @@ test "builtin arg type: assert_eq with matching supported types is clean (no fal
     assert_eq(len(diags), 0);
 }
 
+test "builtin arg type: assert_eq rejects a user entity with no eq method" {
+    let src: String = "module m version \"1.0\"; entity P " + lbrace() + " field x: Int; " + rbrace() + " function f(a: P, b: P) returns Void " + lbrace() + " assert_eq(a, b); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "entity 'P' used in assert_eq but has no eq method; define 'method eq(other: P) returns Bool' to enable equality checks");
+}
+
+test "builtin arg type: assert_eq accepts an entity that has an eq method (no false positive)" {
+    let src: String = "module m version \"1.0\"; entity P " + lbrace() + " field x: Int; method eq(other: P) returns Bool " + lbrace() + " return self.x == other.x; " + rbrace() + " " + rbrace() + " function f(a: P, b: P) returns Void " + lbrace() + " assert_eq(a, b); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
 test "async builtin: await_all outside an async function is rejected" {
     let src: String = "module m version \"1.0\"; function f(fs: Array<Future<Int>>) returns Void " + lbrace() + " let r: Array<Int> = await_all(fs); " + rbrace();
     let diags: Array<CheckDiag> = parse_and_check(src);

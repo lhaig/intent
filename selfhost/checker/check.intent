@@ -1418,9 +1418,16 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                 //     expected is Y` (stage1 returns after this; we emit only it);
                 //   - same name Float → `assert_eq does not support Float; ...`
                 //     (the most common assertEqUnsupportedReason case).
-                // The remaining comparable-set rules (entity eq method, Map/Future,
-                // generic recursion) need entity/method lookup or generic .String()
-                // and are deferred — sound corpus-invisible false negatives. 48j-c2c.
+                //   - same name, a user entity with no `eq` method →
+                //     `entity 'X' used in assert_eq but has no eq method; ...`
+                //     (stage1 assertEqUnsupportedReason:3265). The lookup uses
+                //     entity_method_decls (entity body + trait-impl methods),
+                //     which is exactly stage1's EntityInfo.Methods, so the
+                //     presence test is byte-equal (no false positive).
+                // The eq-method SIGNATURE sub-checks (wrong return/param count/param
+                // type) and the Map/Future/generic-recursion rules need generic
+                // .String() and are deferred — sound corpus-invisible false
+                // negatives (an entity WITH any eq method is skipped). 48j-c2c/f.
                 if callee.name == "assert_eq" and len(e.children) == 3 {
                     let aet: Type = infer_expr_type(e.children[1], scope, prog);
                     let eet: Type = infer_expr_type(e.children[2], scope, prog);
@@ -1430,6 +1437,10 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                         } else {
                             if aet.name == "Float" {
                                 diags.push(CheckDiag(callee.line, callee.column, "assert_eq does not support Float; use assert_close(actual, expected, epsilon) for floating-point comparisons"));
+                            } else {
+                                if name_seen(collect_entity_names(prog), aet.name) and len(entity_method_decls(prog, aet.name, "eq")) == 0 {
+                                    diags.push(CheckDiag(callee.line, callee.column, "entity '" + aet.name + "' used in assert_eq but has no eq method; define 'method eq(other: " + aet.name + ") returns Bool' to enable equality checks"));
+                                }
                             }
                         }
                     }

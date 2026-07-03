@@ -1974,3 +1974,34 @@ comparable-set rules, the async-test no-await warning (testSawAwait), unary
 operator-typing, and spawn/try operand recursion (the same latent gap await just
 closed). Then phase-53 (generic-entity arity — mind the let-mismatch caveat,
 extern unknown-type, trait contracts).
+
+---
+
+## 2026-07-03 — Phase 48j-c2f: assert_eq entity-eq comparable-set (no eq method)
+
+Extends the 48j-c2c assert_eq else-branch (matching-type args) with the entity
+comparable-set rule (stage1 assertEqUnsupportedReason:3265): two same-name args of
+a user entity that declares no `eq` method emit `entity 'X' used in assert_eq but
+has no eq method; define 'method eq(other: X) returns Bool' to enable equality
+checks`. The presence test uses entity_method_decls (entity-body + trait-impl
+methods), verified to be exactly stage1's EntityInfo.Methods population
+(checker.go:627 + traits.go:177), so it is byte-equal with no risk of a false
+positive (a superset lookup only ever under-reports). Verified byte-equal against
+stage1 for: no-eq entity (error), entity with a body eq method (clean), entity with
+a trait-impl eq method (clean), and enum args (clean — enums are comparable).
+
+The eq-method SIGNATURE sub-checks (wrong return / param count / param type) and the
+Map/Future/generic-recursion rules are still deferred (an entity WITH any eq method
+is skipped — a sound corpus-invisible false negative; the signature cases need
+generic .String()).
+
++1 fixture (ck_builtin_assert_eq_entity, diff-checker 84/84), +2 tests (no-eq entity
+rejected, has-eq entity clean — 274). All differential gates, go test ./..., and
+make validate green.
+
+assert_eq now covers type-mismatch, Float, and the entity no-eq-method case — 28
+stage1 type-rule diagnostics byte-equal overall. Remaining Phase 48 gaps: assert_eq
+eq-method signature sub-checks + Map/Future/generic recursion, the async-test
+no-await warning (testSawAwait), unary operator-typing, spawn/try operand recursion.
+Then phase-53 (generic-entity arity — mind the let-mismatch caveat, extern
+unknown-type, trait contracts).

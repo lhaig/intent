@@ -1,0 +1,14 @@
+// check-fixtures/ck_builtin_assert_eq_entity.intent — Phase 48j-c2f.
+// Two args of the same user entity that declares no `eq` method fall into the
+// assert_eq comparable-set rejection (stage1 assertEqUnsupportedReason:3265).
+// stage1: entity 'Point' used in assert_eq but has no eq method; define 'method eq(other: Point) returns Bool' to enable equality checks
+module ck_builtin_assert_eq_entity version "0.1.0";
+
+entity Point {
+    field x: Int;
+    field y: Int;
+}
+
+function f(a: Point, b: Point) returns Void {
+    assert_eq(a, b);
+}
