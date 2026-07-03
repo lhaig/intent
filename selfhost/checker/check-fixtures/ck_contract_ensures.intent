@@ -1,0 +1,8 @@
+// check-fixtures/ck_contract_ensures.intent — Phase 48j-b / contract typing.
+// An ensures clause must be boolean. stage1: ensures clause must be boolean, got Int
+module ck_contract_ensures version "0.1.0";
+
+function f(n: Int) returns Void
+    ensures n
+{
+}

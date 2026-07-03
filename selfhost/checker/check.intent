@@ -1899,6 +1899,52 @@ function make_method_scope(f: FunctionDecl, global: Scope, self_type: String) re
     return s;
 }
 
+// check_bool_contracts — contract well-typedness (stage1 checkFunction:945,
+// checkMethod:1188, checkConstructor:1135, checkEntity invariants:1071). Each
+// clause expression must be Bool; emit `<prefix><T>` at the clause when it is
+// confidently inferred to a non-Bool type. Unknown → skip (stage1 guards on
+// exprType != nil; a clause using old()/result/quantifiers/calls infers Unknown
+// and is not flagged). Recursing the clause for undeclared/arg/operator errors
+// is a separate, deferred concern. Phase 48j-b, ADR 0056.
+
+function check_bool_contracts(clauses: Array<Expr>, prefix: String, scope: Scope, prog: Program) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
+    let mutable i: Int = 0;
+    while i < len(clauses) {
+        let c: Expr = clauses[i];
+        let t: Type = infer_expr_type(c, scope, prog);
+        if not is_unknown_type(t) {
+            if t.name != "Bool" {
+                diags.push(CheckDiag(c.line, c.column, prefix + t.name));
+            }
+        }
+        i = i + 1;
+    }
+    return diags;
+}
+
+// check_fn_contracts — requires-then-ensures well-typedness for a function /
+// method / constructor decl, evaluated in `scope`. Order (requires before
+// ensures) mirrors stage1; decreases clauses are a measure, not boolean, so
+// they are not checked.
+
+function check_fn_contracts(f: FunctionDecl, scope: Scope, prog: Program) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
+    let mutable rq: Array<CheckDiag> = check_bool_contracts(f.requires_clauses, "requires clause must be boolean, got ", scope, prog);
+    let mutable ri: Int = 0;
+    while ri < len(rq) {
+        diags.push(rq[ri]);
+        ri = ri + 1;
+    }
+    let mutable en: Array<CheckDiag> = check_bool_contracts(f.ensures_clauses, "ensures clause must be boolean, got ", scope, prog);
+    let mutable ei: Int = 0;
+    while ei < len(en) {
+        diags.push(en[ei]);
+        ei = ei + 1;
+    }
+    return diags;
+}
+
 // check_functions walks each top-level function body, mirroring stage1
 // checkFunctions (checker.go:907).
 
@@ -1908,6 +1954,13 @@ function check_functions(prog: Program, global: Scope, fn_names: Array<String>, 
     while i < len(prog.functions) {
         let f: FunctionDecl = prog.functions[i];
         let fn_scope: Scope = make_fn_scope(f, global);
+        // Contracts (requires then ensures) before the body, matching stage1.
+        let mutable fcd: Array<CheckDiag> = check_fn_contracts(f, fn_scope, prog);
+        let mutable fci: Int = 0;
+        while fci < len(fcd) {
+            diags.push(fcd[fci]);
+            fci = fci + 1;
+        }
         let mutable fd: Array<CheckDiag> = check_body_stmts(f.body.stmts, 0, false, "", fn_scope, fn_names, fn_counts, var_names, var_counts, collect_entity_names(prog), collect_enum_names(prog), prog);
         let mutable fi: Int = 0;
         while fi < len(fd) {
@@ -1927,26 +1980,54 @@ function check_entities(prog: Program, global: Scope, fn_names: Array<String>, f
     let mutable i: Int = 0;
     while i < len(prog.entities) {
         let e: EntityDecl = prog.entities[i];
-        if e.has_constructor {
-            let ctor_scope: Scope = make_method_scope(e.ctor, global, e.name);
-            let mutable cd: Array<CheckDiag> = check_body_stmts(e.ctor.body.stmts, 0, false, "", ctor_scope, fn_names, fn_counts, var_names, var_counts, collect_entity_names(prog), collect_enum_names(prog), prog);
-            let mutable ci: Int = 0;
-            while ci < len(cd) {
-                diags.push(cd[ci]);
-                ci = ci + 1;
+        // stage1 checkEntities SKIPS generic entities entirely (checker.go:1057):
+        // their type params are placeholders, so invariants/contracts/bodies are
+        // not checked. Match that (previously stage2 checked generic bodies, an
+        // inert difference — they produce no diagnostics; the guard aligns us).
+        if len(e.type_params) == 0 {
+            // Invariants first (self-only scope, no params). stage1:1068-1086.
+            let inv_scope: Scope = scope_define_typed(scope_enter(global), "self", type_named(e.name));
+            let mutable invd: Array<CheckDiag> = check_bool_contracts(e.invariants, "invariant must be boolean, got ", inv_scope, prog);
+            let mutable invi: Int = 0;
+            while invi < len(invd) {
+                diags.push(invd[invi]);
+                invi = invi + 1;
             }
-        }
-        let mutable mi: Int = 0;
-        while mi < len(e.methods) {
-            let m: FunctionDecl = e.methods[mi];
-            let meth_scope: Scope = make_method_scope(m, global, e.name);
-            let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "", meth_scope, fn_names, fn_counts, var_names, var_counts, collect_entity_names(prog), collect_enum_names(prog), prog);
-            let mutable mdi: Int = 0;
-            while mdi < len(md) {
-                diags.push(md[mdi]);
-                mdi = mdi + 1;
+            // Constructor: contracts (requires/ensures) then body. stage1:1132.
+            if e.has_constructor {
+                let ctor_scope: Scope = make_method_scope(e.ctor, global, e.name);
+                let mutable ccd: Array<CheckDiag> = check_fn_contracts(e.ctor, ctor_scope, prog);
+                let mutable cci: Int = 0;
+                while cci < len(ccd) {
+                    diags.push(ccd[cci]);
+                    cci = cci + 1;
+                }
+                let mutable cd: Array<CheckDiag> = check_body_stmts(e.ctor.body.stmts, 0, false, "", ctor_scope, fn_names, fn_counts, var_names, var_counts, collect_entity_names(prog), collect_enum_names(prog), prog);
+                let mutable ci: Int = 0;
+                while ci < len(cd) {
+                    diags.push(cd[ci]);
+                    ci = ci + 1;
+                }
             }
-            mi = mi + 1;
+            // Methods: each contracts then body. stage1:1185.
+            let mutable mi: Int = 0;
+            while mi < len(e.methods) {
+                let m: FunctionDecl = e.methods[mi];
+                let meth_scope: Scope = make_method_scope(m, global, e.name);
+                let mutable mcd: Array<CheckDiag> = check_fn_contracts(m, meth_scope, prog);
+                let mutable mci: Int = 0;
+                while mci < len(mcd) {
+                    diags.push(mcd[mci]);
+                    mci = mci + 1;
+                }
+                let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "", meth_scope, fn_names, fn_counts, var_names, var_counts, collect_entity_names(prog), collect_enum_names(prog), prog);
+                let mutable mdi: Int = 0;
+                while mdi < len(md) {
+                    diags.push(md[mdi]);
+                    mdi = mdi + 1;
+                }
+                mi = mi + 1;
+            }
         }
         i = i + 1;
     }

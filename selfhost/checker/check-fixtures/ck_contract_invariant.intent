@@ -1,0 +1,13 @@
+// check-fixtures/ck_contract_invariant.intent — Phase 48j-b / contract typing.
+// An entity invariant must be boolean. stage1: invariant must be boolean, got Int
+module ck_contract_invariant version "0.1.0";
+
+entity Widget {
+    field size: Int;
+
+    invariant self.size;
+
+    constructor(size: Int) {
+        self.size = size;
+    }
+}

@@ -1,0 +1,18 @@
+// check-fixtures/ck_contract_method.intent — Phase 48j-b / contract typing.
+// A method requires clause must be boolean.
+// stage1: requires clause must be boolean, got Int
+module ck_contract_method version "0.1.0";
+
+entity Widget {
+    field size: Int;
+
+    constructor(size: Int) {
+        self.size = size;
+    }
+
+    method grow(by: Int) returns Void
+        requires by
+    {
+        self.size = self.size + by;
+    }
+}

@@ -1,0 +1,8 @@
+// check-fixtures/ck_contract_requires.intent — Phase 48j-b / contract typing.
+// A requires clause must be boolean. stage1: requires clause must be boolean, got Int
+module ck_contract_requires version "0.1.0";
+
+function f(n: Int) returns Void
+    requires n
+{
+}

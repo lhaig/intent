@@ -988,3 +988,62 @@ test "operator typing: an Unknown operand (call result) is skipped soundly" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+// --- Phase 48j-b: contract well-typedness ---------------------------------
+// Each requires/ensures/invariant clause must be boolean. Emit on a confident
+// non-Bool clause; a clause using old()/result/quantifiers/calls infers Unknown
+// and is skipped (stage1 guards on exprType != nil).
+
+// Helper: the Widget entity used by the invariant/method-contract tests.
+function widget_entity(invariant_src: String, method_src: String) returns String {
+    return "entity Widget " + lbrace() + " field size: Int; " + invariant_src + " constructor(size: Int) " + lbrace() + " self.size = size; " + rbrace() + " " + method_src + " " + rbrace();
+}
+
+test "contract: a function requires clause must be boolean" {
+    let src: String = "module m version \"1.0\"; function f(n: Int) returns Void requires n " + lbrace() + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "requires clause must be boolean, got Int");
+}
+
+test "contract: a function ensures clause must be boolean" {
+    let src: String = "module m version \"1.0\"; function f(n: Int) returns Void ensures n " + lbrace() + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "ensures clause must be boolean, got Int");
+}
+
+test "contract: a valid boolean requires clause is clean (no false positive)" {
+    let src: String = "module m version \"1.0\"; function f(n: Int) returns Void requires n > 0 " + lbrace() + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "contract: an entity invariant must be boolean" {
+    let src: String = "module m version \"1.0\"; " + widget_entity("invariant self.size;", "");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "invariant must be boolean, got Int");
+}
+
+test "contract: a method requires clause must be boolean" {
+    let meth: String = "method grow(by: Int) returns Void requires by " + lbrace() + " self.size = self.size + by; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + widget_entity("", meth);
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "requires clause must be boolean, got Int");
+}
+
+test "contract: an Unknown clause (call result) is skipped soundly" {
+    let h: String = "function h() returns Int " + lbrace() + " return 1; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + h + " function f(n: Int) returns Void requires h() > 0 " + lbrace() + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "contract: a generic entity's invariant is not checked (stage1 skips generics)" {
+    let ent: String = "entity Box<T> " + lbrace() + " field size: Int; invariant self.size; constructor(size: Int) " + lbrace() + " self.size = size; " + rbrace() + " " + rbrace();
+    let src: String = "module m version \"1.0\"; " + ent;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
