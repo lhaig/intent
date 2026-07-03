@@ -1,0 +1,8 @@
+// check-fixtures/ck_builtin_arg_numbered.intent — Phase 48j-c / builtin arg typing.
+// A multi-argument builtin numbers the offending argument.
+// stage1: http_get() argument 2 must be String, got Int
+module ck_builtin_arg_numbered version "0.1.0";
+
+function f(n: Int) returns Void {
+    let r: Result<String, String> = http_get("https://x", n);
+}

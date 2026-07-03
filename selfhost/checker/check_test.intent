@@ -392,6 +392,44 @@ test "arity: variant check fires before function check (variants win on name col
     assert_eq(diags[0].message, "variant 'Wrap' expects 1 arguments, got 0");
 }
 
+// --- Phase 48j-c: builtin argument typing ---------------------------------
+// A builtin whose args require one simple type flags a confidently-wrong arg at
+// the call. Single-arg builtins omit the number; multi-arg builtins include it.
+
+test "builtin arg type: assert requires a Bool argument" {
+    let src: String = "module m version \"1.0\"; function f(n: Int) returns Void " + lbrace() + " assert(n); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "assert() argument must be Bool, got Int");
+}
+
+test "builtin arg type: assert with a Bool argument is clean (no false positive)" {
+    let src: String = "module m version \"1.0\"; function f(n: Int) returns Void " + lbrace() + " assert(n > 0); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "builtin arg type: a single-arg String builtin omits the argument number" {
+    let src: String = "module m version \"1.0\"; function f(n: Int) returns Void " + lbrace() + " let r: Result<String, String> = read_file(n); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "read_file() argument must be String, got Int");
+}
+
+test "builtin arg type: a multi-arg builtin numbers the offending argument" {
+    let src: String = "module m version \"1.0\"; function f(n: Int) returns Void " + lbrace() + " let r: Result<String, String> = http_get(\"u\", n); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "http_get() argument 2 must be String, got Int");
+}
+
+test "builtin arg type: an Unknown arg (call result) is skipped soundly" {
+    let h: String = "function h() returns Int " + lbrace() + " return 1; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + h + " function f() returns Void " + lbrace() + " assert(h()); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
 // ---------------------------------------------------------------------------
 // Phase 46.2: parse_type — structured Type tree from the AST's type strings.
 // Mirrors the forms shared/parser.intent parse_type_name emits.

@@ -1,0 +1,8 @@
+// check-fixtures/ck_builtin_arg_string.intent — Phase 48j-c / builtin arg typing.
+// A single-argument builtin's message omits the argument number.
+// stage1: read_file() argument must be String, got Int
+module ck_builtin_arg_string version "0.1.0";
+
+function f(n: Int) returns Void {
+    let r: Result<String, String> = read_file(n);
+}

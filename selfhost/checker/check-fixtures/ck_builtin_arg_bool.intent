@@ -1,0 +1,7 @@
+// check-fixtures/ck_builtin_arg_bool.intent — Phase 48j-c / builtin arg typing.
+// stage1: assert() argument must be Bool, got Int
+module ck_builtin_arg_bool version "0.1.0";
+
+function f(n: Int) returns Void {
+    assert(n);
+}

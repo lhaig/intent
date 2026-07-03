@@ -1029,6 +1029,39 @@ function builtin_arity_message(name: String, got: Int) returns String {
     return name + "() requires exactly " + n.to_string() + " " + noun + ", got " + got.to_string();
 }
 
+// builtin_arg_type — the single simple type EVERY argument of `name` must be
+// (stage1 checkCallExpr, checker.go:1659-1919), or "" for builtins whose args
+// are not one uniform simple type. Only builtins with a uniform String/Int/Bool
+// arg + the "argument [N ]must be T, got X" message shape are listed; print
+// (accepts-set message), assert_close (labeled Float), assert_eq/len/
+// assert_panics (compound types), the async await_*/timeout builtins, and the
+// zero-arg builtins are deferred. Phase 48j-c, ADR 0056.
+
+function builtin_arg_type(name: String) returns String {
+    if name == "assert" {
+        return "Bool";
+    }
+    if name == "char_from_codepoint" or name == "sleep" {
+        return "Int";
+    }
+    if name == "read_file" or name == "write_file" or name == "create_dir" or name == "file_exists" or name == "env_get" or name == "http_post" or name == "http_get" or name == "json_get" or name == "json_path" or name == "emit_event" {
+        return "String";
+    }
+    return "";
+}
+
+// builtin_arg_type_message — stage1's per-argument type diagnostic for `name`.
+// Multi-argument builtins number the argument ("argument N must be ..."); the
+// single-argument ones omit the number ("argument must be ..."). The split is
+// exactly arity > 1 (verified against checker.go).
+
+function builtin_arg_type_message(name: String, argnum: Int, arity: Int, req: String, got: String) returns String {
+    if arity > 1 {
+        return name + "() argument " + argnum.to_string() + " must be " + req + ", got " + got;
+    }
+    return name + "() argument must be " + req + ", got " + got;
+}
+
 // =============================================================================
 // EXPRESSION NAME CHECKER
 //
@@ -1233,6 +1266,7 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                     diags.push(CheckDiag(callee.line, callee.column, builtin_arity_message(callee.name, arg_count)));
                     return diags;
                 }
+                let breq: String = builtin_arg_type(callee.name);
                 let mutable bai: Int = 1;
                 while bai < len(e.children) {
                     let mutable bad: Array<CheckDiag> = check_expr_names(e.children[bai], scope, fn_names, fn_counts, var_names, var_counts, prog);
@@ -1240,6 +1274,18 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                     while badj < len(bad) {
                         diags.push(bad[badj]);
                         badj = badj + 1;
+                    }
+                    // Phase 48j-c: builtin argument typing. For a builtin whose
+                    // args all require one simple type, emit at the call
+                    // `NAME() argument [N ]must be T, got X` when the arg is
+                    // confidently a different simple type. Unknown or type_args
+                    // args skip (sound; .String() == .name only for no-type-args
+                    // types, keeping the message byte-equal). ADR 0056.
+                    if breq != "" {
+                        let bat: Type = infer_expr_type(e.children[bai], scope, prog);
+                        if (not is_unknown_type(bat)) and len(bat.type_args) == 0 and bat.name != breq {
+                            diags.push(CheckDiag(callee.line, callee.column, builtin_arg_type_message(callee.name, bai, bexp, breq, bat.name)));
+                        }
                     }
                     bai = bai + 1;
                 }
