@@ -930,3 +930,61 @@ test "method arity: a trait-impl method resolves via the impl (arity fires)" {
     assert_eq(len(diags), 1);
     assert_eq(diags[0].message, "method 'run' expects 1 arguments, got 0");
 }
+
+// --- Phase 48e: binary operator typing ------------------------------------
+// stage1 renders the operator via `%s` on BinaryExpr.Op (a TokenType), so the
+// message shows the token NAME (MINUS/STAR/EQ/LT/AND/...) — EXCEPT `+`, which is
+// a literal in the format string. Reproduced verbatim for byte-equality.
+
+// Helper: wrap a body in `f(a: Int, b: <bt>)` so operands are typed params.
+function fn_ab_body(bt: String, body: String) returns String {
+    return "function f(a: Int, b: " + bt + ") returns Void " + lbrace() + " " + body + " " + rbrace();
+}
+
+test "operator typing: arithmetic '-' shows the token name MINUS" {
+    let src: String = "module m version \"1.0\"; " + fn_ab_body("String", "let c: Int = a - b;");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "operator 'MINUS' not defined for Int and String");
+}
+
+test "operator typing: '+' is a literal in the message (not PLUS)" {
+    let src: String = "module m version \"1.0\"; " + fn_ab_body("String", "let c: Int = a + b;");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "operator '+' not defined for Int and String");
+}
+
+test "operator typing: logical 'and' uses the boolean-operands shape" {
+    let src: String = "module m version \"1.0\"; " + fn_ab_body("Bool", "let c: Bool = a and b;");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "operator 'AND' requires boolean operands, got Int and Bool");
+}
+
+test "operator typing: comparison '<' shows LT" {
+    let src: String = "module m version \"1.0\"; " + fn_ab_body("String", "let c: Bool = a < b;");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "operator 'LT' not defined for Int and String");
+}
+
+test "operator typing: equality on mismatched types shows EQ" {
+    let src: String = "module m version \"1.0\"; " + fn_ab_body("Bool", "let c: Bool = a == b;");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "operator 'EQ' not defined for Int and Bool");
+}
+
+test "operator typing: a valid Int + Int is clean (no false positive)" {
+    let src: String = "module m version \"1.0\"; " + fn_ab_body("Int", "let c: Int = a + b;");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "operator typing: an Unknown operand (call result) is skipped soundly" {
+    let h: String = "function h() returns Int " + lbrace() + " return 1; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + h + " function f() returns Void " + lbrace() + " let c: Int = h() + 1; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

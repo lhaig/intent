@@ -1,0 +1,8 @@
+// check-fixtures/ck_operator_plus.intent — Phase 48e / binary operator typing.
+// `+` is a LITERAL in stage1's format string (not %s), so it reads '+' not
+// 'PLUS'. stage1: operator '+' not defined for Int and String
+module ck_operator_plus version "0.1.0";
+
+function f(a: Int, b: String) returns Void {
+    let c: Int = a + b;
+}

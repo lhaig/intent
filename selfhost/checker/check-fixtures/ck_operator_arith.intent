@@ -1,0 +1,8 @@
+// check-fixtures/ck_operator_arith.intent — Phase 48e / binary operator typing.
+// stage1 prints the operator's TOKEN NAME (BinaryExpr.Op via %s), so `-` reads
+// 'MINUS'. stage1: operator 'MINUS' not defined for Int and String
+module ck_operator_arith version "0.1.0";
+
+function f(a: Int, b: String) returns Void {
+    let c: Int = a - b;
+}

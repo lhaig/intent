@@ -432,16 +432,126 @@ function type_named(name: String) returns Type {
 
 // Operator classes — op strings are the token text stored in ex_binop's name.
 
-function is_comparison_op(op: String) returns Bool {
-    return op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=";
+// is_eq_type / is_ord_type — the primitives stage1 checkBinaryExpr accepts for
+// `==`/`!=` (adds Bool) and for `<`/`>`/`<=`/`>=` (no Bool). ADR 0041 adds Char.
+
+function is_eq_type(name: String) returns Bool {
+    return name == "Int" or name == "Float" or name == "String" or name == "Bool" or name == "Char";
 }
 
-function is_logical_op(op: String) returns Bool {
-    return op == "and" or op == "or" or op == "implies";
+function is_ord_type(name: String) returns Bool {
+    return name == "Int" or name == "Float" or name == "String" or name == "Char";
 }
 
-function is_arith_op(op: String) returns Bool {
-    return op == "+" or op == "-" or op == "*" or op == "/" or op == "%";
+// binop_result_type — the Type stage1 checkBinaryExpr returns for `op` applied
+// to (already-known) operands `lt`/`rt`, or Unknown when the operator is NOT
+// defined for them (stage1 returns nil and emits an operator error). Callers
+// pass only confidently-inferred operands, so an Unknown result means "stage1
+// would error here". Mirrors checker.go:1564-1621 exactly.
+
+function binop_result_type(op: String, lt: Type, rt: Type) returns Type {
+    if op == "+" {
+        if lt.name == "Int" and rt.name == "Int" {
+            return type_named("Int");
+        }
+        if lt.name == "Float" and rt.name == "Float" {
+            return type_named("Float");
+        }
+        if lt.name == "String" and rt.name == "String" {
+            return type_named("String");
+        }
+        return type_unknown();
+    }
+    if op == "-" or op == "*" or op == "/" or op == "%" {
+        if lt.name == "Int" and rt.name == "Int" {
+            return type_named("Int");
+        }
+        if lt.name == "Float" and rt.name == "Float" {
+            return type_named("Float");
+        }
+        return type_unknown();
+    }
+    if op == "==" or op == "!=" {
+        if lt.name == rt.name and is_eq_type(lt.name) {
+            return type_named("Bool");
+        }
+        return type_unknown();
+    }
+    if op == "<" or op == ">" or op == "<=" or op == ">=" {
+        if lt.name == rt.name and is_ord_type(lt.name) {
+            return type_named("Bool");
+        }
+        return type_unknown();
+    }
+    if op == "and" or op == "or" or op == "implies" {
+        if lt.name == "Bool" and rt.name == "Bool" {
+            return type_named("Bool");
+        }
+        return type_unknown();
+    }
+    return type_unknown();
+}
+
+// operator_display — how stage1 renders the operator in checkBinaryExpr's error
+// message. That code uses `%s` on the TokenType (BinaryExpr.Op), which prints
+// the token NAME (MINUS/STAR/EQ/...) — EXCEPT `+`, a literal in the format
+// string. Reproduced verbatim for byte-equality (checker.go:1576/1587/1597/...).
+
+function operator_display(op: String) returns String {
+    if op == "+" {
+        return "+";
+    }
+    if op == "-" {
+        return "MINUS";
+    }
+    if op == "*" {
+        return "STAR";
+    }
+    if op == "/" {
+        return "SLASH";
+    }
+    if op == "%" {
+        return "PERCENT";
+    }
+    if op == "==" {
+        return "EQ";
+    }
+    if op == "!=" {
+        return "NEQ";
+    }
+    if op == "<" {
+        return "LT";
+    }
+    if op == ">" {
+        return "GT";
+    }
+    if op == "<=" {
+        return "LEQ";
+    }
+    if op == ">=" {
+        return "GEQ";
+    }
+    if op == "and" {
+        return "AND";
+    }
+    if op == "or" {
+        return "OR";
+    }
+    if op == "implies" {
+        return "IMPLIES";
+    }
+    return op;
+}
+
+// operator_error_message — stage1's checkBinaryExpr diagnostic for an operator
+// undefined on `lt`/`rt`. Logical ops read "requires boolean operands, got X and
+// Y"; every other op reads "not defined for X and Y".
+
+function operator_error_message(op: String, lt: Type, rt: Type) returns String {
+    if op == "and" or op == "or" or op == "implies" {
+        return "operator '" + operator_display(op) + "' requires boolean operands, got " + lt.name + " and " + rt.name;
+    }
+    return "operator '" + operator_display(op) + "' not defined for " + lt.name + " and " + rt.name;
 }
 
 public function infer_expr_type(e: Expr, scope: Scope, prog: Program) returns Type {
@@ -477,25 +587,20 @@ public function infer_expr_type(e: Expr, scope: Scope, prog: Program) returns Ty
         return infer_expr_type(e.children[0], scope, prog);
     }
     if e.kind == shared_ast.ex_binop() {
-        // Comparisons and logical operators yield Bool (for VALID operands; an
-        // invalid comparison is stage1's operator-typing error, a later slice,
-        // and does not occur in the valid corpus).
-        if is_comparison_op(e.name) or is_logical_op(e.name) {
-            return type_named("Bool");
-        }
-        // Arithmetic: the operand type when both operands are the same known
-        // primitive; Unknown otherwise (sound — never guesses).
-        if is_arith_op(e.name) {
-            let lt: Type = infer_expr_type(e.children[0], scope, prog);
-            let rt: Type = infer_expr_type(e.children[1], scope, prog);
-            if is_unknown_type(lt) or is_unknown_type(rt) {
-                return type_unknown();
-            }
-            if lt.name == rt.name {
-                return type_named(lt.name);
-            }
+        // Result type mirrors stage1 checkBinaryExpr: known only when BOTH
+        // operands are confidently inferred AND the operator is defined for them
+        // (binop_result_type), else Unknown. Comparisons/logical yield Bool for
+        // VALID operands but Unknown for invalid ones — never eagerly Bool, which
+        // would misfire the let/condition/arg checks when the operator itself is
+        // the error (that operator error is emitted by check_expr_names, 48e).
+        // Assignment `=` and any other op fall through binop_result_type to
+        // Unknown. Phase 48a refined by 48e, ADR 0056.
+        let lt: Type = infer_expr_type(e.children[0], scope, prog);
+        let rt: Type = infer_expr_type(e.children[1], scope, prog);
+        if is_unknown_type(lt) or is_unknown_type(rt) {
             return type_unknown();
         }
+        return binop_result_type(e.name, lt, rt);
     }
     if e.kind == shared_ast.ex_field() {
         // Phase 48i: `object.field`. Infer the object's type; if it is a known
@@ -917,6 +1022,23 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
         while ri < len(rd) {
             diags.push(rd[ri]);
             ri = ri + 1;
+        }
+        // Operator typing (stage1 checkBinaryExpr, checker.go:1564): after both
+        // operands are name-checked, if BOTH are confidently inferred and the
+        // operator is not defined for them (binop_result_type → Unknown), emit
+        // the operator error at the operator token. An Unknown operand skips
+        // (stage1 returns nil on a nil operand, emitting nothing — a sound false
+        // negative). Assignment `=` is a statement (checkAssignStmt), never
+        // routed through checkBinaryExpr, so it is not an operator-typing error.
+        // Phase 48e, ADR 0056.
+        if e.name != "=" {
+            let olt: Type = infer_expr_type(e.children[0], scope, prog);
+            let ort: Type = infer_expr_type(e.children[1], scope, prog);
+            if not is_unknown_type(olt) and not is_unknown_type(ort) {
+                if is_unknown_type(binop_result_type(e.name, olt, ort)) {
+                    diags.push(CheckDiag(e.line, e.column, operator_error_message(e.name, olt, ort)));
+                }
+            }
         }
         return diags;
     }

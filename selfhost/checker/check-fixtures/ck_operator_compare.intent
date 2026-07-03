@@ -1,0 +1,8 @@
+// check-fixtures/ck_operator_compare.intent — Phase 48e / binary operator typing.
+// Comparison ops read the token name; `<` is 'LT'.
+// stage1: operator 'LT' not defined for Int and String
+module ck_operator_compare version "0.1.0";
+
+function f(a: Int, b: String) returns Void {
+    let c: Bool = a < b;
+}
