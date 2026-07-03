@@ -1,16 +1,20 @@
 // selfhost/checker/check_main.intent — Phase 45.9 / stage2 runnable checker.
 //
-// The stage2 checker as an invokable CLI tool. Reads a single file path from
-// args()[1] (ADR 0045), reads the file, parses it, and prints semantic
-// diagnostics to stdout matching stage1 `intentc check` output exactly.
+// The stage2 checker as an invokable CLI tool. Reads one or more file paths from
+// args() (ADR 0045): argv[1] is the entry module (its path is used for
+// diagnostic output), and argv[2..] are its transitive import closure (in
+// dependency order), which the Go harness discovers via the module registry for
+// multi-file programs. Each is read + parsed; their top-level declarations are
+// merged into one Program (Phase 54) so cross-module types resolve, then the
+// merged Program is checked. Output matches stage1 `intentc check` exactly.
+//
+// Single-file programs (argv has exactly one path) bypass the merge entirely, so
+// their behaviour is byte-identical to before Phase 54.
 //
 // Output format (byte-equal with stage1):
 //   - Zero diags: "No errors found.\n"
 //   - N > 0 diags: "error[path:line:col]: message\n" for each (joined by "\n",
 //     no trailing newline from format_diags); print() appends the final "\n".
-//
-// Note: format_diags has NO trailing newline (unlike the linter's format_diags).
-// print() adds exactly one trailing newline, giving the correct final output.
 //
 // Exit codes:
 //   0  clean (no errors)
@@ -22,32 +26,162 @@ import "../shared/parser.intent";
 import "../shared/ast.intent";
 import "../shared/lexer.intent";
 
+// contains_name — membership test over a name list (local helper; the checker's
+// own name_seen is not exported).
+function contains_name(names: Array<String>, n: String) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(names) {
+        if names[i] == n {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// merge_programs — fold a list of parsed modules (entry first, then its import
+// closure in dependency order) into one Program for checking. Mirrors stage1's
+// multi-file checker.CheckAll (which registers each module's public symbols so
+// imported types resolve): here we flatten every module's declarations into one
+// Program so `type_is_known` / the global scope see cross-module entities,
+// enums, and traits — eliminating the `unknown type` false positives the stage2
+// checker used to emit on the compiler's own multi-file source.
+//
+// Cross-module name collisions are deduped (keep the first seen): a helper like
+// empty_string_array() is defined identically in several shared modules, which
+// stage1 permits because modules are separately scoped — a flat merge would
+// otherwise report a false "duplicate" error. The FIRST module (the entry) is
+// merged verbatim (no dedup) so genuine WITHIN-module duplicates it contains are
+// still reported exactly as stage1 would. impls/externs are appended as-is (each
+// is defined once in the closure). The entry's module/imports/tests/intent
+// blocks/trailing comments are preserved for output.
+//
+// A single-module list returns that module unchanged, keeping single-file output
+// byte-identical to the pre-Phase-54 checker.
+function merge_programs(progs: Array<Program>) returns Program {
+    if len(progs) == 1 {
+        return progs[0];
+    }
+    let base: Program = progs[0];
+    let mutable fns: Array<FunctionDecl> = [];
+    let mutable fn_names: Array<String> = [];
+    let mutable ents: Array<EntityDecl> = [];
+    let mutable ent_names: Array<String> = [];
+    let mutable ens: Array<EnumDecl> = [];
+    let mutable en_names: Array<String> = [];
+    let mutable trs: Array<TraitDecl> = [];
+    let mutable tr_names: Array<String> = [];
+    let mutable impls: Array<ImplDecl> = [];
+    let mutable externs: Array<ExternDecl> = [];
+    let mutable pi: Int = 0;
+    while pi < len(progs) {
+        let p: Program = progs[pi];
+        let is_entry: Bool = pi == 0;
+        let mutable fi: Int = 0;
+        while fi < len(p.functions) {
+            let f: FunctionDecl = p.functions[fi];
+            if is_entry or (not contains_name(fn_names, f.name)) {
+                fns.push(f);
+                fn_names.push(f.name);
+            }
+            fi = fi + 1;
+        }
+        let mutable eti: Int = 0;
+        while eti < len(p.entities) {
+            let e: EntityDecl = p.entities[eti];
+            if is_entry or (not contains_name(ent_names, e.name)) {
+                ents.push(e);
+                ent_names.push(e.name);
+            }
+            eti = eti + 1;
+        }
+        let mutable eni: Int = 0;
+        while eni < len(p.enums) {
+            let en: EnumDecl = p.enums[eni];
+            if is_entry or (not contains_name(en_names, en.name)) {
+                ens.push(en);
+                en_names.push(en.name);
+            }
+            eni = eni + 1;
+        }
+        let mutable tri: Int = 0;
+        while tri < len(p.traits) {
+            let tr: TraitDecl = p.traits[tri];
+            if is_entry or (not contains_name(tr_names, tr.name)) {
+                trs.push(tr);
+                tr_names.push(tr.name);
+            }
+            tri = tri + 1;
+        }
+        let mutable imi: Int = 0;
+        while imi < len(p.impls) {
+            impls.push(p.impls[imi]);
+            imi = imi + 1;
+        }
+        let mutable xi: Int = 0;
+        while xi < len(p.externs) {
+            externs.push(p.externs[xi]);
+            xi = xi + 1;
+        }
+        pi = pi + 1;
+    }
+    return Program(base.module_decl, base.imports, fns, ents, ens, trs, impls, base.intent_blocks, base.tests, externs, base.trailing_comments, "");
+}
+
 entry function main() returns Int {
     let argv: Array<String> = args();
     if len(argv) < 2 {
-        print("usage: intent-check <file.intent>");
+        print("usage: intent-check <file.intent> [<module.intent> ...]");
         return 1;
     }
-    let path: String = argv[1];
-    let r: Result<String, String> = read_file(path);
-    if r.is_err() {
-        print("error: cannot read file: " + path);
+    let entry_path: String = argv[1];
+    // Read + parse every path (entry first, then closure modules from the
+    // harness). A read or parse failure on any of them is fatal, as in stage1.
+    let mutable progs: Array<Program> = [];
+    let mutable ai: Int = 1;
+    while ai < len(argv) {
+        let p: String = argv[ai];
+        let r: Result<String, String> = read_file(p);
+        if r.is_err() {
+            print("error: cannot read file: " + p);
+            return 1;
+        }
+        let src: String = match r {
+            Ok(s) => s,
+            Err(_) => "",
+        };
+        let prog: Program = shared_parser.parse(src);
+        if prog.error != "" {
+            print("parse error: " + prog.error);
+            return 1;
+        }
+        progs.push(prog);
+        ai = ai + 1;
+    }
+    // Single-file: check the lone module exactly as before (byte-identical).
+    if len(progs) == 1 {
+        let sdiags: Array<CheckDiag> = checker.check_program(progs[0]);
+        if len(sdiags) == 0 {
+            print("No errors found.");
+            return 0;
+        }
+        print(checker.format_diags(sdiags, entry_path));
         return 1;
     }
-    let src: String = match r {
-        Ok(s) => s,
-        Err(_) => "",
-    };
-    let prog: Program = shared_parser.parse(src);
-    if prog.error != "" {
-        print("parse error: " + prog.error);
-        return 1;
+    // Multi-file: merge declarations and seed the imported module names so
+    // cross-module call qualifiers (shared_lexer.foo()) resolve.
+    let merged: Program = merge_programs(progs);
+    let mutable mod_names: Array<String> = [];
+    let mutable mi: Int = 0;
+    while mi < len(progs) {
+        mod_names.push(progs[mi].module_decl.name);
+        mi = mi + 1;
     }
-    let diags: Array<CheckDiag> = checker.check_program(prog);
+    let diags: Array<CheckDiag> = checker.check_program_seeded(merged, mod_names);
     if len(diags) == 0 {
         print("No errors found.");
         return 0;
     }
-    print(checker.format_diags(diags, path));
+    print(checker.format_diags(diags, entry_path));
     return 1;
 }

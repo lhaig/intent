@@ -255,7 +255,7 @@ func handleCheck(args []string) {
 			fmt.Fprintf(os.Stderr, "stage2 checker: %s\n", err)
 			os.Exit(1)
 		}
-		stdout, exitCode, err := runStage2Checker(binPath, filePath)
+		stdout, exitCode, err := runStage2Checker(binPath, stage2CheckPaths(filePath))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			os.Exit(1)
@@ -972,8 +972,44 @@ func stage2LinterBinary() (string, error) {
 // returns its stdout and exit code. Unlike runStage2Linter, a non-zero exit
 // does NOT mean an error in running the binary — it means the checker found
 // semantic errors. The caller distinguishes exit 0 (clean) from exit 1 (diags).
-func runStage2Checker(binaryPath, filePath string) (stdout string, exitCode int, err error) {
-	cmd := exec.Command(binaryPath, filePath)
+// stage2CheckPaths returns the argument list for the stage2 checker binary: the
+// entry file first (its path is used for diagnostic output), followed by its
+// transitive import closure for multi-file programs. Stage1 resolves imports via
+// CheckProject/CheckAll; the stage2 checker is a single-Program checker, so the
+// harness discovers the closure here (reusing the module registry) and passes
+// every module's path — check_main merges their declarations so cross-module
+// types and call qualifiers resolve. Single-file programs (or any discovery
+// failure) fall back to the entry alone, preserving the original behaviour.
+func stage2CheckPaths(entryPath string) []string {
+	paths := []string{entryPath}
+	isMulti, err := compiler.IsMultiFile(entryPath)
+	if err != nil || !isMulti {
+		return paths
+	}
+	registry, err := compiler.NewModuleRegistry(entryPath)
+	if err != nil {
+		return paths
+	}
+	depDiag, err := registry.DiscoverDependencies()
+	if err != nil || (depDiag != nil && depDiag.HasErrors()) {
+		return paths
+	}
+	sorted, err := registry.TopologicalSort()
+	if err != nil {
+		return paths
+	}
+	entryAbs, _ := filepath.Abs(entryPath)
+	for _, p := range sorted {
+		if pAbs, aerr := filepath.Abs(p); aerr == nil && pAbs == entryAbs {
+			continue // entry is passed first, above; don't parse it twice
+		}
+		paths = append(paths, p)
+	}
+	return paths
+}
+
+func runStage2Checker(binaryPath string, filePaths []string) (stdout string, exitCode int, err error) {
+	cmd := exec.Command(binaryPath, filePaths...)
 	var outBuf, errBuf strings.Builder
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf

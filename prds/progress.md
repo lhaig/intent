@@ -2041,3 +2041,44 @@ This opens Phase 53 (independent checker diagnostics). Remaining: the entity
 `unknown type` (0 corpus usage), trait-method contract parser gap. Plus the Phase
 48 tail (assert_eq signature sub-checks, async-test no-await warning, unary
 operator-typing, spawn/try operand recursion).
+
+---
+
+## 2026-07-03 — Phase 54: multi-file self-hosted checking (ADR 0058) — SELF-HOSTING BLOCKER FIXED
+
+The stage2 checker now checks the compiler's own multi-file source byte-equal
+with stage1. Previously `intentc check --self-hosted` checked a single file, so it
+emitted hundreds of false positives on real source (check.intent 84, parser.intent
+461+ `unknown type` for imported entities/enums, ~1172 `undeclared variable` for
+module-name call qualifiers). Fix (ADR 0058):
+
+- **Harness discovery** (`stage2CheckPaths`, cmd/intentc/main.go): for a
+  multi-file entry, reuse the Go ModuleRegistry (NewModuleRegistry /
+  DiscoverDependencies / TopologicalSort) to find the import closure and pass the
+  entry first + every module path to the stage2 binary. runStage2Checker now takes
+  a path slice. Single-file entries pass one path — unchanged.
+- **Stage2 merge** (`check_main.merge_programs`): parse each path and flatten the
+  modules into one Program so imported entities/enums/traits are visible to
+  type_is_known / the global scope. Cross-module name collisions dedup first-seen
+  (empty_string_array() is defined identically in ast + lexer; stage1 permits it
+  via module scoping). The entry is merged verbatim so genuine within-module dups
+  still fire; impls/externs appended.
+- **Module-name seeding** (`check_program_seeded`): seed imported module names so
+  `shared_lexer.foo()` resolves the qualifier instead of `undeclared variable`.
+  check_program is now a thin wrapper (empty extra names) → single-file + the 278
+  in-language tests are byte-identical.
+- **Gate** (`make selfcheck-checker`, selfhost/checker/selfcheck-check.sh): diffs
+  stage1 vs stage2 over the 9 core self-hosting modules → 9/9 PASS. Not wired into
+  `make validate` (stage2 is slow — ~24s on check.intent's merged closure).
+
+Verified: `intentc check --self-hosted` matches stage1 ("No errors found") on
+selfhost/shared/{lexer,ast,parser}, selfhost/checker/{check,check_main},
+selfhost/linter/{lint,lint_main}, selfhost/formatter/{format,main}. Single-file
+gates unchanged: diff-checker 86/86, diff-formatter 22/22, diff-linter 26/26,
+selfcheck-formatter, 278 checker tests, go test ./..., make validate all green.
+main_test.go updated for the runStage2Checker signature.
+
+This clears the [[project_stage2_checker_multifile_blocker]]. Remaining Phase 48/53
+error-diagnostic gaps (the long tail — missing diagnostics on invalid input) are
+now the next candidates, plus the deferred multi-file ERROR-position parity (this
+phase targets valid-source parity; see ADR 0058 non-goals).

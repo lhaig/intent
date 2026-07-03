@@ -139,6 +139,18 @@ first two checks shipped + pushed; the rest are the continuation.
 **NOTE:** stage1 `checkReturnStmt` does NOT compare the return value to the declared
 return type — there is no return-type-mismatch diagnostic to port.
 
+## Phase 54: Multi-file self-hosted checking — COMPLETE (2026-07-03)
+
+`intentc check --self-hosted` used to check a single file, so it flooded false
+positives on the compiler's own multi-file source (imported types → `unknown
+type`, module-name qualifiers → `undeclared variable`). This was the real
+self-hosting blocker (valid code rejected), invisible to the single-file
+`diff-checker` gate. ADR 0058.
+
+| # | Task | PRD | Status | Notes |
+|---|------|-----|--------|-------|
+| 54 | cross-module resolution for --self-hosted | ADR 0058 | DONE (2026-07-03) | Harness (`stage2CheckPaths`, main.go) reuses the Go ModuleRegistry to discover the import closure and passes the entry + all module paths to the stage2 binary. `check_main.merge_programs` flattens the modules into one Program (cross-module dedup by name, first-seen kept; entry merged verbatim so within-module dups still fire). `check_program_seeded` seeds imported module names so call qualifiers (`shared_lexer.foo()`) resolve; `check_program` is a thin wrapper (empty names) → single-file + tests byte-identical. New `make selfcheck-checker` gate: 9/9 core self-hosting modules match stage1 (not in `make validate` — stage2 is slow on big merges). commit TBD. diff-checker still 86/86, 278 checker tests, go test + validate green |
+
 ## Phase 53: Remaining checker diagnostics (independent gaps) — IN PROGRESS
 
 | # | Task | PRD | Status | Notes |

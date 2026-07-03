@@ -2535,6 +2535,16 @@ function check_tests(prog: Program, global: Scope, fn_names: Array<String>, fn_c
 // =============================================================================
 
 public function check_program(prog: Program) returns Array<CheckDiag> {
+    return check_program_seeded(prog, shared_ast.empty_string_array());
+}
+
+// check_program_seeded — check_program with additional names pre-seeded into the
+// global scope. Phase 54: the multi-file driver (check_main) passes the imported
+// modules' names so cross-module call qualifiers (`shared_lexer.foo()`) resolve
+// as known names instead of undeclared-variable false positives. Single-file
+// programs and the in-language tests call check_program (empty extra names), so
+// their behaviour is unchanged and byte-identical to before Phase 54.
+public function check_program_seeded(prog: Program, extra_names: Array<String>) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
 
     // --- Register phase -------------------------------------------------------
@@ -2568,7 +2578,16 @@ public function check_program(prog: Program) returns Array<CheckDiag> {
     // Builtin arity (assert/len/etc.) and method arity are deferred.
     // Order mirrors stage1: checkFunctions → checkEntities →
     // checkImplBlockBodies → checkTests (checker.go lines 118-121).
-    let global: Scope = build_global_scope(prog);
+    let mutable global: Scope = build_global_scope(prog);
+    // Phase 54: seed imported module names (call qualifiers) so a cross-module
+    // reference like `shared_lexer.kw_await_marker()` resolves the qualifier
+    // instead of reporting `undeclared variable 'shared_lexer'`. Empty for
+    // single-file / test callers (via check_program), leaving them unchanged.
+    let mutable mni: Int = 0;
+    while mni < len(extra_names) {
+        global = scope_define(global, extra_names[mni]);
+        mni = mni + 1;
+    }
     let fn_names: Array<String> = build_fn_arity_names(prog);
     let fn_counts: Array<Int> = build_fn_arity_counts(prog);
     let var_names: Array<String> = build_variant_arity_names(prog);

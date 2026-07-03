@@ -768,7 +768,7 @@ func TestRunStage2Checker(t *testing.T) {
 	t.Run("exit 0: stdout returned verbatim", func(t *testing.T) {
 		content := "No errors found.\n"
 		binPath := makeFakeFormatter(t, tmpDir, "check-ok", content, 0)
-		out, code, err := runStage2Checker(binPath, dummyFile)
+		out, code, err := runStage2Checker(binPath, []string{dummyFile})
 		if err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
@@ -783,7 +783,7 @@ func TestRunStage2Checker(t *testing.T) {
 	t.Run("exit 1: stdout returned verbatim with exit code 1", func(t *testing.T) {
 		content := "error[foo.intent:2:1]: function 'f' already defined\n"
 		binPath := makeFakeFormatter(t, tmpDir, "check-err", content, 1)
-		out, code, err := runStage2Checker(binPath, dummyFile)
+		out, code, err := runStage2Checker(binPath, []string{dummyFile})
 		if err != nil {
 			t.Fatalf("expected no error (non-zero exit is not a run error), got: %v", err)
 		}

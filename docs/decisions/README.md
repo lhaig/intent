@@ -89,3 +89,4 @@ What follows from this decision? Trade-offs accepted.
 | 0055 | [Self-hosted checker — builtin-call arity](0055-self-hosted-builtin-arity.md) | 2026-07-02 | accepted (Phase 47) |
 | 0056 | [Self-hosted checker — expression type inference (sound-but-incomplete)](0056-self-hosted-expression-inference.md) | 2026-07-02 | accepted (Phase 48) |
 | 0057 | [Self-hosted checker — async context via the Scope](0057-self-hosted-checker-async-context.md) | 2026-07-03 | accepted (Phase 48j-c2d) |
+| 0058 | [Self-hosted checker — cross-module resolution via harness discovery + stage2 merge](0058-self-hosted-checker-cross-module-resolution.md) | 2026-07-03 | accepted (Phase 54) |
