@@ -1,0 +1,15 @@
+// check-fixtures/ck_match_binding_count.intent — Phase 48j-a / binding-count mismatch.
+// stage1: variant 'Circle' has 1 fields but pattern has 0 bindings
+module ck_match_binding_count version "0.1.0";
+
+enum Shape {
+    Circle(r: Int),
+    Point,
+}
+
+function f(sh: Shape) returns Void {
+    let n: Int = match sh {
+        Circle => 0,
+        Point => 1,
+    };
+}

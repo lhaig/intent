@@ -1,0 +1,18 @@
+// check-fixtures/ck_match_unknown_variant.intent — Phase 48j-a / unknown variant.
+// stage1: variant 'Bogus' is not a variant of enum 'Status'
+module ck_match_unknown_variant version "0.1.0";
+
+enum Status {
+    Pending,
+    Running,
+    Complete,
+}
+
+function f(s: Status) returns Void {
+    let n: Int = match s {
+        Pending => 0,
+        Running => 1,
+        Complete => 2,
+        Bogus => 3,
+    };
+}

@@ -1047,3 +1047,75 @@ test "contract: a generic entity's invariant is not checked (stage1 skips generi
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+// --- Phase 48j-a: match-arm structural checks -----------------------------
+// For a scrutinee confidently typed as a known USER enum: variant-exists,
+// duplicate, binding-count, unreachable-after-wildcard, exhaustiveness. Arm-type
+// consistency + scrutinee-not-enum are deferred; Option/Result and other
+// scrutinees take the fallback (arm-body name checking only).
+
+function status_enum() returns String {
+    return "enum Status " + lbrace() + " Pending, Running, Complete, " + rbrace();
+}
+
+// Helper: a Status-scrutinee function wrapping a match with the given arms.
+function fn_match_status(arms: String) returns String {
+    return "function f(s: Status) returns Void " + lbrace() + " let n: Int = match s " + lbrace() + " " + arms + " " + rbrace() + "; " + rbrace();
+}
+
+test "match: a non-exhaustive match on a user enum fires" {
+    let src: String = "module m version \"1.0\"; " + status_enum() + " " + fn_match_status("Pending => 0,");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "non-exhaustive match on enum 'Status': missing variants: Running, Complete");
+}
+
+test "match: an exhaustive match is clean (no false positive)" {
+    let src: String = "module m version \"1.0\"; " + status_enum() + " " + fn_match_status("Pending => 0, Running => 1, Complete => 2,");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "match: a wildcard arm makes the match exhaustive (no false positive)" {
+    let src: String = "module m version \"1.0\"; " + status_enum() + " " + fn_match_status("Pending => 0, _ => 1,");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "match: a duplicate arm fires" {
+    let src: String = "module m version \"1.0\"; " + status_enum() + " " + fn_match_status("Pending => 0, Pending => 1, Running => 2, Complete => 3,");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "duplicate match arm for variant 'Pending'");
+}
+
+test "match: an unknown variant fires" {
+    let src: String = "module m version \"1.0\"; " + status_enum() + " " + fn_match_status("Pending => 0, Running => 1, Complete => 2, Bogus => 3,");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "variant 'Bogus' is not a variant of enum 'Status'");
+}
+
+test "match: a binding-count mismatch fires" {
+    let en: String = "enum Shape " + lbrace() + " Circle(r: Int), Point, " + rbrace();
+    let fn_src: String = "function f(sh: Shape) returns Void " + lbrace() + " let n: Int = match sh " + lbrace() + " Circle => 0, Point => 1, " + rbrace() + "; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + en + " " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "variant 'Circle' has 1 fields but pattern has 0 bindings");
+}
+
+test "match: correct data-variant bindings are clean (no false positive)" {
+    let en: String = "enum Shape " + lbrace() + " Circle(r: Int), Point, " + rbrace();
+    let fn_src: String = "function f(sh: Shape) returns Void " + lbrace() + " let n: Int = match sh " + lbrace() + " Circle(r) => r, Point => 1, " + rbrace() + "; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + en + " " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "match: an arm after a wildcard is unreachable" {
+    let src: String = "module m version \"1.0\"; " + status_enum() + " " + fn_match_status("_ => 0, Pending => 1,");
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "unreachable pattern after wildcard '_'");
+}

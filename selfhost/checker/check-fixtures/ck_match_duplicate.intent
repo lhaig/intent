@@ -1,0 +1,18 @@
+// check-fixtures/ck_match_duplicate.intent — Phase 48j-a / duplicate match arm.
+// stage1: duplicate match arm for variant 'Pending'
+module ck_match_duplicate version "0.1.0";
+
+enum Status {
+    Pending,
+    Running,
+    Complete,
+}
+
+function f(s: Status) returns Void {
+    let n: Int = match s {
+        Pending => 0,
+        Pending => 1,
+        Running => 2,
+        Complete => 3,
+    };
+}

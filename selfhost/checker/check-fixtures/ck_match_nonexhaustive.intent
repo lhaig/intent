@@ -1,0 +1,15 @@
+// check-fixtures/ck_match_nonexhaustive.intent — Phase 48j-a / match exhaustiveness.
+// stage1: non-exhaustive match on enum 'Status': missing variants: Running, Complete
+module ck_match_nonexhaustive version "0.1.0";
+
+enum Status {
+    Pending,
+    Running,
+    Complete,
+}
+
+function f(s: Status) returns Void {
+    let n: Int = match s {
+        Pending => 0,
+    };
+}

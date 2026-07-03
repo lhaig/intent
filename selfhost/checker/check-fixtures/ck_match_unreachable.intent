@@ -1,0 +1,16 @@
+// check-fixtures/ck_match_unreachable.intent — Phase 48j-a / unreachable after wildcard.
+// stage1: unreachable pattern after wildcard '_'
+module ck_match_unreachable version "0.1.0";
+
+enum Status {
+    Pending,
+    Running,
+    Complete,
+}
+
+function f(s: Status) returns Void {
+    let n: Int = match s {
+        _ => 0,
+        Pending => 1,
+    };
+}

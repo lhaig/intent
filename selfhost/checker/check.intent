@@ -872,6 +872,49 @@ function find_entity_index(prog: Program, name: String) returns Int {
     return 0 - 1;
 }
 
+// find_enum_index — index of the USER enum named `name` in prog.enums, or -1.
+// Builtin Option/Result are not in prog.enums, so a match on them resolves to
+// -1 → the match checks skip them (a sound false negative). Used by the
+// match-arm checks to resolve the scrutinee's enum + its variants.
+
+function find_enum_index(prog: Program, name: String) returns Int {
+    let mutable i: Int = 0;
+    while i < len(prog.enums) {
+        if prog.enums[i].name == name {
+            return i;
+        }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+// enum_has_variant — whether enum `ed` declares a variant named `name`.
+
+function enum_has_variant(ed: EnumDecl, name: String) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(ed.variants) {
+        if ed.variants[i].name == name {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// variant_field_count — the number of fields declared by variant `name` on enum
+// `ed` (0 for a unit variant, or if the variant is absent).
+
+function variant_field_count(ed: EnumDecl, name: String) returns Int {
+    let mutable i: Int = 0;
+    while i < len(ed.variants) {
+        if ed.variants[i].name == name {
+            return len(ed.variants[i].params);
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
 // entity_method_decls — every method named `method_name` on entity
 // `entity_name`, gathered from the entity BODY and from impl blocks for that
 // entity (stage1 merges trait-impl methods into Entity.Methods, so a call may
@@ -1001,6 +1044,20 @@ function builtin_arity_message(name: String, got: Int) returns String {
 //                  bound var defined.
 //   literals (ex_int, ex_float, ex_string, ex_bool, ex_char, ex_void) → skip.
 // =============================================================================
+
+// check_arm_body — name-checks a match arm's body in a child scope with the
+// arm's pattern bindings defined (stage1 recurses each arm body in armScope).
+// Shared by the match-arm check (48j-a) and the fallback path.
+
+function check_arm_body(arm: MatchArm, scope: Scope, fn_names: Array<String>, fn_counts: Array<Int>, var_names: Array<String>, var_counts: Array<Int>, prog: Program) returns Array<CheckDiag> {
+    let mutable arm_scope: Scope = scope_enter(scope);
+    let mutable bi: Int = 0;
+    while bi < len(arm.bindings) {
+        arm_scope = scope_define(arm_scope, arm.bindings[bi]);
+        bi = bi + 1;
+    }
+    return check_expr_names(arm.body, arm_scope, fn_names, fn_counts, var_names, var_counts, prog);
+}
 
 function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_counts: Array<Int>, var_names: Array<String>, var_counts: Array<Int>, prog: Program) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
@@ -1312,29 +1369,98 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
     }
     if e.kind == shared_ast.ex_match() {
         // children[0] is the scrutinee.
-        let mutable scd: Array<CheckDiag> = check_expr_names(e.children[0], scope, fn_names, fn_counts, var_names, var_counts, prog);
+        let scrutinee: Expr = e.children[0];
+        let mutable scd: Array<CheckDiag> = check_expr_names(scrutinee, scope, fn_names, fn_counts, var_names, var_counts, prog);
         let mutable sci: Int = 0;
         while sci < len(scd) {
             diags.push(scd[sci]);
             sci = sci + 1;
         }
-        // Each arm's body is checked in a child scope with the arm bindings.
-        let mutable ami: Int = 0;
-        while ami < len(e.match_arms) {
-            let arm: MatchArm = e.match_arms[ami];
-            let mutable arm_scope: Scope = scope_enter(scope);
-            let mutable bi: Int = 0;
-            while bi < len(arm.bindings) {
-                arm_scope = scope_define(arm_scope, arm.bindings[bi]);
-                bi = bi + 1;
+        // Phase 48j-a: when the scrutinee is confidently a known USER enum, port
+        // stage1 checkMatchExpr's structural checks (checker.go:2915) —
+        // variant-exists, duplicate arm, binding-count, unreachable-after-
+        // wildcard, and exhaustiveness. Arm-type consistency (needs arm-body
+        // inference) and scrutinee-must-be-enum (needs enum-vs-nonenum certainty
+        // that Option/Result would break) are deferred. Option/Result and any
+        // non-user-enum / unknown scrutinee take the fallback (arm bodies only) —
+        // a sound false negative. Per stage1: an unreachable or unknown-variant
+        // arm does NOT recurse its body (early `continue`).
+        let scrut_t: Type = infer_expr_type(scrutinee, scope, prog);
+        let enum_idx: Int = find_enum_index(prog, scrut_t.name);
+        if (not is_unknown_type(scrut_t)) and enum_idx >= 0 {
+            let ed: EnumDecl = prog.enums[enum_idx];
+            let mutable covered: Array<String> = [];
+            let mutable has_wildcard: Bool = false;
+            let mutable ami: Int = 0;
+            while ami < len(e.match_arms) {
+                let arm: MatchArm = e.match_arms[ami];
+                if has_wildcard {
+                    diags.push(CheckDiag(arm.line, arm.column, "unreachable pattern after wildcard '_'"));
+                } else {
+                    if arm.is_wildcard {
+                        has_wildcard = true;
+                        let mutable wbd: Array<CheckDiag> = check_arm_body(arm, scope, fn_names, fn_counts, var_names, var_counts, prog);
+                        let mutable wbi: Int = 0;
+                        while wbi < len(wbd) {
+                            diags.push(wbd[wbi]);
+                            wbi = wbi + 1;
+                        }
+                    } else {
+                        if not enum_has_variant(ed, arm.variant) {
+                            diags.push(CheckDiag(arm.line, arm.column, "variant '" + arm.variant + "' is not a variant of enum '" + ed.name + "'"));
+                        } else {
+                            if name_seen(covered, arm.variant) {
+                                diags.push(CheckDiag(arm.line, arm.column, "duplicate match arm for variant '" + arm.variant + "'"));
+                            }
+                            covered.push(arm.variant);
+                            let vfc: Int = variant_field_count(ed, arm.variant);
+                            if len(arm.bindings) != vfc {
+                                diags.push(CheckDiag(arm.line, arm.column, "variant '" + arm.variant + "' has " + vfc.to_string() + " fields but pattern has " + len(arm.bindings).to_string() + " bindings"));
+                            }
+                            let mutable vbd: Array<CheckDiag> = check_arm_body(arm, scope, fn_names, fn_counts, var_names, var_counts, prog);
+                            let mutable vbi: Int = 0;
+                            while vbi < len(vbd) {
+                                diags.push(vbd[vbi]);
+                                vbi = vbi + 1;
+                            }
+                        }
+                    }
+                }
+                ami = ami + 1;
             }
-            let mutable amd: Array<CheckDiag> = check_expr_names(arm.body, arm_scope, fn_names, fn_counts, var_names, var_counts, prog);
-            let mutable amdi: Int = 0;
-            while amdi < len(amd) {
-                diags.push(amd[amdi]);
-                amdi = amdi + 1;
+            // Exhaustiveness (only when no wildcard): missing variants in enum
+            // declaration order, comma-joined. stage1 checker.go:3006.
+            if not has_wildcard {
+                let mutable missing: String = "";
+                let mutable mcount: Int = 0;
+                let mutable vi: Int = 0;
+                while vi < len(ed.variants) {
+                    if not name_seen(covered, ed.variants[vi].name) {
+                        if mcount > 0 {
+                            missing = missing + ", ";
+                        }
+                        missing = missing + ed.variants[vi].name;
+                        mcount = mcount + 1;
+                    }
+                    vi = vi + 1;
+                }
+                if mcount > 0 {
+                    diags.push(CheckDiag(e.line, e.column, "non-exhaustive match on enum '" + ed.name + "': missing variants: " + missing));
+                }
             }
-            ami = ami + 1;
+            return diags;
+        }
+        // Fallback: scrutinee not a confident user enum — recurse arm bodies for
+        // name checking only (the pre-48j-a behavior).
+        let mutable fmi: Int = 0;
+        while fmi < len(e.match_arms) {
+            let mutable fbd: Array<CheckDiag> = check_arm_body(e.match_arms[fmi], scope, fn_names, fn_counts, var_names, var_counts, prog);
+            let mutable fbi: Int = 0;
+            while fbi < len(fbd) {
+                diags.push(fbd[fbi]);
+                fbi = fbi + 1;
+            }
+            fmi = fmi + 1;
         }
         return diags;
     }
