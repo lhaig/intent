@@ -443,6 +443,17 @@ function is_ord_type(name: String) returns Bool {
     return name == "Int" or name == "Float" or name == "String" or name == "Char";
 }
 
+// is_primitive_type — the built-in scalar types. These are definitively NOT
+// enums, so a match scrutinee confidently inferred to one of them is a
+// scrutinee-must-be-enum error (48j-a2). Entities/Option/Result/collections are
+// excluded: stage2 cannot always tell them apart from enums, so they are not
+// flagged (a sound false negative). Also `.String() == .name` for these, so the
+// diagnostic renders byte-equally.
+
+function is_primitive_type(name: String) returns Bool {
+    return name == "Int" or name == "Float" or name == "String" or name == "Bool" or name == "Char";
+}
+
 // binop_result_type — the Type stage1 checkBinaryExpr returns for `op` applied
 // to (already-known) operands `lt`/`rt`, or Unknown when the operator is NOT
 // defined for them (stage1 returns nil and emits an operator error). Callers
@@ -1448,6 +1459,16 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                     diags.push(CheckDiag(e.line, e.column, "non-exhaustive match on enum '" + ed.name + "': missing variants: " + missing));
                 }
             }
+            return diags;
+        }
+        // Scrutinee-must-be-enum (stage1 checkMatchExpr:2926): a scrutinee
+        // confidently inferred to a PRIMITIVE is definitely not an enum → emit at
+        // the match keyword and return WITHOUT processing arms (stage1 returns nil
+        // there). Restricted to primitives so Option/Result/entity/collection
+        // scrutinees (which stage2 can't confirm are non-enums) fall through to
+        // the arm-body fallback. Phase 48j-a2.
+        if (not is_unknown_type(scrut_t)) and is_primitive_type(scrut_t.name) {
+            diags.push(CheckDiag(e.line, e.column, "match scrutinee must be an enum type, got " + scrut_t.name));
             return diags;
         }
         // Fallback: scrutinee not a confident user enum — recurse arm bodies for

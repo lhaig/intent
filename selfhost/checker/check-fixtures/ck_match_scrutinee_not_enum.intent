@@ -1,0 +1,11 @@
+// check-fixtures/ck_match_scrutinee_not_enum.intent — Phase 48j-a2 / a match
+// scrutinee must be an enum. A confidently-primitive scrutinee is flagged (and
+// stage1 returns without processing arms).
+// stage1: match scrutinee must be an enum type, got Int
+module ck_match_scrutinee_not_enum version "0.1.0";
+
+function f(n: Int) returns Void {
+    let x: Int = match n {
+        _ => 0,
+    };
+}

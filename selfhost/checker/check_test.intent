@@ -1119,3 +1119,10 @@ test "match: an arm after a wildcard is unreachable" {
     assert_eq(len(diags), 1);
     assert_eq(diags[0].message, "unreachable pattern after wildcard '_'");
 }
+
+test "match: a primitive scrutinee must be an enum type" {
+    let src: String = "module m version \"1.0\"; function f(n: Int) returns Void " + lbrace() + " let x: Int = match n " + lbrace() + " _ => 0, " + rbrace() + "; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "match scrutinee must be an enum type, got Int");
+}
