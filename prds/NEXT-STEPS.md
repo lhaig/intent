@@ -1,5 +1,43 @@
 # Pickup Notes — 2026-07-03 (Phase 48 builtin+async DONE; Phase 53 opened: generic-entity arity)
 
+## ⚠️ SELF-HOSTING BLOCKER DISCOVERED (2026-07-03) — read before planning next work
+
+`make diff-checker` (86/86) only tests **single-file** programs (22 examples + fixtures).
+Running the stage2 checker on the compiler's OWN multi-file source reveals massive
+divergence — **false positives**, the opposite of the error-diagnostic gaps we've been
+closing:
+
+| file | stage1 | `check --self-hosted` |
+|---|---|---|
+| `selfhost/shared/ast.intent` (no imports) | No errors | **matches** (0) |
+| `selfhost/checker/check.intent` (imports) | No errors | **84 `unknown type` FPs** |
+| `selfhost/shared/parser.intent` (imports) | No errors | **461 `unknown type` FPs** |
+
+Root cause (verified in `cmd/intentc/main.go:237` handleCheck): the `--self-hosted` path
+runs the stage2 checker on a SINGLE file (`runStage2Checker`). Stage1 detects imports and
+routes multi-file programs through `compiler.CheckProject` (`main.go:283`), which discovers
++ merges the imported files and does cross-file type checking. The stage2 checker never
+resolves imports, so every imported type (`Token`, `Expr`, `Program`, and `Array<Token>`
+whose inner type is imported) → `unknown type` FP. `ast.intent` matches precisely because it
+imports nothing. The "byte-identical" guarantee holds ONLY for single-file inputs.
+
+**Implication:** the remaining error-diagnostic gaps below are the LONG TAIL (missing
+diagnostics on *invalid* inputs, corpus-invisible). This blocker is the opposite and more
+important class — the stage2 checker REJECTS VALID CODE, including its own source, so it
+cannot replace stage1 regardless of error-diagnostic completeness. It is invisible to every
+current gate because none test multi-file input.
+
+**Recommended next work (not yet started — awaiting direction):**
+1. Make `--self-hosted` handle multi-file input the way stage1 does — likely a harness-side
+   merge of imported modules into one Program/source before invoking the stage2 checker
+   (mirroring CheckProject's front-end), keeping the stage2 checker single-Program. Confirm
+   whether CheckProject merges into one combined source or checks files with a shared symbol
+   table (`internal/compiler/compiler.go` CheckProject / IsMultiFile).
+2. Add a `selfcheck-checker` gate (analogue of `selfcheck-formatter`) diffing both checkers
+   across all `selfhost/**/*.intent` — the metric that actually measures self-hosting
+   readiness and would have caught this. It will START RED; do NOT wire it into `make
+   validate`/CI until it's green (would break the build).
+
 ## Where we are
 
 **Phase 48 (Expression type inference + type-rule checks) — FOUNDATION + 18 CHECKS
