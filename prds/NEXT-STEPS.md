@@ -34,6 +34,8 @@ selfhost/
   [N ]must be T, got X` at the call (numbered iff arity>1). No-type_args + confident args only.
 - **print** (bd3d22f): accepts only Int/Float/Bool/String (not Char) → `print() cannot print
   type X (accepts Int, Float, Bool, String)` (uses base .name, byte-equal for generic/entity).
+- **assert_close** (87d04c3): each of the 3 args must be Float → `assert_close() argument N
+  (label) must be Float, got X` (labels actual/expected/epsilon).
 
 **Match checking (48j-a/a2) is COMPLETE** — all seven checkMatchExpr diagnostics byte-equal.
 Also pushed this session: **48i.2** method calls, **48e** binary operators, **48j-b** contracts.
@@ -42,12 +44,11 @@ Also pushed this session: **48i.2** method calls, **48e** binary operators, **48
 
 Remaining, in rough value order:
 
-- **48j-c2 — remaining builtin arg typing + `await_*` async-context**: assert_close (3 args,
-  labeled: `assert_close() argument N (label) must be Float, got X`, labels actual/expected/
-  epsilon), assert_eq (`assert_eq() type mismatch: actual is X, expected is Y` + the entity-eq
-  / comparable-set rules — complex, uses .String()), len (`len() requires Array, Map, or String
-  argument, got X` — needs generic .String()), assert_panics (`Fn() -> Void`). The async
-  builtins await_all/await_any/timeout emit `<name> can only be used inside async functions` —
+- **48j-c2 — remaining builtin arg typing + `await_*` async-context**: assert_eq
+  (`assert_eq() type mismatch: actual is X, expected is Y` + the entity-eq / comparable-set
+  rules — complex, uses .String()), len (`len() requires Array, Map, or String argument, got
+  X` — needs generic .String()), assert_panics (`Fn() -> Void`). The async builtins
+  await_all/await_any/timeout emit `<name> can only be used inside async functions` —
   this needs an async-context flag threaded through the checker (stage1 c.inAsyncFunc), which
   stage2 does NOT track yet; that flag is the real unlock (also gates the deferred `await`
   expression check). Hang off builtin_arg_type / a new table.

@@ -1809,3 +1809,20 @@ phase-53 gaps (extern unknown-type, generic-entity-instantiation arity — mind 
 let-mismatch caveat, trait contracts). Deferred: unary operator-typing, contract-clause
 recursion, impl-method contracts, method-call RETURN-type inference,
 immutable-assignment/push.
+
+---
+
+## 2026-07-03 — Phase 48j-c (cont.): assert_close argument typing
+
+Follow-on commit (87d04c3): assert_close's three arguments must each be Float, flagged with
+their label — `assert_close() argument N (label) must be Float, got X` (labels actual/
+expected/epsilon, via assert_close_label). Handled as a dedicated branch in the builtin
+arity-match loop (its labeled message doesn't fit the uniform builtin_arg_type shape).
+Confident + no-type_args args only. +1 fixture (diff-checker 75/75), +2 tests (255). All
+gates + validate green.
+
+48j-c now covers the uniform-type builtins, print, and assert_close — 19 stage1 type-rule
+diagnostics byte-equal overall. Remaining builtin arg typing (48j-c2): assert_eq (Equal +
+comparable-set + entity eq), len (Array/Map/String + generic .String()), assert_panics
+(Fn()->Void), and the async await_*/timeout builtins (need an inAsyncFunc flag threaded
+through the checker — not yet modeled). Then the phase-53 gaps.
