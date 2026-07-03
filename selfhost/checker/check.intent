@@ -1512,6 +1512,22 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
                 diags.push(exprd[expri]);
                 expri = expri + 1;
             }
+            // Assignment type-mismatch (stage1 checkAssignStmt:1336). An
+            // assignment `target = value` parses as an ex_binop with op "="
+            // (children[0]=target, children[1]=value). When both sides are
+            // confidently inferred and differ, emit at the statement position
+            // (stage1 anchors at the target's start). Phase 48h, ADR 0056.
+            if s.expr.kind == shared_ast.ex_binop() {
+                if s.expr.name == "=" {
+                    let tt: Type = infer_expr_type(s.expr.children[0], cur_scope);
+                    let vt: Type = infer_expr_type(s.expr.children[1], cur_scope);
+                    if not is_unknown_type(tt) and not is_unknown_type(vt) {
+                        if tt.name != vt.name {
+                            diags.push(CheckDiag(s.line, s.column, "type mismatch: cannot assign " + vt.name + " to " + tt.name));
+                        }
+                    }
+                }
+            }
         }
         // Recurse into if bodies with the SAME loop depth (if does not add depth).
         // Each branch gets its OWN child scope (bindings in then don't leak to else).

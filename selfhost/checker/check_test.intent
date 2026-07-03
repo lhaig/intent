@@ -836,3 +836,20 @@ test "variant arg type: matching field type is clean (no false positive)" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+// --- Phase 48h: assignment type-mismatch ----------------------------------
+
+test "assign mismatch: assigning String to an Int variable" {
+    let body: String = "let mutable n: Int = 0; n = \"hi\";";
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " " + body + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "type mismatch: cannot assign String to Int");
+}
+
+test "assign mismatch: assigning a matching type is clean (no false positive)" {
+    let body: String = "let mutable n: Int = 0; n = 5;";
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " " + body + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
