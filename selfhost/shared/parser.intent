@@ -672,11 +672,17 @@ public entity Parser {
             return Expr(shared_ast.ex_unary(), 0, "", false, "not", children);
         }
         if self.check(shared_lexer.kw_await_marker()) {
-            self.advance();
+            // Stamp the `await` keyword position so the checker's async-context
+            // diagnostic anchors there (matching stage1 AwaitExpr.Pos()). Inert
+            // to the formatter and every other gate (ADR 0054).
+            let await_tok: Token = self.advance();
             let operand: Expr = self.parse_unary();
             let mutable children: Array<Expr> = [];
             children.push(operand);
-            return Expr(shared_ast.ex_await(), 0, "", false, "", children);
+            let mutable aw: Expr = Expr(shared_ast.ex_await(), 0, "", false, "", children);
+            aw.line = await_tok.line;
+            aw.column = await_tok.column;
+            return aw;
         }
         if self.check(shared_lexer.kw_spawn_marker()) {
             self.advance();
