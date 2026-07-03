@@ -581,6 +581,32 @@ test "await expression: the operand is still name-checked (undeclared var)" {
     assert_eq(diags[0].message, "undeclared variable 'bogus'");
 }
 
+test "generic entity: wrong type-argument count is flagged" {
+    let src: String = "module m version \"1.0\"; entity Box<T> " + lbrace() + " field v: T; constructor(v: T) " + lbrace() + " self.v = v; " + rbrace() + " " + rbrace() + " function f() returns Void " + lbrace() + " Box<Int, String>(5); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "entity 'Box' expects 1 type arguments, got 2");
+}
+
+test "generic entity: missing type arguments is flagged" {
+    let src: String = "module m version \"1.0\"; entity Box<T> " + lbrace() + " field v: T; constructor(v: T) " + lbrace() + " self.v = v; " + rbrace() + " " + rbrace() + " function f() returns Void " + lbrace() + " Box(5); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "generic entity 'Box' requires type arguments");
+}
+
+test "generic entity: correct type-argument count is clean (no false positive)" {
+    let src: String = "module m version \"1.0\"; entity Box<T> " + lbrace() + " field v: T; constructor(v: T) " + lbrace() + " self.v = v; " + rbrace() + " " + rbrace() + " function f() returns Void " + lbrace() + " Box<Int>(5); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "generic entity: a non-generic entity constructor is not flagged" {
+    let src: String = "module m version \"1.0\"; entity Plain " + lbrace() + " field x: Int; constructor(x: Int) " + lbrace() + " self.x = x; " + rbrace() + " " + rbrace() + " function f() returns Void " + lbrace() + " Plain(5); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
 // ---------------------------------------------------------------------------
 // Phase 46.2: parse_type — structured Type tree from the AST's type strings.
 // Mirrors the forms shared/parser.intent parse_type_name emits.

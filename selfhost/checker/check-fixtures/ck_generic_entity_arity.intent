@@ -1,0 +1,19 @@
+// check-fixtures/ck_generic_entity_arity.intent — Phase 53a.
+// A generic entity constructor called with the wrong number of type arguments
+// (stage1 checkCallExpr:2071). Uses a BARE constructor-call statement, NOT a
+// let-binding: stage1 would additionally infer the ctor's return type and emit a
+// second `type mismatch` for a let, which stage2 (Unknown ctor return) cannot
+// reproduce — the bare statement keeps output byte-equal.
+// stage1: entity 'Box' expects 1 type arguments, got 2
+module ck_generic_entity_arity version "0.1.0";
+
+entity Box<T> {
+    field v: T;
+    constructor(v: T) {
+        self.v = v;
+    }
+}
+
+function f() returns Void {
+    Box<Int, String>(5);
+}

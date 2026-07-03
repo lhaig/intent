@@ -1,0 +1,17 @@
+// check-fixtures/ck_generic_entity_no_targs.intent — Phase 53a.
+// A generic entity constructor called with NO type arguments (stage1
+// checkCallExpr:2067). Bare constructor-call statement (see ck_generic_entity_arity
+// for why no let-binding).
+// stage1: generic entity 'Box' requires type arguments
+module ck_generic_entity_no_targs version "0.1.0";
+
+entity Box<T> {
+    field v: T;
+    constructor(v: T) {
+        self.v = v;
+    }
+}
+
+function f() returns Void {
+    Box(5);
+}

@@ -1615,6 +1615,38 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
             }
             cai = cai + 1;
         }
+        // Generic entity constructor type-argument arity (stage1 checkCallExpr:
+        // 2066). A generic constructor call parses as an ex_ident callee whose
+        // type args are BAKED into the name (`Stack<Int>()` → callee.name ==
+        // "Stack<Int>"); parse_type splits base + type_args. stage1 recurses the
+        // args first (done above) THEN checks arity, using the BASE name in the
+        // message and anchoring at the call (= the ident). Only when the base is
+        // a generic entity WITH a constructor (stage1 emits "has no constructor"
+        // first otherwise, and returns before this check — so we skip that case,
+        // a sound false negative):
+        //   - no type args  → `generic entity 'X' requires type arguments`;
+        //   - wrong count   → `entity 'X' expects N type arguments, got M`.
+        // The constructor's return type is NOT inferred here (stage2 returns
+        // Unknown for ctor calls), so a `let`-bound wrong-arity call would MISS
+        // stage1's second `type mismatch` diagnostic — fixtures use bare
+        // constructor-call statements to stay byte-equal. Phase 53a.
+        if callee.kind == shared_ast.ex_ident() {
+            let cbase: Type = parse_type(callee.name);
+            let ce_idx: Int = find_entity_index(prog, cbase.name);
+            if ce_idx >= 0 {
+                let ce: EntityDecl = prog.entities[ce_idx];
+                if ce.has_constructor and len(ce.type_params) > 0 {
+                    let ntargs: Int = len(cbase.type_args);
+                    if ntargs == 0 {
+                        diags.push(CheckDiag(callee.line, callee.column, "generic entity '" + cbase.name + "' requires type arguments"));
+                    } else {
+                        if ntargs != len(ce.type_params) {
+                            diags.push(CheckDiag(callee.line, callee.column, "entity '" + cbase.name + "' expects " + len(ce.type_params).to_string() + " type arguments, got " + ntargs.to_string()));
+                        }
+                    }
+                }
+            }
+        }
         return diags;
     }
     if e.kind == shared_ast.ex_match() {

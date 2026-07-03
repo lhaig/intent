@@ -2005,3 +2005,39 @@ eq-method signature sub-checks + Map/Future/generic recursion, the async-test
 no-await warning (testSawAwait), unary operator-typing, spawn/try operand recursion.
 Then phase-53 (generic-entity arity — mind the let-mismatch caveat, extern
 unknown-type, trait contracts).
+
+---
+
+## 2026-07-03 — Phase 53a: generic-entity-instantiation arity
+
+A generic entity constructor call parses as an ex_call whose ex_ident callee has
+the type args BAKED into the name (`Stack<Int>()` → callee.name == "Stack<Int>");
+parse_type splits base + type_args. In check_expr_names' ex_call path, after the
+common argument recursion (matching stage1's args-then-arity order,
+checkCallExpr:2061 then 2066), when the base name resolves to a generic entity
+(find_entity_index, len(type_params) > 0) that HAS a constructor:
+- no type args (`Box(5)`) → `generic entity 'Box' requires type arguments`;
+- wrong count (`Box<Int, String>(5)`) → `entity 'Box' expects 1 type arguments,
+  got 2`.
+Anchored at the callee position (= stage1 CallExpr.Pos()), base name in the
+message. The `has_constructor` guard is important: stage1 emits `entity 'X' has no
+constructor` and returns BEFORE the generic-arity check, so a generic entity
+without a constructor must NOT get the arity error (a sound skip; the `has no
+constructor` diagnostic itself is a separate deferred gap).
+
+Per the verified caveat, fixtures use BARE constructor-call statements, not
+let-bindings: stage1 also infers the ctor's return type and emits a second
+`type mismatch: cannot assign Box to Box` for a let, which stage2 (Unknown ctor
+return) cannot reproduce — the bare statement keeps output byte-equal.
+
++2 fixtures (ck_generic_entity_arity, ck_generic_entity_no_targs — diff-checker
+86/86), +4 tests (wrong count, missing type args, correct arity clean, non-generic
+entity clean — 278). Verified byte-equal against stage1 for all four plus the
+no-constructor divergence (pre-existing, corpus-invisible). All differential gates,
+go test ./..., and make validate green.
+
+This opens Phase 53 (independent checker diagnostics). Remaining: the entity
+`has no constructor` diagnostic (broader — also non-generic), extern param/return
+`unknown type` (0 corpus usage), trait-method contract parser gap. Plus the Phase
+48 tail (assert_eq signature sub-checks, async-test no-await warning, unary
+operator-typing, spawn/try operand recursion).

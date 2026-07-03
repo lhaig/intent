@@ -1,4 +1,4 @@
-# Pickup Notes — 2026-07-03 (Phase 48 IN PROGRESS: builtin arg typing + async-context (builtins + await expr) DONE)
+# Pickup Notes — 2026-07-03 (Phase 48 builtin+async DONE; Phase 53 opened: generic-entity arity)
 
 ## Where we are
 
@@ -13,9 +13,10 @@ seven checkMatchExpr diagnostics), **48j-c/48j-c2a-c** builtin argument typing
 for the uniform-type group + print + assert_close + len + assert_panics + assert_eq
 (mismatch + Float), and **48j-c2d/e** the async-context checks (await_all/await_any/
 timeout builtins + the `await` expression, ADR 0057 — async flag threaded on the
-Scope), plus **48j-c2f** the assert_eq entity no-eq-method comparable-set rule.
-`make diff-checker` → **84/84**, **274** checker tests. Full stage1 type-system parity
-is a large, open-ended goal; the rest (remaining Phase 48 gaps / phase-53) is below.
+Scope), **48j-c2f** the assert_eq entity no-eq-method comparable-set rule, and
+**53a** generic-entity-instantiation arity. `make diff-checker` → **86/86**, **278**
+checker tests. Full stage1 type-system parity is a large, open-ended goal; the rest
+(remaining Phase 48 gaps / phase-53) is below.
 
 **Phase 47 (builtin-call arity) — COMPLETE**. ADR 0055.
 **Phase 46 (type foundation + `unknown type`) — COMPLETE**. ADR 0053 + ADR 0054.
@@ -26,7 +27,7 @@ selfhost/
   shared/    lexer · ast · parser
   formatter/ intentc fmt   --self-hosted   (Phase 42, diff-formatter 22/22)
   linter/    intentc lint  --self-hosted   (Phase 43, diff-linter 26/26)
-  checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 84/84)
+  checker/   intentc check --self-hosted   (Phase 45-53, diff-checker 86/86)
 ```
 
 ## What 48j-c shipped (this session)
@@ -66,21 +67,24 @@ Remaining, in rough value order:
     their operand (the same latent gap the await case just closed for ex_await).
   - **unary operator-typing** — `unary '-'/'not'` errors; needs ex_unary positions + tighter
     unary inference (corpus-invisible).
-- **phase-53 gaps** (independent, smaller): **generic-entity-instantiation arity** (stage1
-  checker.go:2068 `generic entity 'X' requires type arguments` / `entity 'X' expects N type
-  arguments, got M`), **extern param/return `unknown type`** (0 corpus usage; stage2 parses
-  `ExternDecl`), and the stage2 **trait-method contract** parser gap.
-  - **CAVEAT (verified 2026-07-03)** for generic-entity arity: a generic constructor call
-    parses as an ex_call whose callee is an ex_ident with the type args BAKED INTO THE NAME
-    (`Stack<Int>()` → callee.name == "Stack<Int>"; `parse_type(callee.name)` splits base +
-    type_args). Anchor at the callee position (= stage1 CallExpr.Pos() = the ident), and use
-    the BASE name in the message (stage1 uses expr.Function = "Stack", not "Stack<Int>").
-    Arity checks return early, so a wrong-arity fixture emits only the arity error — BUT only
-    if there is no `let`: stage1 ALSO infers the constructor's return type and emits a second
-    `type mismatch: cannot assign Box to Box` for `let b: Box<Int> = Box<Int,String>(5)`
-    (its Equal() compares type args; both print as "Box"). The self-hosted checker returns
-    Unknown for constructor calls, so it would MISS that second diagnostic → fixtures must
-    use a BARE constructor-call statement, not a let-binding, to stay byte-equal.
+- **phase-53 gaps** (independent, smaller): **generic-entity-instantiation arity** is DONE
+  (53a — `generic entity 'X' requires type arguments` / `entity 'X' expects N type arguments,
+  got M`; the verified caveat below was applied — bare constructor-call fixtures, base name in
+  message, has_constructor guard). Remaining: the entity **`has no constructor`** diagnostic
+  (stage1 checker.go:2056; broader than 53a — also non-generic; currently a corpus-invisible
+  divergence stage2 doesn't emit), **extern param/return `unknown type`** (0 corpus usage;
+  stage2 parses `ExternDecl`), and the stage2 **trait-method contract** parser gap.
+  - **CAVEAT (verified 2026-07-03, APPLIED in 53a)** for generic-entity arity: a generic
+    constructor call parses as an ex_call whose callee is an ex_ident with the type args BAKED
+    INTO THE NAME (`Stack<Int>()` → callee.name == "Stack<Int>"; `parse_type(callee.name)`
+    splits base + type_args). Anchor at the callee position (= stage1 CallExpr.Pos() = the
+    ident), and use the BASE name in the message (stage1 uses expr.Function = "Stack", not
+    "Stack<Int>"). Arity checks return early, so a wrong-arity fixture emits only the arity
+    error — BUT only if there is no `let`: stage1 ALSO infers the constructor's return type and
+    emits a second `type mismatch: cannot assign Box to Box` for `let b: Box<Int> =
+    Box<Int,String>(5)` (its Equal() compares type args; both print as "Box"). The self-hosted
+    checker returns Unknown for constructor calls, so it would MISS that second diagnostic →
+    fixtures must use a BARE constructor-call statement, not a let-binding, to stay byte-equal.
 - **unary operator typing** (`unary '-' not defined for X`, `unary 'not' requires boolean
   operand, got X`): companion to 48e for checkUnaryExpr — needs ex_unary positions + tightening
   unary inference (currently eager Bool/operand-type). Low value, corpus-invisible.
