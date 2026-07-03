@@ -702,6 +702,26 @@ function lookup_function(prog: Program, name: String) returns Int {
     return 0 - 1;
 }
 
+// find_variant_params — the fields (as Params: name + type_name) of the enum
+// variant named `name`, or an empty array if not found. Used by the variant
+// argument-type check to read each field's declared type.
+
+function find_variant_params(prog: Program, name: String) returns Array<Param> {
+    let mutable ei: Int = 0;
+    while ei < len(prog.enums) {
+        let e: EnumDecl = prog.enums[ei];
+        let mutable vi: Int = 0;
+        while vi < len(e.variants) {
+            if e.variants[vi].name == name {
+                return e.variants[vi].params;
+            }
+            vi = vi + 1;
+        }
+        ei = ei + 1;
+    }
+    return shared_ast.empty_param_array();
+}
+
 // =============================================================================
 // BUILTIN CALL ARITY (Phase 47, ADR 0055)
 //
@@ -925,14 +945,29 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                     diags.push(CheckDiag(callee.line, callee.column, "variant '" + callee.name + "' expects " + var_arity.to_string() + " arguments, got " + arg_count.to_string()));
                     return diags;
                 }
-                // Correct variant arity — recurse args for undeclared.
+                // Correct variant arity — per arg: recurse for undeclared, then
+                // field-type check (stage1 checkCallExpr:2040-2048). Emit on a
+                // confidently-inferred, positioned arg whose type differs from
+                // the variant field's declared type; Unknown skips. Phase 48g.
+                let vparams: Array<Param> = find_variant_params(prog, callee.name);
                 let mutable vai: Int = 1;
                 while vai < len(e.children) {
-                    let mutable vad: Array<CheckDiag> = check_expr_names(e.children[vai], scope, fn_names, fn_counts, var_names, var_counts, prog);
+                    let varg: Expr = e.children[vai];
+                    let mutable vad: Array<CheckDiag> = check_expr_names(varg, scope, fn_names, fn_counts, var_names, var_counts, prog);
                     let mutable vadj: Int = 0;
                     while vadj < len(vad) {
                         diags.push(vad[vadj]);
                         vadj = vadj + 1;
+                    }
+                    let vpidx: Int = vai - 1;
+                    if vpidx < len(vparams) {
+                        let vptype: Type = parse_type(vparams[vpidx].type_name);
+                        let vatype: Type = infer_expr_type(varg, scope);
+                        if not is_unknown_type(vatype) and varg.line > 0 {
+                            if vatype.name != vptype.name {
+                                diags.push(CheckDiag(varg.line, varg.column, "variant '" + callee.name + "' field '" + vparams[vpidx].name + "' expects " + vptype.name + ", got " + vatype.name));
+                            }
+                        }
                     }
                     vai = vai + 1;
                 }

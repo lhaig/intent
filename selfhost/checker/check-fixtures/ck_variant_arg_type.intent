@@ -1,0 +1,11 @@
+// check-fixtures/ck_variant_arg_type.intent — Phase 48g / variant constructor
+// field-type mismatch. stage1: variant 'Named' field 'label' expects String, got Int
+module ck_variant_arg_type version "0.1.0";
+
+enum Shape {
+    Named(label: String),
+}
+
+function f() returns Shape {
+    return Named(42);
+}

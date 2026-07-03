@@ -817,3 +817,22 @@ test "let-bound var: correct downstream use is clean (no false positive)" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+// --- Phase 48g: variant-constructor argument-type mismatch ----------------
+
+test "variant arg type: Int passed where a String field is expected" {
+    let en: String = "enum Shape " + lbrace() + " Named(label: String), " + rbrace();
+    let body: String = "return Named(42);";
+    let src: String = "module m version \"1.0\"; " + en + " function f() returns Shape " + lbrace() + " " + body + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "variant 'Named' field 'label' expects String, got Int");
+}
+
+test "variant arg type: matching field type is clean (no false positive)" {
+    let en: String = "enum Shape " + lbrace() + " Named(label: String), " + rbrace();
+    let body: String = "return Named(\"hi\");";
+    let src: String = "module m version \"1.0\"; " + en + " function f() returns Shape " + lbrace() + " " + body + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
