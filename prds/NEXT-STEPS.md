@@ -58,6 +58,17 @@ Remaining, in rough value order:
   checker.go:2068 `generic entity 'X' requires type arguments` / `entity 'X' expects N type
   arguments, got M`), **extern param/return `unknown type`** (0 corpus usage; stage2 parses
   `ExternDecl`), and the stage2 **trait-method contract** parser gap.
+  - **CAVEAT (verified 2026-07-03)** for generic-entity arity: a generic constructor call
+    parses as an ex_call whose callee is an ex_ident with the type args BAKED INTO THE NAME
+    (`Stack<Int>()` → callee.name == "Stack<Int>"; `parse_type(callee.name)` splits base +
+    type_args). Anchor at the callee position (= stage1 CallExpr.Pos() = the ident), and use
+    the BASE name in the message (stage1 uses expr.Function = "Stack", not "Stack<Int>").
+    Arity checks return early, so a wrong-arity fixture emits only the arity error — BUT only
+    if there is no `let`: stage1 ALSO infers the constructor's return type and emits a second
+    `type mismatch: cannot assign Box to Box` for `let b: Box<Int> = Box<Int,String>(5)`
+    (its Equal() compares type args; both print as "Box"). The self-hosted checker returns
+    Unknown for constructor calls, so it would MISS that second diagnostic → fixtures must
+    use a BARE constructor-call statement, not a let-binding, to stay byte-equal.
 - **48j-c — builtin argument typing + `await_*` async-context** (deferred from Phase 47;
   hang off the builtin table). Plus **unary operator typing** (`unary '-' not defined for
   X`, `unary 'not' requires boolean operand, got X`) — needs ex_unary positions + tightening
