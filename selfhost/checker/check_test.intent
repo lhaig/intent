@@ -430,6 +430,19 @@ test "builtin arg type: an Unknown arg (call result) is skipped soundly" {
     assert_eq(len(diags), 0);
 }
 
+test "builtin arg type: print rejects a non-printable type (Char)" {
+    let src: String = "module m version \"1.0\"; function f(c: Char) returns Void " + lbrace() + " print(c); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "print() cannot print type Char (accepts Int, Float, Bool, String)");
+}
+
+test "builtin arg type: print accepts a String (no false positive)" {
+    let src: String = "module m version \"1.0\"; function f(s: String) returns Void " + lbrace() + " print(s); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
 // ---------------------------------------------------------------------------
 // Phase 46.2: parse_type — structured Type tree from the AST's type strings.
 // Mirrors the forms shared/parser.intent parse_type_name emits.

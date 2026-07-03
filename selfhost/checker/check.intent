@@ -1062,6 +1062,14 @@ function builtin_arg_type_message(name: String, argnum: Int, arity: Int, req: St
     return name + "() argument must be " + req + ", got " + got;
 }
 
+// is_printable_type — the types print() accepts (stage1 checkCallExpr:1666).
+// Note Char is NOT accepted. The print() diagnostic uses the base .Name, so it
+// renders byte-equally even for a generic/entity argument.
+
+function is_printable_type(name: String) returns Bool {
+    return name == "Int" or name == "Float" or name == "Bool" or name == "String";
+}
+
 // =============================================================================
 // EXPRESSION NAME CHECKER
 //
@@ -1285,6 +1293,16 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                         let bat: Type = infer_expr_type(e.children[bai], scope, prog);
                         if (not is_unknown_type(bat)) and len(bat.type_args) == 0 and bat.name != breq {
                             diags.push(CheckDiag(callee.line, callee.column, builtin_arg_type_message(callee.name, bai, bexp, breq, bat.name)));
+                        }
+                    }
+                    // print() accepts only Int/Float/Bool/String; a confidently
+                    // other-typed argument is `print() cannot print type X ...`.
+                    // The message uses the base .name (not .String()), so it is
+                    // byte-equal even for generic/entity args. Phase 48j-c.
+                    if callee.name == "print" {
+                        let pat: Type = infer_expr_type(e.children[bai], scope, prog);
+                        if (not is_unknown_type(pat)) and (not is_printable_type(pat.name)) {
+                            diags.push(CheckDiag(callee.line, callee.column, "print() cannot print type " + pat.name + " (accepts Int, Float, Bool, String)"));
                         }
                     }
                     bai = bai + 1;

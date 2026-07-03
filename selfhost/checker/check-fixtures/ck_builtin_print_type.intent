@@ -1,0 +1,8 @@
+// check-fixtures/ck_builtin_print_type.intent — Phase 48j-c / print() arg typing.
+// print() accepts only Int/Float/Bool/String (not Char).
+// stage1: print() cannot print type Char (accepts Int, Float, Bool, String)
+module ck_builtin_print_type version "0.1.0";
+
+function f(c: Char) returns Void {
+    print(c);
+}
