@@ -216,12 +216,19 @@ public entity MatchArm {
     field bindings: Array<String>;
     field is_wildcard: Bool;
     field body: Expr;
+    // ADR 0054 (Phase 48j-a): source position of the pattern's first token
+    // (variant name or `_`), matching stage1 MatchArm.Pos()/MatchPattern.Pos().
+    // Defaulted to 0 (no constructor signature change); the parser assigns them.
+    field line: Int;
+    field column: Int;
 
     constructor(variant: String, bindings: Array<String>, is_wildcard: Bool, body: Expr) {
         self.variant = variant;
         self.bindings = bindings;
         self.is_wildcard = is_wildcard;
         self.body = body;
+        self.line = 0;
+        self.column = 0;
     }
 }
 

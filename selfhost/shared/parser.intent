@@ -870,7 +870,7 @@ public entity Parser {
     }
 
     method parse_match_expr() returns Expr {
-        self.expect(shared_lexer.kw_match_marker(), "'match'");
+        let match_tok: Token = self.expect(shared_lexer.kw_match_marker(), "'match'");
         let scrutinee: Expr = self.parse_expr();
         self.expect(shared_lexer.tk_lbrace(), "'" + '{'.to_string() + "' to start match arms");
         let mutable arms: Array<MatchArm> = [];
@@ -880,8 +880,13 @@ public entity Parser {
         self.expect(shared_lexer.tk_rbrace(), "'" + '}'.to_string() + "' to close match");
         let mutable children: Array<Expr> = [];
         children.push(scrutinee);
+        // ADR 0054: anchor the match expression at the `match` keyword (stage1
+        // MatchExpr.Pos()) so the checker's non-exhaustive-match diagnostic lands
+        // there. Additive/inert.
         let mutable e: Expr = Expr(shared_ast.ex_match(), 0, "", false, "", children);
         e.match_arms = arms;
+        e.line = match_tok.line;
+        e.column = match_tok.column;
         return e;
     }
 
@@ -909,7 +914,13 @@ public entity Parser {
         self.expect(shared_lexer.tk_arrow(), "'=>' in match arm");
         let body: Expr = self.parse_expr();
         self.check_consume(shared_lexer.tk_comma());
-        return MatchArm(variant, bindings, is_wild, body);
+        // ADR 0054: anchor the arm at the pattern's first token (variant name or
+        // `_`), matching stage1 MatchArm.Pos(), so per-arm match diagnostics land
+        // on the pattern. Additive/inert.
+        let mutable ma: MatchArm = MatchArm(variant, bindings, is_wild, body);
+        ma.line = name_tok.line;
+        ma.column = name_tok.column;
+        return ma;
     }
 
     method parse_quantifier(kind: Int) returns Expr {
