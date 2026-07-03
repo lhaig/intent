@@ -1,19 +1,17 @@
-# Pickup Notes — 2026-07-03 (Phase 48 IN PROGRESS: match checking complete)
+# Pickup Notes — 2026-07-03 (Phase 48 IN PROGRESS: builtin arg typing started)
 
 ## Where we are
 
-**Phase 48 (Expression type inference + type-rule checks) — FOUNDATION + 16 CHECKS
+**Phase 48 (Expression type inference + type-rule checks) — FOUNDATION + 18 CHECKS
 SHIPPED, IN PROGRESS.** ADR 0056: `infer_expr_type` is SOUND but INCOMPLETE (a Type only
 when certain, else an Unknown sentinel); type-rule checks fire only on a confident result,
-so each is corpus-safe while inference grows. Shipped + pushed: **48a** the inference engine,
-**48b** `if/while condition must be boolean`, **48c** `let` type-mismatch, **48d/48d+** the
-type-carrying scope, **48f** function arg-type, **48g** variant arg-type, **48h** assignment
-mismatch, **48i.1** `self` + field-access inference, **48i.2** method-call arity + arg-types,
-**48e** binary operator typing, **48j-b** contract well-typedness, **48j-a** the five
-match-arm structural checks, and **48j-a2** match arm-type consistency + scrutinee-must-be-
-enum. **Match checking is now COMPLETE** — all seven stage1 checkMatchExpr diagnostics are
-byte-equal. `make diff-checker` → **70/70**, **246** checker tests. Full stage1 type-system
-parity is a large, open-ended goal; the rest (48j-c / phase-53) is below.
+so each is corpus-safe while inference grows. Shipped + pushed: **48a-48h** (inference engine,
+condition-boolean, let-mismatch, typed scope, function/variant arg-type, assignment mismatch),
+**48i.1/48i.2** (self + field access, method-call arity/arg-types), **48e** binary operator
+typing, **48j-b** contract well-typedness, **48j-a/48j-a2** the complete match checking (all
+seven checkMatchExpr diagnostics), and **48j-c** builtin argument typing for the uniform-type
+group + print. `make diff-checker` → **74/74**, **253** checker tests. Full stage1 type-system
+parity is a large, open-ended goal; the rest (48j-c2 / phase-53) is below.
 
 **Phase 47 (builtin-call arity) — COMPLETE**. ADR 0055.
 **Phase 46 (type foundation + `unknown type`) — COMPLETE**. ADR 0053 + ADR 0054.
@@ -27,32 +25,32 @@ selfhost/
   checker/   intentc check --self-hosted   (Phase 45-48, diff-checker 68/68)
 ```
 
-## What 48j-a2 shipped (this session)
+## What 48j-c shipped (this session)
 
-- **scrutinee-must-be-enum** (e65292f): a match scrutinee confidently inferred to a PRIMITIVE
-  (is_primitive_type) is flagged `match scrutinee must be an enum type, got X` at the match
-  keyword (emit + return, like stage1); Option/Result/entity/collection scrutinees fall to
-  the fallback (sound skip).
-- **arm-type consistency** (d461273): each reached arm's body is inferred in `arm_typed_scope`
-  (bindings TYPED from variant fields, only where index < field count, like stage1). Arm 0 is
-  the baseline (stage1 i==0; skipped/untypeable arm 0 → no comparisons); a later arm of a
-  confidently DIFFERENT type (no type_args, so String()==name) → `match arm type mismatch:
-  expected X, got Y` at that arm.
+- **uniform-type builtins** (42b3f0c): `builtin_arg_type` maps each builtin whose args all
+  require one simple type → that type (assert→Bool, char_from_codepoint/sleep→Int, read_file/
+  write_file/create_dir/file_exists/env_get/http_post/http_get/json_get/json_path/emit_event→
+  String). In the builtin arity-match path, a confidently other-typed arg → `NAME() argument
+  [N ]must be T, got X` at the call (numbered iff arity>1). No-type_args + confident args only.
+- **print** (bd3d22f): accepts only Int/Float/Bool/String (not Char) → `print() cannot print
+  type X (accepts Int, Float, Bool, String)` (uses base .name, byte-equal for generic/entity).
 
-**Match checking is COMPLETE**: all seven stage1 checkMatchExpr diagnostics byte-equal.
-Earlier this session (also pushed): **48i.2** method-call arity/arg-types, **48e** binary
-operator typing, **48j-b** contract well-typedness, **48j-a** the five match structural
-checks (+match-pos front-end 88807f7).
+**Match checking (48j-a/a2) is COMPLETE** — all seven checkMatchExpr diagnostics byte-equal.
+Also pushed this session: **48i.2** method calls, **48e** binary operators, **48j-b** contracts.
 
-## Next: Phase 48j-c / phase-53 gaps
+## Next: Phase 48j-c2 / phase-53 gaps
 
 Remaining, in rough value order:
 
-- **48j-c — builtin argument typing + `await_*` async-context** (deferred from Phase 47):
-  hang off the builtin table (builtin_arity_names). stage1 checkCallExpr (checker.go:1659-
-  2028) type-checks each builtin's args with ~20 bespoke messages (e.g. `print() cannot
-  print type X`, `assert() argument must be Bool, got X`, `len() ...`). Emit only on a
-  confident arg type. Plus `await` outside an async context. Larger; slice per builtin group.
+- **48j-c2 — remaining builtin arg typing + `await_*` async-context**: assert_close (3 args,
+  labeled: `assert_close() argument N (label) must be Float, got X`, labels actual/expected/
+  epsilon), assert_eq (`assert_eq() type mismatch: actual is X, expected is Y` + the entity-eq
+  / comparable-set rules — complex, uses .String()), len (`len() requires Array, Map, or String
+  argument, got X` — needs generic .String()), assert_panics (`Fn() -> Void`). The async
+  builtins await_all/await_any/timeout emit `<name> can only be used inside async functions` —
+  this needs an async-context flag threaded through the checker (stage1 c.inAsyncFunc), which
+  stage2 does NOT track yet; that flag is the real unlock (also gates the deferred `await`
+  expression check). Hang off builtin_arg_type / a new table.
 - **phase-53 gaps** (independent, smaller): **generic-entity-instantiation arity** (stage1
   checker.go:2068 `generic entity 'X' requires type arguments` / `entity 'X' expects N type
   arguments, got M`), **extern param/return `unknown type`** (0 corpus usage; stage2 parses
@@ -86,9 +84,10 @@ assignment/push (needs mutability tracking in Scope).
 ## How to resume
 
 1. `git log --oneline -20`, then read this file + `prds/TASKS.md` (Phase 48 rows) + ADR 0056.
-2. Continue Phase 48 at **48j-c** — builtin argument typing (hang off builtin_arity_names;
-   port stage1 checkCallExpr's per-builtin arg messages, one builtin-group per slice) — or
-   pick a phase-53 gap (generic-entity arity is well-scoped, but mind the let-mismatch caveat
-   above). Keep inference SOUND (Unknown skips); one check per slice, gate after each.
+2. Continue Phase 48 at **48j-c2** — the remaining builtin arg checks (assert_close/assert_eq/
+   len/assert_panics) hang off the same builtin_arg_type path; the async await_* builtins need
+   an inAsyncFunc flag threaded through the checker first. Or pick a phase-53 gap (generic-
+   entity arity is well-scoped, but mind the let-mismatch caveat above). Keep inference SOUND
+   (Unknown skips); one check per slice, gate after each.
 3. Validate with `make validate`, `make selfcheck-formatter`, `make diff-formatter`,
    `make diff-linter`, `make diff-checker` after every slice.

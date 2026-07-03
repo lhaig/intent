@@ -1771,3 +1771,41 @@ async-context (48j-c), and phase-53 gaps (extern unknown-type, generic-entity-in
 arity — mind the let-mismatch caveat, trait contracts). Deferred: contract-clause recursion,
 impl-method contracts, method-call RETURN-type inference, unary operator-typing,
 immutable-assignment/push.
+
+---
+
+## 2026-07-03 — Phase 48j-c: builtin argument typing (uniform-type group + print)
+
+Two commits, no front-end change (builtins hang off the existing builtin_arity machinery):
+- **uniform-type group** (42b3f0c): new builtin_arg_type table maps each builtin whose args
+  all require ONE simple type → that type: assert(Bool), char_from_codepoint/sleep(Int), and
+  read_file/write_file/create_dir/file_exists/env_get/http_post/http_get/json_get/json_path/
+  emit_event(String). In the builtin arity-match path, each arg confidently inferred to a
+  different simple type is flagged at the call with `NAME() argument [N ]must be T, got X` —
+  numbered iff arity>1 (all 1-arg builtins read "argument must be", multi-arg read "argument
+  N must be"; the split is exactly arity, verified against checker.go). Unknown or type_args
+  args skip (sound; stage1 Type.String()==.name only for no-type-args types, keeping the
+  message byte-equal).
+- **print** (bd3d22f): print() accepts only Int/Float/Bool/String (NOT Char); a confidently
+  other-typed arg emits `print() cannot print type X (accepts Int, Float, Bool, String)`.
+  The message uses the base .name (stage1 uses argType.Name, not .String()), so it renders
+  byte-equally even for generic/entity args (entity→'Point', Array→'Array', Char→'Char').
+
+Deferred to 48j-c2 (bespoke messages / compound types / async): assert_close (3 labeled
+Float args), assert_eq (Equal + comparable set incl. entity eq method), len (Array/Map/
+String with generic .String()), assert_panics (Fn()->Void), and await_all/await_any/timeout
+(need async-context tracking — `await can only be used inside async functions` — that
+stage2's checker does not model).
+
+Fixtures (+4 → diff-checker 74/74): ck_builtin_arg_bool (assert/Int), ck_builtin_arg_string
+(read_file single-arg, unnumbered), ck_builtin_arg_numbered (http_get argument 2), and
+ck_builtin_print_type (Char). +7 tests (incl. clean-arg no-false-positive + Unknown-arg
+skip) → 253 checker tests. All four differential gates, go test ./..., and make validate
+green.
+
+Phase 48 progress: 18 stage1 type-rule diagnostics now byte-equal. Remaining: 48j-c2
+(assert_close/assert_eq/len/assert_panics arg typing + await_* async-context), and the
+phase-53 gaps (extern unknown-type, generic-entity-instantiation arity — mind the
+let-mismatch caveat, trait contracts). Deferred: unary operator-typing, contract-clause
+recursion, impl-method contracts, method-call RETURN-type inference,
+immutable-assignment/push.
