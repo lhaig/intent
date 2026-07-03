@@ -853,3 +853,22 @@ test "assign mismatch: assigning a matching type is clean (no false positive)" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+// --- Phase 48i: field-access type inference -------------------------------
+
+test "field access: a param entity's Int field assigned to a Bool let errors" {
+    let ent: String = "entity Point " + lbrace() + " field x: Int; constructor(x: Int) " + lbrace() + " self.x = x; " + rbrace() + " " + rbrace();
+    let body: String = "let b: Bool = p.x;";
+    let src: String = "module m version \"1.0\"; " + ent + " function f(p: Point) returns Void " + lbrace() + " " + body + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "type mismatch: cannot assign Int to Bool");
+}
+
+test "field access: a Bool field used as a condition is clean (no false positive)" {
+    let ent: String = "entity Point " + lbrace() + " field active: Bool; constructor(active: Bool) " + lbrace() + " self.active = active; " + rbrace() + " " + rbrace();
+    let body: String = "if p.active " + fn_body();
+    let src: String = "module m version \"1.0\"; " + ent + " function f(p: Point) returns Void " + lbrace() + " " + body + " " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

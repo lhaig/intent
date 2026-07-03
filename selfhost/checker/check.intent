@@ -444,7 +444,7 @@ function is_arith_op(op: String) returns Bool {
     return op == "+" or op == "-" or op == "*" or op == "/" or op == "%";
 }
 
-public function infer_expr_type(e: Expr, scope: Scope) returns Type {
+public function infer_expr_type(e: Expr, scope: Scope, prog: Program) returns Type {
     if e.kind == shared_ast.ex_int() {
         return type_named("Int");
     }
@@ -467,14 +467,14 @@ public function infer_expr_type(e: Expr, scope: Scope) returns Type {
         return scope_type_of(scope, e.name);
     }
     if e.kind == shared_ast.ex_paren() {
-        return infer_expr_type(e.children[0], scope);
+        return infer_expr_type(e.children[0], scope, prog);
     }
     if e.kind == shared_ast.ex_unary() {
         // `not x` is Bool; unary `-x` has the operand's numeric type.
         if e.name == "not" {
             return type_named("Bool");
         }
-        return infer_expr_type(e.children[0], scope);
+        return infer_expr_type(e.children[0], scope, prog);
     }
     if e.kind == shared_ast.ex_binop() {
         // Comparisons and logical operators yield Bool (for VALID operands; an
@@ -486,8 +486,8 @@ public function infer_expr_type(e: Expr, scope: Scope) returns Type {
         // Arithmetic: the operand type when both operands are the same known
         // primitive; Unknown otherwise (sound — never guesses).
         if is_arith_op(e.name) {
-            let lt: Type = infer_expr_type(e.children[0], scope);
-            let rt: Type = infer_expr_type(e.children[1], scope);
+            let lt: Type = infer_expr_type(e.children[0], scope, prog);
+            let rt: Type = infer_expr_type(e.children[1], scope, prog);
             if is_unknown_type(lt) or is_unknown_type(rt) {
                 return type_unknown();
             }
@@ -497,8 +497,39 @@ public function infer_expr_type(e: Expr, scope: Scope) returns Type {
             return type_unknown();
         }
     }
-    // call / method / field / index / match / array / range / lambda / try /
-    // await / spawn — deferred (need field/call-return inference). Unknown.
+    if e.kind == shared_ast.ex_field() {
+        // Phase 48i: `object.field`. Infer the object's type; if it is a known
+        // entity, return the field's declared type. Anything else (primitive,
+        // unknown object, missing field) → Unknown (sound skip).
+        let obj_t: Type = infer_expr_type(e.children[0], scope, prog);
+        if is_unknown_type(obj_t) {
+            return type_unknown();
+        }
+        return entity_field_type(prog, obj_t.name, e.name);
+    }
+    // call / method / index / match / array / range / lambda / try / await /
+    // spawn — deferred (need call-return / element inference). Unknown.
+    return type_unknown();
+}
+
+// entity_field_type — the declared type of field `field_name` on entity
+// `entity_name`, or Unknown if the entity or field is not found.
+
+function entity_field_type(prog: Program, entity_name: String, field_name: String) returns Type {
+    let mutable i: Int = 0;
+    while i < len(prog.entities) {
+        if prog.entities[i].name == entity_name {
+            let ent: EntityDecl = prog.entities[i];
+            let mutable fi: Int = 0;
+            while fi < len(ent.fields) {
+                if ent.fields[fi].name == field_name {
+                    return parse_type(ent.fields[fi].type_name);
+                }
+                fi = fi + 1;
+            }
+        }
+        i = i + 1;
+    }
     return type_unknown();
 }
 
@@ -962,7 +993,7 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                     let vpidx: Int = vai - 1;
                     if vpidx < len(vparams) {
                         let vptype: Type = parse_type(vparams[vpidx].type_name);
-                        let vatype: Type = infer_expr_type(varg, scope);
+                        let vatype: Type = infer_expr_type(varg, scope, prog);
                         if not is_unknown_type(vatype) and varg.line > 0 {
                             if vatype.name != vptype.name {
                                 diags.push(CheckDiag(varg.line, varg.column, "variant '" + callee.name + "' field '" + vparams[vpidx].name + "' expects " + vptype.name + ", got " + vatype.name));
@@ -1001,7 +1032,7 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                             let pidx: Int = fai - 1;
                             if pidx < len(f.params) {
                                 let ptype: Type = parse_type(f.params[pidx].type_name);
-                                let atype: Type = infer_expr_type(arg, scope);
+                                let atype: Type = infer_expr_type(arg, scope, prog);
                                 if not is_unknown_type(atype) and arg.line > 0 {
                                     if atype.name != ptype.name {
                                         diags.push(CheckDiag(arg.line, arg.column, "argument " + (pidx + 1).to_string() + " to '" + callee.name + "': expected " + ptype.name + ", got " + atype.name));
@@ -1484,7 +1515,7 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
                     // also a mismatch). Phase 48c, ADR 0056.
                     if s.type_name != "" {
                         let decl_t: Type = parse_type(s.type_name);
-                        let rhs_t: Type = infer_expr_type(s.expr, cur_scope);
+                        let rhs_t: Type = infer_expr_type(s.expr, cur_scope, prog);
                         if not is_unknown_type(rhs_t) {
                             if rhs_t.name != decl_t.name {
                                 diags.push(CheckDiag(s.line, s.column, "type mismatch: cannot assign " + rhs_t.name + " to " + decl_t.name));
@@ -1499,7 +1530,7 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
                     if s.type_name != "" {
                         bind_type = parse_type(s.type_name);
                     } else {
-                        bind_type = infer_expr_type(s.expr, cur_scope);
+                        bind_type = infer_expr_type(s.expr, cur_scope, prog);
                     }
                     cur_scope = scope_define_typed(cur_scope, s.name, bind_type);
                 }
@@ -1519,8 +1550,8 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
             // (stage1 anchors at the target's start). Phase 48h, ADR 0056.
             if s.expr.kind == shared_ast.ex_binop() {
                 if s.expr.name == "=" {
-                    let tt: Type = infer_expr_type(s.expr.children[0], cur_scope);
-                    let vt: Type = infer_expr_type(s.expr.children[1], cur_scope);
+                    let tt: Type = infer_expr_type(s.expr.children[0], cur_scope, prog);
+                    let vt: Type = infer_expr_type(s.expr.children[1], cur_scope, prog);
                     if not is_unknown_type(tt) and not is_unknown_type(vt) {
                         if tt.name != vt.name {
                             diags.push(CheckDiag(s.line, s.column, "type mismatch: cannot assign " + vt.name + " to " + tt.name));
@@ -1541,7 +1572,7 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
             // Condition must be boolean (stage1 checkIfStmt:1359). Emit only on
             // a confident non-Bool inference; Unknown → skip (stage1 skips when
             // condType == nil). Phase 48b, ADR 0056.
-            let if_ct: Type = infer_expr_type(s.expr, cur_scope);
+            let if_ct: Type = infer_expr_type(s.expr, cur_scope, prog);
             if not is_unknown_type(if_ct) {
                 if if_ct.name != "Bool" {
                     diags.push(CheckDiag(s.line, s.column, "if condition must be boolean, got " + if_ct.name));
@@ -1571,7 +1602,7 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
                 wcond_i = wcond_i + 1;
             }
             // Condition must be boolean (stage1 checkWhileStmt:1380). Phase 48b.
-            let wh_ct: Type = infer_expr_type(s.expr, cur_scope);
+            let wh_ct: Type = infer_expr_type(s.expr, cur_scope, prog);
             if not is_unknown_type(wh_ct) {
                 if wh_ct.name != "Bool" {
                     diags.push(CheckDiag(s.line, s.column, "while condition must be boolean, got " + wh_ct.name));
@@ -1626,11 +1657,11 @@ function make_fn_scope(f: FunctionDecl, global: Scope) returns Scope {
 // global scope entered + "self" + all params defined. Mirrors stage1
 // checkMethod/checkConstructor (lines 1112-1176).
 
-function make_method_scope(f: FunctionDecl, global: Scope) returns Scope {
+function make_method_scope(f: FunctionDecl, global: Scope, self_type: String) returns Scope {
     let mutable s: Scope = scope_enter(global);
-    // `self` is left Unknown-typed for now (field/method inference is a later
-    // slice; a bare `self` in a condition/let is not a corpus case).
-    s = scope_define(s, "self");
+    // Phase 48i: `self` is typed as its enclosing entity so `self.field`
+    // resolves through entity_field_type.
+    s = scope_define_typed(s, "self", type_named(self_type));
     let mutable i: Int = 0;
     while i < len(f.params) {
         s = scope_define_typed(s, f.params[i].name, parse_type(f.params[i].type_name));
@@ -1668,7 +1699,7 @@ function check_entities(prog: Program, global: Scope, fn_names: Array<String>, f
     while i < len(prog.entities) {
         let e: EntityDecl = prog.entities[i];
         if e.has_constructor {
-            let ctor_scope: Scope = make_method_scope(e.ctor, global);
+            let ctor_scope: Scope = make_method_scope(e.ctor, global, e.name);
             let mutable cd: Array<CheckDiag> = check_body_stmts(e.ctor.body.stmts, 0, false, "", ctor_scope, fn_names, fn_counts, var_names, var_counts, collect_entity_names(prog), collect_enum_names(prog), prog);
             let mutable ci: Int = 0;
             while ci < len(cd) {
@@ -1679,7 +1710,7 @@ function check_entities(prog: Program, global: Scope, fn_names: Array<String>, f
         let mutable mi: Int = 0;
         while mi < len(e.methods) {
             let m: FunctionDecl = e.methods[mi];
-            let meth_scope: Scope = make_method_scope(m, global);
+            let meth_scope: Scope = make_method_scope(m, global, e.name);
             let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "", meth_scope, fn_names, fn_counts, var_names, var_counts, collect_entity_names(prog), collect_enum_names(prog), prog);
             let mutable mdi: Int = 0;
             while mdi < len(md) {
@@ -1704,7 +1735,7 @@ function check_impl_bodies(prog: Program, global: Scope, fn_names: Array<String>
         let mutable mi: Int = 0;
         while mi < len(ib.methods) {
             let m: FunctionDecl = ib.methods[mi];
-            let meth_scope: Scope = make_method_scope(m, global);
+            let meth_scope: Scope = make_method_scope(m, global, ib.entity_name);
             let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "", meth_scope, fn_names, fn_counts, var_names, var_counts, collect_entity_names(prog), collect_enum_names(prog), prog);
             let mutable mdi: Int = 0;
             while mdi < len(md) {

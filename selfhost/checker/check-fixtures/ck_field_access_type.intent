@@ -1,0 +1,15 @@
+// check-fixtures/ck_field_access_type.intent — Phase 48i / field-access type
+// inference. stage1: type mismatch: cannot assign Int to Bool (p.x is Int)
+module ck_field_access_type version "0.1.0";
+
+entity Point {
+    field x: Int;
+
+    constructor(x: Int) {
+        self.x = x;
+    }
+}
+
+function f(p: Point) returns Void {
+    let b: Bool = p.x;
+}
