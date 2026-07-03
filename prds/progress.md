@@ -1516,3 +1516,27 @@ let-bound vars (typed scope). diff-checker 51/51, 211 checker tests, all gates +
 Next big unlock: 48i — `self` typed as the enclosing entity + field-access inference
 (self.field → field type), which enables method-call arity/arg-types. Then operator-typing
 (needs ex_binop positions), match-arm consistency, contract typing, phase-53 gaps.
+
+---
+
+## 2026-07-03 — Phase 48i.1: self + field-access type inference (the big unlock)
+
+Threaded `prog` into `infer_expr_type` (via two `, scope)` / `, cur_scope)` replace_alls +
+signature) and added an `ex_field` case: infer the object's type, and if it is a known
+entity return the field's declared type (`entity_field_type` over prog.entities).
+`make_method_scope` now types `self` as its enclosing entity (threaded from
+check_entities → e.name, check_impl_bodies → ib.entity_name). So `self.field` and
+`x.field` (for an entity-typed param/let) now resolve → condition-boolean, let/assignment
+mismatch, and arg-type all extend to field-access expressions. Byte-equal with stage1
+(`if self.x` Int-field → condition error at the `if`; `let b: Bool = p.x` → mismatch);
+Unknown (primitive object / unknown entity / missing field) skips → sound. +1 fixture +
+2 tests. diff-checker 52/52, 213 checker tests, all gates + validate green. commit e42b66d.
+
+This unlocks the receiver type needed for method-call arity/arg-types (48i.2 next).
+
+Cumulative Phase 48: full expression inference for literals, operators, idents (params +
+let-bound), `self`, and field access; SIX type-rule diagnostics byte-equal
+(condition-boolean, let-mismatch, function arg-type, variant arg-type, assignment
+mismatch — all covering field access now). Remaining: method-call arity/arg-types (48i.2,
+uses the receiver type), operator-typing (needs ex_binop positions), match-arm
+consistency, contract typing, phase-53 gaps.
