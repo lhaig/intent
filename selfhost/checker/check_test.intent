@@ -456,6 +456,25 @@ test "builtin arg type: assert_close with all Floats is clean (no false positive
     assert_eq(len(diags), 0);
 }
 
+test "builtin arg type: len rejects a non-String simple type (Int)" {
+    let src: String = "module m version \"1.0\"; function f(n: Int) returns Void " + lbrace() + " let x: Int = len(n); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "len() requires Array, Map, or String argument, got Int");
+}
+
+test "builtin arg type: len accepts a String (no false positive)" {
+    let src: String = "module m version \"1.0\"; function f(s: String) returns Void " + lbrace() + " let x: Int = len(s); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "builtin arg type: len accepts a generic Array (no false positive)" {
+    let src: String = "module m version \"1.0\"; function f(a: Array<Int>) returns Void " + lbrace() + " let x: Int = len(a); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
 // ---------------------------------------------------------------------------
 // Phase 46.2: parse_type — structured Type tree from the AST's type strings.
 // Mirrors the forms shared/parser.intent parse_type_name emits.

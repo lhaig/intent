@@ -1826,3 +1826,28 @@ diagnostics byte-equal overall. Remaining builtin arg typing (48j-c2): assert_eq
 comparable-set + entity eq), len (Array/Map/String + generic .String()), assert_panics
 (Fn()->Void), and the async await_*/timeout builtins (need an inAsyncFunc flag threaded
 through the checker — not yet modeled). Then the phase-53 gaps.
+
+---
+
+## 2026-07-03 — Phase 48j-c2a: len() argument typing
+
+Follow-on commit: len()'s single argument accepts String or a generic Array/Map
+(stage1 checker.go:1759). A confidently-inferred simple type that is NOT String is
+rejected with `len() requires Array, Map, or String argument, got X` at the call —
+a dedicated branch in the builtin arity-match loop (the accepts-set doesn't fit the
+uniform builtin_arg_type single-required-type shape, like assert_close and print).
+Confident + no-type_args args only: generic Array/Map args (accepted by stage1) are
+skipped harmlessly, and a rejected generic like Option<Int> — which would need
+generic .String() rendering to stay byte-equal — is a deferred, corpus-invisible
+false negative. Simple rejected types (Int/Float/Bool/Char/entity) render byte-equal
+via .name.
+
++1 fixture (ck_builtin_len_arg, diff-checker 76/76), +3 tests (len rejects Int,
+accepts String, accepts generic Array — 258). All differential gates, go test ./...,
+and make validate green.
+
+48j-c now covers uniform-type builtins, print, assert_close, and len — 20 stage1
+type-rule diagnostics byte-equal overall. Remaining builtin arg typing (48j-c2):
+assert_eq (Equal + comparable-set + entity eq), assert_panics (Fn()->Void), and the
+async await_*/timeout builtins (need an inAsyncFunc flag threaded through the
+checker — not yet modeled). Then the phase-53 gaps.

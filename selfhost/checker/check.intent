@@ -1033,9 +1033,10 @@ function builtin_arity_message(name: String, got: Int) returns String {
 // (stage1 checkCallExpr, checker.go:1659-1919), or "" for builtins whose args
 // are not one uniform simple type. Only builtins with a uniform String/Int/Bool
 // arg + the "argument [N ]must be T, got X" message shape are listed; print
-// (accepts-set message), assert_close (labeled Float), assert_eq/len/
-// assert_panics (compound types), the async await_*/timeout builtins, and the
-// zero-arg builtins are deferred. Phase 48j-c, ADR 0056.
+// (accepts-set message), assert_close (labeled Float), len (accepts-set:
+// String/Array/Map), assert_eq/assert_panics (compound types), the async
+// await_*/timeout builtins, and the zero-arg builtins are handled elsewhere or
+// deferred. Phase 48j-c, ADR 0056.
 
 function builtin_arg_type(name: String) returns String {
     if name == "assert" {
@@ -1324,6 +1325,19 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                         let cat: Type = infer_expr_type(e.children[bai], scope, prog);
                         if (not is_unknown_type(cat)) and len(cat.type_args) == 0 and cat.name != "Float" {
                             diags.push(CheckDiag(callee.line, callee.column, "assert_close() argument " + bai.to_string() + " (" + assert_close_label(bai) + ") must be Float, got " + cat.name));
+                        }
+                    }
+                    // len() accepts String or a generic Array/Map (stage1
+                    // checker.go:1759). A confidently-inferred simple type that is
+                    // NOT String is rejected with `len() requires Array, Map, or
+                    // String argument, got X`. Args with type_args skip (sound:
+                    // generic Array/Map are accepted anyway, and a rejected
+                    // generic like Option<Int> would need .String() rendering —
+                    // deferred, a corpus-invisible false negative). Phase 48j-c2.
+                    if callee.name == "len" {
+                        let lat: Type = infer_expr_type(e.children[bai], scope, prog);
+                        if (not is_unknown_type(lat)) and len(lat.type_args) == 0 and lat.name != "String" {
+                            diags.push(CheckDiag(callee.line, callee.column, "len() requires Array, Map, or String argument, got " + lat.name));
                         }
                     }
                     bai = bai + 1;

@@ -1,0 +1,8 @@
+// check-fixtures/ck_builtin_len_arg.intent — Phase 48j-c2 / len() arg typing.
+// len() accepts String or a generic Array/Map; a confidently non-String simple
+// type is rejected. stage1: len() requires Array, Map, or String argument, got Int
+module ck_builtin_len_arg version "0.1.0";
+
+function f(n: Int) returns Void {
+    let x: Int = len(n);
+}
