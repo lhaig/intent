@@ -719,7 +719,14 @@ public entity Parser {
                         let fld: Token = self.expect(shared_lexer.tk_ident(), "field name after '.'");
                         let mutable children: Array<Expr> = [];
                         children.push(e);
-                        e = Expr(shared_ast.ex_field(), 0, "", false, fld.text, children);
+                        // ADR 0054: anchor the field/method-name position (matches
+                        // stage1 FieldAccessExpr/MethodCallExpr.Pos() = the name
+                        // token). Enables method-call arity/arg-type diagnostics
+                        // (48i.2) to land on the method name. Additive/inert.
+                        let mutable e_fld: Expr = Expr(shared_ast.ex_field(), 0, "", false, fld.text, children);
+                        e_fld.line = fld.line;
+                        e_fld.column = fld.column;
+                        e = e_fld;
                     } else {
                         if self.check_consume(shared_lexer.tk_question()) {
                             let mutable children: Array<Expr> = [];
