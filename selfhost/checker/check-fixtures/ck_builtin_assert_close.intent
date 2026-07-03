@@ -1,0 +1,8 @@
+// check-fixtures/ck_builtin_assert_close.intent — Phase 48j-c / assert_close arg
+// typing. Each argument must be Float, flagged with its label.
+// stage1: assert_close() argument 2 (expected) must be Float, got Int
+module ck_builtin_assert_close version "0.1.0";
+
+function f(n: Int) returns Void {
+    assert_close(1.0, n, 0.01);
+}

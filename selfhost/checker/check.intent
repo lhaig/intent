@@ -1070,6 +1070,19 @@ function is_printable_type(name: String) returns Bool {
     return name == "Int" or name == "Float" or name == "Bool" or name == "String";
 }
 
+// assert_close_label — the label stage1 gives each assert_close argument
+// (checker.go:1720: labels[i] = actual/expected/epsilon for args 1/2/3).
+
+function assert_close_label(argnum: Int) returns String {
+    if argnum == 1 {
+        return "actual";
+    }
+    if argnum == 2 {
+        return "expected";
+    }
+    return "epsilon";
+}
+
 // =============================================================================
 // EXPRESSION NAME CHECKER
 //
@@ -1303,6 +1316,14 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                         let pat: Type = infer_expr_type(e.children[bai], scope, prog);
                         if (not is_unknown_type(pat)) and (not is_printable_type(pat.name)) {
                             diags.push(CheckDiag(callee.line, callee.column, "print() cannot print type " + pat.name + " (accepts Int, Float, Bool, String)"));
+                        }
+                    }
+                    // assert_close(actual, expected, epsilon): each arg must be
+                    // Float, flagged with its label (stage1 checker.go:1717).
+                    if callee.name == "assert_close" {
+                        let cat: Type = infer_expr_type(e.children[bai], scope, prog);
+                        if (not is_unknown_type(cat)) and len(cat.type_args) == 0 and cat.name != "Float" {
+                            diags.push(CheckDiag(callee.line, callee.column, "assert_close() argument " + bai.to_string() + " (" + assert_close_label(bai) + ") must be Float, got " + cat.name));
                         }
                     }
                     bai = bai + 1;
