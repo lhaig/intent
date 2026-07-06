@@ -20,6 +20,31 @@ verbatim); `check_program_seeded` seeds imported module names so qualifiers reso
 and stage1's per-module import scoping are not reproduced (flat merge gives broader
 visibility). Fine for the self-hosting target ("No errors found").
 
+## Strategic state (2026-07-06) — checker milestone hit; pick the next front
+
+The self-hosted CHECKER is essentially complete: 28 stage1 type-rule diagnostics byte-equal,
+and Phase 54 made `check --self-hosted` check the compiler's own source (selfcheck-checker
+9/9). Backlog PRDs 49-52 (type-carrying scope, operator/assignment typing, arg-typing/method
+arity, return/match/contract typing) are **largely superseded** by the Phase 48 slices already
+shipped. Three tools — fmt, lint, check — are now self-hosted and byte-equal with stage1.
+
+Three candidate directions (awaiting user pick as of 2026-07-06):
+1. **Self-hosted compiler (IR + backend)** — the real bootstrapping endgame (stage2 that
+   *compiles*, not just checks). Scoped: reimplement in Intent the IR lowering (`internal/ir`
+   ~2,745 LOC) + one backend (`internal/rustbe` ~2,420 LOC) on the existing self-hosted
+   front-end (~8,700 LOC). ~5,000+ LOC, multi-phase; needs a PRD/ADR. Thin first slice:
+   stage2 lowers a trivial program (e.g. hello.intent) to IR + emits Rust, gated byte-equal
+   vs stage1 `intentc build --emit` on a tiny corpus.
+2. **Stage2 parser gaps** (extern `from`-clause, trait-method contracts) — LOW value: **zero
+   corpus/selfhost usage**, and extern is a syntax *mismatch* (stage1 `extern function
+   name(...) from "path"` vs stage2 `extern "target" function ...`), not a simple widening.
+   Only helps broader language coverage + gating linter R3/R4.
+3. **Checker error-diagnostic tail** (48/53 remainder + 54b multi-file error parity) —
+   completeness of the checker as a stage1 replacement; diminishing returns, corpus-invisible.
+
+Recommendation: (1) is the goal-aligned next milestone but large — start by scoping a PRD +
+a thin end-to-end slice. (2)/(3) are lower-leverage.
+
 ## Where we are
 
 **Phase 48 (Expression type inference + type-rule checks) — FOUNDATION + 18 CHECKS
