@@ -65,9 +65,23 @@ selfhost/
 **Match checking (48j-a/a2) is COMPLETE** — all seven checkMatchExpr diagnostics byte-equal.
 Also pushed this session: **48i.2** method calls, **48e** binary operators, **48j-b** contracts.
 
-## Next: Phase 48j-c2 / phase-53 gaps
+## Next: Phase 48j-c2 / phase-53 / Phase 54b gaps
 
 Remaining, in rough value order:
+
+- **Phase 54b — multi-file ERROR-diagnostic parity** (deferred non-goal of ADR 0058; the
+  self-hosting VALID-source milestone is done). On INVALID multi-file input the flat merge
+  diverges from stage1: (1) **wrong path** — a diagnostic in an imported module prints with
+  the ENTRY's path, not the module's (repro: an `import`ed `helper.intent` with a type error
+  → stage1 `helper.intent:4:5`, stage2 `app.intent:4:5`); (2) **broader visibility** — the
+  flat merge makes all closure symbols visible everywhere, so a reference valid only because
+  the ENTRY (not the referencing module) imports it is accepted by stage2 but flagged by
+  stage1's per-module import scoping; (3) **dedup masking** — same-name cross-module decls
+  dedup first-seen (no same-name/different-signature collision in the corpus today). Real
+  fix: replicate stage1 `checker.CheckAll` — per-module checking with import-scoped symbol
+  tables in topological order, each decl carrying its source module/path. Substantial: the
+  stage2 checker moves from single-Program to a module-registry model. See TASKS.md row 54b
+  and ADR 0058 non-goals. Not needed for self-hosting valid-source parity.
 
 - **Builtin arg typing + async-context — DONE this session**: len() (48j-c2a),
   assert_panics (48j-c2b), assert_eq mismatch+Float (48j-c2c), the async-only builtins
