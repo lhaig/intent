@@ -1,4 +1,4 @@
-# Pickup Notes — 2026-07-03 (Phase 54 DONE: multi-file self-hosted checking; self-hosting blocker cleared)
+# Pickup Notes — 2026-07-07 (checker DONE; NEXT FRONT = Phase 55 self-hosted compiler — see prds/active/prd-phase-55-self-hosted-compiler.md)
 
 ## ✅ SELF-HOSTING BLOCKER RESOLVED (Phase 54, 2026-07-03) — ADR 0058
 
@@ -28,22 +28,23 @@ and Phase 54 made `check --self-hosted` check the compiler's own source (selfche
 arity, return/match/contract typing) are **largely superseded** by the Phase 48 slices already
 shipped. Three tools — fmt, lint, check — are now self-hosted and byte-equal with stage1.
 
-Three candidate directions (awaiting user pick as of 2026-07-06):
-1. **Self-hosted compiler (IR + backend)** — the real bootstrapping endgame (stage2 that
-   *compiles*, not just checks). Scoped: reimplement in Intent the IR lowering (`internal/ir`
-   ~2,745 LOC) + one backend (`internal/rustbe` ~2,420 LOC) on the existing self-hosted
-   front-end (~8,700 LOC). ~5,000+ LOC, multi-phase; needs a PRD/ADR. Thin first slice:
-   stage2 lowers a trivial program (e.g. hello.intent) to IR + emits Rust, gated byte-equal
-   vs stage1 `intentc build --emit` on a tiny corpus.
-2. **Stage2 parser gaps** (extern `from`-clause, trait-method contracts) — LOW value: **zero
-   corpus/selfhost usage**, and extern is a syntax *mismatch* (stage1 `extern function
-   name(...) from "path"` vs stage2 `extern "target" function ...`), not a simple widening.
-   Only helps broader language coverage + gating linter R3/R4.
-3. **Checker error-diagnostic tail** (48/53 remainder + 54b multi-file error parity) —
-   completeness of the checker as a stage1 replacement; diminishing returns, corpus-invisible.
+**DECIDED (2026-07-07): next front is Option 1 — the self-hosted compiler.** See the kickoff
+PRD: `prds/active/prd-phase-55-self-hosted-compiler.md` (read it first after any compaction).
 
-Recommendation: (1) is the goal-aligned next milestone but large — start by scoping a PRD +
-a thin end-to-end slice. (2)/(3) are lower-leverage.
+**Phase 55 — self-hosted compiler (IR + backend):** reimplement in Intent the IR lowering
+(`internal/ir` ~2,745 LOC) + the Rust backend (`internal/rustbe` ~2,420 LOC) on the existing
+self-hosted front-end. Goal: `intentc build --emit --self-hosted <f>` emits Rust byte-equal
+with stage1, gated by a new `make diff-emit`. **Thin first slice (start here):** 55a IR node
+entities for a trivial subset → 55b lower `examples/hello.intent` → 55c emit Rust byte-equal
++ wire `--emit --self-hosted` (mirror the Phase 54 harness) + `make diff-emit` at 1/1. Then
+scale construct-by-construct (let → binops → if/while → functions → entities → enums/match →
+contracts → Result/Option → generics → closures → async), growing the emit corpus per slice.
+~5,000+ LOC, multi-phase. Full plan, module layout, gate strategy, and ADR list in the PRD.
+
+Deferred alternatives (lower-leverage, parked): stage2 parser gaps (extern `from`-clause,
+trait-method contracts — **zero corpus usage**, extern is a syntax mismatch not a widening);
+the checker error-diagnostic tail (48/53 remainder + 54b multi-file error parity —
+diminishing returns, corpus-invisible). See TASKS.md rows 48j-c2 / 53 / 54b.
 
 ## Where we are
 

@@ -2082,3 +2082,28 @@ This clears the [[project_stage2_checker_multifile_blocker]]. Remaining Phase 48
 error-diagnostic gaps (the long tail — missing diagnostics on invalid input) are
 now the next candidates, plus the deferred multi-file ERROR-position parity (this
 phase targets valid-source parity; see ADR 0058 non-goals).
+
+---
+
+## 2026-07-07 — Phase 55 KICKOFF: self-hosted compiler (IR + backend)
+
+Checker self-hosting milestone is complete (28 diagnostics byte-equal; Phase 54
+self-checks the compiler source). Next front DECIDED with the user: the self-hosted
+compiler — the bootstrapping endgame. Reimplement in Intent the IR lowering
+(internal/ir ~2,745 LOC) + the Rust backend (internal/rustbe ~2,420 LOC) on the
+existing self-hosted front-end (~8,700 LOC). Goal: `intentc build --emit
+--self-hosted <f>` emits Rust byte-equal with stage1, gated by a new `make
+diff-emit`, grown construct-by-construct.
+
+Wrote the kickoff PRD (prds/active/prd-phase-55-self-hosted-compiler.md) with module
+layout (selfhost/compiler/{ir,lower,rustbe,compile_main}.intent), phasing, the thin
+first slice (55a IR entities → 55b lower hello.intent → 55c emit Rust byte-equal +
+wire `--emit --self-hosted` mirroring the Phase 54 harness + `make diff-emit` 1/1),
+the gate strategy, and the ADR list (IR modeling, checker-reuse-in-lowering,
+`--emit --self-hosted` wiring, contract lowering). Key strategy contrast: unlike the
+checker (sound-but-incomplete, ADR 0056), the emitter must be COMPLETE per supported
+construct — coverage grows by explicitly expanding the supported set per slice and
+the diff-emit corpus only holds fully-supported programs.
+
+No code yet — this session prepared the durable kickoff so work continues cleanly
+after a context compaction. NEXT-STEPS + TASKS (Phase 55 rows 55a/b/c/+) updated.
