@@ -267,4 +267,14 @@ test "lowers a match expression with builtin Ok/Err arms" {
     assert(mt.match_arms[1].bindings[0] == "e");
 }
 
+test "lowers the ? operator to irex_try wrapping the call" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction p(n: Int) returns Result<Int, String> " + lbrace() + "\n    return Ok(n);\n" + rbrace() + "\n\nfunction q(n: Int) returns Result<Int, String> " + lbrace() + "\n    let x: Int = p(n)?;\n    return Ok(x);\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    let try_expr: IrExpr = m.functions[1].body[0].expr;
+    assert(try_expr.kind == compiler_ir.irex_try());
+    assert(try_expr.children[0].kind == compiler_ir.irex_call());
+    assert(try_expr.children[0].name == "p");
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

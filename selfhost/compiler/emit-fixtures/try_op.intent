@@ -1,0 +1,23 @@
+module try_op version "1.0.0";
+
+function parse(n: Int) returns Result<Int, String> {
+    if n > 0 {
+        return Ok(n);
+    }
+    return Err("non-positive");
+}
+
+function add_two(a: Int, b: Int) returns Result<Int, String> {
+    let x: Int = parse(a)?;
+    let y: Int = parse(b)?;
+    return Ok(x + y);
+}
+
+entry function main() returns Int {
+    let r: Result<Int, String> = add_two(3, 4);
+    let v: Int = match r {
+        Ok(n) => n,
+        Err(e) => 0,
+    };
+    return v;
+}

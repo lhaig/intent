@@ -121,6 +121,10 @@ public function irex_match() returns Int {
     return 15;
 } // children[0] = scrutinee, match_arms = arms
 
+public function irex_try() returns Int {
+    return 16;
+} // children[0] = operand; the `?` error-propagation operator
+
 // --- Call-kind constants ----------------------------------------------------
 // Mirrors internal/ir CallKind iota so the backend dispatches identically.
 public function callkind_function() returns Int {
@@ -592,6 +596,14 @@ public function ir_lambda(ret_type: IrType, body: IrExpr) returns IrExpr {
     let mutable kids: Array<IrExpr> = empty_ir_expr_array();
     kids.push(body);
     return IrExpr(irex_lambda(), 0, "", false, "", kids, ret_type);
+}
+
+// ir_try — the `?` error-propagation operator (irex_try): children[0] is the
+// operand. The Rust backend emits `operand?`, mirroring stage1's TryExpr.
+public function ir_try(operand: IrExpr) returns IrExpr {
+    let mutable kids: Array<IrExpr> = empty_ir_expr_array();
+    kids.push(operand);
+    return IrExpr(irex_try(), 0, "", false, "", kids, ir_type_named(""));
 }
 
 // ir_match — a match expression shell (irex_match): children[0] is the scrutinee.

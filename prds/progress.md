@@ -2535,3 +2535,28 @@ inferred types (ADR 0059 D3 bridge deferred), so cloneIfNeeded needs either the 
 bridge or scoped param/let type propagation. `?` can be gated now via a fixture with
 Copy args; try_operator's String-arg clone is the follow-up. Then enums+match+float
 (shape_area, enum_basic), entities (bank_account), generics, async.
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 13: the `?` operator (diff-emit 18/18)
+
+The `?` error-propagation operator now emits byte-equal: `operand?`. New IR kind
+`irex_try` + `ir_try`; lowering maps `ex_try` -> it; backend emits
+`generate_expr(operand) + "?"` (mirrors stage1's TryExpr). diff-emit is **18/18 EQUAL**.
+
+Gated by a new fixture `emit-fixtures/try_op.intent` using an Int (Copy) arg
+(`parse(a)?`) so no `cloneIfNeeded` is required. Gates green: diff-emit 18/18,
+selfcheck-formatter 7/7, selfcheck-checker 13/13, ir_test 16, lower_test grown. No
+Go / shared/* touched.
+
+**Blocker for the real `?` examples (try_operator, error_handling):** they pass
+non-Copy (String) VarRef args — `parse_number(a.clone())` — which needs
+`cloneIfNeeded`, and that needs the arg's TYPE. The stage2 IR does not carry inferred
+types (ADR 0059 D3 bridge deferred). NEXT foundational slice = the type bridge: stamp
+VarRef.expr_type from local param/let types during lowering (a scope threaded through
+lower_expr), then add `cloneIfNeeded` (VarRef/index/field of non-Copy type -> `.clone()`)
+to generate_call / generate_builtin_call. That single piece unblocks try_operator,
+error_handling, and io_demo's `content.clone()`, plus cleaner match-scrutinee cloning.
+io_demo additionally needs IO builtins (create_dir/write_file/read_file/file_exists/
+env_get), Float literals, and the `mutatedVars` analysis (method-call receivers ->
+`let mut`). Then enums+match+float (shape_area, enum_basic), entities, generics, async.

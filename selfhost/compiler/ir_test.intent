@@ -137,6 +137,14 @@ test "ir_unary carries operator text and a single operand" {
     assert(notb.children[0].bool_value == true);
 }
 
+test "ir_try wraps an operand for the ? operator" {
+    let tr: IrExpr = compiler_ir.ir_try(compiler_ir.ir_var_ref("r"));
+    assert(tr.kind == compiler_ir.irex_try());
+    assert(len(tr.children) == 1);
+    assert(tr.children[0].kind == compiler_ir.irex_var());
+    assert(tr.children[0].name == "r");
+}
+
 test "ir_match carries scrutinee and arms with builtin detection" {
     let mutable arms: Array<IrMatchArm> = compiler_ir.empty_ir_match_arm_array();
     let mutable okb: Array<String> = [];

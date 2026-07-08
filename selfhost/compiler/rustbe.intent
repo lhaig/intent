@@ -342,6 +342,10 @@ public function generate_expr(e: IrExpr, funcs: Array<IrFunction>) returns Strin
     if e.kind == compiler_ir.irex_call() {
         return generate_call(e, funcs);
     }
+    if e.kind == compiler_ir.irex_try() {
+        // `operand?` — mirrors stage1's TryExpr emit.
+        return generate_expr(e.children[0], funcs) + "?";
+    }
     if e.kind == compiler_ir.irex_match() {
         // A match's multi-line layout is indent-relative (see gen_stmt_value), so it
         // is emitted only from a statement-direct position. A match nested elsewhere

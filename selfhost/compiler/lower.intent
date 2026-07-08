@@ -197,6 +197,10 @@ public function lower_expr(e: Expr) returns IrExpr {
     if e.kind == shared_ast.ex_range() {
         return compiler_ir.ir_range(lower_expr(e.children[0]), lower_expr(e.children[1]));
     }
+    if e.kind == shared_ast.ex_try() {
+        // `expr?` — the operand is children[0]. Mirrors stage1's TryExpr.
+        return compiler_ir.ir_try(lower_expr(e.children[0]));
+    }
     if e.kind == shared_ast.ex_match() {
         // children[0] is the scrutinee; match_arms hold variant / bindings /
         // is_wildcard / body. is_builtin (Ok/Err/Some/None) is derived by name,

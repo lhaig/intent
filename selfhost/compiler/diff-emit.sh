@@ -52,6 +52,7 @@ CORPUS=(
   "selfhost/compiler/emit-fixtures/arrays.intent"
   "selfhost/compiler/emit-fixtures/unary.intent"
   "selfhost/compiler/emit-fixtures/quantifiers.intent"
+  "selfhost/compiler/emit-fixtures/try_op.intent"
 )
 
 # Build the stage2 compiler binary once; reuse it across corpus files.
