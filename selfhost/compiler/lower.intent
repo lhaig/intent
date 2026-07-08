@@ -58,8 +58,12 @@ entity LowerScope {
     field self_name: String;
     field in_old: Bool;
     field self_entity_name: String;
+    // join_handle_vars — names bound to a `spawn` result (a Future/JoinHandle), so
+    // `await <name>` emits the JoinHandle unwrap (`.expect(...)`). Accumulated in
+    // lower_block (like let types), mirroring stage1's joinHandleVars.
+    field join_handle_vars: Array<String>;
 
-    constructor(names: Array<String>, types: Array<IrType>, enums: Array<EnumDecl>, entities: Array<EntityDecl>, self_name: String, in_old: Bool, self_entity_name: String) {
+    constructor(names: Array<String>, types: Array<IrType>, enums: Array<EnumDecl>, entities: Array<EntityDecl>, self_name: String, in_old: Bool, self_entity_name: String, join_handle_vars: Array<String>) {
         self.names = names;
         self.types = types;
         self.enums = enums;
@@ -67,6 +71,7 @@ entity LowerScope {
         self.self_name = self_name;
         self.in_old = in_old;
         self.self_entity_name = self_entity_name;
+        self.join_handle_vars = join_handle_vars;
     }
 }
 
@@ -86,7 +91,7 @@ function lower_scope_empty(enums: Array<EnumDecl>, entities: Array<EntityDecl>) 
         ent.push(entities[enti]);
         enti = enti + 1;
     }
-    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), e, ent, "self", false, "");
+    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), e, ent, "self", false, "", shared_ast.empty_string_array());
 }
 
 // lower_scope_define — a NEW scope with `name: ty` appended (copies names/types,
@@ -107,19 +112,32 @@ function lower_scope_define(s: LowerScope, name: String, ty: IrType) returns Low
         ti = ti + 1;
     }
     new_types.push(ty);
-    return LowerScope(new_names, new_types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name);
+    return LowerScope(new_names, new_types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, s.join_handle_vars);
 }
 
 // lower_scope_with_self — a copy of `s` with self_name + self_entity_name set (for
 // entity members: methods use "self", constructors "__self").
 function lower_scope_with_self(s: LowerScope, name: String, entity_name: String) returns LowerScope {
-    return LowerScope(s.names, s.types, s.enums, s.entities, name, s.in_old, entity_name);
+    return LowerScope(s.names, s.types, s.enums, s.entities, name, s.in_old, entity_name, s.join_handle_vars);
 }
 
 // lower_scope_with_old — a copy of `s` with in_old set (for ensures clauses, where
 // `old(expr)` lowers to its captured variable).
 function lower_scope_with_old(s: LowerScope, flag: Bool) returns LowerScope {
-    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, flag, s.self_entity_name);
+    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, flag, s.self_entity_name, s.join_handle_vars);
+}
+
+// lower_scope_add_joinhandle — a copy of `s` with `name` recorded as a spawn-bound
+// (JoinHandle) variable, so a later `await name` emits the JoinHandle unwrap.
+function lower_scope_add_joinhandle(s: LowerScope, name: String) returns LowerScope {
+    let mutable jh: Array<String> = shared_ast.empty_string_array();
+    let mutable i: Int = 0;
+    while i < len(s.join_handle_vars) {
+        jh.push(s.join_handle_vars[i]);
+        i = i + 1;
+    }
+    jh.push(name);
+    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, jh);
 }
 
 // lookup_entity_field_type — the declared type of `field_name` in entity `ent_name`,
@@ -532,6 +550,10 @@ public function lower_block(b: Block, scope: LowerScope) returns Array<IrStmt> {
         // before the name is bound), so subsequent statements see `name: let_type`.
         if st.kind == compiler_ir.irst_let() {
             s = lower_scope_define(s, st.name, st.let_type);
+            // Track a `let f = spawn ...` binding so `await f` unwraps the JoinHandle.
+            if st.expr.kind == compiler_ir.irex_spawn() {
+                s = lower_scope_add_joinhandle(s, st.name);
+            }
         }
         i = i + 1;
     }
@@ -727,6 +749,26 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
     if e.kind == shared_ast.ex_try() {
         // `expr?` — the operand is children[0]. Mirrors stage1's TryExpr.
         return compiler_ir.ir_try(lower_expr(e.children[0], scope));
+    }
+    if e.kind == shared_ast.ex_spawn() {
+        // `spawn <call>` — operand is children[0]. Mirrors stage1's SpawnExpr.
+        return compiler_ir.ir_spawn(lower_expr(e.children[0], scope));
+    }
+    if e.kind == shared_ast.ex_await() {
+        // `await <op>` — is_join_handle when the operand is a spawn directly, or a
+        // variable bound to a spawn (join_handle_vars). Mirrors stage1's AwaitExpr.
+        let inner: Expr = e.children[0];
+        let mutable is_jh: Bool = false;
+        if inner.kind == shared_ast.ex_spawn() {
+            is_jh = true;
+        } else {
+            if inner.kind == shared_ast.ex_ident() {
+                if string_in(scope.join_handle_vars, inner.name) {
+                    is_jh = true;
+                }
+            }
+        }
+        return compiler_ir.ir_await(lower_expr(inner, scope), is_jh);
     }
     if e.kind == shared_ast.ex_match() {
         // children[0] is the scrutinee; match_arms hold variant / bindings /

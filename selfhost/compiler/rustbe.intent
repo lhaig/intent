@@ -594,23 +594,32 @@ function trim_both_underscores(s: String) returns String {
 // params are emitted by reference (`&Vec`/`&HashMap`), matching the call-site
 // borrow. Deferred: async (tokio); old() in ensures; --strip-contracts.
 public function generate_function(f: IrFunction, funcs: Array<IrFunction>) returns String {
-    if f.is_async {
-        return "// unsupported: async function " + f.name + "\n";
-    }
     let mutated: Array<String> = collect_mutated_vars(f.body);
+    // An async function is emitted `async fn`; the async entry also gets the
+    // `#[tokio::main]` wrapper that `.await`s __intent_main (mirrors generateFunction).
+    let mutable fn_kw: String = "fn ";
+    if f.is_async {
+        fn_kw = "async fn ";
+    }
     if f.is_entry {
-        let mutable out: String = "fn __intent_main() -> i64 " + lbrace() + "\n";
+        let mutable out: String = fn_kw + "__intent_main() -> i64 " + lbrace() + "\n";
         out = out + generate_stmts(f.body, 1, false, funcs, mutated);
         out = out + rbrace() + "\n";
         out = out + "\n";
-        out = out + "fn main() " + lbrace() + "\n";
-        out = out + "    let __exit_code = __intent_main();\n";
+        if f.is_async {
+            out = out + "#[tokio::main]\n";
+            out = out + "async fn main() " + lbrace() + "\n";
+            out = out + "    let __exit_code = __intent_main().await;\n";
+        } else {
+            out = out + "fn main() " + lbrace() + "\n";
+            out = out + "    let __exit_code = __intent_main();\n";
+        }
         out = out + "    std::process::exit(__exit_code as i32);\n";
         out = out + rbrace() + "\n";
         return out;
     }
     let ret_ty: String = map_type(f.return_type);
-    let mutable sig: String = "fn " + f.name + "(";
+    let mutable sig: String = fn_kw + f.name + "(";
     let mutable i: Int = 0;
     while i < len(f.params) {
         if i > 0 {
@@ -661,12 +670,15 @@ public function generate_contracts(clauses: Array<IrContract>, prefix: String, f
 // entity ctors/methods, then functions). `mutated` is that leaked set; replicating
 // this quirk is required for byte-equal `let mut` decisions in test bodies.
 public function generate_test(t: IrTest, funcs: Array<IrFunction>, mutated: Array<String>) returns String {
-    if t.is_async {
-        return "// unsupported: async test " + t.name + "\n";
-    }
     let fn_name: String = "__test_" + sanitise_test_name(t.name);
+    // An async test uses `#[tokio::test]` + `async fn` (mirrors generateTest).
     let mutable out: String = "#[test]\n";
-    out = out + "fn " + fn_name + "() " + lbrace() + "\n";
+    let mutable fn_kw: String = "fn ";
+    if t.is_async {
+        out = "#[tokio::test]\n";
+        fn_kw = "async fn ";
+    }
+    out = out + fn_kw + fn_name + "() " + lbrace() + "\n";
     out = out + generate_stmts(t.body, 1, false, funcs, mutated);
     out = out + rbrace() + "\n";
     return out;
@@ -1009,6 +1021,18 @@ public function generate_expr(e: IrExpr, funcs: Array<IrFunction>) returns Strin
         // `operand?` — mirrors stage1's TryExpr emit.
         return generate_expr(e.children[0], funcs) + "?";
     }
+    if e.kind == compiler_ir.irex_spawn() {
+        // `spawn <call>` -> tokio::spawn(call). Mirrors stage1's SpawnExpr emit.
+        return "tokio::spawn(" + generate_expr(e.children[0], funcs) + ")";
+    }
+    if e.kind == compiler_ir.irex_await() {
+        // `(operand).await`, plus `.expect(...)` for a JoinHandle (spawn result).
+        let a: String = "(" + generate_expr(e.children[0], funcs) + ").await";
+        if e.bool_value {
+            return a + ".expect(\"spawned task panicked\")";
+        }
+        return a;
+    }
     if e.kind == compiler_ir.irex_match() {
         // A match's multi-line layout is indent-relative (see gen_stmt_value), so it
         // is emitted only from a statement-direct position. A match nested elsewhere
@@ -1337,6 +1361,14 @@ public function map_type(t: IrType) returns String {
         }
         return "HashMap<_, _>";
     }
+    if t.name == "Future" {
+        // Future<T> -> tokio::task::JoinHandle<T> (ADR 0026); fully qualified, so no
+        // use statement is needed.
+        if len(t.type_args) == 1 {
+            return "tokio::task::JoinHandle<" + map_type(t.type_args[0]) + ">";
+        }
+        return "tokio::task::JoinHandle<()>";
+    }
     if t.name == "Fn" {
         // ir_parse_type stores a Fn's type_args as [param0..paramN-1, return],
         // with fn_param_count = N. Mirrors mapType's `impl Fn(params) -> ret`
@@ -1388,6 +1420,13 @@ public function generate_call(e: IrExpr, funcs: Array<IrFunction>) returns Strin
         }
         out = out + ")";
         return out;
+    }
+    // sleep(ms): a Future-returning async builtin handled in the function-call path
+    // (stage1 generateCallExpr's CallFunction default), not generate_builtin_call.
+    if e.name == "sleep" {
+        if len(e.children) == 1 {
+            return "tokio::time::sleep(std::time::Duration::from_millis(" + generate_expr(e.children[0], funcs) + " as u64))";
+        }
     }
     let mutable out: String = e.name + "(";
     let mutable i: Int = 0;

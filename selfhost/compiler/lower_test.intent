@@ -464,4 +464,23 @@ test "stamps a Map field access type and an empty-array Map let" {
     assert(scores_let.expr.expr_type.name == "Map");
 }
 
+test "lowers spawn/await with join-handle tracking" {
+    let src: String = "module m version \"1.0.0\";\n\nasync function work(a: Int) returns Int " + lbrace() + "\n    return a;\n" + rbrace() + "\n\nasync entry function main() returns Int " + lbrace() + "\n    let f: Future<Int> = spawn work(3);\n    let r: Int = await f;\n    return r;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    // work is async; main is async entry.
+    assert(m.functions[0].is_async);
+    assert(m.functions[1].is_async);
+    let mainbody: Array<IrStmt> = m.functions[1].body;
+    // `spawn work(3)` -> irex_spawn wrapping the call.
+    let spawn_let: IrStmt = mainbody[0];
+    assert(spawn_let.expr.kind == compiler_ir.irex_spawn());
+    assert(spawn_let.expr.children[0].kind == compiler_ir.irex_call());
+    // `await f` -> irex_await with is_join_handle (f bound to a spawn) = bool_value true.
+    let await_let: IrStmt = mainbody[1];
+    assert(await_let.expr.kind == compiler_ir.irex_await());
+    assert(await_let.expr.bool_value == true);
+    assert(await_let.expr.children[0].name == "f");
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

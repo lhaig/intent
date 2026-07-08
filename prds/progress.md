@@ -2771,3 +2771,30 @@ Gates green: diff-emit 26/26, selfcheck-formatter 7/7, selfcheck-checker 13/13,
 lower_test (+ Map cases), ir_test, map_demo cargo. No shared/* touched. NEXT:
 char/String receiver methods + char literals (char_string_demo), traits (handler_trait),
 generics/monomorphization (generic_stack), async (async_demo, task_queue).
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 21: async (spawn/await/sleep + tokio) (diff-emit 28/28)
+
+`examples/async_demo.intent` AND `examples/task_queue.intent` self-host byte-equal —
+the EIGHTEENTH and NINETEENTH real examples (task_queue was blocked only on async).
+diff-emit is **28/28 EQUAL**.
+
+- **async functions/tests**: `async fn`; the async entry gets `#[tokio::main] async fn
+  main() { let __exit_code = __intent_main().await; ... }`; async tests use
+  `#[tokio::test] async fn`. Contract/labeled-block bodies are identical to the sync
+  path — only the `async` keyword + entry wrapper differ.
+- **spawn / await** (irex_spawn / irex_await): `spawn <call>` -> `tokio::spawn(call)`;
+  `await x` -> `(x).await`, plus `.expect("spawned task panicked")` when x is a
+  JoinHandle. IsJoinHandle mirrors stage1: the operand is a spawn directly, or a var
+  bound to a spawn — tracked in `LowerScope.join_handle_vars`, accumulated in
+  lower_block when a `let` value is an irex_spawn.
+- **sleep builtin**: `sleep(ms)` -> `tokio::time::sleep(std::time::Duration::from_millis(
+  ms as u64))` (a function-call special case, mirroring stage1's CallFunction default).
+- **Future<T>** -> `tokio::task::JoinHandle<T>` (map_type; fully qualified, no use stmt).
+
+Gates green: diff-emit 28/28, selfcheck-formatter 7/7, selfcheck-checker 13/13,
+lower_test (+ async cases), ir_test. No shared/* touched. NEXT (remaining real
+examples): char_string_demo (char literals + char/String receiver methods + String
+indexing/slicing + char_from_codepoint), handler_trait (traits + impl blocks),
+generic_stack (monomorphization).

@@ -145,6 +145,14 @@ public function irex_field() returns Int {
     return 19;
 } // children[0] = object, name = field; emits `object.field`
 
+public function irex_await() returns Int {
+    return 20;
+} // children[0] = operand; bool_value = is_join_handle (adds `.expect(...)`)
+
+public function irex_spawn() returns Int {
+    return 21;
+} // children[0] = operand; emits `tokio::spawn(operand)`
+
 // --- Call-kind constants ----------------------------------------------------
 // Mirrors internal/ir CallKind iota so the backend dispatches identically.
 public function callkind_function() returns Int {
@@ -866,6 +874,23 @@ public function ir_index(object: IrExpr, index: IrExpr) returns IrExpr {
     kids.push(object);
     kids.push(index);
     return IrExpr(irex_index(), 0, "", false, "", kids, ir_type_named(""));
+}
+
+// ir_await — an `await` expression (irex_await): children[0] is the operand,
+// bool_value carries is_join_handle (a spawn result -> add `.expect(...)` on await).
+// The Rust backend emits `(operand).await` (+ `.expect("spawned task panicked")`).
+public function ir_await(operand: IrExpr, is_join_handle: Bool) returns IrExpr {
+    let mutable kids: Array<IrExpr> = empty_ir_expr_array();
+    kids.push(operand);
+    return IrExpr(irex_await(), 0, "", is_join_handle, "", kids, ir_type_named(""));
+}
+
+// ir_spawn — a `spawn` expression (irex_spawn): children[0] is the operand call.
+// The Rust backend emits `tokio::spawn(operand)`.
+public function ir_spawn(operand: IrExpr) returns IrExpr {
+    let mutable kids: Array<IrExpr> = empty_ir_expr_array();
+    kids.push(operand);
+    return IrExpr(irex_spawn(), 0, "", false, "", kids, ir_type_named(""));
 }
 
 // ir_field — a field access (irex_field): children[0] is the object, name is the

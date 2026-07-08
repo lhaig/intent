@@ -314,6 +314,23 @@ from enums+entities, 25/25) self-host byte-equal.
   `generate_test` uses it for ALL tests (not the test's own). Required for byte-equal
   `let mut` decisions in test bodies (surfaced by map_demo's `cfg`).
 
+## Update — async (spawn / await / sleep / tokio)
+
+`examples/async_demo.intent` and `examples/task_queue.intent` self-host byte-equal
+(diff-emit 28/28; task_queue was blocked only on async).
+
+- **async functions/tests**: `async fn`; the async entry adds `#[tokio::main] async fn
+  main()` that `.await`s `__intent_main`; async tests use `#[tokio::test] async fn`. The
+  contract/labeled-block body is identical to the sync path.
+- **spawn/await** (irex_spawn/irex_await): `tokio::spawn(call)` and `(x).await` (+
+  `.expect("spawned task panicked")` for a JoinHandle). `IsJoinHandle` is carried on
+  `irex_await.bool_value` and set in lowering when the operand is a spawn directly or a
+  var bound to a spawn — tracked in `LowerScope.join_handle_vars` (accumulated in
+  lower_block, mirroring stage1's `joinHandleVars`).
+- **sleep** -> `tokio::time::sleep(std::time::Duration::from_millis(ms as u64))` (a
+  function-call special case). **Future<T>** -> `tokio::task::JoinHandle<T>` (map_type;
+  fully qualified, so no `use` injection).
+
 ## References
 
 - [`internal/ir/nodes.go`](../../internal/ir/nodes.go) — the port target for this slice.
