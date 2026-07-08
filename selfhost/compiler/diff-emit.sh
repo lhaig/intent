@@ -45,6 +45,7 @@ CORPUS=(
   "examples/closure_demo.intent"
   "examples/result_option.intent"
   "examples/try_operator.intent"
+  "examples/error_handling.intent"
   "selfhost/compiler/emit-fixtures/let_locals.intent"
   "selfhost/compiler/emit-fixtures/binops.intent"
   "selfhost/compiler/emit-fixtures/control_flow.intent"

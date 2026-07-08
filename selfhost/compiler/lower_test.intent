@@ -323,4 +323,39 @@ test "leaves an unbound VarRef's expr_type unknown (never over-clones)" {
     assert(ok_body.expr_type.name == "");
 }
 
+test "lowers break and continue statements" {
+    let src: String = "module m version \"1.0.0\";\n\nentry function main() returns Int " + lbrace() + "\n    let mutable i: Int = 0;\n    while i < 10 " + lbrace() + "\n        i = i + 1;\n        if i == 3 " + lbrace() + "\n            continue;\n        " + rbrace() + "\n        if i == 7 " + lbrace() + "\n            break;\n        " + rbrace() + "\n    " + rbrace() + "\n    return i;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    let loop_body: Array<IrStmt> = m.functions[0].body[1].then_body;
+    // loop body: [i = i + 1, if(continue), if(break)]
+    let cont_if: IrStmt = loop_body[1];
+    assert(cont_if.kind == compiler_ir.irst_if());
+    assert(cont_if.then_body[0].kind == compiler_ir.irst_continue());
+    let break_if: IrStmt = loop_body[2];
+    assert(break_if.then_body[0].kind == compiler_ir.irst_break());
+}
+
+test "lowers `+` on two String operands to irex_string_concat" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction f(s: String) returns String " + lbrace() + "\n    return \"prefix: \" + s;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    let ret: IrExpr = m.functions[0].body[0].expr;
+    // "prefix: " (String literal) + s (String param, stamped) -> string concat.
+    assert(ret.kind == compiler_ir.irex_string_concat());
+    assert(ret.expr_type.name == "String");
+    assert(ret.children[0].kind == compiler_ir.irex_string());
+    assert(ret.children[1].kind == compiler_ir.irex_var());
+    assert(ret.children[1].name == "s");
+}
+
+test "keeps numeric `+` as a plain binary (not a string concat)" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction f(a: Int, b: Int) returns Int " + lbrace() + "\n    return a + b;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    let ret: IrExpr = m.functions[0].body[0].expr;
+    assert(ret.kind == compiler_ir.irex_binary());
+    assert(ret.name == "+");
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

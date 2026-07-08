@@ -2607,3 +2607,34 @@ the `mutatedVars` analysis — method-call receivers -> `let mut`). Then enums +
 match + float (shape_area, enum_basic) -> entities (bank_account) -> generics
 (generic_stack) -> async (async_demo, task_queue) -> char/float + string
 concat/interp (char_string_demo) -> traits (handler_trait) -> Map (map_demo).
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 15: string concat + break/continue + mutatedVars (diff-emit 20/20)
+
+`examples/error_handling.intent` now self-hosts byte-equal — an ELEVENTH real
+example. diff-emit is **20/20 EQUAL**. Four pieces (all foundational, reused by
+io_demo and later slices):
+
+- **StringConcat -> format!** (`irex_string_concat`). Lowering detects a `+` whose
+  both operands are String (via the type bridge: string literals + stamped VarRefs,
+  with a concat node itself typed String so nesting works) -> `ir_string_concat`;
+  backend emits `format!("{}{}", l, r)`. generate_binary keeps stage1's fallback (a
+  `+` with a string-LITERAL operand -> format! even without a concat node).
+- **break / continue** (`irst_break` / `irst_continue`): the stage2 AST already had
+  `st_break`/`st_continue`; lowering maps them, backend emits `break;` / `continue;`
+  (they previously hit lower_stmt's `true;` fallback).
+- **mutatedVars analysis** (`collect_mutated_vars`): a `let` is emitted `let mut`
+  when the name is later assigned OR is a top-level method-call receiver (mirrors
+  stage1 collectMutatedVars + `stmt.Mutable || g.mutatedVars[name]`). Written
+  functionally (returns merged arrays) because Array params are immutable `&Vec`
+  and cannot be pushed to. Threaded as a new `mutated: Array<String>` param through
+  generate_stmts/stmt/if/while/for; computed once per function/test.
+
+Gates green: diff-emit 20/20, selfcheck-formatter 7/7, selfcheck-checker 13/13,
+lower_test 127 (added break/continue + string-concat + numeric-plus cases),
+`intentc test examples/error_handling.intent` 3/3 (cargo). No Go / shared/* touched.
+
+NEXT: io_demo (IO builtins create_dir/write_file/read_file/file_exists/env_get ->
+std::fs emit + their clone_if_needed, Float literals; mutatedVars now in place).
+Then enums+match+float (shape_area, enum_basic), entities (bank_account), etc.

@@ -242,7 +242,25 @@ public function lower_stmt(s: Stmt, scope: LowerScope) returns IrStmt {
         fs.then_body = lower_block(s.then_block, scope);
         return fs;
     }
+    if s.kind == shared_ast.st_break() {
+        return IrStmt(compiler_ir.irst_break(), compiler_ir.ir_void_expr());
+    }
+    if s.kind == shared_ast.st_continue() {
+        return IrStmt(compiler_ir.irst_continue(), compiler_ir.ir_void_expr());
+    }
     return IrStmt(compiler_ir.irst_expr(), compiler_ir.ir_bool_lit(true));
+}
+
+// lower_ir_is_string — is this lowered expression String-typed? A string literal
+// always is; any other node is String iff its stamped expr_type is String (a
+// VarRef via the scope, or a nested string concat whose type is String). Mirrors
+// stage1's isStringType(checker type == String) for the operands the bridge can
+// reconstruct. Used to lower `+` on strings to a concat node.
+function lower_ir_is_string(e: IrExpr) returns Bool {
+    if e.kind == compiler_ir.irex_string() {
+        return true;
+    }
+    return e.expr_type.name == "String";
 }
 
 // lower_expr — mirrors lowerExpr for the supported subset (int/bool literal,
@@ -281,9 +299,21 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
         return vr;
     }
     if e.kind == shared_ast.ex_binop() {
-        // String concatenation (`+` on two strings) lowers to a distinct node in
-        // stage1 (it needs operand types); that lands with the strings slice.
-        return compiler_ir.ir_binary(e.name, lower_expr(e.children[0], scope), lower_expr(e.children[1], scope));
+        // String concatenation (`+` on two String operands) lowers to a distinct
+        // irex_string_concat, exactly as stage1's lowerExpr does (it checks
+        // isStringType on both sides). The type bridge stamps VarRef / literal
+        // types, so a literal + param concat is detected; the Rust backend emits
+        // format!("{}{}", …). A `+` where an operand's type is not reconstructable
+        // (e.g. a String-returning call) stays a plain binary here — the backend's
+        // PLUS-with-a-string-literal fallback still catches the literal cases.
+        let left: IrExpr = lower_expr(e.children[0], scope);
+        let right: IrExpr = lower_expr(e.children[1], scope);
+        if e.name == "+" {
+            if lower_ir_is_string(left) and lower_ir_is_string(right) {
+                return compiler_ir.ir_string_concat(left, right);
+            }
+        }
+        return compiler_ir.ir_binary(e.name, left, right);
     }
     if e.kind == shared_ast.ex_paren() {
         // The Go AST has no paren node — parens are discarded at parse time and

@@ -56,6 +56,14 @@ public function irst_assign() returns Int {
     return 7;
 } // target = assignment target; expr = assigned value
 
+public function irst_break() returns Int {
+    return 8;
+} // no operands; emits `break;`
+
+public function irst_continue() returns Int {
+    return 9;
+} // no operands; emits `continue;`
+
 // --- Expression kind constants ----------------------------------------------
 public function irex_void() returns Int {
     return 0;
@@ -124,6 +132,10 @@ public function irex_match() returns Int {
 public function irex_try() returns Int {
     return 16;
 } // children[0] = operand; the `?` error-propagation operator
+
+public function irex_string_concat() returns Int {
+    return 17;
+} // children = [left, right]; `+` on two String operands -> format!("{}{}", ...)
 
 // --- Call-kind constants ----------------------------------------------------
 // Mirrors internal/ir CallKind iota so the backend dispatches identically.
@@ -594,6 +606,17 @@ public function ir_binary(op: String, left: IrExpr, right: IrExpr) returns IrExp
     kids.push(left);
     kids.push(right);
     return IrExpr(irex_binary(), 0, "", false, op, kids, ir_type_named(""));
+}
+
+// ir_string_concat — a string concatenation (irex_string_concat): children are
+// [left, right], both String-typed operands of a `+`. Its own type is String so a
+// nested concat (`a + b + c`) is itself detected as a string operand. The Rust
+// backend emits `format!("{}{}", left, right)`, mirroring stage1's StringConcat.
+public function ir_string_concat(left: IrExpr, right: IrExpr) returns IrExpr {
+    let mutable kids: Array<IrExpr> = empty_ir_expr_array();
+    kids.push(left);
+    kids.push(right);
+    return IrExpr(irex_string_concat(), 0, "", false, "", kids, ir_type_named("String"));
 }
 
 // ir_unary — a unary operation (irex_unary): name is the operator text ("-" or

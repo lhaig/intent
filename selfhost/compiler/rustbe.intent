@@ -85,9 +85,10 @@ public function generate_function(f: IrFunction, funcs: Array<IrFunction>) retur
     if f.is_async {
         return "// unsupported: async function " + f.name + "\n";
     }
+    let mutated: Array<String> = collect_mutated_vars(f.body);
     if f.is_entry {
         let mutable out: String = "fn __intent_main() -> i64 " + lbrace() + "\n";
-        out = out + generate_stmts(f.body, 1, false, funcs);
+        out = out + generate_stmts(f.body, 1, false, funcs, mutated);
         out = out + rbrace() + "\n";
         out = out + "\n";
         out = out + "fn main() " + lbrace() + "\n";
@@ -115,12 +116,12 @@ public function generate_function(f: IrFunction, funcs: Array<IrFunction>) retur
     let needs_labeled: Bool = len(f.ensures_clauses) > 0 and f.return_type.name != "Void";
     if needs_labeled {
         sig = sig + "    let __result: " + ret_ty + " = 'body: " + lbrace() + "\n";
-        sig = sig + generate_stmts(f.body, 2, true, funcs);
+        sig = sig + generate_stmts(f.body, 2, true, funcs, mutated);
         sig = sig + "    " + rbrace() + ";\n";
         sig = sig + generate_contracts(f.ensures_clauses, "Postcondition failed: ", funcs);
         sig = sig + "    __result\n";
     } else {
-        sig = sig + generate_stmts(f.body, 1, false, funcs);
+        sig = sig + generate_stmts(f.body, 1, false, funcs, mutated);
         sig = sig + generate_contracts(f.ensures_clauses, "Postcondition failed: ", funcs);
     }
     sig = sig + rbrace() + "\n";
@@ -147,21 +148,106 @@ public function generate_test(t: IrTest, funcs: Array<IrFunction>) returns Strin
         return "// unsupported: async test " + t.name + "\n";
     }
     let fn_name: String = "__test_" + sanitise_test_name(t.name);
+    let mutated: Array<String> = collect_mutated_vars(t.body);
     let mutable out: String = "#[test]\n";
     out = out + "fn " + fn_name + "() " + lbrace() + "\n";
-    out = out + generate_stmts(t.body, 1, false, funcs);
+    out = out + generate_stmts(t.body, 1, false, funcs, mutated);
     out = out + rbrace() + "\n";
+    return out;
+}
+
+// name_in_array — linear membership test (small arrays), mirrors a Go map lookup.
+public function name_in_array(names: Array<String>, name: String) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(names) {
+        if names[i] == name {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// collect_mutated_vars — mirrors internal/rustbe collectMutatedVars: the names
+// that are assigned to, or are the receiver of a top-level method call, anywhere
+// in `stmts` (recursing into if/while/for bodies). A `let` whose name is in this
+// set is emitted `let mut` even without the source `mutable` keyword (Rust needs
+// `mut` for later reassignment / a `&mut self` method). The method-receiver rule
+// is conservative (stage1 cannot cheaply tell &self from &mut self), so ANY `x` in
+// an `x.method(...)` statement-value position is marked.
+//
+// Written FUNCTIONALLY (each call returns a fresh array, merged into a LOCAL owned
+// array) because an Array parameter lowers to an immutable `&Vec` that cannot be
+// pushed to — the same reason the checker's scope helpers copy-and-return.
+// Duplicates are harmless: name_in_array is a membership test at the `let` site.
+public function collect_mutated_vars(stmts: Array<IrStmt>) returns Array<String> {
+    let mutable out: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(stmts) {
+        let s: IrStmt = stmts[i];
+        if s.kind == compiler_ir.irst_assign() {
+            // Assignment target root -> mutated (a VarRef directly, or the object
+            // of an index assignment `x[i] = …`). Field targets land with entities.
+            if s.target.kind == compiler_ir.irex_var() {
+                out.push(s.target.name);
+            } else {
+                if s.target.kind == compiler_ir.irex_index() {
+                    if s.target.children[0].kind == compiler_ir.irex_var() {
+                        out.push(s.target.children[0].name);
+                    }
+                }
+            }
+        } else {
+            if s.kind == compiler_ir.irst_expr() or s.kind == compiler_ir.irst_let() or s.kind == compiler_ir.irst_return() {
+                // Top-level method call on a plain variable -> mark the receiver
+                // (only the top level, exactly like collectMethodReceivers).
+                if s.expr.kind == compiler_ir.irex_method() {
+                    if s.expr.children[0].kind == compiler_ir.irex_var() {
+                        out.push(s.expr.children[0].name);
+                    }
+                }
+            } else {
+                if s.kind == compiler_ir.irst_if() {
+                    out = append_names(out, collect_mutated_vars(s.then_body));
+                    out = append_names(out, collect_mutated_vars(s.else_body));
+                } else {
+                    if s.kind == compiler_ir.irst_while() or s.kind == compiler_ir.irst_for() {
+                        out = append_names(out, collect_mutated_vars(s.then_body));
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+// append_names — a fresh array holding all of `a` then all of `b` (functional
+// concatenation; the arguments are immutable `&Vec` so a new owned array is built).
+function append_names(a: Array<String>, b: Array<String>) returns Array<String> {
+    let mutable out: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(a) {
+        out.push(a[i]);
+        i = i + 1;
+    }
+    let mutable j: Int = 0;
+    while j < len(b) {
+        out.push(b[j]);
+        j = j + 1;
+    }
     return out;
 }
 
 // generate_stmts — emit each statement at the given indent level, in order.
 // in_labeled propagates the ensures `'body:` context so a `return` inside it (at
-// any nesting depth) becomes `break 'body`.
-public function generate_stmts(stmts: Array<IrStmt>, level: Int, in_labeled: Bool, funcs: Array<IrFunction>) returns String {
+// any nesting depth) becomes `break 'body`. `mutated` is the function/test's
+// mutated-var set (see collect_mutated_vars), consulted by the `let` emit.
+public function generate_stmts(stmts: Array<IrStmt>, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>) returns String {
     let mutable out: String = "";
     let mutable i: Int = 0;
     while i < len(stmts) {
-        out = out + generate_stmt(stmts[i], level, in_labeled, funcs);
+        out = out + generate_stmt(stmts[i], level, in_labeled, funcs, mutated);
         i = i + 1;
     }
     return out;
@@ -170,7 +256,7 @@ public function generate_stmts(stmts: Array<IrStmt>, level: Int, in_labeled: Boo
 // generate_stmt — mirrors generateStmt. Inside an ensures labeled block
 // (in_labeled), `return X` becomes `break 'body X` and bare `return` becomes
 // `break 'body`. Unsupported kinds fail the gate loudly.
-public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>) returns String {
+public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>) returns String {
     let ind: String = indent_str(level);
     if s.kind == compiler_ir.irst_return() {
         if s.expr.kind == compiler_ir.irex_void() {
@@ -190,16 +276,20 @@ public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Ar
     }
     if s.kind == compiler_ir.irst_let() {
         let val: String = gen_stmt_value(s.expr, funcs, level);
+        // A `let` is emitted `mut` if the source said so OR the mutatedVars scan
+        // saw it later assigned / used as a method receiver (mirrors stage1's
+        // `stmt.Mutable || g.mutatedVars[stmt.Name]`).
+        let is_mut: Bool = s.is_mutable or name_in_array(mutated, s.name);
         // Fn-typed lets use type inference (`impl Fn` is not allowed in variable
         // position), so the annotation is dropped — mirrors stage1's LetStmt path.
         if s.let_type.name == "Fn" {
-            if s.is_mutable {
+            if is_mut {
                 return ind + "let mut " + s.name + " = " + val + ";\n";
             }
             return ind + "let " + s.name + " = " + val + ";\n";
         }
         let ty: String = map_type(s.let_type);
-        if s.is_mutable {
+        if is_mut {
             return ind + "let mut " + s.name + ": " + ty + " = " + val + ";\n";
         }
         return ind + "let " + s.name + ": " + ty + " = " + val + ";\n";
@@ -207,14 +297,20 @@ public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Ar
     if s.kind == compiler_ir.irst_assign() {
         return ind + generate_expr(s.target, funcs) + " = " + gen_stmt_value(s.expr, funcs, level) + ";\n";
     }
+    if s.kind == compiler_ir.irst_break() {
+        return ind + "break;\n";
+    }
+    if s.kind == compiler_ir.irst_continue() {
+        return ind + "continue;\n";
+    }
     if s.kind == compiler_ir.irst_if() {
-        return generate_if(s, level, in_labeled, funcs);
+        return generate_if(s, level, in_labeled, funcs, mutated);
     }
     if s.kind == compiler_ir.irst_while() {
-        return generate_while(s, level, in_labeled, funcs);
+        return generate_while(s, level, in_labeled, funcs, mutated);
     }
     if s.kind == compiler_ir.irst_for() {
-        return generate_for(s, level, in_labeled, funcs);
+        return generate_for(s, level, in_labeled, funcs, mutated);
     }
     return ind + "// unsupported stmt\n";
 }
@@ -226,10 +322,10 @@ public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Ar
 // stage1. Bodies indent one level deeper than the `if`.
 // Braces in the emitted Rust go through lbrace()/rbrace() — a literal `{`/`}` in
 // an Intent string lexes as string interpolation.
-public function generate_if(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>) returns String {
+public function generate_if(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>) returns String {
     let ind: String = indent_str(level);
     let mutable out: String = ind + "if " + generate_expr(s.expr, funcs) + " " + lbrace() + "\n";
-    out = out + generate_stmts(s.then_body, level + 1, in_labeled, funcs);
+    out = out + generate_stmts(s.then_body, level + 1, in_labeled, funcs, mutated);
     out = out + ind + rbrace();
     if s.has_else {
         let mutable is_else_if: Bool = false;
@@ -241,11 +337,11 @@ public function generate_if(s: IrStmt, level: Int, in_labeled: Bool, funcs: Arra
         if is_else_if {
             let ei: IrStmt = s.else_body[0];
             out = out + " else if " + generate_expr(ei.expr, funcs) + " " + lbrace() + "\n";
-            out = out + generate_stmts(ei.then_body, level + 1, in_labeled, funcs);
+            out = out + generate_stmts(ei.then_body, level + 1, in_labeled, funcs, mutated);
             out = out + ind + rbrace();
             if ei.has_else {
                 out = out + " else " + lbrace() + "\n";
-                out = out + generate_stmts(ei.else_body, level + 1, in_labeled, funcs);
+                out = out + generate_stmts(ei.else_body, level + 1, in_labeled, funcs, mutated);
                 out = out + ind + rbrace() + "\n";
             } else {
                 out = out + "\n";
@@ -253,7 +349,7 @@ public function generate_if(s: IrStmt, level: Int, in_labeled: Bool, funcs: Arra
             return out;
         }
         out = out + " else " + lbrace() + "\n";
-        out = out + generate_stmts(s.else_body, level + 1, in_labeled, funcs);
+        out = out + generate_stmts(s.else_body, level + 1, in_labeled, funcs, mutated);
         out = out + ind + rbrace() + "\n";
         return out;
     }
@@ -263,17 +359,17 @@ public function generate_if(s: IrStmt, level: Int, in_labeled: Bool, funcs: Arra
 
 // generate_while — mirrors generateWhileStmt's no-contract path: `while COND {`
 // ... `}`. Loop invariants / decreases (the contract path) land with contracts.
-public function generate_while(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>) returns String {
+public function generate_while(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>) returns String {
     let ind: String = indent_str(level);
     let mutable out: String = ind + "while " + generate_expr(s.expr, funcs) + " " + lbrace() + "\n";
-    out = out + generate_stmts(s.then_body, level + 1, in_labeled, funcs);
+    out = out + generate_stmts(s.then_body, level + 1, in_labeled, funcs, mutated);
     out = out + ind + rbrace() + "\n";
     return out;
 }
 
 // generate_for — mirrors generateForInStmt: `for VAR in (START..END) {` for a
 // range iterable, else `for VAR in EXPR.iter() {`.
-public function generate_for(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>) returns String {
+public function generate_for(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>) returns String {
     let ind: String = indent_str(level);
     let mutable out: String = ind + "for " + s.name + " in ";
     if s.expr.kind == compiler_ir.irex_range() {
@@ -282,7 +378,7 @@ public function generate_for(s: IrStmt, level: Int, in_labeled: Bool, funcs: Arr
         out = out + generate_expr(s.expr, funcs) + ".iter()";
     }
     out = out + " " + lbrace() + "\n";
-    out = out + generate_stmts(s.then_body, level + 1, in_labeled, funcs);
+    out = out + generate_stmts(s.then_body, level + 1, in_labeled, funcs, mutated);
     out = out + ind + rbrace() + "\n";
     return out;
 }
@@ -309,6 +405,13 @@ public function generate_expr(e: IrExpr, funcs: Array<IrFunction>) returns Strin
     }
     if e.kind == compiler_ir.irex_binary() {
         return generate_binary(e, funcs);
+    }
+    if e.kind == compiler_ir.irex_string_concat() {
+        // format!("{}{}", left, right) — mirrors stage1's StringConcat emit. The
+        // "{}{}" braces go through lbrace()/rbrace().
+        let l: String = generate_expr(e.children[0], funcs);
+        let r: String = generate_expr(e.children[1], funcs);
+        return "format!(\"" + lbrace() + rbrace() + lbrace() + rbrace() + "\", " + l + ", " + r + ")";
     }
     if e.kind == compiler_ir.irex_unary() {
         return generate_unary(e, funcs);
@@ -454,6 +557,16 @@ public function generate_method_call(e: IrExpr, funcs: Array<IrFunction>) return
 public function generate_binary(e: IrExpr, funcs: Array<IrFunction>) returns String {
     let left: String = generate_expr(e.children[0], funcs);
     let right: String = generate_expr(e.children[1], funcs);
+    // Fallback string-concat detection (mirrors stage1's generateExpr BinaryExpr
+    // case): a `+` where either operand is a string LITERAL emits format!, even if
+    // lowering did not build a StringConcat node (it does when both operand types
+    // are reconstructable). Typechecking guarantees a StringLit's partner is also
+    // String, so this and the irex_string_concat path agree.
+    if e.name == "+" {
+        if e.children[0].kind == compiler_ir.irex_string() or e.children[1].kind == compiler_ir.irex_string() {
+            return "format!(\"" + lbrace() + rbrace() + lbrace() + rbrace() + "\", " + left + ", " + right + ")";
+        }
+    }
     if e.name == "implies" {
         return "(!" + left + " || " + right + ")";
     }
