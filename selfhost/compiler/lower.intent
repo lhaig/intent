@@ -274,6 +274,11 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
     if e.kind == shared_ast.ex_int() {
         return compiler_ir.ir_int_lit(e.int_value);
     }
+    if e.kind == shared_ast.ex_float() {
+        // The AST keeps the raw float lexeme in str_value (the formatter round-trips
+        // it verbatim); stage1's FloatLit.Value is emitted as-is, so pass it through.
+        return compiler_ir.ir_float_lit(e.str_value);
+    }
     if e.kind == shared_ast.ex_bool() {
         return compiler_ir.ir_bool_lit(e.bool_value);
     }

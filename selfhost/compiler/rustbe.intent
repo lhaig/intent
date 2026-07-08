@@ -391,6 +391,10 @@ public function generate_expr(e: IrExpr, funcs: Array<IrFunction>) returns Strin
     if e.kind == compiler_ir.irex_int() {
         return e.int_value.to_string() + "i64";
     }
+    if e.kind == compiler_ir.irex_float() {
+        // The raw float lexeme, emitted verbatim (stage1 FloatLit -> expr.Value).
+        return e.str_value;
+    }
     if e.kind == compiler_ir.irex_bool() {
         if e.bool_value {
             return "true";
@@ -817,6 +821,27 @@ public function generate_builtin_call(e: IrExpr, funcs: Array<IrFunction>) retur
     if e.name == "None" {
         return "None";
     }
+    if e.name == "read_file" {
+        let arg: String = clone_if_needed(generate_expr(e.children[0], funcs), e.children[0]);
+        return "std::fs::read_to_string(" + arg + ").map_err(|e| e.to_string())";
+    }
+    if e.name == "write_file" {
+        let path: String = clone_if_needed(generate_expr(e.children[0], funcs), e.children[0]);
+        let content: String = clone_if_needed(generate_expr(e.children[1], funcs), e.children[1]);
+        return "std::fs::write(" + path + ", " + content + ").map_err(|e| e.to_string())";
+    }
+    if e.name == "create_dir" {
+        let arg: String = clone_if_needed(generate_expr(e.children[0], funcs), e.children[0]);
+        return "std::fs::create_dir_all(" + arg + ").map_err(|e| e.to_string())";
+    }
+    if e.name == "file_exists" {
+        let arg: String = clone_if_needed(generate_expr(e.children[0], funcs), e.children[0]);
+        return "std::path::Path::new(&" + arg + ").exists()";
+    }
+    if e.name == "env_get" {
+        let arg: String = clone_if_needed(generate_expr(e.children[0], funcs), e.children[0]);
+        return "std::env::var(" + arg + ").ok()";
+    }
     return "/* unsupported builtin: " + e.name + " */";
 }
 
@@ -850,7 +875,7 @@ public function starts_with_amp(s: String) returns Bool {
 // for the current IR; Float literals and string interpolation join as those kinds
 // land (they are already excluded — an unsupported kind never reaches an arg here).
 public function is_literal_expr(e: IrExpr) returns Bool {
-    return e.kind == compiler_ir.irex_int() or e.kind == compiler_ir.irex_string() or e.kind == compiler_ir.irex_bool() or e.kind == compiler_ir.irex_array();
+    return e.kind == compiler_ir.irex_int() or e.kind == compiler_ir.irex_float() or e.kind == compiler_ir.irex_string() or e.kind == compiler_ir.irex_bool() or e.kind == compiler_ir.irex_array();
 }
 
 // ends_with_clone — does arg_str already end with ".clone()"? Guards against

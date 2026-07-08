@@ -2638,3 +2638,27 @@ lower_test 127 (added break/continue + string-concat + numeric-plus cases),
 NEXT: io_demo (IO builtins create_dir/write_file/read_file/file_exists/env_get ->
 std::fs emit + their clone_if_needed, Float literals; mutatedVars now in place).
 Then enums+match+float (shape_area, enum_basic), entities (bank_account), etc.
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 16: IO builtins + Float literals (diff-emit 21/21)
+
+`examples/io_demo.intent` now self-hosts byte-equal — a TWELFTH real example.
+diff-emit is **21/21 EQUAL**. (mutatedVars from slice 15 already handled io_demo's
+`let mut pi` / `let mut num`.)
+
+- **IO builtins** (generate_builtin_call): `read_file` -> `std::fs::read_to_string(a)
+  .map_err(|e| e.to_string())`; `write_file` -> `std::fs::write(p, c).map_err(…)`;
+  `create_dir` -> `std::fs::create_dir_all(a).map_err(…)`; `file_exists` ->
+  `std::path::Path::new(&a).exists()`; `env_get` -> `std::env::var(a).ok()`. Each arg
+  runs through clone_if_needed at stage1's exact call site (no-op for the literal args).
+- **Float literals** (`irex_float`): lowering keeps the raw lexeme from the AST's
+  `ex_float` str_value; backend emits it verbatim (stage1 FloatLit.Value), typed
+  Float -> f64. Added to is_literal_expr (a float literal never needs cloning).
+
+Gates green: diff-emit 21/21, selfcheck-formatter 7/7, selfcheck-checker 13/13,
+ir_test 17, lower_test 128 (added a float-literal case). No Go / shared/* touched.
+
+NEXT: enums + match + float arithmetic (shape_area, enum_basic) -> entities
+(bank_account) -> generics (generic_stack) -> traits (handler_trait) -> Map
+(map_demo) -> async (async_demo, task_queue) -> char/string interp (char_string_demo).

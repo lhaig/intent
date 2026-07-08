@@ -137,6 +137,10 @@ public function irex_string_concat() returns Int {
     return 17;
 } // children = [left, right]; `+` on two String operands -> format!("{}{}", ...)
 
+public function irex_float() returns Int {
+    return 18;
+} // str_value = the raw float lexeme (e.g. "3.14"); emitted verbatim as f64
+
 // --- Call-kind constants ----------------------------------------------------
 // Mirrors internal/ir CallKind iota so the backend dispatches identically.
 public function callkind_function() returns Int {
@@ -585,6 +589,12 @@ public function ir_int_lit(value: Int) returns IrExpr {
 
 public function ir_string_lit(lexeme: String) returns IrExpr {
     return IrExpr(irex_string(), 0, lexeme, false, "", empty_ir_expr_array(), ir_type_named("String"));
+}
+
+// ir_float_lit — a float literal (irex_float): str_value is the raw source lexeme
+// (e.g. "3.14"), which the Rust backend emits verbatim (stage1 FloatLit.Value).
+public function ir_float_lit(lexeme: String) returns IrExpr {
+    return IrExpr(irex_float(), 0, lexeme, false, "", empty_ir_expr_array(), ir_type_named("Float"));
 }
 
 public function ir_bool_lit(value: Bool) returns IrExpr {

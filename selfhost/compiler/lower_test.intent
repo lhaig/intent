@@ -358,4 +358,14 @@ test "keeps numeric `+` as a plain binary (not a string concat)" {
     assert(ret.name == "+");
 }
 
+test "lowers a float literal keeping its raw lexeme" {
+    let src: String = "module m version \"1.0.0\";\n\nentry function main() returns Int " + lbrace() + "\n    let pi: Float = 3.14;\n    return 0;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    let lit: IrExpr = m.functions[0].body[0].expr;
+    assert(lit.kind == compiler_ir.irex_float());
+    assert(lit.str_value == "3.14");
+    assert(lit.expr_type.name == "Float");
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.
