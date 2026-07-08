@@ -36,43 +36,75 @@ import "ir.intent";
 // (HashMap/reqwest/tokio) land with their construct slices.
 public function generate(m: IrModule) returns String {
     let funcs: Array<IrFunction> = m.functions;
-    let mutable out: String = "// Generated Rust code from Intent\n";
-    out = out + "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n";
-    out = out + "\n";
+    // Build the body first; the header's `use` statements depend on what it emits.
     // Decl emission order mirrors stage1 Generate: entities, enums, traits, impls,
     // functions, intents, tests (traits/impls land with their slices). Each decl is
     // followed by a blank line.
+    let mutable body: String = "";
     let mutable eei: Int = 0;
     while eei < len(m.entities) {
-        out = out + generate_entity(m.entities[eei], funcs);
-        out = out + "\n";
+        body = body + generate_entity(m.entities[eei], funcs);
+        body = body + "\n";
         eei = eei + 1;
     }
     let mutable eni: Int = 0;
     while eni < len(m.enums) {
-        out = out + generate_enum(m.enums[eni]);
-        out = out + "\n";
+        body = body + generate_enum(m.enums[eni]);
+        body = body + "\n";
         eni = eni + 1;
     }
     let mutable fi: Int = 0;
     while fi < len(m.functions) {
-        out = out + generate_function(m.functions[fi], funcs);
-        out = out + "\n";
+        body = body + generate_function(m.functions[fi], funcs);
+        body = body + "\n";
         fi = fi + 1;
     }
     let mutable ii: Int = 0;
     while ii < len(m.intents) {
-        out = out + generate_intent(m.intents[ii]);
-        out = out + "\n";
+        body = body + generate_intent(m.intents[ii]);
+        body = body + "\n";
         ii = ii + 1;
     }
+    // Tests inherit the mutated-var set leaked from the last function/method/ctor
+    // (stage1 generateTest does not reset g.mutatedVars — see generate_test).
+    let leaked: Array<String> = compute_leaked_mutated(m);
     let mutable ti: Int = 0;
     while ti < len(m.tests) {
-        out = out + generate_test(m.tests[ti], funcs);
-        out = out + "\n";
+        body = body + generate_test(m.tests[ti], funcs, leaked);
+        body = body + "\n";
         ti = ti + 1;
     }
+    let mutable out: String = "// Generated Rust code from Intent\n";
+    out = out + "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n";
+    // Inject the HashMap use statement when the body references it (mirrors stage1's
+    // needsHashMap post-processing — any Map type/literal emits `HashMap`).
+    if contains_substring(body, "HashMap") {
+        out = out + "use std::collections::HashMap;\n";
+    }
+    out = out + "\n";
+    out = out + body;
     return out;
+}
+
+// contains_substring — does `hay` contain `needle`? (Simple linear scan for the
+// header use-statement injection.)
+public function contains_substring(hay: String, needle: String) returns Bool {
+    let hn: Int = len(hay);
+    let nn: Int = len(needle);
+    if nn == 0 {
+        return true;
+    }
+    if nn > hn {
+        return false;
+    }
+    let mutable i: Int = 0;
+    while i <= hn - nn {
+        if hay[i..i + nn] == needle {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
 }
 
 // param_is_arrayref — is param `idx` of function `fn_name` an Array/Map (emitted
@@ -623,12 +655,16 @@ public function generate_contracts(clauses: Array<IrContract>, prefix: String, f
 
 // generate_test — mirrors generateTest. Test name is sanitised to a Rust-legal
 // identifier. Async tests (#[tokio::test]) land with the async slice.
-public function generate_test(t: IrTest, funcs: Array<IrFunction>) returns String {
+// generate_test — mirrors generateTest. IMPORTANT: stage1's generateTest does NOT
+// recompute g.mutatedVars, so a test inherits the mutated-var set LEAKED from the
+// last function/method/constructor generated before the tests (generation order:
+// entity ctors/methods, then functions). `mutated` is that leaked set; replicating
+// this quirk is required for byte-equal `let mut` decisions in test bodies.
+public function generate_test(t: IrTest, funcs: Array<IrFunction>, mutated: Array<String>) returns String {
     if t.is_async {
         return "// unsupported: async test " + t.name + "\n";
     }
     let fn_name: String = "__test_" + sanitise_test_name(t.name);
-    let mutated: Array<String> = collect_mutated_vars(t.body);
     let mutable out: String = "#[test]\n";
     out = out + "fn " + fn_name + "() " + lbrace() + "\n";
     out = out + generate_stmts(t.body, 1, false, funcs, mutated);
@@ -700,6 +736,32 @@ public function collect_mutated_vars(stmts: Array<IrStmt>) returns Array<String>
         i = i + 1;
     }
     return out;
+}
+
+// compute_leaked_mutated — the mutated-var set of the LAST function/method/constructor
+// generated (in stage1's order: each entity's ctor then methods, then the functions).
+// Tests inherit this leaked set (see generate_test). Empty if there are no such bodies.
+public function compute_leaked_mutated(m: IrModule) returns Array<String> {
+    let mutable leaked: Array<String> = [];
+    let mutable ei: Int = 0;
+    while ei < len(m.entities) {
+        let e: IrEntity = m.entities[ei];
+        if e.has_constructor {
+            leaked = collect_mutated_vars(e.constructor_fn.body);
+        }
+        let mutable mi: Int = 0;
+        while mi < len(e.methods) {
+            leaked = collect_mutated_vars(e.methods[mi].body);
+            mi = mi + 1;
+        }
+        ei = ei + 1;
+    }
+    let mutable fi: Int = 0;
+    while fi < len(m.functions) {
+        leaked = collect_mutated_vars(m.functions[fi].body);
+        fi = fi + 1;
+    }
+    return leaked;
 }
 
 // append_names — a fresh array holding all of `a` then all of `b` (functional
@@ -914,6 +976,11 @@ public function generate_expr(e: IrExpr, funcs: Array<IrFunction>) returns Strin
     }
     if e.kind == compiler_ir.irex_array() {
         if len(e.children) == 0 {
+            // An empty literal typed Map is a HashMap literal (stamped in lowering);
+            // otherwise an empty Vec. Mirrors stage1's ArrayLit emit.
+            if e.expr_type.name == "Map" {
+                return "HashMap::new()";
+            }
             return "Vec::new()";
         }
         return "vec![" + generate_args(e.children, funcs) + "]";
@@ -1046,6 +1113,27 @@ public function generate_match_pattern(arm: IrMatchArm) returns String {
 // only `Vec::push`, which takes this general path.
 public function generate_method_call(e: IrExpr, funcs: Array<IrFunction>) returns String {
     let obj: String = generate_expr(e.children[0], funcs);
+    // Receiver-type method dispatch (mirrors generateMethodCallExpr). The receiver's
+    // stamped type selects a rewrite; Map methods differ from the general path. Char /
+    // String receiver methods land with char_string_demo.
+    let recv_type: String = e.children[0].expr_type.name;
+    if recv_type == "Map" {
+        if e.name == "get" {
+            return obj + ".get(&" + generate_expr(e.children[1], funcs) + ").cloned().unwrap_or(" + generate_expr(e.children[2], funcs) + ")";
+        }
+        if e.name == "set" {
+            return obj + ".insert(" + generate_expr(e.children[1], funcs) + ", " + generate_expr(e.children[2], funcs) + ")";
+        }
+        if e.name == "contains" {
+            return obj + ".contains_key(&" + generate_expr(e.children[1], funcs) + ")";
+        }
+        if e.name == "keys" {
+            return obj + ".keys().cloned().collect::<Vec<_>>()";
+        }
+        if e.name == "remove" {
+            return obj + ".remove(&" + generate_expr(e.children[1], funcs) + ")";
+        }
+    }
     let mutable out: String = obj + "." + e.name + "(";
     let mutable i: Int = 1;
     while i < len(e.children) {
@@ -1240,6 +1328,14 @@ public function map_type(t: IrType) returns String {
             return "Option<" + map_type(t.type_args[0]) + ">";
         }
         return "Option<_>";
+    }
+    if t.name == "Map" {
+        // HashMap<K, V> — the `use std::collections::HashMap;` header is injected
+        // post-generation (see generate) when the output references HashMap.
+        if len(t.type_args) == 2 {
+            return "HashMap<" + map_type(t.type_args[0]) + ", " + map_type(t.type_args[1]) + ">";
+        }
+        return "HashMap<_, _>";
     }
     if t.name == "Fn" {
         // ir_parse_type stores a Fn's type_args as [param0..paramN-1, return],

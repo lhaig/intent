@@ -2746,3 +2746,28 @@ NEXT (each large, each needs new machinery): generics/monomorphization (generic_
 receiver-type method dispatch (map_demo needs Map->HashMap + use-injection; char_string_demo
 needs char literals with \u escapes + String/Char receiver methods + String indexing),
 traits (handler_trait), async (async_demo, task_queue).
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 20: Map (HashMap) + receiver-type method dispatch (diff-emit 26/26)
+
+`examples/map_demo.intent` self-hosts byte-equal — the SEVENTEENTH real example
+(js_demo was the sixteenth, slice 19). diff-emit is **26/26 EQUAL**.
+
+- **Map -> HashMap** (map_type Map case); empty `[]` typed Map -> `HashMap::new()`
+  (stamped in lowering); `use std::collections::HashMap;` injected by a post-generation
+  body scan (equivalent to stage1's needsHashMap).
+- **Receiver-type method dispatch** (generate_method_call): the receiver's stamped type
+  selects the rewrite. Map get/set/contains/keys/remove -> the HashMap idioms. Needs
+  field-access types, so lowering stamps irex_field.expr_type from the owning entity's
+  field decl (self entity carried on LowerScope.self_entity_name) -> `self.settings.get`
+  dispatches as Map. String/Char receiver methods reuse this in a later slice.
+- **Stage1 quirk replicated — mutatedVars leaks into tests**: generateTest does NOT reset
+  g.mutatedVars, so tests reuse the LAST function/method/ctor's mutated set (not their
+  own). compute_leaked_mutated returns it; generate_test uses it for all tests. Required
+  for byte-equal `let mut` in test bodies (surfaced by map_demo's cfg).
+
+Gates green: diff-emit 26/26, selfcheck-formatter 7/7, selfcheck-checker 13/13,
+lower_test (+ Map cases), ir_test, map_demo cargo. No shared/* touched. NEXT:
+char/String receiver methods + char literals (char_string_demo), traits (handler_trait),
+generics/monomorphization (generic_stack), async (async_demo, task_queue).

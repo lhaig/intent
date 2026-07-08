@@ -447,4 +447,21 @@ test "lowers an entity constructor call to callkind_constructor" {
     assert(ctor_call.name == "P");
 }
 
+test "stamps a Map field access type and an empty-array Map let" {
+    let src: String = "module m version \"1.0.0\";\n\nentity C " + lbrace() + "\n    field settings: Map<String, String>;\n    constructor(settings: Map<String, String>) " + lbrace() + "\n        self.settings = settings;\n    " + rbrace() + "\n    method g(k: String) returns String " + lbrace() + "\n        return self.settings.get(k, k);\n    " + rbrace() + "\n" + rbrace() + "\n\nentry function main() returns Int " + lbrace() + "\n    let mutable scores: Map<String, Int> = [];\n    return 0;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    // In method g, `self.settings.get(...)` receiver `self.settings` is stamped Map.
+    let g: IrFunction = m.entities[0].methods[0];
+    let ret_call: IrExpr = g.body[0].expr;
+    assert(ret_call.kind == compiler_ir.irex_method());
+    assert(ret_call.children[0].kind == compiler_ir.irex_field());
+    assert(ret_call.children[0].expr_type.name == "Map");
+    // `let scores: Map = []` stamps the empty array literal's type Map.
+    let scores_let: IrStmt = m.functions[0].body[0];
+    assert(scores_let.kind == compiler_ir.irst_let());
+    assert(scores_let.expr.kind == compiler_ir.irex_array());
+    assert(scores_let.expr.expr_type.name == "Map");
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

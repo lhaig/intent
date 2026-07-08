@@ -287,6 +287,33 @@ captures, and the `intent` block emitted as doc-comments + a compile-time-verifi
   reserved words (IR field named `verifications`, param named `ens_preds`); a local
   named `fn` emits as the Rust keyword `fn` (renamed `func`).
 
+## Update — Map (HashMap) + receiver-type method dispatch + the mutatedVars test-leak quirk
+
+`examples/map_demo.intent` (diff-emit 26/26) and `examples/js_demo.intent` (a free win
+from enums+entities, 25/25) self-host byte-equal.
+
+- **Map -> HashMap**: `map_type` gains the `Map<K,V> -> HashMap<K,V>` case; an empty
+  array literal typed `Map` (stamped in lowering when the `let` type is `Map`) emits
+  `HashMap::new()`. The `use std::collections::HashMap;` header is injected by a
+  post-generation substring scan of the body (equivalent to stage1's `needsHashMap`,
+  since any Map type/literal emits the token `HashMap`).
+- **Receiver-type method dispatch**: `generate_method_call` selects a rewrite from the
+  RECEIVER's stamped type — Map's `get`/`set`/`contains`/`keys`/`remove` become the
+  `HashMap` idioms (`.get(&k).cloned().unwrap_or(d)`, `.insert`, `.contains_key(&k)`,
+  `.keys().cloned().collect()`, `.remove(&k)`). This needs field-access types, so
+  lowering now stamps `irex_field.expr_type` from the owning entity's field
+  declaration (the `self` entity is carried on `LowerScope.self_entity_name`) — so
+  `self.settings.get(...)` dispatches as a Map. String/Char receiver methods reuse
+  this machinery in a later slice.
+- **Discovered stage1 quirk — `mutatedVars` leaks into tests.** `generateTest` does
+  NOT reset `g.mutatedVars`, so every test body reuses the set left by the LAST
+  function/method/constructor generated before the tests (generation order: entity
+  ctors/methods, then functions). A test's own `let` that is never mutated is still
+  emitted `let mut` if that name happened to be mutated in, e.g., the entry function.
+  Reproduced exactly: `compute_leaked_mutated` returns the last such body's set and
+  `generate_test` uses it for ALL tests (not the test's own). Required for byte-equal
+  `let mut` decisions in test bodies (surfaced by map_demo's `cfg`).
+
 ## References
 
 - [`internal/ir/nodes.go`](../../internal/ir/nodes.go) — the port target for this slice.

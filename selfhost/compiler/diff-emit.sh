@@ -51,6 +51,7 @@ CORPUS=(
   "examples/shape_area.intent"
   "examples/bank_account.intent"
   "examples/js_demo.intent"
+  "examples/map_demo.intent"
   "selfhost/compiler/emit-fixtures/let_locals.intent"
   "selfhost/compiler/emit-fixtures/binops.intent"
   "selfhost/compiler/emit-fixtures/control_flow.intent"

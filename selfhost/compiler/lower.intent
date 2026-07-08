@@ -53,16 +53,20 @@ entity LowerScope {
     // self_name — what a `self` identifier lowers to: "self" (methods) or "__self"
     // (constructors, where stage1 emits the struct being built). in_old — true while
     // lowering an ensures clause, so an `old(expr)` call lowers to its captured var.
+    // self_entity_name — the entity currently being lowered (for stamping `self.field`
+    // access types, needed by receiver-type method dispatch like Map/String/Char).
     field self_name: String;
     field in_old: Bool;
+    field self_entity_name: String;
 
-    constructor(names: Array<String>, types: Array<IrType>, enums: Array<EnumDecl>, entities: Array<EntityDecl>, self_name: String, in_old: Bool) {
+    constructor(names: Array<String>, types: Array<IrType>, enums: Array<EnumDecl>, entities: Array<EntityDecl>, self_name: String, in_old: Bool, self_entity_name: String) {
         self.names = names;
         self.types = types;
         self.enums = enums;
         self.entities = entities;
         self.self_name = self_name;
         self.in_old = in_old;
+        self.self_entity_name = self_entity_name;
     }
 }
 
@@ -82,7 +86,7 @@ function lower_scope_empty(enums: Array<EnumDecl>, entities: Array<EntityDecl>) 
         ent.push(entities[enti]);
         enti = enti + 1;
     }
-    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), e, ent, "self", false);
+    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), e, ent, "self", false, "");
 }
 
 // lower_scope_define — a NEW scope with `name: ty` appended (copies names/types,
@@ -103,19 +107,40 @@ function lower_scope_define(s: LowerScope, name: String, ty: IrType) returns Low
         ti = ti + 1;
     }
     new_types.push(ty);
-    return LowerScope(new_names, new_types, s.enums, s.entities, s.self_name, s.in_old);
+    return LowerScope(new_names, new_types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name);
 }
 
-// lower_scope_with_self — a copy of `s` with self_name set (for constructor bodies,
-// where `self` lowers to `__self`).
-function lower_scope_with_self(s: LowerScope, name: String) returns LowerScope {
-    return LowerScope(s.names, s.types, s.enums, s.entities, name, s.in_old);
+// lower_scope_with_self — a copy of `s` with self_name + self_entity_name set (for
+// entity members: methods use "self", constructors "__self").
+function lower_scope_with_self(s: LowerScope, name: String, entity_name: String) returns LowerScope {
+    return LowerScope(s.names, s.types, s.enums, s.entities, name, s.in_old, entity_name);
 }
 
 // lower_scope_with_old — a copy of `s` with in_old set (for ensures clauses, where
 // `old(expr)` lowers to its captured variable).
 function lower_scope_with_old(s: LowerScope, flag: Bool) returns LowerScope {
-    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, flag);
+    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, flag, s.self_entity_name);
+}
+
+// lookup_entity_field_type — the declared type of `field_name` in entity `ent_name`,
+// or the unknown type if not found. Used to stamp `self.field` / `obj.field` access
+// types for receiver-type method dispatch.
+function lookup_entity_field_type(entities: Array<EntityDecl>, ent_name: String, field_name: String) returns IrType {
+    let mutable i: Int = 0;
+    while i < len(entities) {
+        let e: EntityDecl = entities[i];
+        if e.name == ent_name {
+            let mutable j: Int = 0;
+            while j < len(e.fields) {
+                if e.fields[j].name == field_name {
+                    return compiler_ir.ir_parse_type(e.fields[j].type_name);
+                }
+                j = j + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return compiler_ir.ir_type_named("");
 }
 
 // is_known_entity — is `name` a declared entity? (Used to classify constructor calls.)
@@ -243,12 +268,12 @@ public function lower_entity(e: EntityDecl, enums: Array<EnumDecl>, entities: Ar
     }
     let mutable ctor: IrFunction = compiler_ir.empty_ir_function();
     if e.has_constructor {
-        ctor = lower_member(e.ctor, "__self", enums, entities);
+        ctor = lower_member(e.ctor, "__self", e.name, enums, entities);
     }
     let mutable methods: Array<IrFunction> = compiler_ir.empty_ir_function_array();
     let mutable mi: Int = 0;
     while mi < len(e.methods) {
-        methods.push(lower_member(e.methods[mi], "self", enums, entities));
+        methods.push(lower_member(e.methods[mi], "self", e.name, enums, entities));
         mi = mi + 1;
     }
     return IrEntity(e.name, e.is_public, fields, invs, e.has_constructor, ctor, methods);
@@ -258,8 +283,8 @@ public function lower_entity(e: EntityDecl, enums: Array<EnumDecl>, entities: Ar
 // "__self" for a constructor, "self" for a method. Ensures are lowered in an
 // in_old scope so `old(expr)` becomes its captured variable; old captures are
 // scanned from the ensures ASTs (mirrors lowerConstructor / lowerMethod).
-public function lower_member(f: FunctionDecl, self_name: String, enums: Array<EnumDecl>, entities: Array<EntityDecl>) returns IrFunction {
-    let base: LowerScope = lower_scope_with_self(lower_scope_empty(enums, entities), self_name);
+public function lower_member(f: FunctionDecl, self_name: String, entity_name: String, enums: Array<EnumDecl>, entities: Array<EntityDecl>) returns IrFunction {
+    let base: LowerScope = lower_scope_with_self(lower_scope_empty(enums, entities), self_name, entity_name);
     let mutable scope: LowerScope = base;
     let mutable params: Array<IrParam> = compiler_ir.empty_ir_param_array();
     let mutable i: Int = 0;
@@ -546,6 +571,16 @@ public function lower_stmt(s: Stmt, scope: LowerScope) returns IrStmt {
         ls.name = s.name;
         ls.is_mutable = s.is_mutable;
         ls.let_type = compiler_ir.ir_parse_type(s.type_name);
+        // An empty array literal assigned to a Map-typed let is a HashMap literal:
+        // stamp the value's type Map so the backend emits `HashMap::new()` (mirrors
+        // stage1's ArrayLit-with-Map-Type -> HashMap::new()).
+        if ls.let_type.name == "Map" {
+            if ls.expr.kind == compiler_ir.irex_array() {
+                if len(ls.expr.children) == 0 {
+                    ls.expr.expr_type = compiler_ir.ir_type_named("Map");
+                }
+            }
+        }
         return ls;
     }
     if s.kind == shared_ast.st_if() {
@@ -789,7 +824,24 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
         // `object.field` — name is the field, children[0] the object. Mirrors stage1
         // FieldAccessExpr. (An `obj.method(...)` CALL is handled in ex_call below,
         // where the callee is this ex_field.)
-        return compiler_ir.ir_field(lower_expr(e.children[0], scope), e.name);
+        let obj_ir: IrExpr = lower_expr(e.children[0], scope);
+        let mutable fld: IrExpr = compiler_ir.ir_field(obj_ir, e.name);
+        // Stamp the field's type (for receiver-type method dispatch, e.g. a Map field
+        // accessed as `self.settings.get(...)`). The owning entity is the current
+        // `self` entity when the object is `self`, else the object's stamped type.
+        let mutable ent_name: String = "";
+        if e.children[0].kind == shared_ast.ex_ident() {
+            if e.children[0].name == "self" {
+                ent_name = scope.self_entity_name;
+            }
+        }
+        if ent_name == "" {
+            ent_name = obj_ir.expr_type.name;
+        }
+        if ent_name != "" {
+            fld.expr_type = lookup_entity_field_type(scope.entities, ent_name, e.name);
+        }
+        return fld;
     }
     if e.kind == shared_ast.ex_call() {
         let callee: Expr = e.children[0];
