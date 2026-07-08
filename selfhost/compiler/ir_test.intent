@@ -93,6 +93,38 @@ test "control-flow statements carry bodies, defaults, and ranges" {
     assert(rng.children[1].int_value == 5);
 }
 
+test "ir_parse_type parses scalars, generics, and nesting" {
+    let t1: IrType = compiler_ir.ir_parse_type("Int");
+    assert(t1.name == "Int");
+    assert(len(t1.type_args) == 0);
+    let t2: IrType = compiler_ir.ir_parse_type("Array<Int>");
+    assert(t2.name == "Array");
+    assert(len(t2.type_args) == 1);
+    assert(t2.type_args[0].name == "Int");
+    let t3: IrType = compiler_ir.ir_parse_type("Map<String, Int>");
+    assert(t3.name == "Map");
+    assert(len(t3.type_args) == 2);
+    assert(t3.type_args[0].name == "String");
+    assert(t3.type_args[1].name == "Int");
+    let t4: IrType = compiler_ir.ir_parse_type("Array<Map<String, Int>>");
+    assert(t4.name == "Array");
+    assert(t4.type_args[0].name == "Map");
+    assert(t4.type_args[0].type_args[1].name == "Int");
+}
+
+test "array and index expressions" {
+    let mutable elems: Array<IrExpr> = compiler_ir.empty_ir_expr_array();
+    elems.push(compiler_ir.ir_int_lit(1));
+    elems.push(compiler_ir.ir_int_lit(2));
+    let arr: IrExpr = compiler_ir.ir_array(elems);
+    assert(arr.kind == compiler_ir.irex_array());
+    assert(len(arr.children) == 2);
+    let idx: IrExpr = compiler_ir.ir_index(compiler_ir.ir_var_ref("a"), compiler_ir.ir_int_lit(0));
+    assert(idx.kind == compiler_ir.irex_index());
+    assert(idx.children[0].name == "a");
+    assert(idx.children[1].int_value == 0);
+}
+
 test "a function carries requires/ensures contracts with raw text" {
     let pred: IrExpr = compiler_ir.ir_binary(">=", compiler_ir.ir_var_ref("n"), compiler_ir.ir_int_lit(0));
     let c: IrContract = IrContract(pred, "n >= 0", 3, 5);

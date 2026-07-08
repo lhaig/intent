@@ -267,6 +267,17 @@ public function generate_expr(e: IrExpr) returns String {
     if e.kind == compiler_ir.irex_range() {
         return "(" + generate_expr(e.children[0]) + ".." + generate_expr(e.children[1]) + ")";
     }
+    if e.kind == compiler_ir.irex_array() {
+        if len(e.children) == 0 {
+            return "Vec::new()";
+        }
+        return "vec![" + generate_args(e.children) + "]";
+    }
+    if e.kind == compiler_ir.irex_index() {
+        // Non-String indexing: obj[idx as usize]. String indexing (.chars()) and
+        // Map indexing land with their slices; the corpus indexes only Vecs.
+        return generate_expr(e.children[0]) + "[" + generate_expr(e.children[1]) + " as usize]";
+    }
     if e.kind == compiler_ir.irex_call() {
         return generate_call(e);
     }
@@ -399,6 +410,11 @@ public function generate_builtin_call(e: IrExpr) returns String {
     if e.name == "print" {
         // println!("{}", ARG) — the "{}" braces go through lbrace()/rbrace().
         return "println!(\"" + lbrace() + rbrace() + "\", " + generate_expr(e.children[0]) + ")";
+    }
+    if e.name == "len" {
+        // Non-String len: (ARG.len() as i64). String len (.chars().count()) is
+        // deferred; the corpus calls len only on Vecs.
+        return "(" + generate_expr(e.children[0]) + ".len() as i64)";
     }
     return "/* unsupported builtin: " + e.name + " */";
 }

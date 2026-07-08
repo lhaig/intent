@@ -38,23 +38,20 @@ public function lower(prog: Program, path: String) returns IrModule {
     return IrModule(decl_name, decl_name, "", true, path, fns, tsts);
 }
 
-// lower_function — mirrors lowerFunction. Contracts (requires/ensures) are
-// deferred to the contracts slice: the stage2 AST carries only the predicate
-// Expr (no raw text), so byte-equal `assert!` injection needs its own slice.
-// hello.intent's main has none, so leaving the clause arrays empty is correct
-// for the trivial subset.
+// lower_function — mirrors lowerFunction: params (types parsed structurally),
+// requires/ensures contracts (via lower_contracts), and the lowered body.
 public function lower_function(f: FunctionDecl) returns IrFunction {
     let mutable params: Array<IrParam> = compiler_ir.empty_ir_param_array();
     let mutable i: Int = 0;
     while i < len(f.params) {
         let p: Param = f.params[i];
-        params.push(IrParam(p.name, compiler_ir.ir_type_named(p.type_name)));
+        params.push(IrParam(p.name, compiler_ir.ir_parse_type(p.type_name)));
         i = i + 1;
     }
     let reqs: Array<IrContract> = lower_contracts(f.requires_clauses, f.requires_raw);
     let enss: Array<IrContract> = lower_contracts(f.ensures_clauses, f.ensures_raw);
     let body: Array<IrStmt> = lower_block(f.body);
-    return IrFunction(f.name, f.is_entry, f.is_public, f.is_async, params, compiler_ir.ir_type_named(f.return_type), reqs, enss, body);
+    return IrFunction(f.name, f.is_entry, f.is_public, f.is_async, params, compiler_ir.ir_parse_type(f.return_type), reqs, enss, body);
 }
 
 // lower_contracts — pair each contract predicate Expr with its captured raw text
@@ -123,7 +120,7 @@ public function lower_stmt(s: Stmt) returns IrStmt {
         let mutable ls: IrStmt = IrStmt(compiler_ir.irst_let(), lower_expr(s.expr));
         ls.name = s.name;
         ls.is_mutable = s.is_mutable;
-        ls.let_type = compiler_ir.ir_type_named(s.type_name);
+        ls.let_type = compiler_ir.ir_parse_type(s.type_name);
         return ls;
     }
     if s.kind == shared_ast.st_if() {
@@ -185,6 +182,18 @@ public function lower_expr(e: Expr) returns IrExpr {
     }
     if e.kind == shared_ast.ex_range() {
         return compiler_ir.ir_range(lower_expr(e.children[0]), lower_expr(e.children[1]));
+    }
+    if e.kind == shared_ast.ex_array() {
+        let mutable elems: Array<IrExpr> = compiler_ir.empty_ir_expr_array();
+        let mutable ai: Int = 0;
+        while ai < len(e.children) {
+            elems.push(lower_expr(e.children[ai]));
+            ai = ai + 1;
+        }
+        return compiler_ir.ir_array(elems);
+    }
+    if e.kind == shared_ast.ex_index() {
+        return compiler_ir.ir_index(lower_expr(e.children[0]), lower_expr(e.children[1]));
     }
     if e.kind == shared_ast.ex_call() {
         let callee: Expr = e.children[0];

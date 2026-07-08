@@ -2331,3 +2331,28 @@ entity-method contracts (the other two parser contract loops), arg cloning in as
 Gates green: diff-emit 9/9, selfcheck-formatter 7/7, selfcheck-checker 13/13, ir_test
 8/8, lower_test 115/115, diff-checker/formatter/linter, go test, validate all OK.
 NEXT: arrays/Map (sorted_check, array_sum) or entities (bank_account).
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 7: arrays (local) + the type-string parser (diff-emit 10/10)
+
+`emit-fixtures/arrays.intent` (array literal + indexing + `len` over a local
+Array<Int>) emits byte-equal.
+
+- **Type-string parser (foundational, ADR 0059 D3 bridge):** the AST carries types
+  as flat strings ("Array<Int>", "Map<String, Int>"). Added `IrTypeParser` +
+  `ir_parse_type` to `ir.intent`, mirroring the checker's TypeParser (bare / generic
+  `<...>` / `Fn(...) -> R`, recursing through args). lower.intent now parses param /
+  return / let types via `ir_parse_type` instead of wrapping the whole string as the
+  name — so `map_type` sees `Array` with type_args `[Int]` and emits `Vec<i64>`. This
+  unblocks every generic-typed construct going forward.
+- IR: `irex_array` (children=elements) + `irex_index` (children=[obj, index]) +
+  `ir_array`/`ir_index`. Emit: `vec![...]` / `Vec::new()`; `obj[idx as usize]`;
+  `len` builtin -> `(x.len() as i64)`. String indexing/len (.chars()) and Map indexing
+  deferred (corpus uses only Vecs).
+
+Still 4 real examples byte-equal (arrays fixture is synthetic). array_sum/sorted_check
+need MORE: Array-by-ref params (`&Vec`), call-site borrow (needs a function-param
+registry threaded into emit), method calls (`.push`), and forall-in-contract
+(sorted_check) — each its own follow-up. Gates green: diff-emit 10/10,
+selfcheck-formatter 8/8, selfcheck-checker 13/13, ir_test 10/10.

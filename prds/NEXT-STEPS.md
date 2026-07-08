@@ -16,13 +16,22 @@ byte-equal against stage1 before landing; all pre-existing gates stayed green th
 grow `lower.intent` + `rustbe.intent` for one construct, add a byte-equal corpus entry to
 `selfhost/compiler/diff-emit.sh`. Order (✅ = done, byte-equal-gated in diff-emit):
 ✅ let-bindings & locals → ✅ binops → ✅ if/while/for + assignment → ✅ functions & calls →
-✅ strings & `print` → ✅ contracts (requires/ensures) → **NEXT: arrays/Map** →
-entities (structs) + field access + methods → enums + match → Result/Option/`?` → generics →
-closures/lambdas → async → char/float + string concat/interp. The 22 `TESTED_EXAMPLES` are the
-target corpus. Emitter must stay COMPLETE per supported construct (unlike the checker).
+✅ strings & `print` → ✅ contracts (requires/ensures) → ✅ arrays (local) + the type-string
+parser → **NEXT: array params + method calls** (finishes array_sum) → entities (structs) +
+field access + methods → enums + match → Result/Option/`?` → generics → closures/lambdas →
+async → char/float + string concat/interp. Emitter must stay COMPLETE per supported construct.
 
-**diff-emit is at 9/9** — FOUR real examples (`hello`, `divergence_demo`, `fibonacci`,
-`target_specific_demo`) plus 5 fixtures
+**Foundational win:** `ir_parse_type` (in `ir.intent`, mirrors the checker's TypeParser)
+now parses the AST's flat type strings ("Array<Int>", "Map<String, Int>", "Fn(..) -> R")
+into structured IrType — the ADR 0059 D3 bridge. Unblocks all generic-typed constructs.
+
+**To finish array_sum (next):** (1) Array/Map params emit `&Vec`/`&HashMap` (generate_function
+param loop); (2) call-site borrow `f(&arr)` — needs a function-param-type registry threaded
+into generate_call (mirror stage1 `g.functions`); (3) method calls `x.push(v)` (a new AST
+ex_field-callee / MethodCall path). sorted_check additionally needs forall-in-contract.
+
+**diff-emit is at 10/10** — FOUR real examples (`hello`, `divergence_demo`, `fibonacci`,
+`target_specific_demo`) plus 6 fixtures (incl. `arrays`)
 (`let_locals`, `binops`, `control_flow`, `functions`, `strings`). Supported constructs:
 entry+non-entry functions & params & calls, `return`, `let`/`let mutable`, var refs, int/bool/
 string literals, all binops (`(l op r)`, `implies`), if/else(+1-level else-if)/while/for-in,

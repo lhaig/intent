@@ -89,6 +89,14 @@ public function irex_range() returns Int {
     return 7;
 } // children = [start, end]
 
+public function irex_array() returns Int {
+    return 8;
+} // children = elements
+
+public function irex_index() returns Int {
+    return 9;
+} // children = [object, index]
+
 // --- Call-kind constants ----------------------------------------------------
 // Mirrors internal/ir CallKind iota so the backend dispatches identically.
 public function callkind_function() returns Int {
@@ -356,6 +364,120 @@ public function ir_type_named(name: String) returns IrType {
     return IrType(name, empty_ir_type_array(), 0);
 }
 
+// --- Type-string parsing (mirrors the checker's TypeParser, ADR 0053) ---------
+// The AST carries types as flat strings ("Array<Int>", "Map<String, Int>",
+// "Fn(Int) -> Int"). ir_parse_type builds a structured IrType from one, so the
+// backend can map Array->Vec, Map->HashMap, etc. This is the checker.Type ->
+// IrType bridge ADR 0059 D3 anticipated — reimplemented here (IrType is
+// shape-identical to the checker's Type) to keep the compiler decoupled from the
+// checker rather than importing it for one function.
+function ir_type_is_ident_char(c: Char) returns Bool {
+    return c.is_alphanumeric() or c == '_';
+}
+
+entity IrTypeParser {
+    field src: String;
+    field pos: Int;
+
+    constructor(src: String) {
+        self.src = src;
+        self.pos = 0;
+    }
+
+    method at_end() returns Bool {
+        return self.pos >= len(self.src);
+    }
+
+    method peek() returns Char {
+        if self.at_end() {
+            return '\0';
+        }
+        return self.src[self.pos];
+    }
+
+    method skip_spaces() returns Void {
+        while not self.at_end() and self.peek() == ' ' {
+            self.pos = self.pos + 1;
+        }
+    }
+
+    method read_ident() returns String {
+        let start: Int = self.pos;
+        while not self.at_end() and ir_type_is_ident_char(self.peek()) {
+            self.pos = self.pos + 1;
+        }
+        return self.src[start..self.pos];
+    }
+
+    method parse() returns IrType {
+        self.skip_spaces();
+        let base: String = self.read_ident();
+        if base == "Fn" and self.peek() == '(' {
+            return self.parse_fn();
+        }
+        if self.peek() == '<' {
+            return self.parse_generic(base);
+        }
+        return IrType(base, empty_ir_type_array(), 0);
+    }
+
+    method parse_generic(base: String) returns IrType {
+        self.pos = self.pos + 1;
+        let mutable args: Array<IrType> = empty_ir_type_array();
+        self.skip_spaces();
+        while not self.at_end() and self.peek() != '>' {
+            let arg: IrType = self.parse();
+            args.push(arg);
+            self.skip_spaces();
+            if self.peek() == ',' {
+                self.pos = self.pos + 1;
+                self.skip_spaces();
+            }
+        }
+        if self.peek() == '>' {
+            self.pos = self.pos + 1;
+        }
+        return IrType(base, args, 0);
+    }
+
+    method parse_fn() returns IrType {
+        self.pos = self.pos + 1;
+        let mutable args: Array<IrType> = empty_ir_type_array();
+        let mutable param_count: Int = 0;
+        self.skip_spaces();
+        while not self.at_end() and self.peek() != ')' {
+            let p: IrType = self.parse();
+            args.push(p);
+            param_count = param_count + 1;
+            self.skip_spaces();
+            if self.peek() == ',' {
+                self.pos = self.pos + 1;
+                self.skip_spaces();
+            }
+        }
+        if self.peek() == ')' {
+            self.pos = self.pos + 1;
+        }
+        self.skip_spaces();
+        if self.peek() == '-' {
+            self.pos = self.pos + 1;
+            if self.peek() == '>' {
+                self.pos = self.pos + 1;
+            }
+        }
+        self.skip_spaces();
+        let ret: IrType = self.parse();
+        args.push(ret);
+        return IrType("Fn", args, param_count);
+    }
+}
+
+// ir_parse_type — build a structured IrType from an AST type string.
+public function ir_parse_type(s: String) returns IrType {
+    let mutable p: IrTypeParser = IrTypeParser(s);
+    return p.parse();
+}
+
 // ir_void_expr — the placeholder expression for an absent value (bare return).
 public function ir_void_expr() returns IrExpr {
     return IrExpr(irex_void(), 0, "", false, "", empty_ir_expr_array(), ir_type_named("Void"));
@@ -400,6 +522,19 @@ public function ir_range(start: IrExpr, end_expr: IrExpr) returns IrExpr {
     kids.push(start);
     kids.push(end_expr);
     return IrExpr(irex_range(), 0, "", false, "", kids, ir_type_named(""));
+}
+
+// ir_array — an array literal (irex_array): children are the elements.
+public function ir_array(elements: Array<IrExpr>) returns IrExpr {
+    return IrExpr(irex_array(), 0, "", false, "", elements, ir_type_named(""));
+}
+
+// ir_index — an index expression (irex_index): children are [object, index].
+public function ir_index(object: IrExpr, index: IrExpr) returns IrExpr {
+    let mutable kids: Array<IrExpr> = empty_ir_expr_array();
+    kids.push(object);
+    kids.push(index);
+    return IrExpr(irex_index(), 0, "", false, "", kids, ir_type_named(""));
 }
 
 // No entry function here — this is a library module imported by lower.intent /
