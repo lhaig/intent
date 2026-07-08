@@ -1,0 +1,25 @@
+module quantifiers version "1.0.0";
+
+function all_non_negative(xs: Array<Int>) returns Bool
+    requires forall i in 0..len(xs): xs[i] >= 0
+{
+    return true;
+}
+
+function has_a_zero(xs: Array<Int>) returns Bool
+    requires exists i in 0..len(xs): xs[i] == 0
+{
+    return true;
+}
+
+entry function main() returns Int {
+    let xs: Array<Int> = [0, 1, 2];
+    let a: Bool = all_non_negative(xs);
+    let b: Bool = has_a_zero(xs);
+    if a {
+        if b {
+            return 1;
+        }
+    }
+    return 0;
+}

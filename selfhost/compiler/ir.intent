@@ -105,6 +105,14 @@ public function irex_unary() returns Int {
     return 11;
 } // name = operator text ("-" / "not"), children = [operand]
 
+public function irex_forall() returns Int {
+    return 12;
+} // name = loop var, children = [range, body]
+
+public function irex_exists() returns Int {
+    return 13;
+} // name = loop var, children = [range, body]
+
 // --- Call-kind constants ----------------------------------------------------
 // Mirrors internal/ir CallKind iota so the backend dispatches identically.
 public function callkind_function() returns Int {
@@ -530,6 +538,24 @@ public function ir_unary(op: String, operand: IrExpr) returns IrExpr {
     let mutable kids: Array<IrExpr> = empty_ir_expr_array();
     kids.push(operand);
     return IrExpr(irex_unary(), 0, "", false, op, kids, ir_type_named(""));
+}
+
+// ir_forall / ir_exists — a quantifier over a range (irex_forall / irex_exists):
+// name is the loop variable and children are [range, body], mirroring the AST's
+// `forall var in range: body` shape (children[0] is an irex_range). The Rust
+// backend expands each to a scan loop (see generate_forall / generate_exists).
+public function ir_forall(var_name: String, range_expr: IrExpr, body: IrExpr) returns IrExpr {
+    let mutable kids: Array<IrExpr> = empty_ir_expr_array();
+    kids.push(range_expr);
+    kids.push(body);
+    return IrExpr(irex_forall(), 0, "", false, var_name, kids, ir_type_named("Bool"));
+}
+
+public function ir_exists(var_name: String, range_expr: IrExpr, body: IrExpr) returns IrExpr {
+    let mutable kids: Array<IrExpr> = empty_ir_expr_array();
+    kids.push(range_expr);
+    kids.push(body);
+    return IrExpr(irex_exists(), 0, "", false, var_name, kids, ir_type_named("Bool"));
 }
 
 // ir_range — a range expression (irex_range): children are [start, end]. The

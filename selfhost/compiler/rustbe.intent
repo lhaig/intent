@@ -304,6 +304,12 @@ public function generate_expr(e: IrExpr, funcs: Array<IrFunction>) returns Strin
     if e.kind == compiler_ir.irex_unary() {
         return generate_unary(e, funcs);
     }
+    if e.kind == compiler_ir.irex_forall() {
+        return generate_forall(e, funcs);
+    }
+    if e.kind == compiler_ir.irex_exists() {
+        return generate_exists(e, funcs);
+    }
     if e.kind == compiler_ir.irex_range() {
         return "(" + generate_expr(e.children[0], funcs) + ".." + generate_expr(e.children[1], funcs) + ")";
     }
@@ -369,6 +375,51 @@ public function generate_unary(e: IrExpr, funcs: Array<IrFunction>) returns Stri
         return "!" + operand;
     }
     return "-" + operand;
+}
+
+// generate_forall — mirrors generateForallExpr: expand `forall var in a..b: body`
+// to a `{ let mut __forall_holds = true; for var in (a..b) { if !(body) { … } }
+// __forall_holds }` block. The indentation is a FIXED template (4/8/12 spaces),
+// not relative to the surrounding statement — faithfully matching stage1 (quantifiers
+// appear only in contract asserts at body level in the corpus). children[0] is the
+// irex_range (its own children are start/end), children[1] the body. Braces via
+// lbrace()/rbrace().
+public function generate_forall(e: IrExpr, funcs: Array<IrFunction>) returns String {
+    let range_expr: IrExpr = e.children[0];
+    let range_start: String = generate_expr(range_expr.children[0], funcs);
+    let range_end: String = generate_expr(range_expr.children[1], funcs);
+    let body: String = generate_expr(e.children[1], funcs);
+    let mutable out: String = lbrace() + "\n";
+    out = out + "    let mut __forall_holds = true;\n";
+    out = out + "    for " + e.name + " in (" + range_start + ".." + range_end + ") " + lbrace() + "\n";
+    out = out + "        if !(" + body + ") " + lbrace() + "\n";
+    out = out + "            __forall_holds = false;\n";
+    out = out + "            break;\n";
+    out = out + "        " + rbrace() + "\n";
+    out = out + "    " + rbrace() + "\n";
+    out = out + "    __forall_holds\n";
+    out = out + rbrace();
+    return out;
+}
+
+// generate_exists — mirrors generateExistsExpr: the exists counterpart of
+// generate_forall (__exists_found, `if body` sets it true and breaks).
+public function generate_exists(e: IrExpr, funcs: Array<IrFunction>) returns String {
+    let range_expr: IrExpr = e.children[0];
+    let range_start: String = generate_expr(range_expr.children[0], funcs);
+    let range_end: String = generate_expr(range_expr.children[1], funcs);
+    let body: String = generate_expr(e.children[1], funcs);
+    let mutable out: String = lbrace() + "\n";
+    out = out + "    let mut __exists_found = false;\n";
+    out = out + "    for " + e.name + " in (" + range_start + ".." + range_end + ") " + lbrace() + "\n";
+    out = out + "        if " + body + " " + lbrace() + "\n";
+    out = out + "            __exists_found = true;\n";
+    out = out + "            break;\n";
+    out = out + "        " + rbrace() + "\n";
+    out = out + "    " + rbrace() + "\n";
+    out = out + "    __exists_found\n";
+    out = out + rbrace();
+    return out;
 }
 
 // map_op — mirrors mapOperator: operator source text to its Rust spelling

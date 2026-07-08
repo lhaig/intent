@@ -210,4 +210,20 @@ test "lowers unary negation and unwraps parentheses transparently" {
     assert(par.children[1].name == "y");
 }
 
+test "lowers a forall quantifier in a contract to irex_forall" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction f(xs: Array<Int>) returns Bool\n    requires forall i in 0..len(xs): xs[i] >= 0\n" + lbrace() + "\n    return true;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    let req: IrContract = m.functions[0].requires_clauses[0];
+    let q: IrExpr = req.expr;
+    assert(q.kind == compiler_ir.irex_forall());
+    assert(q.name == "i");
+    // children[0] is the range (0..len(xs)), children[1] the body (xs[i] >= 0).
+    assert(q.children[0].kind == compiler_ir.irex_range());
+    assert(q.children[0].children[0].int_value == 0);
+    assert(q.children[1].kind == compiler_ir.irex_binary());
+    assert(q.children[1].name == ">=");
+    assert(req.raw_text == "forall i in 0 .. len ( xs ) : xs [ i ] >= 0");
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

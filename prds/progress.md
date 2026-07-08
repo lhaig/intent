@@ -2433,3 +2433,32 @@ Frontier (re-probed): closest remaining are closure_demo (12), sorted_check (11)
 closures and forall-in-contract respectively. Ordered next front unchanged: entities
 (bank_account/shape_area) -> enums/match -> Result/Option/`?` -> generics ->
 closures -> async -> char/float + string concat/interp.
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 10: quantifiers (forall/exists) in contracts (diff-emit 15/15)
+
+`examples/sorted_check.intent` now self-hosts byte-equal — a SEVENTH real example.
+diff-emit is **15/15 EQUAL** (7 real + 8 fixtures incl. new `quantifiers`).
+
+- New IR kinds `irex_forall` / `irex_exists` (name = loop var, children = [range, body],
+  mirroring the AST's `forall var in range: body`) + `ir_forall` / `ir_exists`.
+- Lowering maps `ex_forall`/`ex_exists` → the IR kinds (children[0] = the lowered
+  irex_range, children[1] = body).
+- Backend `generate_forall` / `generate_exists` mirror stage1's generateForallExpr /
+  generateExistsExpr: expand to a `{ let mut __forall_holds = true; for v in (a..b)
+  { if !(body) { … } } __forall_holds }` scan block. The indentation is a FIXED
+  template (4/8/12 spaces), not relative to the surrounding statement — faithfully
+  reproducing stage1 (quantifiers appear only in body-level contract asserts in the
+  corpus). Braces via lbrace()/rbrace().
+
+New fixture `emit-fixtures/quantifiers.intent` gates BOTH forall and exists (no
+example uses exists). Gates green: diff-emit 15/15, selfcheck-formatter 7/7,
+selfcheck-checker 13/13, ir_test 13/13, lower_test grown, `intentc test
+examples/sorted_check.intent` 3/3 (cargo). No Go / shared/* touched.
+
+Frontier (re-probed): remaining real examples need bigger slices — closure_demo (12,
+closures), io_demo (23), result_option/try_operator (36, Result/Option/`?`),
+enum_basic (54, enums/match), shape_area (57)/bank_account (entities). Ordered next
+front: entities → enums/match → Result/Option/`?` → generics → closures → async →
+char/float + string concat/interp.

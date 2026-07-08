@@ -197,6 +197,13 @@ public function lower_expr(e: Expr) returns IrExpr {
     if e.kind == shared_ast.ex_range() {
         return compiler_ir.ir_range(lower_expr(e.children[0]), lower_expr(e.children[1]));
     }
+    if e.kind == shared_ast.ex_forall() {
+        // `forall var in range: body` — name is the loop var, children [range, body].
+        return compiler_ir.ir_forall(e.name, lower_expr(e.children[0]), lower_expr(e.children[1]));
+    }
+    if e.kind == shared_ast.ex_exists() {
+        return compiler_ir.ir_exists(e.name, lower_expr(e.children[0]), lower_expr(e.children[1]));
+    }
     if e.kind == shared_ast.ex_array() {
         let mutable elems: Array<IrExpr> = compiler_ir.empty_ir_expr_array();
         let mutable ai: Int = 0;

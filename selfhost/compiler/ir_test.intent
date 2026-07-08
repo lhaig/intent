@@ -137,6 +137,21 @@ test "ir_unary carries operator text and a single operand" {
     assert(notb.children[0].bool_value == true);
 }
 
+test "ir_forall/ir_exists carry the loop var, range, and body" {
+    let rng: IrExpr = compiler_ir.ir_range(compiler_ir.ir_int_lit(0), compiler_ir.ir_var_ref("n"));
+    let body: IrExpr = compiler_ir.ir_binary(">", compiler_ir.ir_var_ref("i"), compiler_ir.ir_int_lit(0));
+    let fa: IrExpr = compiler_ir.ir_forall("i", rng, body);
+    assert(fa.kind == compiler_ir.irex_forall());
+    assert(fa.name == "i");
+    assert(fa.expr_type.name == "Bool");
+    assert(len(fa.children) == 2);
+    assert(fa.children[0].kind == compiler_ir.irex_range());
+    assert(fa.children[1].kind == compiler_ir.irex_binary());
+    let ex: IrExpr = compiler_ir.ir_exists("j", rng, body);
+    assert(ex.kind == compiler_ir.irex_exists());
+    assert(ex.name == "j");
+}
+
 test "ir_method flattens receiver and args, tagging call_kind method" {
     let mutable args: Array<IrExpr> = compiler_ir.empty_ir_expr_array();
     args.push(compiler_ir.ir_int_lit(4));
