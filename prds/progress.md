@@ -2356,3 +2356,51 @@ need MORE: Array-by-ref params (`&Vec`), call-site borrow (needs a function-para
 registry threaded into emit), method calls (`.push`), and forall-in-contract
 (sorted_check) — each its own follow-up. Gates green: diff-emit 10/10,
 selfcheck-formatter 8/8, selfcheck-checker 13/13, ir_test 10/10.
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 8: array params + call-site borrow + method calls (diff-emit 11/11)
+
+`examples/array_sum.intent` now self-hosts byte-equal — a FIFTH real example
+(hello, divergence_demo, fibonacci, target_specific_demo, array_sum) alongside 6
+fixtures. diff-emit is **11/11 EQUAL**.
+
+array_sum diverged in exactly three spots; each is now handled:
+- **Array/Map params -> `&Vec`/`&HashMap`** (generate_function param loop) plus
+  **call-site borrow** `sum_array(&arr)` — a function-param-type registry
+  (`param_is_arrayref(funcs, name, idx)`) mirrors stage1's `g.functions` lookup
+  in `generateCallExpr`. The borrow also reaches through `assert_eq(sum_array(arr), …)`
+  in the tests via the recursive `generate_expr`.
+- **Method calls `x.push(v)`** — the stage2 AST has NO MethodCallExpr node:
+  `dynamic.push(4)` parses as `ex_call(children=[ex_field(object, name=push), 4])`.
+  Lowering detects the `ex_field` callee and builds a new IR kind `irex_method`
+  (name=method, children=[receiver, args…], call_kind=method); the backend emits
+  the general `receiver.method(args)` path. Single-file corpus has no
+  module-qualified calls, so an ex_field callee is always a genuine method call.
+
+**Structural decision (documented in ADR 0059 update):** the Rust backend stays
+FREE FUNCTIONS threading `funcs: Array<IrFunction>` as a param, NOT a RustGenerator
+entity. An entity was tried and rejected: stage1's method-receiver inference
+(`methodMutatesSelf`) is shallow — a `return self.foo()` method is `&mut self` while
+a `return "(" + self.foo() + ")"` method stays `&self`, and `&self` can't call
+`&mut self`, so the stage2 binary failed to compile. Parser/checker entities dodge
+this only because they genuinely mutate `self` (self.pos). Future generator state
+threads the same way.
+
+Deferred (not needed for array_sum byte-equal): `arrayRefParams` VarRef rebinding
+clone (`let y: Array = param` -> `.clone()`), non-Copy index/field clone, the
+receiver-type-specific method paths (String/Map/Char/is_ok), method-call arg cloning.
+
+Gates green: diff-emit 11/11, selfcheck-formatter 7/7 (ir/lower/rustbe fixpoints),
+selfcheck-checker 13/13, ir_test 11/11, lower_test grown, go test ./... all OK,
+`intentc test examples/array_sum.intent` 2/2 (cargo). No shared/* touched, so
+diff-checker/formatter/linter untouched (still green from prior slices).
+
+### Frontier (re-probed all 22) — still 5 real examples byte-equal
+Closest remaining: verify_example (6-line diverge), closure_demo (12), sorted_check
+(13) — each needs its own construct slice. Ordered frontier unchanged: entities
+(bank_account, shape_area) -> enums/match (enum_basic) -> Result/Option/`?`
+(result_option, try_operator, error_handling) -> generics (generic_stack) ->
+closures (closure_demo) -> async (async_demo, task_queue) -> char/float +
+string concat/interp (char_string_demo). sorted_check additionally needs
+forall-in-contract; map_demo needs Map + HashMap use-injection.

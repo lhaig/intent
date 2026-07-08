@@ -97,6 +97,10 @@ public function irex_index() returns Int {
     return 9;
 } // children = [object, index]
 
+public function irex_method() returns Int {
+    return 10;
+} // name = method, children = [object, arg1..argN], call_kind = method
+
 // --- Call-kind constants ----------------------------------------------------
 // Mirrors internal/ir CallKind iota so the backend dispatches identically.
 public function callkind_function() returns Int {
@@ -535,6 +539,25 @@ public function ir_index(object: IrExpr, index: IrExpr) returns IrExpr {
     kids.push(object);
     kids.push(index);
     return IrExpr(irex_index(), 0, "", false, "", kids, ir_type_named(""));
+}
+
+// ir_method — a method call (irex_method): name is the method, children[0] is the
+// receiver object and children[1..] are the args (the flattened stage1
+// MethodCallExpr Object/Method/Args). call_kind is set to method so the backend
+// dispatches on it. The Rust backend emits `object.method(args)` (the general
+// method path); the receiver-type-specific paths (String/Map/Char/is_ok) land
+// with their slices.
+public function ir_method(object: IrExpr, method_name: String, args: Array<IrExpr>) returns IrExpr {
+    let mutable kids: Array<IrExpr> = empty_ir_expr_array();
+    kids.push(object);
+    let mutable i: Int = 0;
+    while i < len(args) {
+        kids.push(args[i]);
+        i = i + 1;
+    }
+    let mutable m: IrExpr = IrExpr(irex_method(), 0, "", false, method_name, kids, ir_type_named(""));
+    m.call_kind = callkind_method();
+    return m;
 }
 
 // No entry function here — this is a library module imported by lower.intent /

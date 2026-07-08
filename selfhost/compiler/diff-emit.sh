@@ -39,6 +39,7 @@ CORPUS=(
   "examples/divergence_demo.intent"
   "examples/fibonacci.intent"
   "examples/target_specific_demo.intent"
+  "examples/array_sum.intent"
   "selfhost/compiler/emit-fixtures/let_locals.intent"
   "selfhost/compiler/emit-fixtures/binops.intent"
   "selfhost/compiler/emit-fixtures/control_flow.intent"

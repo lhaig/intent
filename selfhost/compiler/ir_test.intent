@@ -125,6 +125,19 @@ test "array and index expressions" {
     assert(idx.children[1].int_value == 0);
 }
 
+test "ir_method flattens receiver and args, tagging call_kind method" {
+    let mutable args: Array<IrExpr> = compiler_ir.empty_ir_expr_array();
+    args.push(compiler_ir.ir_int_lit(4));
+    let mc: IrExpr = compiler_ir.ir_method(compiler_ir.ir_var_ref("dynamic"), "push", args);
+    assert(mc.kind == compiler_ir.irex_method());
+    assert(mc.name == "push");
+    assert(mc.call_kind == compiler_ir.callkind_method());
+    assert(len(mc.children) == 2);
+    assert(mc.children[0].kind == compiler_ir.irex_var());
+    assert(mc.children[0].name == "dynamic");
+    assert(mc.children[1].int_value == 4);
+}
+
 test "a function carries requires/ensures contracts with raw text" {
     let pred: IrExpr = compiler_ir.ir_binary(">=", compiler_ir.ir_var_ref("n"), compiler_ir.ir_int_lit(0));
     let c: IrContract = IrContract(pred, "n >= 0", 3, 5);

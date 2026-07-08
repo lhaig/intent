@@ -165,4 +165,29 @@ test "lowers requires/ensures with captured raw text and result -> __result" {
     assert(post.children[0].name == "__result");
 }
 
+test "lowers an Array param structurally and a method call (obj.push)" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction sum(numbers: Array<Int>) returns Int " + lbrace() + "\n    return 0;\n" + rbrace() + "\n\nentry function main() returns Int " + lbrace() + "\n    let mutable d: Array<Int> = [1];\n    d.push(2);\n    return sum(d);\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    // The Array param is parsed into a structured IrType (Array<Int>).
+    let sumfn: IrFunction = m.functions[0];
+    assert(sumfn.params[0].param_type.name == "Array");
+    assert(sumfn.params[0].param_type.type_args[0].name == "Int");
+    // `d.push(2)` lowers to an irex_method whose receiver is `d` and arg is 2.
+    let mainbody: Array<IrStmt> = m.functions[1].body;
+    let push_stmt: IrStmt = mainbody[1];
+    assert(push_stmt.kind == compiler_ir.irst_expr());
+    let mc: IrExpr = push_stmt.expr;
+    assert(mc.kind == compiler_ir.irex_method());
+    assert(mc.name == "push");
+    assert(mc.children[0].kind == compiler_ir.irex_var());
+    assert(mc.children[0].name == "d");
+    assert(mc.children[1].int_value == 2);
+    // `sum(d)` stays a plain call (callee is an ident, not a field).
+    let ret_call: IrExpr = mainbody[2].expr;
+    assert(ret_call.kind == compiler_ir.irex_call());
+    assert(ret_call.name == "sum");
+    assert(ret_call.call_kind == compiler_ir.callkind_function());
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

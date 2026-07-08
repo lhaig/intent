@@ -203,6 +203,16 @@ public function lower_expr(e: Expr) returns IrExpr {
             args.push(lower_expr(e.children[i]));
             i = i + 1;
         }
+        // A call whose callee is an ex_field (`obj.name(...)`) is a method call
+        // (stage1 MethodCallExpr): the callee's own child[0] is the receiver and
+        // its name is the method. Module-qualified calls (`mod.fn()`, where the
+        // object has no type) look identical in the AST, but the single-file emit
+        // corpus has none, so an ex_field callee is always a genuine method call
+        // here; the module-call distinction lands with multi-file emit.
+        if callee.kind == shared_ast.ex_field() {
+            let object: IrExpr = lower_expr(callee.children[0]);
+            return compiler_ir.ir_method(object, callee.name, args);
+        }
         let mutable call: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, callee.name, args, compiler_ir.ir_type_named(""));
         call.call_kind = resolve_call_kind(callee.name);
         return call;

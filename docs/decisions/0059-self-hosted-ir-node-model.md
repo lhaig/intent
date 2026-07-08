@@ -160,6 +160,36 @@ and stage2 `intentc build --emit --self-hosted`, gated by `make diff-emit` (1/1)
   need — so `requires`/`ensures`/`invariant` lowering + emission is its own future slice.
   hello uses no contracts, so the empty clause arrays are correct here.
 
+## Update — array-by-ref params + call-site borrow + method calls (diff-emit 11/11)
+
+`examples/array_sum.intent` self-hosts byte-equal, adding a 5th real example. Three
+sub-changes and one structural decision:
+
+- **Array/Map params emit `&Vec`/`&HashMap`** and the call site borrows the matching arg
+  (`sum_array(&arr)`), mirroring `generateFunction`'s param loop and the `g.functions`
+  arg-borrow lookup in `rustbe.go`. `param_is_arrayref(funcs, name, idx)` is the stage2
+  registry lookup.
+- **Method calls are a new AST path, not a new AST node.** The stage2 AST has no
+  `MethodCallExpr`: `x.push(v)` parses as `ex_call(children=[ex_field(object=x, name=push), v])`.
+  Lowering detects the `ex_field` callee and produces a new IR kind `irex_method`
+  (name=method, children=[receiver, args…], `call_kind` = method); the backend emits the
+  general `receiver.method(args)` path. Module-qualified calls (`mod.fn()`) look identical in
+  the AST but the single-file emit corpus has none, so an `ex_field` callee is always a
+  genuine method call here — the module-call split lands with multi-file emit.
+- **The backend stays free functions, threading `funcs` as a parameter — NOT a generator
+  entity.** The call-site borrow needs the callee's param types at the call site, which
+  stage1 holds as `g.functions` on the `generator` struct. Modelling that as a `RustGenerator`
+  entity was tried and rejected: stage1's method-receiver inference (`methodMutatesSelf`) is
+  **shallow** — a method whose statement is a bare `return self.foo()` is marked `&mut self`,
+  but one that buries `self.foo()` inside a string concat (`return "(" + self.foo() + ")"`)
+  stays `&self`, and a `&self` method may not call a `&mut self` one, so the emitted stage2
+  binary fails to compile. Existing self-hosted entities (parser, checker) escape this only
+  because they genuinely mutate `self` (e.g. `self.pos`), making every method uniformly
+  `&mut self`. A non-mutating generator does not, so free functions with a threaded `funcs`
+  parameter are the robust choice (and the working style of the earlier slices). Future
+  generator state (Map's `needsHashMap`, entity/enum tables, async's `needsTokio`) threads the
+  same way, or waits for a genuinely-mutating generator entity if one becomes warranted.
+
 ## References
 
 - [`internal/ir/nodes.go`](../../internal/ir/nodes.go) — the port target for this slice.
