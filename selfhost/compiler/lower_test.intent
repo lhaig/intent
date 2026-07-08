@@ -245,4 +245,26 @@ test "lowers a lambda and its inferred Fn-typed let binding" {
     assert(lam.children[0].name == "*");
 }
 
+test "lowers a match expression with builtin Ok/Err arms" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction f(n: Int) returns Result<Int, String> " + lbrace() + "\n    return Ok(n);\n" + rbrace() + "\n\nentry function main() returns Int " + lbrace() + "\n    let r: Result<Int, String> = f(5);\n    let v: Int = match r " + lbrace() + "\n        Ok(x) => x,\n        Err(e) => 0,\n    " + rbrace() + ";\n    return v;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    // `Ok(n)` lowers to a builtin call.
+    let ok_call: IrExpr = m.functions[0].body[0].expr;
+    assert(ok_call.kind == compiler_ir.irex_call());
+    assert(ok_call.name == "Ok");
+    assert(ok_call.call_kind == compiler_ir.callkind_builtin());
+    // `match r { Ok(x) => x, Err(e) => 0 }` lowers to irex_match.
+    let mt: IrExpr = m.functions[1].body[1].expr;
+    assert(mt.kind == compiler_ir.irex_match());
+    assert(mt.children[0].kind == compiler_ir.irex_var());
+    assert(mt.children[0].name == "r");
+    assert(len(mt.match_arms) == 2);
+    assert(mt.match_arms[0].variant == "Ok");
+    assert(mt.match_arms[0].is_builtin == true);
+    assert(mt.match_arms[0].bindings[0] == "x");
+    assert(mt.match_arms[1].variant == "Err");
+    assert(mt.match_arms[1].bindings[0] == "e");
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

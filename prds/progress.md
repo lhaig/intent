@@ -2498,3 +2498,40 @@ result_option/try_operator (36, Result/Option/match/`?`), enum_basic (54)/shape_
 (57, enums + match + float), bank_account (74, entities), and the larger async/generic/
 map/trait examples. Ordered next front: Result/Option/`?` and enums+match (shape_area,
 result_option) are the mid-size unlocks; entities and generics the larger ones.
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 12: match + Result/Option construction (diff-emit 17/17)
+
+`examples/result_option.intent` now self-hosts byte-equal — a NINTH real example.
+diff-emit is **17/17 EQUAL**.
+
+- **Ok/Err/Some/None construction** (generate_builtin_call): `Ok(x)`/`Err(x)`/`Some(x)`,
+  `None`. (None already emitted via the var-ref path; added explicitly too.)
+- **match** (`irex_match` + `IrMatchArm` + `ir_match`): new IR kind carrying the
+  scrutinee (children[0]) and arms (variant / bindings / is_wildcard / is_builtin /
+  body). Backend `generate_match` emits `match scrutinee { pattern => body, … }`;
+  `generate_match_pattern` handles `_`, `None`, and `Variant(binding)`.
+  - **Scrutinee `.clone()` without the checker's types:** stage1 clones a VarRef
+    scrutinee of Result/Option type. Result/Option-ness is inferred from whether ANY
+    arm is a builtin (Ok/Err/Some/None) pattern — those match only Result/Option, so
+    it is byte-equal with stage1's type check without threading inferred types.
+  - **Relative indentation without threading `level` everywhere:** unlike forall
+    (fixed indent), match indents relative to its statement. Rather than thread
+    `level` through all ~15 generate functions, a match is emitted only from a
+    statement-direct position (let RHS / return / assign value / expr-stmt) via a new
+    `gen_stmt_value(e, funcs, level)` in generate_stmt; a match nested elsewhere hits
+    generate_expr's loud marker (discipline-compliant, unreachable in the corpus).
+
+New IR: `IrMatchArm` entity + `match_arms` field on IrExpr (defaulted, ADR 0054
+additive). Gates green: diff-emit 17/17, selfcheck-formatter 7/7, selfcheck-checker
+13/13, ir_test 15, lower_test grown, `intentc test examples/result_option.intent`
+(cargo). No Go / shared/* touched.
+
+**NEXT (small): the `?` operator (try_operator, now only 4 lines diverging).** `?` itself
+is trivial (`EXPR?`), but try_operator also needs `parse_number(a.clone())` — cloning a
+non-Copy (String) VarRef arg, which needs the arg's TYPE. The stage2 IR does not carry
+inferred types (ADR 0059 D3 bridge deferred), so cloneIfNeeded needs either the type
+bridge or scoped param/let type propagation. `?` can be gated now via a fixture with
+Copy args; try_operator's String-arg clone is the follow-up. Then enums+match+float
+(shape_area, enum_basic), entities (bank_account), generics, async.

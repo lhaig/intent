@@ -137,6 +137,24 @@ test "ir_unary carries operator text and a single operand" {
     assert(notb.children[0].bool_value == true);
 }
 
+test "ir_match carries scrutinee and arms with builtin detection" {
+    let mutable arms: Array<IrMatchArm> = compiler_ir.empty_ir_match_arm_array();
+    let mutable okb: Array<String> = [];
+    okb.push("v");
+    arms.push(IrMatchArm("Ok", okb, false, true, compiler_ir.ir_var_ref("v")));
+    let mutable none_b: Array<String> = [];
+    arms.push(IrMatchArm("", none_b, true, false, compiler_ir.ir_int_lit(0)));
+    let mutable mt: IrExpr = compiler_ir.ir_match(compiler_ir.ir_var_ref("res"));
+    mt.match_arms = arms;
+    assert(mt.kind == compiler_ir.irex_match());
+    assert(mt.children[0].name == "res");
+    assert(len(mt.match_arms) == 2);
+    assert(mt.match_arms[0].variant == "Ok");
+    assert(mt.match_arms[0].is_builtin == true);
+    assert(mt.match_arms[0].bindings[0] == "v");
+    assert(mt.match_arms[1].is_wildcard == true);
+}
+
 test "ir_lambda carries params, return type, and body" {
     let mutable params: Array<IrParam> = compiler_ir.empty_ir_param_array();
     params.push(IrParam("x", compiler_ir.ir_type_named("Int")));

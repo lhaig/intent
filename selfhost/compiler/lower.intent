@@ -197,6 +197,25 @@ public function lower_expr(e: Expr) returns IrExpr {
     if e.kind == shared_ast.ex_range() {
         return compiler_ir.ir_range(lower_expr(e.children[0]), lower_expr(e.children[1]));
     }
+    if e.kind == shared_ast.ex_match() {
+        // children[0] is the scrutinee; match_arms hold variant / bindings /
+        // is_wildcard / body. is_builtin (Ok/Err/Some/None) is derived by name,
+        // exactly as stage1's lowerMatchExpr does. Enum-variant field-name
+        // resolution (checker-dependent) lands with the enums slice. lambda-style
+        // local-then-assign: the arms array is owned here (a function Array param
+        // would lower to `&Vec`, unmovable into the field).
+        let mutable arms: Array<IrMatchArm> = compiler_ir.empty_ir_match_arm_array();
+        let mutable ai: Int = 0;
+        while ai < len(e.match_arms) {
+            let a: MatchArm = e.match_arms[ai];
+            let is_builtin: Bool = a.variant == "Ok" or a.variant == "Err" or a.variant == "Some" or a.variant == "None";
+            arms.push(IrMatchArm(a.variant, a.bindings, a.is_wildcard, is_builtin, lower_expr(a.body)));
+            ai = ai + 1;
+        }
+        let mutable mt: IrExpr = compiler_ir.ir_match(lower_expr(e.children[0]));
+        mt.match_arms = arms;
+        return mt;
+    }
     if e.kind == shared_ast.ex_lambda() {
         // The AST stores the params in lambda_params (name + type string), the
         // return type in str_value, and the body in children[0]. Parse the param

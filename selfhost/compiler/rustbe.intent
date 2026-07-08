@@ -179,16 +179,17 @@ public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Ar
             }
             return ind + "return;\n";
         }
+        let rv: String = gen_stmt_value(s.expr, funcs, level);
         if in_labeled {
-            return ind + "break 'body " + generate_expr(s.expr, funcs) + ";\n";
+            return ind + "break 'body " + rv + ";\n";
         }
-        return ind + "return " + generate_expr(s.expr, funcs) + ";\n";
+        return ind + "return " + rv + ";\n";
     }
     if s.kind == compiler_ir.irst_expr() {
-        return ind + generate_expr(s.expr, funcs) + ";\n";
+        return ind + gen_stmt_value(s.expr, funcs, level) + ";\n";
     }
     if s.kind == compiler_ir.irst_let() {
-        let val: String = generate_expr(s.expr, funcs);
+        let val: String = gen_stmt_value(s.expr, funcs, level);
         // Fn-typed lets use type inference (`impl Fn` is not allowed in variable
         // position), so the annotation is dropped — mirrors stage1's LetStmt path.
         if s.let_type.name == "Fn" {
@@ -204,7 +205,7 @@ public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Ar
         return ind + "let " + s.name + ": " + ty + " = " + val + ";\n";
     }
     if s.kind == compiler_ir.irst_assign() {
-        return ind + generate_expr(s.target, funcs) + " = " + generate_expr(s.expr, funcs) + ";\n";
+        return ind + generate_expr(s.target, funcs) + " = " + gen_stmt_value(s.expr, funcs, level) + ";\n";
     }
     if s.kind == compiler_ir.irst_if() {
         return generate_if(s, level, in_labeled, funcs);
@@ -341,7 +342,85 @@ public function generate_expr(e: IrExpr, funcs: Array<IrFunction>) returns Strin
     if e.kind == compiler_ir.irex_call() {
         return generate_call(e, funcs);
     }
+    if e.kind == compiler_ir.irex_match() {
+        // A match's multi-line layout is indent-relative (see gen_stmt_value), so it
+        // is emitted only from a statement-direct position. A match nested elsewhere
+        // (e.g. inside a binary) is unsupported for now — a loud marker, not silently
+        // wrong Rust. Unreachable in the corpus.
+        return "/* unsupported: match in nested expression position */";
+    }
     return "/* unsupported expr */";
+}
+
+// gen_stmt_value — emit a statement-direct value expression (a let RHS, return /
+// break value, assignment value, or expr-statement). A match is the one expression
+// whose multi-line layout depends on the enclosing statement indent (stage1 uses
+// g.indent), so it routes to the level-aware generate_match; every other expression
+// is single-line and indent-independent, handled by generate_expr.
+function gen_stmt_value(e: IrExpr, funcs: Array<IrFunction>, level: Int) returns String {
+    if e.kind == compiler_ir.irex_match() {
+        return generate_match(e, funcs, level);
+    }
+    return generate_expr(e, funcs);
+}
+
+// generate_match — mirrors generateMatchExpr: `match scrutinee { pattern => body, … }`.
+// The scrutinee is `.clone()`d when it is a plain variable of Result/Option type;
+// that type is inferred from whether any arm is a builtin (Ok/Err/Some/None) pattern
+// (those match only Result/Option), so no checker types are needed. Arms indent one
+// level deeper than the match's statement (level+1); the closing brace at `level`.
+public function generate_match(e: IrExpr, funcs: Array<IrFunction>, level: Int) returns String {
+    let scrutinee: IrExpr = e.children[0];
+    let mutable scrutinee_str: String = generate_expr(scrutinee, funcs);
+    if match_is_result_option(e) {
+        if scrutinee.kind == compiler_ir.irex_var() {
+            scrutinee_str = scrutinee_str + ".clone()";
+        }
+    }
+    let mutable out: String = "match " + scrutinee_str + " " + lbrace() + "\n";
+    let mutable i: Int = 0;
+    while i < len(e.match_arms) {
+        let arm: IrMatchArm = e.match_arms[i];
+        out = out + indent_str(level + 1) + generate_match_pattern(arm) + " => " + generate_expr(arm.body, funcs) + ",\n";
+        i = i + 1;
+    }
+    out = out + indent_str(level) + rbrace();
+    return out;
+}
+
+// match_is_result_option — a match whose scrutinee is a Result/Option: detected by
+// any arm being a builtin (Ok/Err/Some/None) pattern (which only match Result/Option;
+// enum-variant patterns never do). Byte-equal with stage1's type-based check without
+// threading the checker's inferred types.
+function match_is_result_option(e: IrExpr) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(e.match_arms) {
+        if e.match_arms[i].is_builtin {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// generate_match_pattern — mirrors generateMatchPattern for the builtin (Ok/Err/
+// Some/None) and wildcard cases: `_`, `None`, or `Variant(binding)`. Enum-variant
+// patterns (EnumName mangling + field-name struct patterns) land with the enums
+// slice; unreachable for the Result/Option corpus.
+public function generate_match_pattern(arm: IrMatchArm) returns String {
+    if arm.is_wildcard {
+        return "_";
+    }
+    if arm.is_builtin {
+        if arm.variant == "None" {
+            return "None";
+        }
+        if len(arm.bindings) == 1 {
+            return arm.variant + "(" + arm.bindings[0] + ")";
+        }
+        return arm.variant;
+    }
+    return "/* unsupported pattern: " + arm.variant + " */";
 }
 
 // generate_method_call — mirrors generateMethodCallExpr's general path
@@ -602,6 +681,15 @@ public function generate_builtin_call(e: IrExpr, funcs: Array<IrFunction>) retur
         // Non-String len: (ARG.len() as i64). String len (.chars().count()) is
         // deferred; the corpus calls len only on Vecs.
         return "(" + generate_expr(e.children[0], funcs) + ".len() as i64)";
+    }
+    if e.name == "Ok" or e.name == "Err" or e.name == "Some" {
+        // Result/Option constructors: Ok(x) / Err(x) / Some(x). Non-Copy-arg cloning
+        // (a String/entity/Array variable moved into the constructor) lands with a
+        // later slice; the corpus's args are Copy or string literals.
+        return e.name + "(" + generate_expr(e.children[0], funcs) + ")";
+    }
+    if e.name == "None" {
+        return "None";
     }
     return "/* unsupported builtin: " + e.name + " */";
 }

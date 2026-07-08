@@ -117,6 +117,10 @@ public function irex_lambda() returns Int {
     return 14;
 } // lambda_params = params, expr_type = return type, children = [body]
 
+public function irex_match() returns Int {
+    return 15;
+} // children[0] = scrutinee, match_arms = arms
+
 // --- Call-kind constants ----------------------------------------------------
 // Mirrors internal/ir CallKind iota so the backend dispatches identically.
 public function callkind_function() returns Int {
@@ -158,6 +162,29 @@ public entity IrType {
     }
 }
 
+// --- Match arm --------------------------------------------------------------
+// One arm of an irex_match. variant is the constructor/variant name (empty for a
+// wildcard); bindings are the pattern's binding names; is_wildcard marks `_`;
+// is_builtin marks the Result/Option constructors (Ok/Err/Some/None), which the
+// backend renders as tuple patterns and which signal a Result/Option scrutinee
+// (so it is cloned). enum_name / field_names for enum-variant patterns land with
+// the enums slice. Mirrors stage1 ir.MatchArm + MatchPattern for this subset.
+public entity IrMatchArm {
+    field variant: String;
+    field bindings: Array<String>;
+    field is_wildcard: Bool;
+    field is_builtin: Bool;
+    field body: IrExpr;
+
+    constructor(variant: String, bindings: Array<String>, is_wildcard: Bool, is_builtin: Bool, body: IrExpr) {
+        self.variant = variant;
+        self.bindings = bindings;
+        self.is_wildcard = is_wildcard;
+        self.is_builtin = is_builtin;
+        self.body = body;
+    }
+}
+
 // --- Expression node --------------------------------------------------------
 // Field usage by kind:
 //   irex_void   — no fields set (expr_type is "Void")
@@ -181,6 +208,7 @@ public entity IrExpr {
     field call_kind: Int;
     field enum_name: String;
     field lambda_params: Array<IrParam>;
+    field match_arms: Array<IrMatchArm>;
 
     constructor(kind: Int, int_value: Int, str_value: String, bool_value: Bool, name: String, children: Array<IrExpr>, expr_type: IrType) {
         self.kind = kind;
@@ -193,6 +221,7 @@ public entity IrExpr {
         self.call_kind = callkind_function();
         self.enum_name = "";
         self.lambda_params = empty_ir_param_array();
+        self.match_arms = empty_ir_match_arm_array();
     }
 }
 
@@ -360,6 +389,11 @@ public function empty_ir_stmt_array() returns Array<IrStmt> {
 
 public function empty_ir_param_array() returns Array<IrParam> {
     let mutable a: Array<IrParam> = [];
+    return a;
+}
+
+public function empty_ir_match_arm_array() returns Array<IrMatchArm> {
+    let mutable a: Array<IrMatchArm> = [];
     return a;
 }
 
@@ -558,6 +592,16 @@ public function ir_lambda(ret_type: IrType, body: IrExpr) returns IrExpr {
     let mutable kids: Array<IrExpr> = empty_ir_expr_array();
     kids.push(body);
     return IrExpr(irex_lambda(), 0, "", false, "", kids, ret_type);
+}
+
+// ir_match — a match expression shell (irex_match): children[0] is the scrutinee.
+// The caller assigns match_arms from its own LOCAL array (same reason as ir_lambda:
+// a function's Array param lowers to `&Vec`, which cannot be moved into the owned
+// field). The Rust backend emits `match scrutinee { pattern => body, … }`.
+public function ir_match(scrutinee: IrExpr) returns IrExpr {
+    let mutable kids: Array<IrExpr> = empty_ir_expr_array();
+    kids.push(scrutinee);
+    return IrExpr(irex_match(), 0, "", false, "", kids, ir_type_named(""));
 }
 
 // ir_forall / ir_exists — a quantifier over a range (irex_forall / irex_exists):
