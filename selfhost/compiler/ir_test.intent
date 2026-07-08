@@ -137,6 +137,20 @@ test "ir_unary carries operator text and a single operand" {
     assert(notb.children[0].bool_value == true);
 }
 
+test "ir_lambda carries params, return type, and body" {
+    let mutable params: Array<IrParam> = compiler_ir.empty_ir_param_array();
+    params.push(IrParam("x", compiler_ir.ir_type_named("Int")));
+    let body: IrExpr = compiler_ir.ir_binary("*", compiler_ir.ir_var_ref("x"), compiler_ir.ir_int_lit(2));
+    let mutable lam: IrExpr = compiler_ir.ir_lambda(compiler_ir.ir_type_named("Int"), body);
+    lam.lambda_params = params;
+    assert(lam.kind == compiler_ir.irex_lambda());
+    assert(lam.expr_type.name == "Int");
+    assert(len(lam.lambda_params) == 1);
+    assert(lam.lambda_params[0].name == "x");
+    assert(lam.lambda_params[0].param_type.name == "Int");
+    assert(lam.children[0].kind == compiler_ir.irex_binary());
+}
+
 test "ir_forall/ir_exists carry the loop var, range, and body" {
     let rng: IrExpr = compiler_ir.ir_range(compiler_ir.ir_int_lit(0), compiler_ir.ir_var_ref("n"));
     let body: IrExpr = compiler_ir.ir_binary(">", compiler_ir.ir_var_ref("i"), compiler_ir.ir_int_lit(0));

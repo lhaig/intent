@@ -197,6 +197,27 @@ public function lower_expr(e: Expr) returns IrExpr {
     if e.kind == shared_ast.ex_range() {
         return compiler_ir.ir_range(lower_expr(e.children[0]), lower_expr(e.children[1]));
     }
+    if e.kind == shared_ast.ex_lambda() {
+        // The AST stores the params in lambda_params (name + type string), the
+        // return type in str_value, and the body in children[0]. Parse the param
+        // and return type strings into structured IrTypes (the checker isn't
+        // threaded; lambda types are annotated in source).
+        let mutable lparams: Array<IrParam> = compiler_ir.empty_ir_param_array();
+        let mutable li: Int = 0;
+        while li < len(e.lambda_params) {
+            let lp: Param = e.lambda_params[li];
+            lparams.push(IrParam(lp.name, compiler_ir.ir_parse_type(lp.type_name)));
+            li = li + 1;
+        }
+        let ret_type: IrType = compiler_ir.ir_parse_type(e.str_value);
+        // Assign lambda_params from the LOCAL owned array here (not inside
+        // ir_lambda): a function's Array param lowers to `&Vec` and cannot be
+        // moved into the owned field — the same reason parse_lambda sets
+        // Expr.lambda_params at its build site.
+        let mutable lam: IrExpr = compiler_ir.ir_lambda(ret_type, lower_expr(e.children[0]));
+        lam.lambda_params = lparams;
+        return lam;
+    }
     if e.kind == shared_ast.ex_forall() {
         // `forall var in range: body` — name is the loop var, children [range, body].
         return compiler_ir.ir_forall(e.name, lower_expr(e.children[0]), lower_expr(e.children[1]));

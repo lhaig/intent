@@ -2462,3 +2462,39 @@ closures), io_demo (23), result_option/try_operator (36, Result/Option/`?`),
 enum_basic (54, enums/match), shape_area (57)/bank_account (entities). Ordered next
 front: entities → enums/match → Result/Option/`?` → generics → closures → async →
 char/float + string concat/interp.
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 11: closures/lambdas + Fn types (diff-emit 16/16)
+
+`examples/closure_demo.intent` now self-hosts byte-equal — an EIGHTH real example.
+diff-emit is **16/16 EQUAL**.
+
+Three parts (the closure call `f(x)` already worked as a plain call):
+- **Fn type** (`map_type` "Fn"): `Fn(Int) -> Int` -> `impl Fn(i64) -> i64`. ir_parse_type
+  stores a Fn's type_args as [param0..N-1, return] with fn_param_count = N, mirroring
+  mapType's `impl Fn(params) -> ret`.
+- **Fn-typed let**: the annotation is dropped (`let double = …`, not `let double: T = …`)
+  because `impl Fn` is not allowed in variable position — mirrors stage1's LetStmt path.
+- **Lambda** (`irex_lambda` + `ir_lambda`): new IR kind carrying lambda_params (name +
+  type), expr_type (return type), children[0] (body). Backend `generate_lambda` emits
+  `|p: T, …| -> R { body }`, mirroring generateLambdaExpr.
+
+**Self-host build gotcha (documented in-source):** ir_lambda first tried taking the
+params array and assigning it to the field — but a function's Array param lowers to
+`&Vec`, which cannot be moved into the owned `lambda_params` field (the stage2 compiler
+itself failed to compile). Fixed by mirroring parse_lambda: the caller (lower_expr)
+builds lambda_params as a LOCAL owned array and assigns it; ir_lambda only takes the
+return type + body. A new field `lambda_params: Array<IrParam>` on IrExpr (defaulted in
+the constructor, ADR 0054 additive style) keeps every existing IrExpr(...) call
+seven-argument.
+
+Gates green: diff-emit 16/16, selfcheck-formatter 7/7, selfcheck-checker 13/13,
+ir_test 14, lower_test grown, `intentc test examples/closure_demo.intent` (cargo). No
+Go / shared/* touched.
+
+Frontier (re-probed): remaining need bigger slices — io_demo (23, IO builtins + `?`),
+result_option/try_operator (36, Result/Option/match/`?`), enum_basic (54)/shape_area
+(57, enums + match + float), bank_account (74, entities), and the larger async/generic/
+map/trait examples. Ordered next front: Result/Option/`?` and enums+match (shape_area,
+result_option) are the mid-size unlocks; entities and generics the larger ones.

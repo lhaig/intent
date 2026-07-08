@@ -226,4 +226,23 @@ test "lowers a forall quantifier in a contract to irex_forall" {
     assert(req.raw_text == "forall i in 0 .. len ( xs ) : xs [ i ] >= 0");
 }
 
+test "lowers a lambda and its inferred Fn-typed let binding" {
+    let src: String = "module m version \"1.0.0\";\n\nentry function main() returns Int " + lbrace() + "\n    let double: Fn(Int) -> Int = |x: Int| -> Int => x * 2;\n    return double(3);\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    let let_stmt: IrStmt = m.functions[0].body[0];
+    assert(let_stmt.kind == compiler_ir.irst_let());
+    // The let's type parses to a Fn IrType (backend drops the annotation).
+    assert(let_stmt.let_type.name == "Fn");
+    assert(let_stmt.let_type.fn_param_count == 1);
+    let lam: IrExpr = let_stmt.expr;
+    assert(lam.kind == compiler_ir.irex_lambda());
+    assert(len(lam.lambda_params) == 1);
+    assert(lam.lambda_params[0].name == "x");
+    assert(lam.lambda_params[0].param_type.name == "Int");
+    assert(lam.expr_type.name == "Int");
+    assert(lam.children[0].kind == compiler_ir.irex_binary());
+    assert(lam.children[0].name == "*");
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

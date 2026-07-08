@@ -113,6 +113,10 @@ public function irex_exists() returns Int {
     return 13;
 } // name = loop var, children = [range, body]
 
+public function irex_lambda() returns Int {
+    return 14;
+} // lambda_params = params, expr_type = return type, children = [body]
+
 // --- Call-kind constants ----------------------------------------------------
 // Mirrors internal/ir CallKind iota so the backend dispatches identically.
 public function callkind_function() returns Int {
@@ -161,9 +165,11 @@ public entity IrType {
 //   irex_string — str_value (the quoted source lexeme, e.g. "\"hello\"")
 //   irex_bool   — bool_value
 //   irex_call   — name (callee), children (args), call_kind, enum_name
-// call_kind defaults to callkind_function() and enum_name to "" in the
-// constructor; lowering assigns them after construction for calls (the AST's
-// match_arms/lambda_params follow the same defaulted-then-assigned pattern).
+//   irex_lambda — lambda_params (params), expr_type (return type), children[0] (body)
+// call_kind defaults to callkind_function(), enum_name to "", and lambda_params to
+// empty in the constructor; lowering assigns them after construction (the AST's
+// match_arms/lambda_params follow the same defaulted-then-assigned pattern), so the
+// existing IrExpr(...) constructor call sites stay seven-argument.
 public entity IrExpr {
     field kind: Int;
     field int_value: Int;
@@ -174,6 +180,7 @@ public entity IrExpr {
     field expr_type: IrType;
     field call_kind: Int;
     field enum_name: String;
+    field lambda_params: Array<IrParam>;
 
     constructor(kind: Int, int_value: Int, str_value: String, bool_value: Bool, name: String, children: Array<IrExpr>, expr_type: IrType) {
         self.kind = kind;
@@ -185,6 +192,7 @@ public entity IrExpr {
         self.expr_type = expr_type;
         self.call_kind = callkind_function();
         self.enum_name = "";
+        self.lambda_params = empty_ir_param_array();
     }
 }
 
@@ -538,6 +546,18 @@ public function ir_unary(op: String, operand: IrExpr) returns IrExpr {
     let mutable kids: Array<IrExpr> = empty_ir_expr_array();
     kids.push(operand);
     return IrExpr(irex_unary(), 0, "", false, op, kids, ir_type_named(""));
+}
+
+// ir_lambda — a lambda expression shell (irex_lambda): expr_type is the return
+// type and children[0] is the body. The caller assigns lambda_params from its own
+// LOCAL array (mirroring how parse_lambda sets Expr.lambda_params): a function
+// Array param lowers to `&Vec`, which cannot be moved into the owned field, so the
+// params array must be owned at the assignment site. The Rust backend emits
+// `|p: T, …| -> R { body }` (see generate_lambda), mirroring stage1's LambdaExpr.
+public function ir_lambda(ret_type: IrType, body: IrExpr) returns IrExpr {
+    let mutable kids: Array<IrExpr> = empty_ir_expr_array();
+    kids.push(body);
+    return IrExpr(irex_lambda(), 0, "", false, "", kids, ret_type);
 }
 
 // ir_forall / ir_exists — a quantifier over a range (irex_forall / irex_exists):

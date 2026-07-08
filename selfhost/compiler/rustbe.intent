@@ -188,8 +188,16 @@ public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Ar
         return ind + generate_expr(s.expr, funcs) + ";\n";
     }
     if s.kind == compiler_ir.irst_let() {
-        let ty: String = map_type(s.let_type);
         let val: String = generate_expr(s.expr, funcs);
+        // Fn-typed lets use type inference (`impl Fn` is not allowed in variable
+        // position), so the annotation is dropped — mirrors stage1's LetStmt path.
+        if s.let_type.name == "Fn" {
+            if s.is_mutable {
+                return ind + "let mut " + s.name + " = " + val + ";\n";
+            }
+            return ind + "let " + s.name + " = " + val + ";\n";
+        }
+        let ty: String = map_type(s.let_type);
         if s.is_mutable {
             return ind + "let mut " + s.name + ": " + ty + " = " + val + ";\n";
         }
@@ -310,6 +318,9 @@ public function generate_expr(e: IrExpr, funcs: Array<IrFunction>) returns Strin
     if e.kind == compiler_ir.irex_exists() {
         return generate_exists(e, funcs);
     }
+    if e.kind == compiler_ir.irex_lambda() {
+        return generate_lambda(e, funcs);
+    }
     if e.kind == compiler_ir.irex_range() {
         return "(" + generate_expr(e.children[0], funcs) + ".." + generate_expr(e.children[1], funcs) + ")";
     }
@@ -375,6 +386,23 @@ public function generate_unary(e: IrExpr, funcs: Array<IrFunction>) returns Stri
         return "!" + operand;
     }
     return "-" + operand;
+}
+
+// generate_lambda — mirrors generateLambdaExpr: `|p: T, …| -> R { body }`. Params
+// come from lambda_params (each type via map_type), the return type from expr_type,
+// and the body from children[0]. Braces via lbrace()/rbrace().
+public function generate_lambda(e: IrExpr, funcs: Array<IrFunction>) returns String {
+    let mutable out: String = "|";
+    let mutable i: Int = 0;
+    while i < len(e.lambda_params) {
+        if i > 0 {
+            out = out + ", ";
+        }
+        out = out + e.lambda_params[i].name + ": " + map_type(e.lambda_params[i].param_type);
+        i = i + 1;
+    }
+    out = out + "| -> " + map_type(e.expr_type) + " " + lbrace() + " " + generate_expr(e.children[0], funcs) + " " + rbrace();
+    return out;
 }
 
 // generate_forall — mirrors generateForallExpr: expand `forall var in a..b: body`
@@ -507,6 +535,21 @@ public function map_type(t: IrType) returns String {
             return "Option<" + map_type(t.type_args[0]) + ">";
         }
         return "Option<_>";
+    }
+    if t.name == "Fn" {
+        // ir_parse_type stores a Fn's type_args as [param0..paramN-1, return],
+        // with fn_param_count = N. Mirrors mapType's `impl Fn(params) -> ret`
+        // (`impl Fn()` collapses to `impl Fn() -> ret` for a zero-param Fn).
+        let mutable params: String = "";
+        let mutable i: Int = 0;
+        while i < t.fn_param_count {
+            if i > 0 {
+                params = params + ", ";
+            }
+            params = params + map_type(t.type_args[i]);
+            i = i + 1;
+        }
+        return "impl Fn(" + params + ") -> " + map_type(t.type_args[t.fn_param_count]);
     }
     return "/* unsupported type: " + t.name + " */";
 }

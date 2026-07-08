@@ -42,6 +42,7 @@ CORPUS=(
   "examples/array_sum.intent"
   "examples/verify_example.intent"
   "examples/sorted_check.intent"
+  "examples/closure_demo.intent"
   "selfhost/compiler/emit-fixtures/let_locals.intent"
   "selfhost/compiler/emit-fixtures/binops.intent"
   "selfhost/compiler/emit-fixtures/control_flow.intent"
