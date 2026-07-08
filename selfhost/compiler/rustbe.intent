@@ -39,6 +39,15 @@ public function generate(m: IrModule) returns String {
     let mutable out: String = "// Generated Rust code from Intent\n";
     out = out + "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n";
     out = out + "\n";
+    // Enum declarations emit before functions (stage1 Generate order: entities,
+    // enums, traits, impls, functions, intents, tests). Entities/traits/impls land
+    // with their slices.
+    let mutable eni: Int = 0;
+    while eni < len(m.enums) {
+        out = out + generate_enum(m.enums[eni]);
+        out = out + "\n";
+        eni = eni + 1;
+    }
     let mutable fi: Int = 0;
     while fi < len(m.functions) {
         out = out + generate_function(m.functions[fi], funcs);
@@ -72,6 +81,35 @@ public function param_is_arrayref(funcs: Array<IrFunction>, fn_name: String, idx
         fi = fi + 1;
     }
     return false;
+}
+
+// generate_enum — mirrors generateEnumDecl: `#[derive(Clone, Debug)] enum Name {
+// Variant, Variant { field: type }, ... }`. Unit variants are bare; data variants
+// use struct syntax with the declared field names. Braces via lbrace()/rbrace().
+public function generate_enum(en: IrEnum) returns String {
+    let mutable out: String = "#[derive(Clone, Debug)]\n";
+    out = out + "enum " + en.name + " " + lbrace() + "\n";
+    let mutable i: Int = 0;
+    while i < len(en.variants) {
+        let v: IrEnumVariant = en.variants[i];
+        if len(v.fields) == 0 {
+            out = out + "    " + v.name + ",\n";
+        } else {
+            out = out + "    " + v.name + " " + lbrace() + " ";
+            let mutable j: Int = 0;
+            while j < len(v.fields) {
+                if j > 0 {
+                    out = out + ", ";
+                }
+                out = out + v.fields[j].name + ": " + map_type(v.fields[j].param_type);
+                j = j + 1;
+            }
+            out = out + " " + rbrace() + ",\n";
+        }
+        i = i + 1;
+    }
+    out = out + rbrace() + "\n";
+    return out;
 }
 
 // generate_function — mirrors generateFunction. A single-file ENTRY function
@@ -531,7 +569,23 @@ public function generate_match_pattern(arm: IrMatchArm) returns String {
         }
         return arm.variant;
     }
-    return "/* unsupported pattern: " + arm.variant + " */";
+    // Enum-variant pattern. A unit variant (no bindings) is `EnumName::Variant`; a
+    // data variant is `EnumName::Variant { field: binding, … }`, pairing the resolved
+    // field_names with the pattern bindings (each an identifier or `_`) by position.
+    if len(arm.bindings) == 0 {
+        return arm.enum_name + "::" + arm.variant;
+    }
+    let mutable out: String = arm.enum_name + "::" + arm.variant + " " + lbrace() + " ";
+    let mutable i: Int = 0;
+    while i < len(arm.bindings) {
+        if i > 0 {
+            out = out + ", ";
+        }
+        out = out + arm.field_names[i] + ": " + arm.bindings[i];
+        i = i + 1;
+    }
+    out = out + " " + rbrace();
+    return out;
 }
 
 // generate_method_call — mirrors generateMethodCallExpr's general path
@@ -751,7 +805,14 @@ public function map_type(t: IrType) returns String {
         }
         return "impl Fn(" + params + ") -> " + map_type(t.type_args[t.fn_param_count]);
     }
-    return "/* unsupported type: " + t.name + " */";
+    // Default: a user-defined type name (enum / entity) maps to its bare name in
+    // single-file emit (stage1 mapType's default -> mangled name, no prefix here).
+    // An empty name is the uninferred sentinel -> a loud marker (a lowering gap,
+    // unreachable for the annotated corpus), never silently-wrong Rust.
+    if t.name == "" {
+        return "/* unsupported type: <empty> */";
+    }
+    return t.name;
 }
 
 // generate_call — mirrors generateCallExpr. Builtins dispatch to
@@ -762,6 +823,9 @@ public function map_type(t: IrType) returns String {
 public function generate_call(e: IrExpr, funcs: Array<IrFunction>) returns String {
     if e.call_kind == compiler_ir.callkind_builtin() {
         return generate_builtin_call(e, funcs);
+    }
+    if e.call_kind == compiler_ir.callkind_variant() {
+        return generate_variant_constructor(e, funcs);
     }
     let mutable out: String = e.name + "(";
     let mutable i: Int = 0;
@@ -786,6 +850,27 @@ public function generate_call(e: IrExpr, funcs: Array<IrFunction>) returns Strin
     return out;
 }
 
+// generate_variant_constructor — mirrors generateVariantConstructor: a unit variant
+// (no field names) is `EnumName::Variant`; a data variant is `EnumName::Variant {
+// field: arg, … }`, pairing the resolved field_names with the args (children) by
+// position. Variant args are NOT cloned (mirrors stage1's plain generateExpr).
+public function generate_variant_constructor(e: IrExpr, funcs: Array<IrFunction>) returns String {
+    if len(e.field_names) == 0 {
+        return e.enum_name + "::" + e.name;
+    }
+    let mutable out: String = e.enum_name + "::" + e.name + " " + lbrace() + " ";
+    let mutable i: Int = 0;
+    while i < len(e.field_names) {
+        if i > 0 {
+            out = out + ", ";
+        }
+        out = out + e.field_names[i] + ": " + generate_expr(e.children[i], funcs);
+        i = i + 1;
+    }
+    out = out + " " + rbrace();
+    return out;
+}
+
 // generate_builtin_call — mirrors generateBuiltinCall. Args that are calls to
 // Array/Map-param functions borrow via the recursive generate_expr, so
 // assert_eq(sum_array(arr), …) emits sum_array(&arr). Non-Copy-arg cloning and the
@@ -801,6 +886,14 @@ public function generate_builtin_call(e: IrExpr, funcs: Array<IrFunction>) retur
         let actual: String = clone_if_needed(generate_expr(e.children[0], funcs), e.children[0]);
         let expected: String = clone_if_needed(generate_expr(e.children[1], funcs), e.children[1]);
         return "assert_eq!(" + actual + ", " + expected + ", \"assertion failed\")";
+    }
+    if e.name == "assert_close" {
+        // assert!(((A) - (B)).abs() <= (C), "...") — the three float args are not
+        // cloned (mirrors stage1; any inner call clones its own receiver/args).
+        let a: String = generate_expr(e.children[0], funcs);
+        let b: String = generate_expr(e.children[1], funcs);
+        let c: String = generate_expr(e.children[2], funcs);
+        return "assert!(((" + a + ") - (" + b + ")).abs() <= (" + c + "), \"assertion failed: floats not within epsilon\")";
     }
     if e.name == "print" {
         // println!("{}", ARG) — the "{}" braces go through lbrace()/rbrace().

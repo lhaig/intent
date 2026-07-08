@@ -368,4 +368,39 @@ test "lowers a float literal keeping its raw lexeme" {
     assert(lit.expr_type.name == "Float");
 }
 
+test "lowers enum decls, variant construction, and enum-match patterns" {
+    let src: String = "module m version \"1.0.0\";\n\nenum Shape " + lbrace() + "\n    Circle(radius: Float),\n    Point,\n" + rbrace() + "\n\nfunction mk() returns Shape " + lbrace() + "\n    return Circle(5.0);\n" + rbrace() + "\n\nfunction unit() returns Shape " + lbrace() + "\n    return Point;\n" + rbrace() + "\n\nfunction kind(s: Shape) returns Int " + lbrace() + "\n    return match s " + lbrace() + "\n        Circle(r) => 1,\n        Point => 0,\n    " + rbrace() + ";\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    // Enum decl lowered with a data variant (radius: Float) and a unit variant.
+    assert(len(m.enums) == 1);
+    let en: IrEnum = m.enums[0];
+    assert(en.name == "Shape");
+    assert(len(en.variants) == 2);
+    assert(en.variants[0].name == "Circle");
+    assert(len(en.variants[0].fields) == 1);
+    assert(en.variants[0].fields[0].name == "radius");
+    assert(en.variants[0].fields[0].param_type.name == "Float");
+    assert(len(en.variants[1].fields) == 0);
+    // `Circle(5.0)` -> a variant call with enum_name + field_names.
+    let data_call: IrExpr = m.functions[0].body[0].expr;
+    assert(data_call.kind == compiler_ir.irex_call());
+    assert(data_call.call_kind == compiler_ir.callkind_variant());
+    assert(data_call.enum_name == "Shape");
+    assert(data_call.field_names[0] == "radius");
+    // `Point` (bare unit variant ref) -> a variant call, no field names.
+    let unit_call: IrExpr = m.functions[1].body[0].expr;
+    assert(unit_call.call_kind == compiler_ir.callkind_variant());
+    assert(unit_call.enum_name == "Shape");
+    assert(unit_call.name == "Point");
+    assert(len(unit_call.field_names) == 0);
+    // match arm `Circle(r)` gets enum_name (from scrutinee `s: Shape`) + field_names.
+    let mt: IrExpr = m.functions[2].body[0].expr;
+    assert(mt.kind == compiler_ir.irex_match());
+    assert(mt.match_arms[0].enum_name == "Shape");
+    assert(mt.match_arms[0].field_names[0] == "radius");
+    assert(mt.match_arms[1].variant == "Point");
+    assert(len(mt.match_arms[1].bindings) == 0);
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

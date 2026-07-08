@@ -44,21 +44,37 @@ import "../shared/ast.intent";
 entity LowerScope {
     field names: Array<String>;
     field types: Array<IrType>;
+    // enums — the program's enum declarations, carried CONSTANT on the scope so the
+    // deep lower_expr chain can resolve variant constructors / unit-variant refs /
+    // match-pattern field names without threading a second parameter everywhere.
+    // Preserved verbatim by lower_scope_define (a field read clones it into the new
+    // scope's owned field), and seeded once by lower_scope_empty.
+    field enums: Array<EnumDecl>;
 
-    constructor(names: Array<String>, types: Array<IrType>) {
+    constructor(names: Array<String>, types: Array<IrType>, enums: Array<EnumDecl>) {
         self.names = names;
         self.types = types;
+        self.enums = enums;
     }
 }
 
-// lower_scope_empty — a fresh scope with no bindings.
-function lower_scope_empty() returns LowerScope {
-    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array());
+// lower_scope_empty — a fresh scope with no bindings, seeded with the program's
+// enum decls. The `enums` param is an immutable `&Vec`, so it is copied into a
+// LOCAL owned array before being moved into the field (gotcha (c)).
+function lower_scope_empty(enums: Array<EnumDecl>) returns LowerScope {
+    let mutable e: Array<EnumDecl> = [];
+    let mutable ei: Int = 0;
+    while ei < len(enums) {
+        e.push(enums[ei]);
+        ei = ei + 1;
+    }
+    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), e);
 }
 
 // lower_scope_define — a NEW scope with `name: ty` appended (copies the arrays,
 // mirroring the checker's scope_define_typed). Copying yields local owned arrays,
-// so a `&Vec` type arg still moves into the entity field (gotcha (c)).
+// so a `&Vec` type arg still moves into the entity field (gotcha (c)). The enum
+// registry is carried over unchanged (the field read clones it into the new scope).
 function lower_scope_define(s: LowerScope, name: String, ty: IrType) returns LowerScope {
     let mutable new_names: Array<String> = shared_ast.empty_string_array();
     let mutable i: Int = 0;
@@ -74,7 +90,7 @@ function lower_scope_define(s: LowerScope, name: String, ty: IrType) returns Low
         ti = ti + 1;
     }
     new_types.push(ty);
-    return LowerScope(new_names, new_types);
+    return LowerScope(new_names, new_types, s.enums);
 }
 
 // lower_scope_type_of — the IrType bound to `name`, or the empty/unknown type if
@@ -102,24 +118,115 @@ public function lower(prog: Program, path: String) returns IrModule {
     let mutable fns: Array<IrFunction> = compiler_ir.empty_ir_function_array();
     let mutable fi: Int = 0;
     while fi < len(prog.functions) {
-        fns.push(lower_function(prog.functions[fi]));
+        fns.push(lower_function(prog.functions[fi], prog.enums));
         fi = fi + 1;
     }
     let mutable tsts: Array<IrTest> = compiler_ir.empty_ir_test_array();
     let mutable ti: Int = 0;
     while ti < len(prog.tests) {
-        tsts.push(lower_test(prog.tests[ti]));
+        tsts.push(lower_test(prog.tests[ti], prog.enums));
         ti = ti + 1;
     }
+    // Lower the enum declarations (their struct-style variants + field types), and
+    // assign to the module post-construction (enums is an ADR 0054 additive field).
+    let mutable ens: Array<IrEnum> = compiler_ir.empty_ir_enum_array();
+    let mutable eni: Int = 0;
+    while eni < len(prog.enums) {
+        ens.push(lower_enum(prog.enums[eni]));
+        eni = eni + 1;
+    }
     let decl_name: String = prog.module_decl.name;
-    return IrModule(decl_name, decl_name, "", true, path, fns, tsts);
+    let mutable m: IrModule = IrModule(decl_name, decl_name, "", true, path, fns, tsts);
+    m.enums = ens;
+    return m;
+}
+
+// lower_enum — mirrors lowerEnum: each variant's fields (name + parsed type) become
+// IrParams (empty for a unit variant). Field types are parsed structurally.
+public function lower_enum(e: EnumDecl) returns IrEnum {
+    let mutable variants: Array<IrEnumVariant> = compiler_ir.empty_ir_enum_variant_array();
+    let mutable vi: Int = 0;
+    while vi < len(e.variants) {
+        let v: EnumVariant = e.variants[vi];
+        let mutable fields: Array<IrParam> = compiler_ir.empty_ir_param_array();
+        let mutable fj: Int = 0;
+        while fj < len(v.params) {
+            let p: Param = v.params[fj];
+            fields.push(IrParam(p.name, compiler_ir.ir_parse_type(p.type_name)));
+            fj = fj + 1;
+        }
+        variants.push(IrEnumVariant(v.name, fields));
+        vi = vi + 1;
+    }
+    return IrEnum(e.name, e.is_public, variants);
+}
+
+// resolve_enum_for_variant — the enum that declares `variant_name`, or "" if none
+// (mirrors resolveEnumForVariant). Variant names are unique across enums (checker-
+// enforced), so the first match is authoritative.
+function resolve_enum_for_variant(enums: Array<EnumDecl>, variant_name: String) returns String {
+    let mutable i: Int = 0;
+    while i < len(enums) {
+        let e: EnumDecl = enums[i];
+        let mutable j: Int = 0;
+        while j < len(e.variants) {
+            if e.variants[j].name == variant_name {
+                return e.name;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+// is_known_enum — is `name` the name of a declared enum? (Used to decide a match
+// scrutinee's enum, mirroring stage1's scrutType.IsEnum check.)
+function is_known_enum(enums: Array<EnumDecl>, name: String) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(enums) {
+        if enums[i].name == name {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// resolve_variant_field_names — the declared field names of `variant_name` in
+// `enum_name` (mirrors resolveVariantFieldNames), as a LOCAL owned array so it moves
+// into the IR node's owned field. Empty if the enum/variant is unknown or a unit.
+function resolve_variant_field_names(enums: Array<EnumDecl>, enum_name: String, variant_name: String) returns Array<String> {
+    let mutable out: Array<String> = shared_ast.empty_string_array();
+    let mutable i: Int = 0;
+    while i < len(enums) {
+        let e: EnumDecl = enums[i];
+        if e.name == enum_name {
+            let mutable j: Int = 0;
+            while j < len(e.variants) {
+                let v: EnumVariant = e.variants[j];
+                if v.name == variant_name {
+                    let mutable k: Int = 0;
+                    while k < len(v.params) {
+                        out.push(v.params[k].name);
+                        k = k + 1;
+                    }
+                    return out;
+                }
+                j = j + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return out;
 }
 
 // lower_function — mirrors lowerFunction: params (types parsed structurally),
-// requires/ensures contracts (via lower_contracts), and the lowered body.
-public function lower_function(f: FunctionDecl) returns IrFunction {
+// requires/ensures contracts (via lower_contracts), and the lowered body. `enums`
+// seeds the scope's enum registry (variant / match resolution).
+public function lower_function(f: FunctionDecl, enums: Array<EnumDecl>) returns IrFunction {
     let mutable params: Array<IrParam> = compiler_ir.empty_ir_param_array();
-    let mutable scope: LowerScope = lower_scope_empty();
+    let mutable scope: LowerScope = lower_scope_empty(enums);
     let mutable i: Int = 0;
     while i < len(f.params) {
         let p: Param = f.params[i];
@@ -155,10 +262,10 @@ public function lower_contracts(preds: Array<Expr>, raws: Array<String>, scope: 
 
 // lower_test — mirrors lowerTest. The AST already stores annotations as their
 // canonical strings, which is exactly the IrTest.annotations shape.
-public function lower_test(t: TestDecl) returns IrTest {
-    // A test has no params; its body opens a fresh (empty) scope, growing as its
-    // own let-bindings land.
-    let body: Array<IrStmt> = lower_block(t.body, lower_scope_empty());
+public function lower_test(t: TestDecl, enums: Array<EnumDecl>) returns IrTest {
+    // A test has no params; its body opens a fresh scope (seeded with the enum
+    // registry), growing as its own let-bindings land.
+    let body: Array<IrStmt> = lower_block(t.body, lower_scope_empty(enums));
     return IrTest(t.name, t.is_async, t.annotations, body);
 }
 
@@ -251,6 +358,13 @@ public function lower_stmt(s: Stmt, scope: LowerScope) returns IrStmt {
     return IrStmt(compiler_ir.irst_expr(), compiler_ir.ir_bool_lit(true));
 }
 
+// copy_str — return an owned copy of `s`. The argument position clones `s` (a
+// non-Copy String arg), so the caller's value survives; the returned owned string
+// can then be MOVED into a field inside a loop without consuming the original.
+function copy_str(s: String) returns String {
+    return s;
+}
+
 // lower_ir_is_string — is this lowered expression String-typed? A string literal
 // always is; any other node is String iff its stamped expr_type is String (a
 // VarRef via the scope, or a nested string concat whose type is String). Mirrors
@@ -294,6 +408,16 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
         // has no dedicated node (result is reserved, so no real variable collides).
         if e.name == "result" {
             return compiler_ir.ir_var_ref("__result");
+        }
+        // A bare identifier that names an enum variant is a UNIT variant construction
+        // (stage1's Identifier -> CallVariant), e.g. `return Running;` -> `Status::
+        // Running`. Modelled as a variant call with no args (no field names).
+        let unit_enum: String = resolve_enum_for_variant(scope.enums, e.name);
+        if unit_enum != "" {
+            let mutable uv: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, e.name, compiler_ir.empty_ir_expr_array(), compiler_ir.ir_type_named(unit_enum));
+            uv.call_kind = compiler_ir.callkind_variant();
+            uv.enum_name = unit_enum;
+            return uv;
         }
         // Stamp the VarRef's type from the local scope (params + prior lets) — the
         // type bridge (ADR 0059 D3) that lets the backend's cloneIfNeeded tell a
@@ -350,15 +474,37 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
         // would lower to `&Vec`, unmovable into the field). Arm bindings are not
         // stamped into the scope yet (their VarRefs stay unknown -> Copy -> no
         // clone); that lands with a slice that needs an arm-bound arg cloned.
+        let scrutinee: IrExpr = lower_expr(e.children[0], scope);
+        // The scrutinee's enum name (from its stamped type) resolves enum-variant
+        // pattern field names, mirroring stage1's lowerMatchExpr (scrutType.IsEnum).
+        // Builtin (Ok/Err/Some/None) and wildcard arms carry no enum name.
+        let mutable scrut_enum: String = "";
+        if is_known_enum(scope.enums, scrutinee.expr_type.name) {
+            scrut_enum = scrutinee.expr_type.name;
+        }
         let mutable arms: Array<IrMatchArm> = compiler_ir.empty_ir_match_arm_array();
         let mutable ai: Int = 0;
         while ai < len(e.match_arms) {
             let a: MatchArm = e.match_arms[ai];
             let is_builtin: Bool = a.variant == "Ok" or a.variant == "Err" or a.variant == "Some" or a.variant == "None";
-            arms.push(IrMatchArm(a.variant, a.bindings, a.is_wildcard, is_builtin, lower_expr(a.body, scope)));
+            let mutable arm: IrMatchArm = IrMatchArm(a.variant, a.bindings, a.is_wildcard, is_builtin, lower_expr(a.body, scope));
+            // Resolve enum name + field names for non-builtin, non-wildcard patterns
+            // (stage1 resolves FieldNames only when there are bindings). field_names
+            // is a LOCAL owned array assigned to the arm's owned field. copy_str keeps
+            // scrut_enum alive across the loop: a plain `arm.enum_name = scrut_enum`
+            // would MOVE it (assignments don't clone), breaking later iterations.
+            if not is_builtin {
+                if not a.is_wildcard {
+                    arm.enum_name = copy_str(scrut_enum);
+                    if len(a.bindings) > 0 {
+                        arm.field_names = resolve_variant_field_names(scope.enums, scrut_enum, a.variant);
+                    }
+                }
+            }
+            arms.push(arm);
             ai = ai + 1;
         }
-        let mutable mt: IrExpr = compiler_ir.ir_match(lower_expr(e.children[0], scope));
+        let mutable mt: IrExpr = compiler_ir.ir_match(scrutinee);
         mt.match_arms = arms;
         return mt;
     }
@@ -429,8 +575,27 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
             let object: IrExpr = lower_expr(callee.children[0], scope);
             return compiler_ir.ir_method(object, callee.name, args);
         }
+        let kind: Int = resolve_call_kind(callee.name);
+        // A non-builtin callee naming an enum variant is a DATA variant construction
+        // (stage1 CallVariant): `Circle(r)` -> `Shape::Circle { radius: r }`. Resolve
+        // the enum name + declared field names (paired positionally with args) here,
+        // so the backend emits without an enum table. field_names is a LOCAL owned
+        // array assigned to the node's owned field.
+        if kind == compiler_ir.callkind_function() {
+            let var_enum: String = resolve_enum_for_variant(scope.enums, callee.name);
+            if var_enum != "" {
+                let mutable vc: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, callee.name, args, compiler_ir.ir_type_named(var_enum));
+                vc.call_kind = compiler_ir.callkind_variant();
+                // Resolve field names (which passes var_enum as an arg -> cloned)
+                // BEFORE the enum_name assignment, which moves var_enum (a plain
+                // VarRef assignment is not cloned by the backend) — its last use.
+                vc.field_names = resolve_variant_field_names(scope.enums, var_enum, callee.name);
+                vc.enum_name = var_enum;
+                return vc;
+            }
+        }
         let mutable call: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, callee.name, args, compiler_ir.ir_type_named(""));
-        call.call_kind = resolve_call_kind(callee.name);
+        call.call_kind = kind;
         return call;
     }
     return compiler_ir.ir_void_expr();

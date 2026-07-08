@@ -2662,3 +2662,36 @@ ir_test 17, lower_test 128 (added a float-literal case). No Go / shared/* touche
 NEXT: enums + match + float arithmetic (shape_area, enum_basic) -> entities
 (bank_account) -> generics (generic_stack) -> traits (handler_trait) -> Map
 (map_demo) -> async (async_demo, task_queue) -> char/string interp (char_string_demo).
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 17: enums + variant construction + enum-match (diff-emit 23/23)
+
+`examples/enum_basic.intent` and `examples/shape_area.intent` now self-host
+byte-equal — the THIRTEENTH and FOURTEENTH real examples. diff-emit is **23/23 EQUAL**.
+
+- **Enum decls** (`IrEnum` / `IrEnumVariant`): lowered from `prog.enums`, emitted as
+  `#[derive(Clone, Debug)] enum Name { Variant, Variant { field: type }, ... }`
+  (struct-style data variants). Assigned to IrModule.enums (ADR 0054 additive field);
+  generate() emits them before functions (stage1 decl order).
+- **Variant construction** (callkind_variant): a data variant `Circle(r)` ->
+  `Shape::Circle { radius: r }`; a unit variant construction — both `Point` as a call
+  and a bare `Running` identifier ref (stage1's Identifier -> CallVariant) ->
+  `Shape::Point`. The enum name + declared field names are resolved DURING lowering
+  (from an enum registry carried on LowerScope) and stored on the IR node, so the
+  backend emits without an enum table.
+- **Enum-match patterns**: `Shape::Circle { radius: r }` / `Shape::Point` / `_`, with
+  field names paired to bindings. The scrutinee's enum comes from its stamped type
+  (the type bridge); each arm's enum_name/field_names resolved in lowering.
+- **assert_close**: `assert!(((A) - (B)).abs() <= (C), "...")`. **map_type** default
+  now returns the bare user type name (enum/entity), empty name still a loud marker.
+
+Enum registry threading: carried as a CONSTANT field on LowerScope (seeded once by
+lower_scope_empty, preserved by lower_scope_define) so only lower_function/lower_test
+gained a param — the deep lower_expr chain reads scope.enums. `copy_str` keeps the
+scrutinee enum name alive across the arm loop (a plain field assign would move it).
+
+Gates green: diff-emit 23/23, selfcheck-formatter 7/7, selfcheck-checker 13/13,
+ir_test 17, lower_test 129 (+ enum lowering case). No Go / shared/* touched. NEXT:
+entities (bank_account) -> generics (generic_stack) -> traits (handler_trait) -> Map
+(map_demo) -> async (async_demo, task_queue) -> char/string interp (char_string_demo).

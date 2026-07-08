@@ -195,6 +195,13 @@ public entity IrMatchArm {
     field is_wildcard: Bool;
     field is_builtin: Bool;
     field body: IrExpr;
+    // enum_name / field_names are resolved during lowering for enum-variant patterns
+    // (from the scrutinee's enum type + the variant's declared field names), so the
+    // backend emits `EnumName::Variant { field: binding }` without an enum table.
+    // Both default (ADR 0054 additive) so the 5-arg constructor call sites stay put;
+    // lowering assigns them post-construction. Empty for builtin/wildcard patterns.
+    field enum_name: String;
+    field field_names: Array<String>;
 
     constructor(variant: String, bindings: Array<String>, is_wildcard: Bool, is_builtin: Bool, body: IrExpr) {
         self.variant = variant;
@@ -202,6 +209,8 @@ public entity IrMatchArm {
         self.is_wildcard = is_wildcard;
         self.is_builtin = is_builtin;
         self.body = body;
+        self.enum_name = "";
+        self.field_names = empty_string_array_ir();
     }
 }
 
@@ -229,6 +238,11 @@ public entity IrExpr {
     field enum_name: String;
     field lambda_params: Array<IrParam>;
     field match_arms: Array<IrMatchArm>;
+    // field_names — for a variant constructor (callkind_variant), the declared field
+    // names paired positionally with children (args), so the backend emits
+    // `EnumName::Variant { field: arg }`. Defaulted empty (ADR 0054 additive); the
+    // constructor call sites stay seven-argument, lowering assigns it after.
+    field field_names: Array<String>;
 
     constructor(kind: Int, int_value: Int, str_value: String, bool_value: Bool, name: String, children: Array<IrExpr>, expr_type: IrType) {
         self.kind = kind;
@@ -242,6 +256,7 @@ public entity IrExpr {
         self.enum_name = "";
         self.lambda_params = empty_ir_param_array();
         self.match_arms = empty_ir_match_arm_array();
+        self.field_names = empty_string_array_ir();
     }
 }
 
@@ -290,6 +305,33 @@ public entity IrParam {
     constructor(name: String, param_type: IrType) {
         self.name = name;
         self.param_type = param_type;
+    }
+}
+
+// --- Enum -------------------------------------------------------------------
+// One enum variant: `name` plus its fields (empty for a unit variant). A field
+// reuses IrParam (name + param_type), mirroring stage1 EnumVariant.Fields ([]Field
+// with Name + Type). The Rust backend emits struct-style variants
+// `Variant { field: type }` (or a bare `Variant` for units).
+public entity IrEnumVariant {
+    field name: String;
+    field fields: Array<IrParam>;
+
+    constructor(name: String, fields: Array<IrParam>) {
+        self.name = name;
+        self.fields = fields;
+    }
+}
+
+public entity IrEnum {
+    field name: String;
+    field is_public: Bool;
+    field variants: Array<IrEnumVariant>;
+
+    constructor(name: String, is_public: Bool, variants: Array<IrEnumVariant>) {
+        self.name = name;
+        self.is_public = is_public;
+        self.variants = variants;
     }
 }
 
@@ -367,6 +409,10 @@ public entity IrModule {
     field path: String;
     field functions: Array<IrFunction>;
     field tests: Array<IrTest>;
+    // enums — the module's enum declarations. Defaulted empty (ADR 0054 additive) so
+    // the 7-arg constructor call sites stay put; lowering assigns them after. Other
+    // decl arrays (entities, traits, impls, intents, externs) land the same way.
+    field enums: Array<IrEnum>;
 
     constructor(name: String, decl_name: String, package_name: String, is_entry: Bool, path: String, functions: Array<IrFunction>, tests: Array<IrTest>) {
         self.name = name;
@@ -376,6 +422,7 @@ public entity IrModule {
         self.path = path;
         self.functions = functions;
         self.tests = tests;
+        self.enums = empty_ir_enum_array();
     }
 }
 
@@ -434,6 +481,23 @@ public function empty_ir_function_array() returns Array<IrFunction> {
 
 public function empty_ir_module_array() returns Array<IrModule> {
     let mutable a: Array<IrModule> = [];
+    return a;
+}
+
+public function empty_ir_enum_array() returns Array<IrEnum> {
+    let mutable a: Array<IrEnum> = [];
+    return a;
+}
+
+public function empty_ir_enum_variant_array() returns Array<IrEnumVariant> {
+    let mutable a: Array<IrEnumVariant> = [];
+    return a;
+}
+
+// empty_string_array_ir — a fresh empty Array<String> (ir.intent imports nothing,
+// so it cannot use shared_ast.empty_string_array; the annotation lets [] infer).
+public function empty_string_array_ir() returns Array<String> {
+    let mutable a: Array<String> = [];
     return a;
 }
 
