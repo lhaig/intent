@@ -55,6 +55,7 @@ CORPUS=(
   "examples/async_demo.intent"
   "examples/task_queue.intent"
   "examples/handler_trait.intent"
+  "examples/char_string_demo.intent"
   "selfhost/compiler/emit-fixtures/let_locals.intent"
   "selfhost/compiler/emit-fixtures/binops.intent"
   "selfhost/compiler/emit-fixtures/control_flow.intent"

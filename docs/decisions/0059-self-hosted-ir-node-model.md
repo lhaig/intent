@@ -342,6 +342,20 @@ entity, looked up by name). The general method-call path now clones non-Copy pla
 args (`start.execute(ctx.clone())`), matching stage1's cloneIfNeeded. Decl order:
 entities, enums, traits, impls, functions, intents, tests.
 
+## Update — char literals + char/String receiver methods + String indexing/slicing
+
+`examples/char_string_demo.intent` self-hosts byte-equal (diff-emit 30/30). New
+`irex_char` (lowering decodes the raw lexeme — quotes, escapes, `\u{HEX}` — to a
+codepoint; backend emits `'\u{HEX}'`). Char receiver methods (`to_codepoint` ->
+`((c) as u32 as i64)`, `is_digit`/`is_alpha`/… -> `is_ascii_*`, `is_whitespace` ->
+the inline block) and String `len` (`.chars().count()`) via the receiver-type
+dispatch; `len(s)` builtin type-checks its arg; String indexing/slicing ->
+`.chars().nth(...)` / `.chars().skip().take().collect()`, with index/slice result
+types stamped (String[i] -> Char, String[a..b] -> String, Array<T>[i] -> T) for
+dispatch and cloning (Char is non-Copy). `char_from_codepoint` -> the
+`match u32::try_from(...)` form. Match-arm bindings are typed from the scrutinee's
+Result/Option args (`extend_scope_for_arm`), so `Ok(c) => c.to_codepoint()` dispatches.
+
 ## References
 
 - [`internal/ir/nodes.go`](../../internal/ir/nodes.go) — the port target for this slice.

@@ -2823,3 +2823,28 @@ Gates green: diff-emit 29/29, selfcheck-formatter 7/7, selfcheck-checker 13/13,
 lower_test (+ trait case), ir_test. No shared/* touched. REMAINING: char_string_demo
 (char literals + char/String receiver methods + String indexing/slicing +
 char_from_codepoint), generic_stack (monomorphization).
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 23: char literals + char/String methods + String indexing (diff-emit 30/30)
+
+`examples/char_string_demo.intent` self-hosts byte-equal — the TWENTY-FIRST real
+example. diff-emit is **30/30 EQUAL**.
+
+- **char literals** (irex_char): lowering decodes the raw lexeme (quotes + escapes,
+  incl. `\u{HEX}`) to a codepoint via char_lexeme_codepoint; backend emits `'\u{HEX}'`
+  (int_to_hex_upper). Char is non-Copy (ir_is_copy_type), so a char index result clones.
+- **Char receiver methods**: to_codepoint -> `((c) as u32 as i64)`; is_digit/is_alpha/
+  is_alphanumeric/is_lowercase/is_uppercase -> the `is_ascii_*` forms; is_whitespace ->
+  the inline `{ let __c = c; __c == ' ' || ... }` block.
+- **String**: `len(s)` -> `((s).chars().count() as i64)` (len builtin type-checks its arg);
+  String indexing `s[i]` -> `.chars().nth(i as usize).expect(...)`; slicing `s[a..b]` ->
+  `.chars().skip(a).take(b-a).collect::<String>()`. Index/slice result types stamped
+  (String[i] -> Char, String[a..b] -> String, Array<T>[i] -> T) for dispatch + cloning.
+- **char_from_codepoint** builtin -> the `match u32::try_from(...).and_then(from_u32)` form.
+- **match-arm binding types**: an Ok/Some binding is typed the scrutinee's Result/Option
+  arg 0, Err arg 1 (extend_scope_for_arm) — so `Ok(c) => c.to_codepoint()` dispatches on Char.
+
+Gates green: diff-emit 30/30, selfcheck-formatter 7/7, selfcheck-checker 13/13,
+lower_test (+ char case), ir_test, char_string_demo cargo. No shared/* touched.
+REMAINING: generic_stack (monomorphization) — the last real example.

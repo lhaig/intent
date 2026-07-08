@@ -153,6 +153,10 @@ public function irex_spawn() returns Int {
     return 21;
 } // children[0] = operand; emits `tokio::spawn(operand)`
 
+public function irex_char() returns Int {
+    return 22;
+} // int_value = codepoint; emits `'\u{HEX}'`
+
 // --- Call-kind constants ----------------------------------------------------
 // Mirrors internal/ir CallKind iota so the backend dispatches identically.
 public function callkind_function() returns Int {
@@ -811,6 +815,12 @@ public function ir_float_lit(lexeme: String) returns IrExpr {
 
 public function ir_bool_lit(value: Bool) returns IrExpr {
     return IrExpr(irex_bool(), 0, "", value, "", empty_ir_expr_array(), ir_type_named("Bool"));
+}
+
+// ir_char_lit — a char literal (irex_char): int_value is the Unicode codepoint,
+// which the Rust backend emits as `'\u{HEX}'` (stage1 CharLit.Value / `'\u{%X}'`).
+public function ir_char_lit(codepoint: Int) returns IrExpr {
+    return IrExpr(irex_char(), codepoint, "", false, "", empty_ir_expr_array(), ir_type_named("Char"));
 }
 
 // ir_var_ref — a variable reference (irex_var). Its type is left unknown; the

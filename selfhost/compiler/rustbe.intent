@@ -1022,6 +1022,10 @@ public function generate_expr(e: IrExpr, funcs: Array<IrFunction>) returns Strin
         // The raw float lexeme, emitted verbatim (stage1 FloatLit -> expr.Value).
         return e.str_value;
     }
+    if e.kind == compiler_ir.irex_char() {
+        // `'\u{HEX}'` — the codepoint in uppercase hex (stage1 CharLit `'\u{%X}'`).
+        return "'" + "\\u" + lbrace() + int_to_hex_upper(e.int_value) + rbrace() + "'";
+    }
     if e.kind == compiler_ir.irex_bool() {
         if e.bool_value {
             return "true";
@@ -1071,9 +1075,19 @@ public function generate_expr(e: IrExpr, funcs: Array<IrFunction>) returns Strin
         return "vec![" + generate_args(e.children, funcs) + "]";
     }
     if e.kind == compiler_ir.irex_index() {
-        // Non-String indexing: obj[idx as usize]. String indexing (.chars()) and
-        // Map indexing land with their slices; the corpus indexes only Vecs.
-        return generate_expr(e.children[0], funcs) + "[" + generate_expr(e.children[1], funcs) + " as usize]";
+        // String indexing/slicing dispatches to .chars() (stage1 IndexExpr for a
+        // String object); a range index is a slice. Non-String -> `obj[idx as usize]`.
+        let obj_i: String = generate_expr(e.children[0], funcs);
+        if e.children[0].expr_type.name == "String" {
+            if e.children[1].kind == compiler_ir.irex_range() {
+                let rng: IrExpr = e.children[1];
+                let st: String = generate_expr(rng.children[0], funcs);
+                let en: String = generate_expr(rng.children[1], funcs);
+                return "((" + obj_i + ").chars().skip(" + st + " as usize).take((" + en + " - " + st + ") as usize).collect::<String>())";
+            }
+            return "((" + obj_i + ").chars().nth(" + generate_expr(e.children[1], funcs) + " as usize).expect(\"string index out of bounds\"))";
+        }
+        return obj_i + "[" + generate_expr(e.children[1], funcs) + " as usize]";
     }
     if e.kind == compiler_ir.irex_field() {
         // object.field. A field read off an indexed Vec element clones (mirrors
@@ -1214,6 +1228,39 @@ public function generate_method_call(e: IrExpr, funcs: Array<IrFunction>) return
     // stamped type selects a rewrite; Map methods differ from the general path. Char /
     // String receiver methods land with char_string_demo.
     let recv_type: String = e.children[0].expr_type.name;
+    if recv_type == "Char" {
+        // Char predicate/codepoint methods (mirror generateMethodCallExpr's Char case).
+        if e.name == "to_codepoint" {
+            return "((" + obj + ") as u32 as i64)";
+        }
+        if e.name == "is_digit" {
+            return "(" + obj + ").is_ascii_digit()";
+        }
+        if e.name == "is_alpha" {
+            return "(" + obj + ").is_ascii_alphabetic()";
+        }
+        if e.name == "is_alphanumeric" {
+            return "(" + obj + ").is_ascii_alphanumeric()";
+        }
+        if e.name == "is_lowercase" {
+            return "(" + obj + ").is_ascii_lowercase()";
+        }
+        if e.name == "is_uppercase" {
+            return "(" + obj + ").is_ascii_uppercase()";
+        }
+        if e.name == "is_whitespace" {
+            // { let __c = OBJ; __c == ' ' || __c == '\t' || __c == '\n' || __c == '\r' }
+            return lbrace() + " let __c = " + obj + "; __c == ' ' || __c == '\\t' || __c == '\\n' || __c == '\\r' " + rbrace();
+        }
+    }
+    if recv_type == "String" {
+        // String methods (mirror generateMethodCallExpr's String case). len ->
+        // codepoint count. Others (to_lowercase/trim/starts_with/contains/split) land
+        // when a corpus example needs them.
+        if e.name == "len" {
+            return "(" + obj + ".chars().count() as i64)";
+        }
+    }
     if recv_type == "Map" {
         if e.name == "get" {
             return obj + ".get(&" + generate_expr(e.children[1], funcs) + ").cloned().unwrap_or(" + generate_expr(e.children[2], funcs) + ")";
@@ -1576,9 +1623,18 @@ public function generate_builtin_call(e: IrExpr, funcs: Array<IrFunction>) retur
         return "println!(\"" + lbrace() + rbrace() + "\", " + generate_expr(e.children[0], funcs) + ")";
     }
     if e.name == "len" {
-        // Non-String len: (ARG.len() as i64). String len (.chars().count()) is
-        // deferred; the corpus calls len only on Vecs.
-        return "(" + generate_expr(e.children[0], funcs) + ".len() as i64)";
+        // String len is codepoint count; Array/Map len is `.len()` (stage1 len()).
+        let la: String = generate_expr(e.children[0], funcs);
+        if e.children[0].expr_type.name == "String" {
+            return "((" + la + ").chars().count() as i64)";
+        }
+        return "(" + la + ".len() as i64)";
+    }
+    if e.name == "char_from_codepoint" {
+        // (match u32::try_from(N).ok().and_then(std::char::from_u32) { Some(c) =>
+        // Ok::<char, String>(c), None => Err::<char, String>("...".to_string()) })
+        let n: String = generate_expr(e.children[0], funcs);
+        return "(match u32::try_from(" + n + ").ok().and_then(std::char::from_u32) " + lbrace() + " Some(c) => Ok::<char, String>(c), None => Err::<char, String>(\"codepoint out of range or surrogate\".to_string()) " + rbrace() + ")";
     }
     if e.name == "Ok" or e.name == "Err" or e.name == "Some" {
         // Result/Option constructors: Ok(x) / Err(x) / Some(x). A non-Copy place
@@ -1744,6 +1800,23 @@ public function trim_trailing_underscores(s: String) returns String {
     while j <= last {
         out = out + s[j].to_string();
         j = j + 1;
+    }
+    return out;
+}
+
+// int_to_hex_upper — `n` as an uppercase hex string with no leading zeros (0 -> "0").
+// Used for char-literal `'\u{HEX}'` emission (matches Go's `%X`).
+public function int_to_hex_upper(n: Int) returns String {
+    if n == 0 {
+        return "0";
+    }
+    let digits: String = "0123456789ABCDEF";
+    let mutable v: Int = n;
+    let mutable out: String = "";
+    while v > 0 {
+        let d: Int = v % 16;
+        out = digits[d].to_string() + out;
+        v = v / 16;
     }
     return out;
 }

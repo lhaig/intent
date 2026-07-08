@@ -492,6 +492,33 @@ function resolve_enum_for_variant(enums: Array<EnumDecl>, variant_name: String) 
     return "";
 }
 
+// extend_scope_for_arm — a scope with a builtin (Ok/Err/Some) pattern's binding typed
+// from the scrutinee's Result/Option type args (Ok/Some -> arg 0, Err -> arg 1), so a
+// binding used as a method receiver dispatches on its real type. Wildcard / non-builtin
+// arms (enum-variant binding types) are returned unchanged for now.
+function extend_scope_for_arm(scope: LowerScope, scrutinee: IrExpr, a: MatchArm, is_builtin: Bool) returns LowerScope {
+    if a.is_wildcard {
+        return scope;
+    }
+    if not is_builtin {
+        return scope;
+    }
+    if len(a.bindings) != 1 {
+        return scope;
+    }
+    let st: IrType = scrutinee.expr_type;
+    if a.variant == "Err" {
+        if len(st.type_args) >= 2 {
+            return lower_scope_define(scope, a.bindings[0], st.type_args[1]);
+        }
+        return scope;
+    }
+    if len(st.type_args) >= 1 {
+        return lower_scope_define(scope, a.bindings[0], st.type_args[0]);
+    }
+    return scope;
+}
+
 // is_known_enum — is `name` the name of a declared enum? (Used to decide a match
 // scrutinee's enum, mirroring stage1's scrutType.IsEnum check.)
 function is_known_enum(enums: Array<EnumDecl>, name: String) returns Bool {
@@ -691,6 +718,67 @@ function copy_str(s: String) returns String {
     return s;
 }
 
+// char_lexeme_codepoint — the Unicode codepoint of a char literal's raw lexeme
+// (`'A'`, `'\n'`, `'\\'`, `'\u{41}'`). Mirrors what stage1's lexer/checker decode
+// into CharLit.Value. Handles the common escapes plus the `\u{HEX}` form.
+function char_lexeme_codepoint(s: String) returns Int {
+    if len(s) < 3 {
+        return 0;
+    }
+    let c1: Char = s[1];
+    if c1 == '\\' {
+        let esc: Char = s[2];
+        if esc == 'n' {
+            return 10;
+        }
+        if esc == 't' {
+            return 9;
+        }
+        if esc == 'r' {
+            return 13;
+        }
+        if esc == '\\' {
+            return 92;
+        }
+        if esc == '\'' {
+            return 39;
+        }
+        if esc == '"' {
+            return 34;
+        }
+        if esc == '0' {
+            return 0;
+        }
+        if esc == 'u' {
+            // `'\u{HEX}'` — parse the hex digits between `{` and `}`.
+            let mutable v: Int = 0;
+            let mutable i: Int = 4;
+            while i < len(s) and s[i] != '}' {
+                v = v * 16 + hex_digit_value(s[i]);
+                i = i + 1;
+            }
+            return v;
+        }
+        return esc.to_codepoint();
+    }
+    return c1.to_codepoint();
+}
+
+// hex_digit_value — the numeric value of a hex digit char (0-9, a-f, A-F).
+function hex_digit_value(c: Char) returns Int {
+    let cp: Int = c.to_codepoint();
+    if cp >= 48 and cp <= 57 {
+        return cp - 48;
+    }
+    if cp >= 97 and cp <= 102 {
+        return cp - 97 + 10;
+    }
+    if cp >= 65 and cp <= 70 {
+        return cp - 65 + 10;
+    }
+    return 0;
+}
+
 // lower_ir_is_string — is this lowered expression String-typed? A string literal
 // always is; any other node is String iff its stamped expr_type is String (a
 // VarRef via the scope, or a nested string concat whose type is String). Mirrors
@@ -718,6 +806,11 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
         // The AST keeps the raw float lexeme in str_value (the formatter round-trips
         // it verbatim); stage1's FloatLit.Value is emitted as-is, so pass it through.
         return compiler_ir.ir_float_lit(e.str_value);
+    }
+    if e.kind == shared_ast.ex_char() {
+        // The AST keeps the raw char lexeme (quotes + raw escapes); compute its
+        // Unicode codepoint so the backend emits `'\u{HEX}'` (stage1 CharLit.Value).
+        return compiler_ir.ir_char_lit(char_lexeme_codepoint(e.str_value));
     }
     if e.kind == shared_ast.ex_bool() {
         return compiler_ir.ir_bool_lit(e.bool_value);
@@ -838,7 +931,12 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
         while ai < len(e.match_arms) {
             let a: MatchArm = e.match_arms[ai];
             let is_builtin: Bool = a.variant == "Ok" or a.variant == "Err" or a.variant == "Some" or a.variant == "None";
-            let mutable arm: IrMatchArm = IrMatchArm(a.variant, a.bindings, a.is_wildcard, is_builtin, lower_expr(a.body, scope));
+            // The arm body sees the pattern bindings typed from the scrutinee: an
+            // Ok/Some binding is the Result/Option's first type arg, Err the second.
+            // This lets a binding used as a receiver dispatch (e.g. Ok(c) => c.to_codepoint()
+            // where c is Char). Enum-variant binding types land when an example needs them.
+            let arm_scope: LowerScope = extend_scope_for_arm(scope, scrutinee, a, is_builtin);
+            let mutable arm: IrMatchArm = IrMatchArm(a.variant, a.bindings, a.is_wildcard, is_builtin, lower_expr(a.body, arm_scope));
             // Resolve enum name + field names for non-builtin, non-wildcard patterns
             // (stage1 resolves FieldNames only when there are bindings). field_names
             // is a LOCAL owned array assigned to the arm's owned field. copy_str keeps
@@ -906,7 +1004,25 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
         return compiler_ir.ir_array(elems);
     }
     if e.kind == shared_ast.ex_index() {
-        return compiler_ir.ir_index(lower_expr(e.children[0], scope), lower_expr(e.children[1], scope));
+        let obj_ix: IrExpr = lower_expr(e.children[0], scope);
+        let mutable ix: IrExpr = compiler_ir.ir_index(obj_ix, lower_expr(e.children[1], scope));
+        // Stamp the element type so the backend can dispatch String indexing/slicing
+        // and clone non-Copy results: String[i] -> Char, String[a..b] -> String,
+        // Array<T>[i] -> T. (Char is non-Copy per ir_is_copy_type -> cloned as an arg.)
+        if obj_ix.expr_type.name == "String" {
+            if ix.children[1].kind == compiler_ir.irex_range() {
+                ix.expr_type = compiler_ir.ir_type_named("String");
+            } else {
+                ix.expr_type = compiler_ir.ir_type_named("Char");
+            }
+        } else {
+            if obj_ix.expr_type.name == "Array" {
+                if len(obj_ix.expr_type.type_args) == 1 {
+                    ix.expr_type = obj_ix.expr_type.type_args[0];
+                }
+            }
+        }
+        return ix;
     }
     if e.kind == shared_ast.ex_field() {
         // `object.field` — name is the field, children[0] the object. Mirrors stage1

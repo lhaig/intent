@@ -305,9 +305,9 @@ test "stamps a let-bound VarRef's expr_type from the accumulated scope" {
     assert(arg.expr_type.name == "String");
 }
 
-test "leaves an unbound VarRef's expr_type unknown (never over-clones)" {
-    // A match-arm binding is not stamped into the scope, so a VarRef to it keeps
-    // the empty/unknown type -> ir_is_copy_type -> true -> no clone.
+test "stamps builtin match-arm binding types from the scrutinee (Ok -> arg0)" {
+    // The scrutinee `r` is Result<Int, String>; the Ok(x) binding is typed from its
+    // first type arg (Int), so a binding used as a receiver dispatches on its type.
     let src: String = "module m version \"1.0.0\";\n\nfunction f(r: Result<Int, String>) returns Int " + lbrace() + "\n    return match r " + lbrace() + "\n        Ok(x) => x,\n        Err(e) => 0,\n    " + rbrace() + ";\n" + rbrace() + "\n";
     let prog: Program = shared_parser.parse(src);
     let m: IrModule = compiler_lower.lower(prog, "m.intent");
@@ -316,11 +316,11 @@ test "leaves an unbound VarRef's expr_type unknown (never over-clones)" {
     // scrutinee `r` is a stamped param (Result), non-Copy.
     assert(mt.children[0].name == "r");
     assert(mt.children[0].expr_type.name == "Result");
-    // the Ok arm body `x` is an arm binding -> unstamped -> empty type name.
+    // the Ok arm body `x` is now stamped Int (Result's first type arg).
     let ok_body: IrExpr = mt.match_arms[0].body;
     assert(ok_body.kind == compiler_ir.irex_var());
     assert(ok_body.name == "x");
-    assert(ok_body.expr_type.name == "");
+    assert(ok_body.expr_type.name == "Int");
 }
 
 test "lowers break and continue statements" {
