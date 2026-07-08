@@ -301,6 +301,9 @@ public function generate_expr(e: IrExpr, funcs: Array<IrFunction>) returns Strin
     if e.kind == compiler_ir.irex_binary() {
         return generate_binary(e, funcs);
     }
+    if e.kind == compiler_ir.irex_unary() {
+        return generate_unary(e, funcs);
+    }
     if e.kind == compiler_ir.irex_range() {
         return "(" + generate_expr(e.children[0], funcs) + ".." + generate_expr(e.children[1], funcs) + ")";
     }
@@ -355,6 +358,17 @@ public function generate_binary(e: IrExpr, funcs: Array<IrFunction>) returns Str
         return "(!" + left + " || " + right + ")";
     }
     return "(" + left + " " + map_op(e.name) + " " + right + ")";
+}
+
+// generate_unary — mirrors generateExpr's UnaryExpr case: `not X` -> `!X`, `- X`
+// -> `-X`, with no added parens (the operand parenthesises itself when it is a
+// binary expression).
+public function generate_unary(e: IrExpr, funcs: Array<IrFunction>) returns String {
+    let operand: String = generate_expr(e.children[0], funcs);
+    if e.name == "not" {
+        return "!" + operand;
+    }
+    return "-" + operand;
 }
 
 // map_op — mirrors mapOperator: operator source text to its Rust spelling

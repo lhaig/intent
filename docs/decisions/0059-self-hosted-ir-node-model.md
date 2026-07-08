@@ -190,6 +190,23 @@ sub-changes and one structural decision:
   generator state (Map's `needsHashMap`, entity/enum tables, async's `needsTokio`) threads the
   same way, or waits for a genuinely-mutating generator entity if one becomes warranted.
 
+## Update — unary operators + paren transparency (diff-emit 13/13)
+
+`examples/verify_example.intent` self-hosts byte-equal (6th real example).
+
+- **Unary** is a new IR kind `irex_unary` (op text in `name`, `children[0]` the operand);
+  the backend emits `!X` / `-X` with no added parens, exactly as `generateExpr`'s `UnaryExpr`
+  case does — the operand self-parenthesises when it is a binary node.
+- **Parens are unwrapped in lowering, not modelled in the IR.** The Go AST has **no** paren
+  node — `internal/parser` discards parentheses at parse time, so stage1's output parens come
+  solely from binary self-parenthesisation. The stage2 AST, by contrast, keeps `ex_paren`
+  (the formatter needs it to round-trip source). Lowering therefore unwraps `ex_paren`
+  transparently to `lower_expr(children[0])` — the same thing the checker does (recurse
+  `children[0]`) — producing IR identical to stage1's and thus byte-equal Rust. This is the
+  right call: the IR is a *compilation* representation (parens carry no semantics once
+  precedence is resolved), whereas the formatter's AST is a *source* representation. The
+  existing corpus had simply never used an explicit source paren; a unary fixture surfaced it.
+
 ## References
 
 - [`internal/ir/nodes.go`](../../internal/ir/nodes.go) — the port target for this slice.

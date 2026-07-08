@@ -190,4 +190,24 @@ test "lowers an Array param structurally and a method call (obj.push)" {
     assert(ret_call.call_kind == compiler_ir.callkind_function());
 }
 
+test "lowers unary negation and unwraps parentheses transparently" {
+    let src: String = "module m version \"1.0.0\";\n\nentry function main() returns Int " + lbrace() + "\n    let x: Int = 5;\n    let y: Int = -x;\n    let z: Int = (0 - y);\n    return z;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    let body: Array<IrStmt> = m.functions[0].body;
+    // `-x` lowers to an irex_unary with op "-" over the var ref.
+    let neg: IrExpr = body[1].expr;
+    assert(neg.kind == compiler_ir.irex_unary());
+    assert(neg.name == "-");
+    assert(neg.children[0].kind == compiler_ir.irex_var());
+    assert(neg.children[0].name == "x");
+    // `(0 - y)` is an ex_paren wrapping an ex_binop; lowering unwraps the paren
+    // to the inner binary (the IR has no paren node, matching stage1).
+    let par: IrExpr = body[2].expr;
+    assert(par.kind == compiler_ir.irex_binary());
+    assert(par.name == "-");
+    assert(par.children[0].int_value == 0);
+    assert(par.children[1].name == "y");
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

@@ -2404,3 +2404,32 @@ Closest remaining: verify_example (6-line diverge), closure_demo (12), sorted_ch
 closures (closure_demo) -> async (async_demo, task_queue) -> char/float +
 string concat/interp (char_string_demo). sorted_check additionally needs
 forall-in-contract; map_demo needs Map + HashMap use-injection.
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 9: unary operators + paren transparency (diff-emit 13/13)
+
+`examples/verify_example.intent` now self-hosts byte-equal — a SIXTH real example.
+diff-emit is **13/13 EQUAL** (6 real: hello, divergence_demo, fibonacci,
+target_specific_demo, array_sum, verify_example + 7 fixtures incl. new `unary`).
+
+- **Unary operators** (`ex_unary`): new IR kind `irex_unary` (name = op text, child
+  = operand) + `ir_unary`. Backend `generate_unary` mirrors stage1: `not X` -> `!X`,
+  `- X` -> `-X`, no added parens (the operand self-parenthesises when binary). The
+  stage2 AST stores the op in `ex_unary.name` ("-" / "not").
+- **Paren transparency** (`ex_paren`): a latent gap the unary fixture surfaced — the
+  existing corpus never used explicit source parens. The Go AST has NO paren node
+  (parens are discarded at parse time; output parens come only from binary
+  self-parenthesisation), but the stage2 AST keeps `ex_paren` for the formatter.
+  Lowering now unwraps it transparently (`lower_expr(children[0])`), matching stage1's
+  IR and how the checker recurses children[0]. `(-total)` -> `-total`, byte-equal.
+
+New fixture `emit-fixtures/unary.intent` gates both `-` and `not` (verify_example
+only exercises `-`). Gates green: diff-emit 13/13, selfcheck-formatter 7/7,
+selfcheck-checker 13/13, ir_test 12/12, lower_test 117, `intentc test
+examples/verify_example.intent` 3/3 (cargo). No Go / shared/* touched.
+
+Frontier (re-probed): closest remaining are closure_demo (12), sorted_check (11) —
+closures and forall-in-contract respectively. Ordered next front unchanged: entities
+(bank_account/shape_area) -> enums/match -> Result/Option/`?` -> generics ->
+closures -> async -> char/float + string concat/interp.

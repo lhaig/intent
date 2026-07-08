@@ -40,12 +40,14 @@ CORPUS=(
   "examples/fibonacci.intent"
   "examples/target_specific_demo.intent"
   "examples/array_sum.intent"
+  "examples/verify_example.intent"
   "selfhost/compiler/emit-fixtures/let_locals.intent"
   "selfhost/compiler/emit-fixtures/binops.intent"
   "selfhost/compiler/emit-fixtures/control_flow.intent"
   "selfhost/compiler/emit-fixtures/functions.intent"
   "selfhost/compiler/emit-fixtures/strings.intent"
   "selfhost/compiler/emit-fixtures/arrays.intent"
+  "selfhost/compiler/emit-fixtures/unary.intent"
 )
 
 # Build the stage2 compiler binary once; reuse it across corpus files.

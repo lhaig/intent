@@ -1,0 +1,18 @@
+module unary version "1.0.0";
+
+function classify(n: Int, flag: Bool) returns Int {
+    let neg: Int = -n;
+    if not flag {
+        return neg;
+    }
+    return -5;
+}
+
+entry function main() returns Int {
+    let mutable total: Int = 0;
+    if not false {
+        total = total + classify(3, false);
+    }
+    total = total + (-total);
+    return total;
+}

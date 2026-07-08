@@ -1,18 +1,19 @@
-# Pickup Notes — 2026-07-08 (Phase 55 milestone + 8 scale-up slices DONE; NEXT = entities — see prds/active/prd-phase-55-self-hosted-compiler.md)
+# Pickup Notes — 2026-07-08 (Phase 55 milestone + 9 scale-up slices DONE; NEXT = entities — see prds/active/prd-phase-55-self-hosted-compiler.md)
 
-## ✅ PHASE 55 SHIPPED: milestone + 8 construct slices (2026-07-07..08) — ADR 0059
+## ✅ PHASE 55 SHIPPED: milestone + 9 construct slices (2026-07-07..08) — ADR 0059
 
 The self-hosted compiler's back half exists in Intent:
 `selfhost/compiler/{ir,lower,rustbe,compile_main}.intent`, wired via `intentc build --emit
 --self-hosted` (harness mirrors Phase 54: `stage2CompilerBinary`, env
 `INTENT_STAGE2_COMPILE`). The bootstrap loop is closed for a growing corpus: **`make
-diff-emit` is 11/11 EQUAL** — FIVE real examples (`hello`, `divergence_demo`, `fibonacci`,
-`target_specific_demo`, `array_sum`) + 6 construct fixtures — plus `make selfcheck-formatter`
-(7/7) and `make selfcheck-checker` (13/13). Supported: functions/params/calls, let, binops,
-if/while/for + assignment, strings/print, contracts, arrays + Array/Map by-ref params +
-call-site borrow + method calls (see the frontier list below for the exact construct set).
-Every slice was verified byte-equal against stage1 before landing; all pre-existing gates
-stayed green throughout.
+diff-emit` is 13/13 EQUAL** — SIX real examples (`hello`, `divergence_demo`, `fibonacci`,
+`target_specific_demo`, `array_sum`, `verify_example`) + 7 construct fixtures — plus `make
+selfcheck-formatter` (7/7) and `make selfcheck-checker` (13/13). Supported:
+functions/params/calls, let, binops, unary (`-`/`not`), if/while/for + assignment,
+strings/print, contracts, arrays + Array/Map by-ref params + call-site borrow + method calls,
+parens (unwrapped) (see the frontier list below for the exact construct set). Every slice was
+verified byte-equal against stage1 before landing; all pre-existing gates stayed green
+throughout.
 
 **NEXT FRONT — scale the emitter construct-by-construct** (PRD "Then scale up"). Each slice:
 grow `lower.intent` + `rustbe.intent` for one construct, add a byte-equal corpus entry to
@@ -20,6 +21,7 @@ grow `lower.intent` + `rustbe.intent` for one construct, add a byte-equal corpus
 ✅ let-bindings & locals → ✅ binops → ✅ if/while/for + assignment → ✅ functions & calls →
 ✅ strings & `print` → ✅ contracts (requires/ensures) → ✅ arrays (local) + the type-string
 parser → ✅ array params + call-site borrow + method calls (finishes array_sum) →
+✅ unary (`-`/`not`) + paren transparency (finishes verify_example) →
 **NEXT: entities (structs) + field access + methods** → enums + match → Result/Option/`?` →
 generics → closures/lambdas → async → char/float + string concat/interp. Emitter must stay
 COMPLETE per supported construct.
@@ -37,15 +39,16 @@ lowering detects the ex_field callee → new IR kind `irex_method` → backend e
 as a param, NOT a generator entity — stage1's shallow `methodMutatesSelf` inference makes a
 non-mutating entity's methods a mix of `&self`/`&mut self` that fails to compile (see ADR 0059).
 
-**diff-emit is at 11/11** — FIVE real examples (`hello`, `divergence_demo`, `fibonacci`,
-`target_specific_demo`, `array_sum`) plus 6 fixtures (incl. `arrays`)
-(`let_locals`, `binops`, `control_flow`, `functions`, `strings`). Supported constructs:
-entry+non-entry functions & params & calls, `return`, `let`/`let mutable`, var refs, int/bool/
-string literals, all binops (`(l op r)`, `implies`), if/else(+1-level else-if)/while/for-in,
-ranges, assignment, `print`/`assert`/`assert_eq`/`len` builtins, scalar + Array/Result/Option
-type mapping, Array/Map by-ref params + call-site borrow, method calls (general path),
-requires/ensures contracts. Remaining for array-heavy examples: `arrayRefParams` rebinding
-clone, non-Copy index/field clone, receiver-type-specific method paths (String/Map/Char).
+**diff-emit is at 13/13** — SIX real examples (`hello`, `divergence_demo`, `fibonacci`,
+`target_specific_demo`, `array_sum`, `verify_example`) plus 7 fixtures (incl. `arrays`,
+`unary`) (`let_locals`, `binops`, `control_flow`, `functions`, `strings`). Supported
+constructs: entry+non-entry functions & params & calls, `return`, `let`/`let mutable`, var
+refs, int/bool/string literals, all binops (`(l op r)`, `implies`), unary (`-X`/`!X`), parens
+(unwrapped), if/else(+1-level else-if)/while/for-in, ranges, assignment,
+`print`/`assert`/`assert_eq`/`len` builtins, scalar + Array/Result/Option type mapping,
+Array/Map by-ref params + call-site borrow, method calls (general path), requires/ensures
+contracts. Remaining for array-heavy examples: `arrayRefParams` rebinding clone, non-Copy
+index/field clone, receiver-type-specific method paths (String/Map/Char).
 
 **Frontier — each remaining example needs a specific unbuilt slice** (probed all 22):
 - **Contracts** (fibonacci, sorted_check, bank_account, array_sum, generic_stack, …) — the

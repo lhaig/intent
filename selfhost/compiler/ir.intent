@@ -101,6 +101,10 @@ public function irex_method() returns Int {
     return 10;
 } // name = method, children = [object, arg1..argN], call_kind = method
 
+public function irex_unary() returns Int {
+    return 11;
+} // name = operator text ("-" / "not"), children = [operand]
+
 // --- Call-kind constants ----------------------------------------------------
 // Mirrors internal/ir CallKind iota so the backend dispatches identically.
 public function callkind_function() returns Int {
@@ -517,6 +521,15 @@ public function ir_binary(op: String, left: IrExpr, right: IrExpr) returns IrExp
     kids.push(left);
     kids.push(right);
     return IrExpr(irex_binary(), 0, "", false, op, kids, ir_type_named(""));
+}
+
+// ir_unary — a unary operation (irex_unary): name is the operator text ("-" or
+// "not") and children is [operand]. Type is left unknown; the Rust backend emits
+// `-operand` / `!operand` and does not consult it.
+public function ir_unary(op: String, operand: IrExpr) returns IrExpr {
+    let mutable kids: Array<IrExpr> = empty_ir_expr_array();
+    kids.push(operand);
+    return IrExpr(irex_unary(), 0, "", false, op, kids, ir_type_named(""));
 }
 
 // ir_range — a range expression (irex_range): children are [start, end]. The

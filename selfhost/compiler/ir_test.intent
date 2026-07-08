@@ -125,6 +125,18 @@ test "array and index expressions" {
     assert(idx.children[1].int_value == 0);
 }
 
+test "ir_unary carries operator text and a single operand" {
+    let neg: IrExpr = compiler_ir.ir_unary("-", compiler_ir.ir_var_ref("x"));
+    assert(neg.kind == compiler_ir.irex_unary());
+    assert(neg.name == "-");
+    assert(len(neg.children) == 1);
+    assert(neg.children[0].name == "x");
+    let notb: IrExpr = compiler_ir.ir_unary("not", compiler_ir.ir_bool_lit(true));
+    assert(notb.kind == compiler_ir.irex_unary());
+    assert(notb.name == "not");
+    assert(notb.children[0].bool_value == true);
+}
+
 test "ir_method flattens receiver and args, tagging call_kind method" {
     let mutable args: Array<IrExpr> = compiler_ir.empty_ir_expr_array();
     args.push(compiler_ir.ir_int_lit(4));

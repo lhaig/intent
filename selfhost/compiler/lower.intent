@@ -180,6 +180,20 @@ public function lower_expr(e: Expr) returns IrExpr {
         // stage1 (it needs operand types); that lands with the strings slice.
         return compiler_ir.ir_binary(e.name, lower_expr(e.children[0]), lower_expr(e.children[1]));
     }
+    if e.kind == shared_ast.ex_paren() {
+        // The Go AST has no paren node — parens are discarded at parse time and
+        // re-added only by binary self-parenthesisation. The stage2 AST preserves
+        // ex_paren (the formatter needs it to round-trip source), so lowering
+        // unwraps it transparently to the inner expression, matching stage1's IR
+        // (and how the checker recurses children[0]).
+        return lower_expr(e.children[0]);
+    }
+    if e.kind == shared_ast.ex_unary() {
+        // The AST stores the operator text in `name` ("-" / "not"); stage1's
+        // UnaryExpr keeps the lexer token, but the backend only distinguishes not
+        // from negate, so the op string is sufficient.
+        return compiler_ir.ir_unary(e.name, lower_expr(e.children[0]));
+    }
     if e.kind == shared_ast.ex_range() {
         return compiler_ir.ir_range(lower_expr(e.children[0]), lower_expr(e.children[1]));
     }
