@@ -426,6 +426,25 @@ public function ir_type_named(name: String) returns IrType {
     return IrType(name, empty_ir_type_array(), 0);
 }
 
+// ir_is_copy_type — does `t` implement Rust's Copy (so an argument of this type
+// is passed by value, never moved / cloned)? Mirrors internal/rustbe isCopyType:
+// Int/Float/Bool/Void and a Fn (closures are passed by value) are Copy. An empty
+// name is the unknown/uninferred sentinel — treated Copy so cloneIfNeeded never
+// OVER-clones a value whose type lowering could not reconstruct (stage1's nil ->
+// true). Everything else (String, Array, Result, Option, Map, entities, enums)
+// is non-Copy. Future<T> is non-Copy in stage1 but excluded from cloning via a
+// separate isFutureType guard; async is out of the type-bridge corpus, so that
+// guard lands with the async slice.
+public function ir_is_copy_type(t: IrType) returns Bool {
+    if t.name == "" {
+        return true;
+    }
+    if t.name == "Fn" {
+        return true;
+    }
+    return t.name == "Int" or t.name == "Float" or t.name == "Bool" or t.name == "Void";
+}
+
 // --- Type-string parsing (mirrors the checker's TypeParser, ADR 0053) ---------
 // The AST carries types as flat strings ("Array<Int>", "Map<String, Int>",
 // "Fn(Int) -> Int"). ir_parse_type builds a structured IrType from one, so the

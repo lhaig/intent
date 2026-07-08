@@ -246,4 +246,21 @@ test "a hello-shaped module holds its entry function and test" {
     assert(len(prog.modules) == 0);
 }
 
+test "ir_is_copy_type classifies Copy vs non-Copy types (type bridge)" {
+    // Copy: Int/Float/Bool/Void, Fn (closures by value), and the empty/unknown
+    // sentinel (so cloneIfNeeded never over-clones an unreconstructed type).
+    assert(compiler_ir.ir_is_copy_type(compiler_ir.ir_type_named("Int")));
+    assert(compiler_ir.ir_is_copy_type(compiler_ir.ir_type_named("Float")));
+    assert(compiler_ir.ir_is_copy_type(compiler_ir.ir_type_named("Bool")));
+    assert(compiler_ir.ir_is_copy_type(compiler_ir.ir_type_named("Void")));
+    assert(compiler_ir.ir_is_copy_type(compiler_ir.ir_type_named("Fn")));
+    assert(compiler_ir.ir_is_copy_type(compiler_ir.ir_type_named("")));
+    // Non-Copy: String, and the generic prelude / user types.
+    assert(not compiler_ir.ir_is_copy_type(compiler_ir.ir_type_named("String")));
+    assert(not compiler_ir.ir_is_copy_type(compiler_ir.ir_type_named("Array")));
+    assert(not compiler_ir.ir_is_copy_type(compiler_ir.ir_type_named("Result")));
+    assert(not compiler_ir.ir_is_copy_type(compiler_ir.ir_type_named("Option")));
+    assert(not compiler_ir.ir_is_copy_type(compiler_ir.ir_type_named("Map")));
+}
+
 // 55b (lower.intent) will construct exactly this shape from examples/hello.intent.

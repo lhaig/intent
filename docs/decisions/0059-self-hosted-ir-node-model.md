@@ -207,6 +207,50 @@ sub-changes and one structural decision:
   precedence is resolved), whereas the formatter's AST is a *source* representation. The
   existing corpus had simply never used an explicit source paren; a unary fixture surfaced it.
 
+## Update — the D3 type bridge: local type reconstruction + cloneIfNeeded (diff-emit 19/19)
+
+`examples/try_operator.intent` self-hosts byte-equal — a TENTH real example — by
+building the first piece of the D3 `checker.Type -> IrType` bridge that this ADR
+deferred. It diverged only on `parse_number(a.clone())` / `parse_number(b.clone())`:
+stage1 clones a non-Copy (`String`) argument so it is not moved out of its owner,
+but the stage2 IR carried no argument types for `cloneIfNeeded` to consult.
+
+- **D3 resolved for local variable types (not yet full inference).** Rather than
+  thread the checker's `CheckResult`, lowering reconstructs the *only* types the
+  backend needs here — a `VarRef`'s type — from a new `LowerScope` (parallel
+  name/type arrays) threaded through `lower_block`/`lower_stmt`/`lower_expr`. It is
+  seeded from the function's params (`name -> param_type`) and grows with each
+  `let` binding (`name -> let_type`); the `ex_ident` case stamps `VarRef.expr_type`
+  from it. The scope is **functional/immutable** (each `lower_scope_define` copies
+  the arrays and returns a new scope), mirroring the checker's `Scope` — which also
+  sidesteps gotcha (c): the copied arrays are local owned arrays, so an `Array`
+  param's `&Vec` type still moves into the entity field. This is a deliberately
+  *narrow* bridge: for-loop / lambda-param / match-arm bindings are left unstamped
+  (their VarRefs get the empty/unknown type), landing with the slice that needs one
+  of them cloned.
+- **`ir_is_copy_type` (ir.intent) mirrors `isCopyType`.** `Int`/`Float`/`Bool`/
+  `Void`/`Fn` and the **empty/unknown** name are Copy; everything else is non-Copy.
+  Unknown -> Copy is the conservative choice (stage1's `nil -> true`): lowering
+  never over-clones a type it could not reconstruct. `Future` (non-Copy but excluded
+  from cloning via stage1's separate `isFutureType`) lands with the async slice.
+- **`clone_if_needed` (rustbe.intent) mirrors `cloneIfNeeded`.** Skips literals,
+  already-`&`-borrowed args, and already-`.clone()`d args; else appends `.clone()`
+  to a `VarRef`/`IndexExpr` whose stamped `expr_type` is non-Copy. Applied at the
+  exact stage1 call sites reachable today: `generate_call` (after the `&`-borrow, so
+  a borrowed `Array` arg is left alone), and `generate_builtin_call` for `assert_eq`
+  (both operands) and `Ok`/`Err`/`Some` (the single operand). The IO builtins
+  (`read_file`/`write_file`/…) get their `clone_if_needed` when their emit slice lands.
+- **Match-scrutinee `.clone()` left as-is.** It is still inferred from builtin-pattern
+  arms (gotcha (e)); switching it to the now-available type check was optional and not
+  needed for byte-equality, so it was deferred to avoid churn (19/19 either way).
+
+Gates green throughout: `diff-emit` 19/19, `selfcheck-formatter` 7/7, `selfcheck-checker`
+13/13, `ir_test` 17, `lower_test` grown (124), `intentc test examples/try_operator.intent`
+2/2 (cargo). No Go / `shared/*` touched. **Follow-ups this unblocks** (each needs MORE
+than the bridge): `error_handling` (StringConcat -> `format!`, `continue`/`break`);
+`io_demo` (IO builtins' `std::fs` emit, Float literals, and the `mutatedVars` analysis
+that makes method-call receivers `let mut`).
+
 ## References
 
 - [`internal/ir/nodes.go`](../../internal/ir/nodes.go) — the port target for this slice.

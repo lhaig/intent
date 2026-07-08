@@ -658,6 +658,10 @@ public function generate_call(e: IrExpr, funcs: Array<IrFunction>) returns Strin
                 a = "&" + a;
             }
         }
+        // Clone non-Copy place args (String/Array/entity variables) so they are
+        // not moved out of their owner. Runs AFTER the &-borrow so a borrowed
+        // Array arg (`&arr`) is left alone (starts_with_amp guard).
+        a = clone_if_needed(a, e.children[i]);
         out = out + a;
         i = i + 1;
     }
@@ -675,7 +679,11 @@ public function generate_builtin_call(e: IrExpr, funcs: Array<IrFunction>) retur
         return "assert!(" + generate_expr(e.children[0], funcs) + ", \"assertion failed\")";
     }
     if e.name == "assert_eq" {
-        return "assert_eq!(" + generate_expr(e.children[0], funcs) + ", " + generate_expr(e.children[1], funcs) + ", \"assertion failed\")";
+        // Clone non-Copy actual/expected args (mirrors stage1's cloneIfNeeded on
+        // both assert_eq operands). The entity-eq special case lands with entities.
+        let actual: String = clone_if_needed(generate_expr(e.children[0], funcs), e.children[0]);
+        let expected: String = clone_if_needed(generate_expr(e.children[1], funcs), e.children[1]);
+        return "assert_eq!(" + actual + ", " + expected + ", \"assertion failed\")";
     }
     if e.name == "print" {
         // println!("{}", ARG) — the "{}" braces go through lbrace()/rbrace().
@@ -687,10 +695,11 @@ public function generate_builtin_call(e: IrExpr, funcs: Array<IrFunction>) retur
         return "(" + generate_expr(e.children[0], funcs) + ".len() as i64)";
     }
     if e.name == "Ok" or e.name == "Err" or e.name == "Some" {
-        // Result/Option constructors: Ok(x) / Err(x) / Some(x). Non-Copy-arg cloning
-        // (a String/entity/Array variable moved into the constructor) lands with a
-        // later slice; the corpus's args are Copy or string literals.
-        return e.name + "(" + generate_expr(e.children[0], funcs) + ")";
+        // Result/Option constructors: Ok(x) / Err(x) / Some(x). A non-Copy place
+        // arg (a String/entity/Array variable) is cloned so it is not moved into
+        // the constructor (mirrors stage1's cloneIfNeeded on the single arg).
+        let arg: String = clone_if_needed(generate_expr(e.children[0], funcs), e.children[0]);
+        return e.name + "(" + arg + ")";
     }
     if e.name == "None" {
         return "None";
@@ -721,6 +730,51 @@ public function starts_with_amp(s: String) returns Bool {
         return false;
     }
     return s[0] == '&';
+}
+
+// is_literal_expr — mirrors internal/rustbe isLiteralExpr: a literal never needs
+// cloning (it is an owned temporary, not a place). Int/String/Bool/Array literals
+// for the current IR; Float literals and string interpolation join as those kinds
+// land (they are already excluded — an unsupported kind never reaches an arg here).
+public function is_literal_expr(e: IrExpr) returns Bool {
+    return e.kind == compiler_ir.irex_int() or e.kind == compiler_ir.irex_string() or e.kind == compiler_ir.irex_bool() or e.kind == compiler_ir.irex_array();
+}
+
+// ends_with_clone — does arg_str already end with ".clone()"? Guards against
+// double-cloning (mirrors stage1's strings.HasSuffix(argStr, ".clone()")).
+public function ends_with_clone(s: String) returns Bool {
+    let suffix: String = ".clone()";
+    let n: Int = len(s);
+    let m: Int = len(suffix);
+    if n < m {
+        return false;
+    }
+    return s[n - m..n] == suffix;
+}
+
+// clone_if_needed — mirrors internal/rustbe (*generator).cloneIfNeeded: append
+// `.clone()` to an argument whose expression is a non-Copy place (a variable or
+// index reference) that Rust would otherwise MOVE out of its owner. Skips literals
+// (owned temporaries), already-borrowed args (`&x`), and already-cloned args. The
+// ADR 0059 D3 type bridge stamps VarRef.expr_type in lowering; an unstamped
+// (empty) type is treated Copy by ir_is_copy_type, so this never over-clones.
+// FieldAccess joins the kind check when entities land (they carry a stamped type).
+public function clone_if_needed(arg_str: String, arg: IrExpr) returns String {
+    if is_literal_expr(arg) {
+        return arg_str;
+    }
+    if starts_with_amp(arg_str) {
+        return arg_str;
+    }
+    if ends_with_clone(arg_str) {
+        return arg_str;
+    }
+    if arg.kind == compiler_ir.irex_var() or arg.kind == compiler_ir.irex_index() {
+        if not compiler_ir.ir_is_copy_type(arg.expr_type) {
+            return arg_str + ".clone()";
+        }
+    }
+    return arg_str;
 }
 
 // sanitise_test_name — mirrors sanitiseTestName exactly (ASCII rules, NOT the

@@ -277,4 +277,50 @@ test "lowers the ? operator to irex_try wrapping the call" {
     assert(try_expr.children[0].name == "p");
 }
 
+test "stamps a param VarRef's expr_type from the scope (type bridge)" {
+    let src: String = "module m version \"1.0.0\";\n\nfunction parse(s: String) returns Int " + lbrace() + "\n    return 0;\n" + rbrace() + "\n\nfunction use(a: String) returns Int " + lbrace() + "\n    return parse(a);\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    // In `use`, the call `parse(a)` has arg `a` — a VarRef to the String param,
+    // so its expr_type is stamped String (a non-Copy type the backend clones).
+    let call: IrExpr = m.functions[1].body[0].expr;
+    assert(call.kind == compiler_ir.irex_call());
+    assert(call.name == "parse");
+    let arg: IrExpr = call.children[0];
+    assert(arg.kind == compiler_ir.irex_var());
+    assert(arg.name == "a");
+    assert(arg.expr_type.name == "String");
+}
+
+test "stamps a let-bound VarRef's expr_type from the accumulated scope" {
+    let src: String = "module m version \"1.0.0\";\n\nentry function main() returns Int " + lbrace() + "\n    let name: String = \"hi\";\n    print(name);\n    return 0;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    // `print(name)` — `name` is a VarRef to the String let, stamped String.
+    let printcall: IrExpr = m.functions[0].body[1].expr;
+    assert(printcall.name == "print");
+    let arg: IrExpr = printcall.children[0];
+    assert(arg.kind == compiler_ir.irex_var());
+    assert(arg.name == "name");
+    assert(arg.expr_type.name == "String");
+}
+
+test "leaves an unbound VarRef's expr_type unknown (never over-clones)" {
+    // A match-arm binding is not stamped into the scope, so a VarRef to it keeps
+    // the empty/unknown type -> ir_is_copy_type -> true -> no clone.
+    let src: String = "module m version \"1.0.0\";\n\nfunction f(r: Result<Int, String>) returns Int " + lbrace() + "\n    return match r " + lbrace() + "\n        Ok(x) => x,\n        Err(e) => 0,\n    " + rbrace() + ";\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    let mt: IrExpr = m.functions[0].body[0].expr;
+    assert(mt.kind == compiler_ir.irex_match());
+    // scrutinee `r` is a stamped param (Result), non-Copy.
+    assert(mt.children[0].name == "r");
+    assert(mt.children[0].expr_type.name == "Result");
+    // the Ok arm body `x` is an arm binding -> unstamped -> empty type name.
+    let ok_body: IrExpr = mt.match_arms[0].body;
+    assert(ok_body.kind == compiler_ir.irex_var());
+    assert(ok_body.name == "x");
+    assert(ok_body.expr_type.name == "");
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

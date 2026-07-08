@@ -18,6 +18,83 @@ import "ir.intent";
 
 import "../shared/ast.intent";
 
+// =============================================================================
+// LowerScope — local var-name -> IrType map for the type bridge (ADR 0059 D3).
+//
+// Stage1 lowering reads every node's type from the checker's precomputed
+// exprTypes map (see typeOf in lower.go). Stage2 carries no such map, so lowering
+// reconstructs the types it actually needs — currently just enough to stamp each
+// VarRef's expr_type so the Rust backend's cloneIfNeeded can tell a non-Copy
+// argument (String/Array/entity/…) that must be `.clone()`d from a Copy one.
+//
+// The scope is FUNCTIONAL/immutable, mirroring the checker's Scope: each
+// lower_scope_define copies the arrays and returns a NEW scope (never mutating in
+// place). This also sidesteps gotcha (c): a function's `Array` param lowers to
+// `&Vec` which cannot be moved into an owned entity field — but the copied
+// new_names/new_types arrays are LOCAL owned arrays at the constructor call site,
+// so they move in cleanly.
+//
+// It is seeded from a function's params (name -> param_type) and grows as
+// lower_block walks let-bindings (name -> let_type). Nested blocks (if/while/for
+// bodies) inherit the enclosing scope by value, so their own lets stay local —
+// no leak back out. For-loop / lambda / match-arm bindings are left unstamped for
+// now (their VarRefs get the empty/unknown type -> treated Copy -> never cloned,
+// which is conservative and corpus-safe); each lands with its construct's slice.
+// =============================================================================
+entity LowerScope {
+    field names: Array<String>;
+    field types: Array<IrType>;
+
+    constructor(names: Array<String>, types: Array<IrType>) {
+        self.names = names;
+        self.types = types;
+    }
+}
+
+// lower_scope_empty — a fresh scope with no bindings.
+function lower_scope_empty() returns LowerScope {
+    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array());
+}
+
+// lower_scope_define — a NEW scope with `name: ty` appended (copies the arrays,
+// mirroring the checker's scope_define_typed). Copying yields local owned arrays,
+// so a `&Vec` type arg still moves into the entity field (gotcha (c)).
+function lower_scope_define(s: LowerScope, name: String, ty: IrType) returns LowerScope {
+    let mutable new_names: Array<String> = shared_ast.empty_string_array();
+    let mutable i: Int = 0;
+    while i < len(s.names) {
+        new_names.push(s.names[i]);
+        i = i + 1;
+    }
+    new_names.push(name);
+    let mutable new_types: Array<IrType> = compiler_ir.empty_ir_type_array();
+    let mutable ti: Int = 0;
+    while ti < len(s.types) {
+        new_types.push(s.types[ti]);
+        ti = ti + 1;
+    }
+    new_types.push(ty);
+    return LowerScope(new_names, new_types);
+}
+
+// lower_scope_type_of — the IrType bound to `name`, or the empty/unknown type if
+// unbound. The LAST-defined binding wins (mirrors the checker's scope_last_index),
+// so an inner shadow overrides an outer name.
+function lower_scope_type_of(s: LowerScope, name: String) returns IrType {
+    let mutable found: Int = 0 - 1;
+    let mutable i: Int = 0;
+    while i < len(s.names) {
+        if s.names[i] == name {
+            found = i;
+        }
+        i = i + 1;
+    }
+    if found >= 0 {
+        return s.types[found];
+    }
+    return compiler_ir.ir_type_named("");
+}
+
 // lower — an AST Program to a single IR Module (the entry module: its `entry`
 // function becomes the program main in the backend). Mirrors Lower in lower.go
 // for the trivial subset (functions + tests; other decl kinds land per slice).
@@ -42,15 +119,21 @@ public function lower(prog: Program, path: String) returns IrModule {
 // requires/ensures contracts (via lower_contracts), and the lowered body.
 public function lower_function(f: FunctionDecl) returns IrFunction {
     let mutable params: Array<IrParam> = compiler_ir.empty_ir_param_array();
+    let mutable scope: LowerScope = lower_scope_empty();
     let mutable i: Int = 0;
     while i < len(f.params) {
         let p: Param = f.params[i];
-        params.push(IrParam(p.name, compiler_ir.ir_parse_type(p.type_name)));
+        let pty: IrType = compiler_ir.ir_parse_type(p.type_name);
+        params.push(IrParam(p.name, pty));
+        // Seed the scope with each param so VarRefs to it carry its type (the
+        // checker's exprTypes equivalent). Copy pty via a fresh parse: a param's
+        // Array type lowered to `&Vec` cannot be shared into two owned fields.
+        scope = lower_scope_define(scope, p.name, compiler_ir.ir_parse_type(p.type_name));
         i = i + 1;
     }
-    let reqs: Array<IrContract> = lower_contracts(f.requires_clauses, f.requires_raw);
-    let enss: Array<IrContract> = lower_contracts(f.ensures_clauses, f.ensures_raw);
-    let body: Array<IrStmt> = lower_block(f.body);
+    let reqs: Array<IrContract> = lower_contracts(f.requires_clauses, f.requires_raw, scope);
+    let enss: Array<IrContract> = lower_contracts(f.ensures_clauses, f.ensures_raw, scope);
+    let body: Array<IrStmt> = lower_block(f.body, scope);
     return IrFunction(f.name, f.is_entry, f.is_public, f.is_async, params, compiler_ir.ir_parse_type(f.return_type), reqs, enss, body);
 }
 
@@ -59,12 +142,12 @@ public function lower_function(f: FunctionDecl) returns IrFunction {
 // lowered like any expr, so `result` in an ensures clause becomes __result. old()
 // captures in ensures are deferred to a later sub-slice (no corpus entry uses
 // them yet). requires_raw / ensures_raw are parallel to the clause arrays.
-public function lower_contracts(preds: Array<Expr>, raws: Array<String>) returns Array<IrContract> {
+public function lower_contracts(preds: Array<Expr>, raws: Array<String>, scope: LowerScope) returns Array<IrContract> {
     let mutable out: Array<IrContract> = compiler_ir.empty_ir_contract_array();
     let mutable i: Int = 0;
     while i < len(preds) {
         let p: Expr = preds[i];
-        out.push(IrContract(lower_expr(p), raws[i], p.line, p.column));
+        out.push(IrContract(lower_expr(p, scope), raws[i], p.line, p.column));
         i = i + 1;
     }
     return out;
@@ -73,16 +156,28 @@ public function lower_contracts(preds: Array<Expr>, raws: Array<String>) returns
 // lower_test — mirrors lowerTest. The AST already stores annotations as their
 // canonical strings, which is exactly the IrTest.annotations shape.
 public function lower_test(t: TestDecl) returns IrTest {
-    let body: Array<IrStmt> = lower_block(t.body);
+    // A test has no params; its body opens a fresh (empty) scope, growing as its
+    // own let-bindings land.
+    let body: Array<IrStmt> = lower_block(t.body, lower_scope_empty());
     return IrTest(t.name, t.is_async, t.annotations, body);
 }
 
-// lower_block — mirrors lowerBlock: lower each statement in order.
-public function lower_block(b: Block) returns Array<IrStmt> {
+// lower_block — mirrors lowerBlock: lower each statement in order, threading the
+// scope and accumulating each let-binding so a later statement's VarRefs carry
+// the binding's type. The accumulation is local to this block (the passed scope
+// is copied on each define), so a nested block's lets never leak back out.
+public function lower_block(b: Block, scope: LowerScope) returns Array<IrStmt> {
     let mutable stmts: Array<IrStmt> = compiler_ir.empty_ir_stmt_array();
+    let mutable s: LowerScope = scope;
     let mutable i: Int = 0;
     while i < len(b.stmts) {
-        stmts.push(lower_stmt(b.stmts[i]));
+        let st: IrStmt = lower_stmt(b.stmts[i], s);
+        stmts.push(st);
+        // Extend the scope AFTER lowering the let (its initializer is checked
+        // before the name is bound), so subsequent statements see `name: let_type`.
+        if st.kind == compiler_ir.irst_let() {
+            s = lower_scope_define(s, st.name, st.let_type);
+        }
         i = i + 1;
     }
     return stmts;
@@ -94,12 +189,12 @@ public function lower_block(b: Block) returns Array<IrStmt> {
 // nil). st_let carries name / is_mutable / type_name from the AST. Other
 // statement kinds land per slice; the fallback mirrors lowerStmt's default (a
 // `true` expr-stmt) and is unreachable for the diff-emit corpus.
-public function lower_stmt(s: Stmt) returns IrStmt {
+public function lower_stmt(s: Stmt, scope: LowerScope) returns IrStmt {
     if s.kind == shared_ast.st_return() {
         if s.expr.kind == shared_ast.ex_void() {
             return IrStmt(compiler_ir.irst_return(), compiler_ir.ir_void_expr());
         }
-        return IrStmt(compiler_ir.irst_return(), lower_expr(s.expr));
+        return IrStmt(compiler_ir.irst_return(), lower_expr(s.expr, scope));
     }
     if s.kind == shared_ast.st_expr() {
         // Assignment `target = value` has no dedicated AST kind: the parser
@@ -109,38 +204,42 @@ public function lower_stmt(s: Stmt) returns IrStmt {
         let inner: Expr = s.expr;
         if inner.kind == shared_ast.ex_binop() {
             if inner.name == "=" {
-                let mutable asg: IrStmt = IrStmt(compiler_ir.irst_assign(), lower_expr(inner.children[1]));
-                asg.target = lower_expr(inner.children[0]);
+                let mutable asg: IrStmt = IrStmt(compiler_ir.irst_assign(), lower_expr(inner.children[1], scope));
+                asg.target = lower_expr(inner.children[0], scope);
                 return asg;
             }
         }
-        return IrStmt(compiler_ir.irst_expr(), lower_expr(inner));
+        return IrStmt(compiler_ir.irst_expr(), lower_expr(inner, scope));
     }
     if s.kind == shared_ast.st_let() {
-        let mutable ls: IrStmt = IrStmt(compiler_ir.irst_let(), lower_expr(s.expr));
+        let mutable ls: IrStmt = IrStmt(compiler_ir.irst_let(), lower_expr(s.expr, scope));
         ls.name = s.name;
         ls.is_mutable = s.is_mutable;
         ls.let_type = compiler_ir.ir_parse_type(s.type_name);
         return ls;
     }
     if s.kind == shared_ast.st_if() {
-        let mutable ifs: IrStmt = IrStmt(compiler_ir.irst_if(), lower_expr(s.expr));
-        ifs.then_body = lower_block(s.then_block);
+        let mutable ifs: IrStmt = IrStmt(compiler_ir.irst_if(), lower_expr(s.expr, scope));
+        ifs.then_body = lower_block(s.then_block, scope);
         ifs.has_else = s.has_else;
         if s.has_else {
-            ifs.else_body = lower_block(s.else_block);
+            ifs.else_body = lower_block(s.else_block, scope);
         }
         return ifs;
     }
     if s.kind == shared_ast.st_while() {
-        let mutable ws: IrStmt = IrStmt(compiler_ir.irst_while(), lower_expr(s.expr));
-        ws.then_body = lower_block(s.then_block);
+        let mutable ws: IrStmt = IrStmt(compiler_ir.irst_while(), lower_expr(s.expr, scope));
+        ws.then_body = lower_block(s.then_block, scope);
         return ws;
     }
     if s.kind == shared_ast.st_for() {
-        let mutable fs: IrStmt = IrStmt(compiler_ir.irst_for(), lower_expr(s.expr));
+        let mutable fs: IrStmt = IrStmt(compiler_ir.irst_for(), lower_expr(s.expr, scope));
         fs.name = s.name;
-        fs.then_body = lower_block(s.then_block);
+        // The loop variable's type is left unstamped (the body inherits the outer
+        // scope); a for-var VarRef gets the unknown type -> treated Copy -> never
+        // cloned. Binding the loop var's element type lands with a later slice if
+        // a corpus example needs a for-var arg cloned.
+        fs.then_body = lower_block(s.then_block, scope);
         return fs;
     }
     return IrStmt(compiler_ir.irst_expr(), compiler_ir.ir_bool_lit(true));
@@ -153,7 +252,7 @@ public function lower_stmt(s: Stmt) returns IrStmt {
 // enum/variant slice (where an ex_ident may instead be a unit variant).
 // Unsupported kinds fall back to the void placeholder and are unreachable for
 // the diff-emit corpus (grown per slice).
-public function lower_expr(e: Expr) returns IrExpr {
+public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
     if e.kind == shared_ast.ex_int() {
         return compiler_ir.ir_int_lit(e.int_value);
     }
@@ -173,12 +272,18 @@ public function lower_expr(e: Expr) returns IrExpr {
         if e.name == "result" {
             return compiler_ir.ir_var_ref("__result");
         }
-        return compiler_ir.ir_var_ref(e.name);
+        // Stamp the VarRef's type from the local scope (params + prior lets) — the
+        // type bridge (ADR 0059 D3) that lets the backend's cloneIfNeeded tell a
+        // non-Copy arg (String/Array/entity/…) from a Copy one. An unbound name
+        // gets the unknown type -> treated Copy -> never cloned (conservative).
+        let mutable vr: IrExpr = compiler_ir.ir_var_ref(e.name);
+        vr.expr_type = lower_scope_type_of(scope, e.name);
+        return vr;
     }
     if e.kind == shared_ast.ex_binop() {
         // String concatenation (`+` on two strings) lowers to a distinct node in
         // stage1 (it needs operand types); that lands with the strings slice.
-        return compiler_ir.ir_binary(e.name, lower_expr(e.children[0]), lower_expr(e.children[1]));
+        return compiler_ir.ir_binary(e.name, lower_expr(e.children[0], scope), lower_expr(e.children[1], scope));
     }
     if e.kind == shared_ast.ex_paren() {
         // The Go AST has no paren node — parens are discarded at parse time and
@@ -186,20 +291,20 @@ public function lower_expr(e: Expr) returns IrExpr {
         // ex_paren (the formatter needs it to round-trip source), so lowering
         // unwraps it transparently to the inner expression, matching stage1's IR
         // (and how the checker recurses children[0]).
-        return lower_expr(e.children[0]);
+        return lower_expr(e.children[0], scope);
     }
     if e.kind == shared_ast.ex_unary() {
         // The AST stores the operator text in `name` ("-" / "not"); stage1's
         // UnaryExpr keeps the lexer token, but the backend only distinguishes not
         // from negate, so the op string is sufficient.
-        return compiler_ir.ir_unary(e.name, lower_expr(e.children[0]));
+        return compiler_ir.ir_unary(e.name, lower_expr(e.children[0], scope));
     }
     if e.kind == shared_ast.ex_range() {
-        return compiler_ir.ir_range(lower_expr(e.children[0]), lower_expr(e.children[1]));
+        return compiler_ir.ir_range(lower_expr(e.children[0], scope), lower_expr(e.children[1], scope));
     }
     if e.kind == shared_ast.ex_try() {
         // `expr?` — the operand is children[0]. Mirrors stage1's TryExpr.
-        return compiler_ir.ir_try(lower_expr(e.children[0]));
+        return compiler_ir.ir_try(lower_expr(e.children[0], scope));
     }
     if e.kind == shared_ast.ex_match() {
         // children[0] is the scrutinee; match_arms hold variant / bindings /
@@ -207,16 +312,18 @@ public function lower_expr(e: Expr) returns IrExpr {
         // exactly as stage1's lowerMatchExpr does. Enum-variant field-name
         // resolution (checker-dependent) lands with the enums slice. lambda-style
         // local-then-assign: the arms array is owned here (a function Array param
-        // would lower to `&Vec`, unmovable into the field).
+        // would lower to `&Vec`, unmovable into the field). Arm bindings are not
+        // stamped into the scope yet (their VarRefs stay unknown -> Copy -> no
+        // clone); that lands with a slice that needs an arm-bound arg cloned.
         let mutable arms: Array<IrMatchArm> = compiler_ir.empty_ir_match_arm_array();
         let mutable ai: Int = 0;
         while ai < len(e.match_arms) {
             let a: MatchArm = e.match_arms[ai];
             let is_builtin: Bool = a.variant == "Ok" or a.variant == "Err" or a.variant == "Some" or a.variant == "None";
-            arms.push(IrMatchArm(a.variant, a.bindings, a.is_wildcard, is_builtin, lower_expr(a.body)));
+            arms.push(IrMatchArm(a.variant, a.bindings, a.is_wildcard, is_builtin, lower_expr(a.body, scope)));
             ai = ai + 1;
         }
-        let mutable mt: IrExpr = compiler_ir.ir_match(lower_expr(e.children[0]));
+        let mutable mt: IrExpr = compiler_ir.ir_match(lower_expr(e.children[0], scope));
         mt.match_arms = arms;
         return mt;
     }
@@ -233,39 +340,48 @@ public function lower_expr(e: Expr) returns IrExpr {
             li = li + 1;
         }
         let ret_type: IrType = compiler_ir.ir_parse_type(e.str_value);
+        // The lambda body sees the enclosing scope plus its own params; stamp each
+        // param into a child scope so a param VarRef in the body carries its type.
+        let mutable body_scope: LowerScope = scope;
+        let mutable bi: Int = 0;
+        while bi < len(e.lambda_params) {
+            let bp: Param = e.lambda_params[bi];
+            body_scope = lower_scope_define(body_scope, bp.name, compiler_ir.ir_parse_type(bp.type_name));
+            bi = bi + 1;
+        }
         // Assign lambda_params from the LOCAL owned array here (not inside
         // ir_lambda): a function's Array param lowers to `&Vec` and cannot be
         // moved into the owned field — the same reason parse_lambda sets
         // Expr.lambda_params at its build site.
-        let mutable lam: IrExpr = compiler_ir.ir_lambda(ret_type, lower_expr(e.children[0]));
+        let mutable lam: IrExpr = compiler_ir.ir_lambda(ret_type, lower_expr(e.children[0], body_scope));
         lam.lambda_params = lparams;
         return lam;
     }
     if e.kind == shared_ast.ex_forall() {
         // `forall var in range: body` — name is the loop var, children [range, body].
-        return compiler_ir.ir_forall(e.name, lower_expr(e.children[0]), lower_expr(e.children[1]));
+        return compiler_ir.ir_forall(e.name, lower_expr(e.children[0], scope), lower_expr(e.children[1], scope));
     }
     if e.kind == shared_ast.ex_exists() {
-        return compiler_ir.ir_exists(e.name, lower_expr(e.children[0]), lower_expr(e.children[1]));
+        return compiler_ir.ir_exists(e.name, lower_expr(e.children[0], scope), lower_expr(e.children[1], scope));
     }
     if e.kind == shared_ast.ex_array() {
         let mutable elems: Array<IrExpr> = compiler_ir.empty_ir_expr_array();
         let mutable ai: Int = 0;
         while ai < len(e.children) {
-            elems.push(lower_expr(e.children[ai]));
+            elems.push(lower_expr(e.children[ai], scope));
             ai = ai + 1;
         }
         return compiler_ir.ir_array(elems);
     }
     if e.kind == shared_ast.ex_index() {
-        return compiler_ir.ir_index(lower_expr(e.children[0]), lower_expr(e.children[1]));
+        return compiler_ir.ir_index(lower_expr(e.children[0], scope), lower_expr(e.children[1], scope));
     }
     if e.kind == shared_ast.ex_call() {
         let callee: Expr = e.children[0];
         let mutable args: Array<IrExpr> = compiler_ir.empty_ir_expr_array();
         let mutable i: Int = 1;
         while i < len(e.children) {
-            args.push(lower_expr(e.children[i]));
+            args.push(lower_expr(e.children[i], scope));
             i = i + 1;
         }
         // A call whose callee is an ex_field (`obj.name(...)`) is a method call
@@ -275,7 +391,7 @@ public function lower_expr(e: Expr) returns IrExpr {
         // corpus has none, so an ex_field callee is always a genuine method call
         // here; the module-call distinction lands with multi-file emit.
         if callee.kind == shared_ast.ex_field() {
-            let object: IrExpr = lower_expr(callee.children[0]);
+            let object: IrExpr = lower_expr(callee.children[0], scope);
             return compiler_ir.ir_method(object, callee.name, args);
         }
         let mutable call: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, callee.name, args, compiler_ir.ir_type_named(""));

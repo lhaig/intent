@@ -2560,3 +2560,50 @@ error_handling, and io_demo's `content.clone()`, plus cleaner match-scrutinee cl
 io_demo additionally needs IO builtins (create_dir/write_file/read_file/file_exists/
 env_get), Float literals, and the `mutatedVars` analysis (method-call receivers ->
 `let mut`). Then enums+match+float (shape_area, enum_basic), entities, generics, async.
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 14: the ADR 0059 D3 type bridge + cloneIfNeeded (diff-emit 19/19)
+
+`examples/try_operator.intent` now self-hosts byte-equal — a TENTH real example.
+diff-emit is **19/19 EQUAL**. It diverged only on `parse_number(a.clone())` /
+`parse_number(b.clone())`: stage1 clones a non-Copy (`String`) arg so it is not
+moved out of its owner, but the stage2 IR carried no arg types for `cloneIfNeeded`.
+
+Three parts (mirroring stage1 `internal/ir/lower.go` + `internal/rustbe/rustbe.go`):
+
+- **lower.intent — local type reconstruction.** New `LowerScope` entity (parallel
+  name/type arrays) threaded through `lower_block`/`lower_stmt`/`lower_expr`/
+  `lower_contracts`/`lower_test`, seeded from a function's params and grown per
+  `let`; the `ex_ident` case stamps `VarRef.expr_type` from it. The scope is
+  functional/immutable (copy-on-define), mirroring the checker's `Scope` — which
+  also sidesteps gotcha (c) (the copied arrays are local owned arrays, so an
+  `Array` param's `&Vec` type still moves into the field). Narrow bridge: for-loop
+  / lambda-param / match-arm bindings stay unstamped (unknown type -> Copy -> no
+  clone), landing with the slice that needs one of them cloned. This is the first
+  piece of the D3 `checker.Type -> IrType` bridge ADR 0059 deferred.
+- **ir.intent — `ir_is_copy_type`.** Mirrors `isCopyType`: Int/Float/Bool/Void/Fn
+  and the empty/unknown sentinel -> Copy; else non-Copy. Unknown -> Copy is
+  conservative (never over-clone). Future's non-clone guard lands with async.
+- **rustbe.intent — `clone_if_needed`** (+ helpers `is_literal_expr`,
+  `ends_with_clone`). Mirrors `cloneIfNeeded`: skip literals / `&`-borrowed /
+  already-cloned; else append `.clone()` to a VarRef/IndexExpr of non-Copy stamped
+  type. Applied at the exact reachable stage1 call sites: `generate_call` (after
+  the `&`-borrow), and `generate_builtin_call` for `assert_eq` (both operands) and
+  `Ok`/`Err`/`Some` (single operand). IO builtins' clones land with io_demo.
+
+Match-scrutinee `.clone()` left inferred from builtin-pattern arms (gotcha (e));
+switching it to the type check was optional and unneeded for byte-equality.
+
+Gates green: diff-emit 19/19, selfcheck-formatter 7/7, selfcheck-checker 13/13,
+ir_test 17 (added an `ir_is_copy_type` case), lower_test 124 (added three
+type-bridge cases), `intentc test examples/try_operator.intent` 2/2 (cargo). No Go
+/ shared/* touched.
+
+**NEXT — the ordered frontier (NEXT-STEPS.md).** The two examples the bridge
+*partly* unblocks each need MORE: `error_handling` (StringConcat -> `format!`,
+`continue`/`break`); `io_demo` (IO builtins' `std::fs` emit, Float literals, and
+the `mutatedVars` analysis — method-call receivers -> `let mut`). Then enums +
+match + float (shape_area, enum_basic) -> entities (bank_account) -> generics
+(generic_stack) -> async (async_demo, task_queue) -> char/float + string
+concat/interp (char_string_demo) -> traits (handler_trait) -> Map (map_demo).

@@ -1,19 +1,20 @@
-# Pickup Notes — 2026-07-08 (Phase 55 milestone + 13 scale-up slices DONE; NEXT = the type bridge (cloneIfNeeded) then enums+match+float — see prds/active/prd-phase-55-self-hosted-compiler.md)
+# Pickup Notes — 2026-07-08 (Phase 55 milestone + 14 scale-up slices DONE incl. the D3 type bridge; NEXT = enums+match+float (shape_area, enum_basic) — see prds/active/prd-phase-55-self-hosted-compiler.md)
 
-## ✅ PHASE 55 SHIPPED: milestone + 13 construct slices (2026-07-07..08) — ADR 0059
+## ✅ PHASE 55 SHIPPED: milestone + 14 construct slices (2026-07-07..08) — ADR 0059
 
 The self-hosted compiler's back half exists in Intent:
 `selfhost/compiler/{ir,lower,rustbe,compile_main}.intent`, wired via `intentc build --emit
 --self-hosted` (harness mirrors Phase 54: `stage2CompilerBinary`, env
 `INTENT_STAGE2_COMPILE`). The bootstrap loop is closed for a growing corpus: **`make
-diff-emit` is 18/18 EQUAL** — NINE real examples (`hello`, `divergence_demo`, `fibonacci`,
+diff-emit` is 19/19 EQUAL** — TEN real examples (`hello`, `divergence_demo`, `fibonacci`,
 `target_specific_demo`, `array_sum`, `verify_example`, `sorted_check`, `closure_demo`,
-`result_option`) + 9 construct fixtures — plus `make selfcheck-formatter` (7/7) and `make
-selfcheck-checker` (13/13). Supported: functions/params/calls, let, binops, unary
-(`-`/`not`), quantifiers (forall/exists), closures/lambdas + Fn types, match +
+`result_option`, `try_operator`) + 9 construct fixtures — plus `make selfcheck-formatter`
+(7/7) and `make selfcheck-checker` (13/13). Supported: functions/params/calls, let, binops,
+unary (`-`/`not`), quantifiers (forall/exists), closures/lambdas + Fn types, match +
 Ok/Err/Some/None construction, `?` operator, if/while/for + assignment, strings/print,
 contracts, arrays + Array/Map by-ref params + call-site borrow + method calls, parens
-(unwrapped) (see the frontier list below for the exact construct set). Every slice was
+(unwrapped), and the **D3 type bridge** (local VarRef type reconstruction + `cloneIfNeeded`
+on non-Copy args) (see the frontier list below for the exact construct set). Every slice was
 verified byte-equal against stage1 before landing; all pre-existing gates stayed green
 throughout.
 
@@ -28,51 +29,53 @@ parser → ✅ array params + call-site borrow + method calls (finishes array_su
 ✅ closures/lambdas + Fn types (finishes closure_demo) →
 ✅ match + Ok/Err/Some/None construction (finishes result_option) →
 ✅ `?` operator (gated via a Copy-arg fixture) →
-**NEXT (foundational): the ADR 0059 D3 type bridge — stamp VarRef.expr_type from local
-param/let types in lowering (scope threaded through lower_expr), then add cloneIfNeeded
-(non-Copy VarRef/index/field arg -> `.clone()`) to generate_call / generate_builtin_call.
-Unblocks try_operator + error_handling (`a.clone()`) and io_demo (`content.clone()`).** Then
-enums + match + float (shape_area, enum_basic) → entities (bank_account) → generics
+✅ the ADR 0059 D3 type bridge — `LowerScope` stamps VarRef.expr_type from local param/let
+types (threaded through lower_block/lower_stmt/lower_expr), `ir_is_copy_type` + `clone_if_needed`
+(non-Copy VarRef/index arg -> `.clone()`) in generate_call / generate_builtin_call
+(finishes try_operator) →
+**NEXT: enums + match + float (shape_area, enum_basic)** → entities (bank_account) → generics
 (generic_stack) → async (async_demo, task_queue) → char/float + string concat/interp
 (char_string_demo) → traits (handler_trait) → Map (map_demo). Emitter must stay COMPLETE per
-supported construct.
+supported construct. **Type-bridge follow-ups** (each needs MORE than the bridge, which is now
+in place): `error_handling` (StringConcat -> `format!`, `continue`/`break`); `io_demo` (IO
+builtins' `std::fs` emit + their `clone_if_needed`, Float literals, and the `mutatedVars`
+analysis: method-call receivers -> `let mut`).
 
-## ▶ NEXT SLICE — the ADR 0059 D3 type bridge + cloneIfNeeded (detailed plan)
+## ✅ DONE — the ADR 0059 D3 type bridge + cloneIfNeeded (slice 14, diff-emit 19/19)
 
-`try_operator`, `error_handling`, and `io_demo` all diverge only because they pass non-Copy
-VarRef args that stage1 clones (`parse_number(a.clone())`, `content.clone()`). The stage2 IR
-carries no inferred types, so `cloneIfNeeded` has nothing to check. This slice adds local
-type propagation. Steps:
+`examples/try_operator.intent` now self-hosts byte-equal (its only divergence was
+`parse_number(a.clone())` on the `String` params). What landed (see ADR 0059's
+"Update — the D3 type bridge" section + progress.md 2026-07-08 slice 14):
 
-1. **lower.intent — stamp VarRef types.** Thread a scope (var name → `IrType`) through
-   `lower_block` / `lower_stmt` / `lower_expr` (and `lower_contracts` / `lower_test`), seeded
-   from the function's params (`name → param_type`) and accumulating each `let` binding
-   (`name → let_type`). In the `ex_ident` case, look the name up and set the VarRef's
-   `expr_type`. This threads through ~25 `lower_expr` call sites — mechanical but broad; the
-   gates catch errors. A small `LowerScope` entity (parallel name/type arrays, push + lookup
-   methods, mirroring the checker's scope) is the natural shape. **Gotcha (c):** a function's
-   `Array` param lowers to `&Vec` and cannot be moved into an owned field, so if `LowerScope`
-   holds arrays, fill them from LOCAL owned arrays at the call site (as `lower_expr` already
-   does for `lambda_params` / `match_arms`).
-2. **ir.intent — `ir_is_copy_type(t: IrType) returns Bool`.** Mirrors stage1 `isCopyType`:
-   `Int`/`Float`/`Bool`/`Void`/`Fn`/empty-name → true; else false. Empty/unknown → true so you
-   never OVER-clone (conservative; only clone when the type is known non-Copy).
-3. **rustbe.intent — `clone_if_needed(arg_str, arg)`.** Mirror stage1 `cloneIfNeeded`: return
-   as-is if the arg is a literal, or `arg_str` already starts with `&` or already ends with
-   `.clone()`; else if `arg` is a VarRef / IndexExpr (FieldAccess once entities land) whose
-   `expr_type` is non-Copy, append `.clone()`. Apply it to args in `generate_call` (AFTER the
-   `&`-borrow check) and in `generate_builtin_call` for `Ok`/`Err`/`Some`, `assert_eq`,
-   `read_file`/`write_file`/etc. — match stage1's exact call sites.
+- **lower.intent — `LowerScope`** (parallel name/type arrays, functional/copy-on-define
+  like the checker's Scope) threaded through `lower_block`/`lower_stmt`/`lower_expr`/
+  `lower_contracts`/`lower_test`, seeded from params + grown per `let`; `ex_ident` stamps
+  `VarRef.expr_type`. Narrow bridge: for-loop / lambda-param / match-arm bindings stay
+  unstamped (unknown -> Copy -> no clone) — extend when a slice needs one cloned.
+- **ir.intent — `ir_is_copy_type`** (Int/Float/Bool/Void/Fn/empty -> Copy; else non-Copy;
+  Future's non-clone guard deferred to async).
+- **rustbe.intent — `clone_if_needed`** (+ `is_literal_expr`, `ends_with_clone`), applied in
+  `generate_call` (after the `&`-borrow) and `generate_builtin_call` (`assert_eq` both
+  operands; `Ok`/`Err`/`Some` single operand). IO builtins' `clone_if_needed` lands with io_demo.
 
-Then add `examples/try_operator.intent` to `diff-emit.sh` (should go byte-equal — probe first).
-`error_handling` additionally needs StringConcat → `format!` and `continue`/`break` statements.
-`io_demo` additionally needs the IO builtins (`create_dir`/`write_file`/`read_file`/`file_exists`/
-`env_get` → their `std::fs::…` emit), Float literals, and the **mutatedVars** analysis
-(method-call receivers → `let mut`, e.g. `num.to_string()` makes `num` `let mut`).
+Match-scrutinee `.clone()` left inferred from builtin-pattern arms (gotcha e) — switching it to
+the now-available type check was optional and unneeded for byte-equality (19/19 either way).
 
-**Optional cleanup once VarRefs carry types:** the match-scrutinee `.clone()` is currently
-inferred from builtin-pattern arms (gotcha e); you MAY switch it to the type check to match
-stage1 exactly — verify byte-equal either way, don't regress the 18/18.
+## ▶ NEXT SLICE — enums + match + float (shape_area, enum_basic)
+
+Probe first (`build --emit` in a temp dir, `od -c` for whitespace) to get the exact target,
+then mirror the relevant `lower.go`/`rustbe.go` logic. Likely pieces: enum decls -> Rust
+`enum` (+ name mangling), enum-variant `match` patterns (the non-builtin arm path in
+`generate_match_pattern`, currently a loud marker), unit-variant refs (an `ex_ident` whose
+type is an enum -> `CallVariant`, per stage1's lowerExpr Identifier case), and Float literals
+(`irex_float` + `f64` emit). `shape_area` also brings float arithmetic. The type bridge now in
+place means enum-typed VarRefs can carry their type where the emit needs it.
+
+**Type-bridge follow-ups** (the bridge is in place; these need MORE): `error_handling`
+(StringConcat -> `format!`, `continue`/`break` statements); `io_demo` (IO builtins
+`create_dir`/`write_file`/`read_file`/`file_exists`/`env_get` -> their `std::fs::…` emit + their
+`clone_if_needed` call sites, Float literals, and the **mutatedVars** analysis: a method-call
+receiver -> `let mut`, e.g. `num.to_string()` makes `num` `let mut`).
 
 ## Critical gotchas (cost time to rediscover)
 
@@ -125,11 +128,11 @@ lowering detects the ex_field callee → new IR kind `irex_method` → backend e
 as a param, NOT a generator entity — stage1's shallow `methodMutatesSelf` inference makes a
 non-mutating entity's methods a mix of `&self`/`&mut self` that fails to compile (see ADR 0059).
 
-**diff-emit is at 18/18** — NINE real examples (`hello`, `divergence_demo`, `fibonacci`,
+**diff-emit is at 19/19** — TEN real examples (`hello`, `divergence_demo`, `fibonacci`,
 `target_specific_demo`, `array_sum`, `verify_example`, `sorted_check`, `closure_demo`,
-`result_option`) plus 9 fixtures (incl. `arrays`, `unary`, `quantifiers`, `try_op`)
-(`let_locals`, `binops`, `control_flow`, `functions`, `strings`). Supported constructs:
-`?` operator, entry+non-entry
+`result_option`, `try_operator`) plus 9 fixtures (incl. `arrays`, `unary`, `quantifiers`,
+`try_op`) (`let_locals`, `binops`, `control_flow`, `functions`, `strings`). Supported
+constructs: `?` operator, entry+non-entry
 functions & params & calls, `return`, `let`/`let mutable`, var refs, int/bool/string
 literals, all binops (`(l op r)`, `implies`), unary (`-X`/`!X`), forall/exists (contract scan
 blocks), closures/lambdas (`|p: T| -> R { body }`) + Fn types (`impl Fn(..) -> R`,
@@ -138,8 +141,11 @@ Result/Option) + Ok/Err/Some/None construction, parens (unwrapped),
 if/else(+1-level else-if)/while/for-in, ranges, assignment,
 `print`/`assert`/`assert_eq`/`len` builtins, scalar + Array/Result/Option type mapping,
 Array/Map by-ref params + call-site borrow, method calls (general path), requires/ensures
-contracts. Remaining (need arg TYPES → ADR 0059 D3 bridge): `cloneIfNeeded` for non-Copy
-VarRef/field/index args (`a.clone()`), `arrayRefParams` rebinding clone, receiver-type
+contracts, and the **D3 type bridge** — `LowerScope` stamps VarRef.expr_type from local
+param/let types, and `clone_if_needed` (`ir_is_copy_type`) appends `.clone()` to non-Copy
+VarRef/index args in `generate_call`/`generate_builtin_call` (`a.clone()`). Remaining (still
+need TYPES the narrow bridge does not yet reconstruct): for-loop/lambda/match-arm binding
+types (stamp when a slice needs one cloned), FieldAccess clone (entities slice), receiver-type
 method paths (String/Map/Char); enum-variant match patterns (enums slice).
 
 **Frontier — each remaining example needs a specific unbuilt slice** (probed all 22):
