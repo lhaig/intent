@@ -1,22 +1,31 @@
-# Pickup Notes — 2026-07-08 (Phase 55 milestone + 14 scale-up slices DONE incl. the D3 type bridge; NEXT = enums+match+float (shape_area, enum_basic) — see prds/active/prd-phase-55-self-hosted-compiler.md)
+# Pickup Notes — 2026-07-08 (Phase 55 COMPLETE — the self-hosted compiler emits byte-equal Rust for the ENTIRE example corpus; see prds/active/prd-phase-55-self-hosted-compiler.md)
 
-## ✅ PHASE 55 SHIPPED: milestone + 14 construct slices (2026-07-07..08) — ADR 0059
+## ✅✅ PHASE 55 COMPLETE: the self-hosted compiler self-hosts the full corpus (2026-07-07..08) — ADR 0059
 
-The self-hosted compiler's back half exists in Intent:
-`selfhost/compiler/{ir,lower,rustbe,compile_main}.intent`, wired via `intentc build --emit
---self-hosted` (harness mirrors Phase 54: `stage2CompilerBinary`, env
-`INTENT_STAGE2_COMPILE`). The bootstrap loop is closed for a growing corpus: **`make
-diff-emit` is 19/19 EQUAL** — TEN real examples (`hello`, `divergence_demo`, `fibonacci`,
+The self-hosted compiler's back half lives in Intent
+(`selfhost/compiler/{ir,lower,rustbe,compile_main}.intent`), wired via `intentc build --emit
+--self-hosted`. **`make diff-emit` is 31/31 EQUAL — ALL 22 real examples + 9 construct
+fixtures emit Rust byte-identical to stage1** (`hello`, `divergence_demo`, `fibonacci`,
 `target_specific_demo`, `array_sum`, `verify_example`, `sorted_check`, `closure_demo`,
-`result_option`, `try_operator`) + 9 construct fixtures — plus `make selfcheck-formatter`
-(7/7) and `make selfcheck-checker` (13/13). Supported: functions/params/calls, let, binops,
-unary (`-`/`not`), quantifiers (forall/exists), closures/lambdas + Fn types, match +
-Ok/Err/Some/None construction, `?` operator, if/while/for + assignment, strings/print,
-contracts, arrays + Array/Map by-ref params + call-site borrow + method calls, parens
-(unwrapped), and the **D3 type bridge** (local VarRef type reconstruction + `cloneIfNeeded`
-on non-Copy args) (see the frontier list below for the exact construct set). Every slice was
-verified byte-equal against stage1 before landing; all pre-existing gates stayed green
-throughout.
+`result_option`, `try_operator`, `error_handling`, `io_demo`, `enum_basic`, `shape_area`,
+`bank_account`, `js_demo`, `map_demo`, `async_demo`, `task_queue`, `handler_trait`,
+`char_string_demo`, `generic_stack`) — plus `make selfcheck-formatter` (7/7) and `make
+selfcheck-checker` (13/13). Every construct group is supported: functions/params/calls, let,
+all binops + string concat, unary, quantifiers, closures/Fn, match + Result/Option
+construction, `?`, if/while/for + break/continue + assignment, strings/print + IO builtins +
+float, enums + variant construction + enum-match, entities (struct/impl/ctor/methods/
+invariants/old/intents) + field access + constructor calls, traits + impl blocks, Map
+(HashMap) + receiver-type method dispatch, async (spawn/await/sleep/tokio), char literals +
+char/String receiver methods + String indexing/slicing, and generics (monomorphization).
+Every slice was verified byte-equal against stage1 before landing; all pre-existing gates
+(diff-checker 86/86, diff-formatter 22/22, diff-linter 26/26, go test, validate) stayed green.
+
+**The Intent compiler now compiles itself — front-end (Phases 42-54) + IR/backend (Phase 55)
+— to byte-equal Rust across the whole example corpus. The bootstrap loop is closed.**
+
+**Next fronts (post-endgame, optional):** multi-file emit (`LowerAll`/`GenerateAll`), the
+js/wasm backends in Intent, `--strip-contracts` parity, and hardening the emitter beyond the
+corpus (any construct combination, not just the 22 examples).
 
 **NEXT FRONT — scale the emitter construct-by-construct** (PRD "Then scale up"). Each slice:
 grow `lower.intent` + `rustbe.intent` for one construct, add a byte-equal corpus entry to
