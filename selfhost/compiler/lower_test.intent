@@ -502,4 +502,21 @@ test "lowers a trait and an impl block" {
     assert(ret.children[0].expr_type.name == "Int");
 }
 
+test "monomorphizes a generic entity per instantiation" {
+    let src: String = "module m version \"1.0.0\";\n\nentity Box<T> " + lbrace() + "\n    field val: T;\n    constructor(v: T) " + lbrace() + "\n        self.val = v;\n    " + rbrace() + "\n" + rbrace() + "\n\nentry function main() returns Int " + lbrace() + "\n    let a: Box<Int> = Box<Int>(1);\n    let b: Box<String> = Box<String>(\"x\");\n    return 0;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    // The generic Box<T> is NOT emitted; Box__Int and Box__String are.
+    assert(len(m.entities) == 2);
+    assert(m.entities[0].name == "Box__Int");
+    assert(m.entities[1].name == "Box__String");
+    // Box__Int's field is substituted to Int; Box__String's to String.
+    assert(m.entities[0].fields[0].param_type.name == "Int");
+    assert(m.entities[1].fields[0].param_type.name == "String");
+    // `Box<Int>(1)` lowers to a constructor call on the mangled name.
+    let ctor_call: IrExpr = m.functions[0].body[0].expr;
+    assert(ctor_call.call_kind == compiler_ir.callkind_constructor());
+    assert(ctor_call.name == "Box__Int");
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

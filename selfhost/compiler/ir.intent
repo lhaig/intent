@@ -791,6 +791,62 @@ public function ir_parse_type(s: String) returns IrType {
     return p.parse();
 }
 
+// ir_mangle_type_name — the mangled name of a type arg (mirrors mangleTypeName):
+// a plain type is its name; a generic type is `Name_arg0_arg1...`.
+public function ir_mangle_type_name(t: IrType) returns String {
+    if len(t.type_args) == 0 {
+        return t.name;
+    }
+    let mutable out: String = t.name;
+    let mutable i: Int = 0;
+    while i < len(t.type_args) {
+        out = out + "_" + ir_mangle_type_name(t.type_args[i]);
+        i = i + 1;
+    }
+    return out;
+}
+
+// ir_mangle_generic_name — a monomorphized entity/function name (mirrors
+// MangleGenericName): `Base__arg0_arg1...` (base, then "__", then args joined by "_").
+public function ir_mangle_generic_name(base: String, type_args: Array<IrType>) returns String {
+    if len(type_args) == 0 {
+        return base;
+    }
+    let mutable parts: String = "";
+    let mutable i: Int = 0;
+    while i < len(type_args) {
+        if i > 0 {
+            parts = parts + "_";
+        }
+        parts = parts + ir_mangle_type_name(type_args[i]);
+        i = i + 1;
+    }
+    return base + "__" + parts;
+}
+
+// ir_substitute_type — replace any type-parameter reference in `t` with its concrete
+// type (param_names[i] -> param_types[i]), recursing through type_args (mirrors
+// checker.SubstituteType). A bare `T` becomes the concrete type; `Array<T>` becomes
+// `Array<Int>`, etc.
+public function ir_substitute_type(t: IrType, param_names: Array<String>, param_types: Array<IrType>) returns IrType {
+    let mutable pi: Int = 0;
+    while pi < len(param_names) {
+        if t.name == param_names[pi] {
+            if len(t.type_args) == 0 {
+                return param_types[pi];
+            }
+        }
+        pi = pi + 1;
+    }
+    let mutable new_args: Array<IrType> = empty_ir_type_array();
+    let mutable i: Int = 0;
+    while i < len(t.type_args) {
+        new_args.push(ir_substitute_type(t.type_args[i], param_names, param_types));
+        i = i + 1;
+    }
+    return IrType(t.name, new_args, t.fn_param_count);
+}
+
 // ir_void_expr — the placeholder expression for an absent value (bare return).
 public function ir_void_expr() returns IrExpr {
     return IrExpr(irex_void(), 0, "", false, "", empty_ir_expr_array(), ir_type_named("Void"));

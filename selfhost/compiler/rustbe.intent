@@ -1513,6 +1513,11 @@ public function map_type(t: IrType) returns String {
     if t.name == "" {
         return "/* unsupported type: <empty> */";
     }
+    // A user type WITH type args is a generic-entity instantiation -> mangled name
+    // (Stack<Int> -> Stack__Int). By here Array/Map/Result/Option/Future/Fn are handled.
+    if len(t.type_args) > 0 {
+        return compiler_ir.ir_mangle_generic_name(t.name, t.type_args);
+    }
     return t.name;
 }
 

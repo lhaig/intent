@@ -356,6 +356,22 @@ dispatch and cloning (Char is non-Copy). `char_from_codepoint` -> the
 `match u32::try_from(...)` form. Match-arm bindings are typed from the scrutinee's
 Result/Option args (`extend_scope_for_arm`), so `Ok(c) => c.to_codepoint()` dispatches.
 
+## Update — generics / monomorphization (diff-emit 31/31 — full corpus self-hosts)
+
+`examples/generic_stack.intent` self-hosts byte-equal — the final example. **All 22
+real examples + 9 fixtures now emit byte-equal Rust between stage1 and stage2.** A
+generic entity `Stack<T>` is not emitted; each instantiation (`Stack<Int>`,
+`Stack<String>`) becomes a concrete `Stack__Int`/`Stack__String` with `T` substituted
+through fields/ctor/methods (`ir_substitute_type`) and the name mangled
+(`ir_mangle_generic_name`). `collect_instantiations` scans the program (function/method/
+ctor sigs+bodies, tests, fields) for generic-entity type refs + ctor-call names, deduped
+by mangled name. `map_type` mangles a user type with args; a generic ctor call
+`Stack<Int>()` lowers to a CallConstructor on the mangled name. **Gotcha:** a
+monomorphized method BODY is lowered with UNSTAMPED params — a generic body's
+type-param exprs have no concrete type in stage1 (`typeOf -> nil -> Copy`), so their args
+are NOT cloned (`self.items.push(item)`, not `item.clone()`, even for `Stack<String>`);
+substitution applies to signatures only.
+
 ## References
 
 - [`internal/ir/nodes.go`](../../internal/ir/nodes.go) — the port target for this slice.

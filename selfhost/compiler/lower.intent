@@ -220,6 +220,260 @@ function lower_scope_type_of(s: LowerScope, name: String) returns IrType {
     return compiler_ir.ir_type_named("");
 }
 
+// =============================================================================
+// Generics: monomorphization (mirrors collectInstantiations + monomorphizeEntity).
+// A generic entity `Stack<T>` is never emitted; instead each instantiation used in
+// the program (Stack<Int>, Stack<String>) becomes a concrete entity `Stack__Int` /
+// `Stack__String` with T substituted throughout. Type refs and constructor calls to
+// `Stack<Int>` mangle to the concrete name (map_type / the ex_call ctor path).
+// =============================================================================
+// entity_is_generic — is `name` a declared entity with type parameters?
+function entity_is_generic(entities: Array<EntityDecl>, name: String) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(entities) {
+        if entities[i].name == name {
+            return len(entities[i].type_params) > 0;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// find_entity_decl — the entity decl named `name`, or an empty one (name "") if absent.
+function find_entity_decl(entities: Array<EntityDecl>, name: String) returns EntityDecl {
+    let mutable i: Int = 0;
+    while i < len(entities) {
+        if entities[i].name == name {
+            return entities[i];
+        }
+        i = i + 1;
+    }
+    let mutable fields: Array<FieldDecl> = [];
+    let mutable methods: Array<FunctionDecl> = [];
+    let mutable invs: Array<Expr> = [];
+    let mutable cmts: Array<String> = [];
+    return EntityDecl("", false, fields, methods, false, shared_ast.empty_function_decl(), invs, 0, cmts);
+}
+
+// append_types — functional concat of two Array<IrType> (immutable-param safe).
+function append_types(a: Array<IrType>, b: Array<IrType>) returns Array<IrType> {
+    let mutable out: Array<IrType> = compiler_ir.empty_ir_type_array();
+    let mutable i: Int = 0;
+    while i < len(a) {
+        out.push(a[i]);
+        i = i + 1;
+    }
+    let mutable j: Int = 0;
+    while j < len(b) {
+        out.push(b[j]);
+        j = j + 1;
+    }
+    return out;
+}
+
+// insts_from_irtype — the generic-entity instantiations referenced by `t` (itself if
+// it is one, plus any in its type args).
+function insts_from_irtype(entities: Array<EntityDecl>, t: IrType) returns Array<IrType> {
+    let mutable out: Array<IrType> = compiler_ir.empty_ir_type_array();
+    if entity_is_generic(entities, t.name) {
+        if len(t.type_args) > 0 {
+            out.push(t);
+        }
+    }
+    let mutable i: Int = 0;
+    while i < len(t.type_args) {
+        out = append_types(out, insts_from_irtype(entities, t.type_args[i]));
+        i = i + 1;
+    }
+    return out;
+}
+
+// insts_from_type_string — instantiations in an AST type annotation string.
+function insts_from_type_string(entities: Array<EntityDecl>, s: String) returns Array<IrType> {
+    return insts_from_irtype(entities, compiler_ir.ir_parse_type(s));
+}
+
+// insts_from_expr — instantiations referenced in an expression (a generic ctor call
+// `Stack<Int>()` bakes the args into the callee ident name), recursing children/arms.
+function insts_from_expr(entities: Array<EntityDecl>, e: Expr) returns Array<IrType> {
+    let mutable out: Array<IrType> = compiler_ir.empty_ir_type_array();
+    if e.kind == shared_ast.ex_call() {
+        if len(e.children) > 0 {
+            let callee: Expr = e.children[0];
+            if callee.kind == shared_ast.ex_ident() {
+                out = append_types(out, insts_from_type_string(entities, callee.name));
+            }
+        }
+    }
+    let mutable i: Int = 0;
+    while i < len(e.children) {
+        out = append_types(out, insts_from_expr(entities, e.children[i]));
+        i = i + 1;
+    }
+    let mutable ai: Int = 0;
+    while ai < len(e.match_arms) {
+        out = append_types(out, insts_from_expr(entities, e.match_arms[ai].body));
+        ai = ai + 1;
+    }
+    return out;
+}
+
+// insts_from_block — instantiations in a block (let type annotations + expressions,
+// recursing nested blocks).
+function insts_from_block(entities: Array<EntityDecl>, b: Block) returns Array<IrType> {
+    let mutable out: Array<IrType> = compiler_ir.empty_ir_type_array();
+    let mutable i: Int = 0;
+    while i < len(b.stmts) {
+        let s: Stmt = b.stmts[i];
+        if s.kind == shared_ast.st_let() {
+            out = append_types(out, insts_from_type_string(entities, s.type_name));
+        }
+        out = append_types(out, insts_from_expr(entities, s.expr));
+        if s.kind == shared_ast.st_if() {
+            out = append_types(out, insts_from_block(entities, s.then_block));
+            if s.has_else {
+                out = append_types(out, insts_from_block(entities, s.else_block));
+            }
+        }
+        if s.kind == shared_ast.st_while() or s.kind == shared_ast.st_for() {
+            out = append_types(out, insts_from_block(entities, s.then_block));
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+// insts_from_func — instantiations in a function/method/ctor signature + body.
+function insts_from_func(entities: Array<EntityDecl>, f: FunctionDecl) returns Array<IrType> {
+    let mutable out: Array<IrType> = compiler_ir.empty_ir_type_array();
+    let mutable i: Int = 0;
+    while i < len(f.params) {
+        out = append_types(out, insts_from_type_string(entities, f.params[i].type_name));
+        i = i + 1;
+    }
+    out = append_types(out, insts_from_type_string(entities, f.return_type));
+    out = append_types(out, insts_from_block(entities, f.body));
+    return out;
+}
+
+// collect_instantiations — the deduped (by mangled name) list of generic-entity
+// instantiations used across the whole program (mirrors collectInstantiations).
+function collect_instantiations(prog: Program) returns Array<IrType> {
+    let mutable all: Array<IrType> = compiler_ir.empty_ir_type_array();
+    let mutable fi: Int = 0;
+    while fi < len(prog.functions) {
+        all = append_types(all, insts_from_func(prog.entities, prog.functions[fi]));
+        fi = fi + 1;
+    }
+    let mutable ti: Int = 0;
+    while ti < len(prog.tests) {
+        all = append_types(all, insts_from_block(prog.entities, prog.tests[ti].body));
+        ti = ti + 1;
+    }
+    let mutable ei: Int = 0;
+    while ei < len(prog.entities) {
+        let e: EntityDecl = prog.entities[ei];
+        if len(e.type_params) == 0 {
+            let mutable fdi: Int = 0;
+            while fdi < len(e.fields) {
+                all = append_types(all, insts_from_type_string(prog.entities, e.fields[fdi].type_name));
+                fdi = fdi + 1;
+            }
+            if e.has_constructor {
+                all = append_types(all, insts_from_func(prog.entities, e.ctor));
+            }
+            let mutable mi: Int = 0;
+            while mi < len(e.methods) {
+                all = append_types(all, insts_from_func(prog.entities, e.methods[mi]));
+                mi = mi + 1;
+            }
+        }
+        ei = ei + 1;
+    }
+    let mutable ii: Int = 0;
+    while ii < len(prog.impls) {
+        let mutable mi2: Int = 0;
+        while mi2 < len(prog.impls[ii].methods) {
+            all = append_types(all, insts_from_func(prog.entities, prog.impls[ii].methods[mi2]));
+            mi2 = mi2 + 1;
+        }
+        ii = ii + 1;
+    }
+    // Dedup by mangled name, preserving first-seen order.
+    let mutable out: Array<IrType> = compiler_ir.empty_ir_type_array();
+    let mutable seen: Array<String> = shared_ast.empty_string_array();
+    let mutable k: Int = 0;
+    while k < len(all) {
+        let mangled: String = compiler_ir.ir_mangle_generic_name(all[k].name, all[k].type_args);
+        if not string_in(seen, mangled) {
+            seen.push(mangled);
+            out.push(all[k]);
+        }
+        k = k + 1;
+    }
+    return out;
+}
+
+// monomorphize_entity — a concrete entity for a generic decl + type args: substitute
+// the type params through fields / ctor / methods and mangle the name. Mirrors
+// monomorphizeEntity + monomorphizeConstructor + monomorphizeMethod.
+function monomorphize_entity(decl: EntityDecl, type_args: Array<IrType>, enums: Array<EnumDecl>, entities: Array<EntityDecl>) returns IrEntity {
+    let mangled: String = compiler_ir.ir_mangle_generic_name(decl.name, type_args);
+    let mutable fields: Array<IrParam> = compiler_ir.empty_ir_param_array();
+    let mutable fi: Int = 0;
+    while fi < len(decl.fields) {
+        let f: FieldDecl = decl.fields[fi];
+        fields.push(IrParam(f.name, compiler_ir.ir_substitute_type(compiler_ir.ir_parse_type(f.type_name), decl.type_params, type_args)));
+        fi = fi + 1;
+    }
+    // Invariants (self stays `self`), paired with raw text.
+    let inv_scope: LowerScope = lower_scope_with_self(lower_scope_empty(enums, entities), "self", mangled);
+    let mutable invs: Array<IrContract> = compiler_ir.empty_ir_contract_array();
+    let mutable ivi: Int = 0;
+    while ivi < len(decl.invariants) {
+        let iv: Expr = decl.invariants[ivi];
+        invs.push(IrContract(lower_expr(iv, inv_scope), decl.invariants_raw[ivi], iv.line, iv.column));
+        ivi = ivi + 1;
+    }
+    let mutable ctor: IrFunction = compiler_ir.empty_ir_function();
+    if decl.has_constructor {
+        ctor = monomorphize_member(decl.ctor, "__self", mangled, decl.type_params, type_args, enums, entities);
+    }
+    let mutable methods: Array<IrFunction> = compiler_ir.empty_ir_function_array();
+    let mutable mi: Int = 0;
+    while mi < len(decl.methods) {
+        methods.push(monomorphize_member(decl.methods[mi], "self", mangled, decl.type_params, type_args, enums, entities));
+        mi = mi + 1;
+    }
+    return IrEntity(mangled, decl.is_public, fields, invs, decl.has_constructor, ctor, methods);
+}
+
+// monomorphize_member — a constructor/method with its signature types substituted, but
+// its BODY lowered with UNSTAMPED params: the generic body's type-param-typed exprs
+// have no concrete type in stage1 (typeOf -> nil -> Copy), so their args are NOT
+// cloned. Seeding the body scope without params reproduces that (a `T` param stamped
+// concrete would wrongly clone). Non-type-param params are rare in generic members and
+// unused-as-receivers in the corpus, so omitting all param stamps is corpus-faithful.
+function monomorphize_member(f: FunctionDecl, self_name: String, entity_name: String, param_names: Array<String>, param_types: Array<IrType>, enums: Array<EnumDecl>, entities: Array<EntityDecl>) returns IrFunction {
+    let base: LowerScope = lower_scope_with_self(lower_scope_empty(enums, entities), self_name, entity_name);
+    let mutable params: Array<IrParam> = compiler_ir.empty_ir_param_array();
+    let mutable i: Int = 0;
+    while i < len(f.params) {
+        let p: Param = f.params[i];
+        params.push(IrParam(p.name, compiler_ir.ir_substitute_type(compiler_ir.ir_parse_type(p.type_name), param_names, param_types)));
+        i = i + 1;
+    }
+    let reqs: Array<IrContract> = lower_contracts(f.requires_clauses, f.requires_raw, base);
+    let old_caps: Array<IrOldCapture> = collect_old_captures(f.ensures_clauses, base);
+    let ens_scope: LowerScope = lower_scope_with_old(base, true);
+    let enss: Array<IrContract> = lower_contracts(f.ensures_clauses, f.ensures_raw, ens_scope);
+    let body: Array<IrStmt> = lower_block(f.body, base);
+    let ret: IrType = compiler_ir.ir_substitute_type(compiler_ir.ir_parse_type(f.return_type), param_names, param_types);
+    let mutable func: IrFunction = IrFunction(f.name, f.is_entry, f.is_public, f.is_async, params, ret, reqs, enss, body);
+    func.old_captures = old_caps;
+    return func;
+}
+
 // lower — an AST Program to a single IR Module (the entry module: its `entry`
 // function becomes the program main in the backend). Mirrors Lower in lower.go
 // for the trivial subset (functions + tests; other decl kinds land per slice).
@@ -247,8 +501,24 @@ public function lower(prog: Program, path: String) returns IrModule {
     let mutable ents: Array<IrEntity> = compiler_ir.empty_ir_entity_array();
     let mutable eei: Int = 0;
     while eei < len(prog.entities) {
-        ents.push(lower_entity(prog.entities[eei], prog.enums, prog.entities));
+        // Generic entities (type params) are NOT emitted directly — only their
+        // monomorphizations (below). Mirrors stage1's Lower first pass.
+        if len(prog.entities[eei].type_params) == 0 {
+            ents.push(lower_entity(prog.entities[eei], prog.enums, prog.entities));
+        }
         eei = eei + 1;
+    }
+    // Collect generic-entity instantiations across the program and emit a
+    // monomorphized entity for each (mirrors collectInstantiations + monomorphizeEntity).
+    let insts: Array<IrType> = collect_instantiations(prog);
+    let mutable insi: Int = 0;
+    while insi < len(insts) {
+        let inst: IrType = insts[insi];
+        let decl: EntityDecl = find_entity_decl(prog.entities, inst.name);
+        if decl.name != "" {
+            ents.push(monomorphize_entity(decl, inst.type_args, prog.enums, prog.entities));
+        }
+        insi = insi + 1;
     }
     let mutable ints: Array<IrIntent> = compiler_ir.empty_ir_intent_array();
     let mutable ii: Int = 0;
@@ -1094,6 +1364,18 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
                 vc.field_names = resolve_variant_field_names(scope.enums, var_enum, callee.name);
                 vc.enum_name = var_enum;
                 return vc;
+            }
+            // A generic constructor call bakes the type args into the callee name
+            // (`Stack<Int>()` -> callee.name "Stack<Int>"): parse it and, if the base
+            // is a generic entity, emit a constructor call to the mangled concrete name.
+            let gctype: IrType = compiler_ir.ir_parse_type(callee.name);
+            if entity_is_generic(scope.entities, gctype.name) {
+                if len(gctype.type_args) > 0 {
+                    let gmangled: String = compiler_ir.ir_mangle_generic_name(gctype.name, gctype.type_args);
+                    let mutable gcc: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, gmangled, args, compiler_ir.ir_type_named(gmangled));
+                    gcc.call_kind = compiler_ir.callkind_constructor();
+                    return gcc;
+                }
             }
             // A callee naming a declared entity is a constructor call (stage1
             // CallConstructor): `BankAccount(...)` -> `BankAccount::new(...)`.

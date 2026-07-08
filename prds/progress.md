@@ -2848,3 +2848,33 @@ example. diff-emit is **30/30 EQUAL**.
 Gates green: diff-emit 30/30, selfcheck-formatter 7/7, selfcheck-checker 13/13,
 lower_test (+ char case), ir_test, char_string_demo cargo. No shared/* touched.
 REMAINING: generic_stack (monomorphization) — the last real example.
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 24: generics / monomorphization (diff-emit 31/31 — EPIC COMPLETE)
+
+`examples/generic_stack.intent` self-hosts byte-equal — the TWENTY-SECOND (and FINAL)
+real example. **diff-emit is 31/31 EQUAL: ALL 22 real examples + 9 fixtures self-host
+byte-equal.** The self-hosted compiler emits byte-identical Rust to stage1 across the
+entire example corpus.
+
+- **Monomorphization** (mirrors collectInstantiations + monomorphizeEntity): a generic
+  entity `Stack<T>` is NOT emitted; instead each instantiation used in the program
+  (Stack<Int>, Stack<String>) becomes a concrete entity `Stack__Int` / `Stack__String`
+  with T substituted through fields / ctor / methods (ir_substitute_type) and the name
+  mangled (ir_mangle_generic_name). collect_instantiations scans the whole program
+  (function/method/ctor sigs + bodies, tests, fields) for generic-entity type refs and
+  ctor-call names, deduped by mangled name.
+- **Type-ref + ctor-call mangling**: `map_type` mangles a user type WITH type args
+  (Stack<Int> -> Stack__Int); a generic ctor call `Stack<Int>()` (callee name baked with
+  args) lowers to a CallConstructor on the mangled name.
+- **Subtle gotcha**: a monomorphized method BODY is lowered with UNSTAMPED params — a
+  generic body's type-param-typed exprs have no concrete type in stage1 (typeOf -> nil ->
+  Copy), so their args are NOT cloned (`self.items.push(item)`, not `item.clone()`, even
+  for Stack<String>). Substitution applies to SIGNATURES only.
+
+Gates green: diff-emit 31/31, selfcheck-formatter 7/7, selfcheck-checker 13/13,
+lower_test (+ generics case), ir_test, generic_stack cargo. No shared/* touched.
+
+**Phase 55 endgame reached: the Intent compiler compiles itself to byte-equal Rust for
+the full example corpus (front-end since Phase 42-54; IR+backend this phase).**
