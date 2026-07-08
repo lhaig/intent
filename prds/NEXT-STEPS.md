@@ -37,6 +37,81 @@ enums + match + float (shape_area, enum_basic) → entities (bank_account) → g
 (char_string_demo) → traits (handler_trait) → Map (map_demo). Emitter must stay COMPLETE per
 supported construct.
 
+## ▶ NEXT SLICE — the ADR 0059 D3 type bridge + cloneIfNeeded (detailed plan)
+
+`try_operator`, `error_handling`, and `io_demo` all diverge only because they pass non-Copy
+VarRef args that stage1 clones (`parse_number(a.clone())`, `content.clone()`). The stage2 IR
+carries no inferred types, so `cloneIfNeeded` has nothing to check. This slice adds local
+type propagation. Steps:
+
+1. **lower.intent — stamp VarRef types.** Thread a scope (var name → `IrType`) through
+   `lower_block` / `lower_stmt` / `lower_expr` (and `lower_contracts` / `lower_test`), seeded
+   from the function's params (`name → param_type`) and accumulating each `let` binding
+   (`name → let_type`). In the `ex_ident` case, look the name up and set the VarRef's
+   `expr_type`. This threads through ~25 `lower_expr` call sites — mechanical but broad; the
+   gates catch errors. A small `LowerScope` entity (parallel name/type arrays, push + lookup
+   methods, mirroring the checker's scope) is the natural shape. **Gotcha (c):** a function's
+   `Array` param lowers to `&Vec` and cannot be moved into an owned field, so if `LowerScope`
+   holds arrays, fill them from LOCAL owned arrays at the call site (as `lower_expr` already
+   does for `lambda_params` / `match_arms`).
+2. **ir.intent — `ir_is_copy_type(t: IrType) returns Bool`.** Mirrors stage1 `isCopyType`:
+   `Int`/`Float`/`Bool`/`Void`/`Fn`/empty-name → true; else false. Empty/unknown → true so you
+   never OVER-clone (conservative; only clone when the type is known non-Copy).
+3. **rustbe.intent — `clone_if_needed(arg_str, arg)`.** Mirror stage1 `cloneIfNeeded`: return
+   as-is if the arg is a literal, or `arg_str` already starts with `&` or already ends with
+   `.clone()`; else if `arg` is a VarRef / IndexExpr (FieldAccess once entities land) whose
+   `expr_type` is non-Copy, append `.clone()`. Apply it to args in `generate_call` (AFTER the
+   `&`-borrow check) and in `generate_builtin_call` for `Ok`/`Err`/`Some`, `assert_eq`,
+   `read_file`/`write_file`/etc. — match stage1's exact call sites.
+
+Then add `examples/try_operator.intent` to `diff-emit.sh` (should go byte-equal — probe first).
+`error_handling` additionally needs StringConcat → `format!` and `continue`/`break` statements.
+`io_demo` additionally needs the IO builtins (`create_dir`/`write_file`/`read_file`/`file_exists`/
+`env_get` → their `std::fs::…` emit), Float literals, and the **mutatedVars** analysis
+(method-call receivers → `let mut`, e.g. `num.to_string()` makes `num` `let mut`).
+
+**Optional cleanup once VarRefs carry types:** the match-scrutinee `.clone()` is currently
+inferred from builtin-pattern arms (gotcha e); you MAY switch it to the type check to match
+stage1 exactly — verify byte-equal either way, don't regress the 18/18.
+
+## Critical gotchas (cost time to rediscover)
+
+- **(a) Braces.** A literal `{`/`}` in an Intent string lexes as string interpolation — emit
+  every Rust brace via `lbrace()`/`rbrace()`; the `\{` escape does NOT work.
+- **(b) Free functions, not a generator entity.** The rustbe backend threads
+  `funcs: Array<IrFunction>` as a param rather than being a `RustGenerator` entity: stage1's
+  shallow `methodMutatesSelf` inference makes a non-mutating entity's methods an inconsistent
+  `&self`/`&mut self` mix that fails to compile. Keep threading params.
+- **(c) `&Vec` can't move into an owned field.** See step 1 above — array-field helpers take
+  scalars; the caller assigns the array from a LOCAL owned array (`ir_lambda`, `ir_match`).
+- **(d) match indentation is RELATIVE** (forall/exists are FIXED-indent templates). match is
+  emitted only from statement-direct positions via `gen_stmt_value(e, funcs, level)` in
+  `generate_stmt`; nested match → loud marker. Extending match to more positions may finally
+  require threading `level` through `generate_expr`.
+- **(e) match scrutinee `.clone()`** is inferred from builtin (Ok/Err/Some/None) arms, not types.
+- **(f) No `st_assign`** — `x = y` is `st_expr` wrapping `ex_binop` op `"="`; `result` is
+  `ex_ident "result"` → lower to `__result`; parens are `ex_paren` → unwrap to `children[0]`
+  in lowering (the Go AST has no paren node).
+- **(g) Never run stage1 `intentc fmt` on `selfhost/**`** — it strips comments/reorders. The
+  source is maintained as a stage2 formatter fixpoint (`make selfcheck-formatter`). If that gate
+  DIFFs after an edit, run the stage2 formatter binary on the file and take its output as canonical.
+
+## Per-slice workflow / discipline
+
+Capture stage1's exact emit first (`build --emit` in a temp dir, `od -c` for whitespace) →
+mirror the relevant `lower.go`/`rustbe.go` logic in `lower.intent`/`rustbe.intent` (+ new IR
+kinds/helpers in `ir.intent`) → add a fixture (or real example) → `make diff-emit` must stay
+green → add `ir_test`/`lower_test` cases → run `make selfcheck-formatter` + `make
+selfcheck-checker` + `make diff-emit`; **if you touch `selfhost/shared/*`** also run `make
+diff-checker diff-formatter diff-linter` + `go test ./...` + `make validate` (all must stay
+green) → commit (conventional, NO Claude co-author) and `git push`. The emitter must be
+COMPLETE per supported construct — unsupported ones emit a loud `// unsupported:` /
+`/* unsupported */` marker, never silently-wrong Rust. To probe examples, build the stage2
+binary once and set `INTENT_STAGE2_COMPILE` (see how `selfhost/compiler/diff-emit.sh` does it).
+
+_Note: `AGENTS.md` has a pre-existing uncommitted modification that is NOT part of this work —
+leave it unstaged._
+
 **Foundational win:** `ir_parse_type` (in `ir.intent`, mirrors the checker's TypeParser)
 now parses the AST's flat type strings ("Array<Int>", "Map<String, Int>", "Fn(..) -> R")
 into structured IrType — the ADR 0059 D3 bridge. Unblocks all generic-typed constructs.
