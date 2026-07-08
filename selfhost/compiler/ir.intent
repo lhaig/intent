@@ -431,6 +431,36 @@ public entity IrEntity {
     }
 }
 
+// --- Trait ------------------------------------------------------------------
+// A trait declaration; its method signatures reuse IrFunction (name/params/return,
+// empty body). Emitted as `trait Name { fn m(&mut self, ...) -> R; ... }`.
+public entity IrTrait {
+    field name: String;
+    field is_public: Bool;
+    field methods: Array<IrFunction>;
+
+    constructor(name: String, is_public: Bool, methods: Array<IrFunction>) {
+        self.name = name;
+        self.is_public = is_public;
+        self.methods = methods;
+    }
+}
+
+// --- Impl block -------------------------------------------------------------
+// `impl Trait for Entity { ... methods ... }`. Methods reuse IrFunction; they are
+// emitted with an always-`&mut self` receiver (impl-block convention).
+public entity IrImplBlock {
+    field trait_name: String;
+    field entity_name: String;
+    field methods: Array<IrFunction>;
+
+    constructor(trait_name: String, entity_name: String, methods: Array<IrFunction>) {
+        self.trait_name = trait_name;
+        self.entity_name = entity_name;
+        self.methods = methods;
+    }
+}
+
 // --- Intent -----------------------------------------------------------------
 // An `intent` block, emitted as doc-comment lines + a compile-time-verified mod.
 // verifications is a list of already-dotted reference strings (e.g.
@@ -490,6 +520,8 @@ public entity IrModule {
     field enums: Array<IrEnum>;
     field entities: Array<IrEntity>;
     field intents: Array<IrIntent>;
+    field traits: Array<IrTrait>;
+    field impls: Array<IrImplBlock>;
 
     constructor(name: String, decl_name: String, package_name: String, is_entry: Bool, path: String, functions: Array<IrFunction>, tests: Array<IrTest>) {
         self.name = name;
@@ -502,6 +534,8 @@ public entity IrModule {
         self.enums = empty_ir_enum_array();
         self.entities = empty_ir_entity_array();
         self.intents = empty_ir_intent_array();
+        self.traits = empty_ir_trait_array();
+        self.impls = empty_ir_impl_array();
     }
 }
 
@@ -580,6 +614,16 @@ public function empty_ir_entity_array() returns Array<IrEntity> {
 
 public function empty_ir_intent_array() returns Array<IrIntent> {
     let mutable a: Array<IrIntent> = [];
+    return a;
+}
+
+public function empty_ir_trait_array() returns Array<IrTrait> {
+    let mutable a: Array<IrTrait> = [];
+    return a;
+}
+
+public function empty_ir_impl_array() returns Array<IrImplBlock> {
+    let mutable a: Array<IrImplBlock> = [];
     return a;
 }
 

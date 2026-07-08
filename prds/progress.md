@@ -2798,3 +2798,28 @@ lower_test (+ async cases), ir_test. No shared/* touched. NEXT (remaining real
 examples): char_string_demo (char literals + char/String receiver methods + String
 indexing/slicing + char_from_codepoint), handler_trait (traits + impl blocks),
 generic_stack (monomorphization).
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 22: traits + impl blocks (diff-emit 29/29)
+
+`examples/handler_trait.intent` self-hosts byte-equal — the TWENTIETH real example.
+diff-emit is **29/29 EQUAL**.
+
+- **trait decls** (IrTrait): `trait Name { fn m(&mut self, p: T) -> R; ... }` (or
+  `pub trait`); method signatures only (trait methods always &mut self). Reuses
+  IrFunction for the sigs.
+- **impl blocks** (IrImplBlock): `impl Trait for Entity { ... }`; each method emitted
+  with an always-`&mut self` receiver (in_impl=true on generate_method). The entity is
+  looked up by name for invariant checks (empty entity if absent). Methods lower like
+  entity methods (self.field access resolves against the impl's entity).
+- **method-call arg cloning**: the general method-call path now clones non-Copy place
+  args (`start.execute(ctx)` -> `start.execute(ctx.clone())`), mirroring stage1's
+  cloneIfNeeded on general method args.
+
+Decl order updated: entities, enums, traits, impls, functions, intents, tests.
+
+Gates green: diff-emit 29/29, selfcheck-formatter 7/7, selfcheck-checker 13/13,
+lower_test (+ trait case), ir_test. No shared/* touched. REMAINING: char_string_demo
+(char literals + char/String receiver methods + String indexing/slicing +
+char_from_codepoint), generic_stack (monomorphization).

@@ -256,12 +256,58 @@ public function lower(prog: Program, path: String) returns IrModule {
         ints.push(lower_intent(prog.intent_blocks[ii]));
         ii = ii + 1;
     }
+    let mutable trs: Array<IrTrait> = compiler_ir.empty_ir_trait_array();
+    let mutable tri: Int = 0;
+    while tri < len(prog.traits) {
+        trs.push(lower_trait(prog.traits[tri], prog.enums, prog.entities));
+        tri = tri + 1;
+    }
+    let mutable imps: Array<IrImplBlock> = compiler_ir.empty_ir_impl_array();
+    let mutable imi: Int = 0;
+    while imi < len(prog.impls) {
+        imps.push(lower_impl(prog.impls[imi], prog.enums, prog.entities));
+        imi = imi + 1;
+    }
     let decl_name: String = prog.module_decl.name;
     let mutable m: IrModule = IrModule(decl_name, decl_name, "", true, path, fns, tsts);
     m.enums = ens;
     m.entities = ents;
     m.intents = ints;
+    m.traits = trs;
+    m.impls = imps;
     return m;
+}
+
+// lower_trait — mirrors lowerTrait: each method signature (TraitMethodSig) becomes an
+// IrFunction (name/params/return, empty body). Enum/entity registries seed param types.
+public function lower_trait(t: TraitDecl, enums: Array<EnumDecl>, entities: Array<EntityDecl>) returns IrTrait {
+    let mutable methods: Array<IrFunction> = compiler_ir.empty_ir_function_array();
+    let mutable mi: Int = 0;
+    while mi < len(t.methods) {
+        let tm: TraitMethodSig = t.methods[mi];
+        let mutable params: Array<IrParam> = compiler_ir.empty_ir_param_array();
+        let mutable pi: Int = 0;
+        while pi < len(tm.params) {
+            let p: Param = tm.params[pi];
+            params.push(IrParam(p.name, compiler_ir.ir_parse_type(p.type_name)));
+            pi = pi + 1;
+        }
+        methods.push(IrFunction(tm.name, false, false, false, params, compiler_ir.ir_parse_type(tm.return_type), compiler_ir.empty_ir_contract_array(), compiler_ir.empty_ir_contract_array(), compiler_ir.empty_ir_stmt_array()));
+        mi = mi + 1;
+    }
+    return IrTrait(t.name, t.is_public, methods);
+}
+
+// lower_impl — mirrors lowerImplBlock: each method is lowered like an entity method
+// (self stays "self"; self.field access types resolve against the impl's entity).
+public function lower_impl(ib: ImplDecl, enums: Array<EnumDecl>, entities: Array<EntityDecl>) returns IrImplBlock {
+    let mutable methods: Array<IrFunction> = compiler_ir.empty_ir_function_array();
+    let mutable mi: Int = 0;
+    while mi < len(ib.methods) {
+        methods.push(lower_member(ib.methods[mi], "self", ib.entity_name, enums, entities));
+        mi = mi + 1;
+    }
+    return IrImplBlock(ib.trait_name, ib.entity_name, methods);
 }
 
 // lower_entity — mirrors lowerEntity: fields (parsed types), invariants (with raw

@@ -483,4 +483,23 @@ test "lowers spawn/await with join-handle tracking" {
     assert(await_let.expr.children[0].name == "f");
 }
 
+test "lowers a trait and an impl block" {
+    let src: String = "module m version \"1.0.0\";\n\nentity E " + lbrace() + "\n    field n: Int;\n    constructor(n: Int) " + lbrace() + "\n        self.n = n;\n    " + rbrace() + "\n" + rbrace() + "\n\ntrait T " + lbrace() + "\n    method run(x: Int) returns Int;\n" + rbrace() + "\n\nimpl T for E " + lbrace() + "\n    method run(x: Int) returns Int " + lbrace() + "\n        return self.n + x;\n    " + rbrace() + "\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    assert(len(m.traits) == 1);
+    assert(m.traits[0].name == "T");
+    assert(m.traits[0].methods[0].name == "run");
+    assert(m.traits[0].methods[0].return_type.name == "Int");
+    assert(len(m.impls) == 1);
+    assert(m.impls[0].trait_name == "T");
+    assert(m.impls[0].entity_name == "E");
+    // impl method body: `self.n + x` — self.n is a field access stamped Int.
+    let run: IrFunction = m.impls[0].methods[0];
+    let ret: IrExpr = run.body[0].expr;
+    assert(ret.kind == compiler_ir.irex_binary());
+    assert(ret.children[0].kind == compiler_ir.irex_field());
+    assert(ret.children[0].expr_type.name == "Int");
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

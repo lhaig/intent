@@ -53,6 +53,18 @@ public function generate(m: IrModule) returns String {
         body = body + "\n";
         eni = eni + 1;
     }
+    let mutable tri: Int = 0;
+    while tri < len(m.traits) {
+        body = body + generate_trait(m.traits[tri]);
+        body = body + "\n";
+        tri = tri + 1;
+    }
+    let mutable imi: Int = 0;
+    while imi < len(m.impls) {
+        body = body + generate_impl_block(m.impls[imi], m.entities, funcs);
+        body = body + "\n";
+        imi = imi + 1;
+    }
     let mutable fi: Int = 0;
     while fi < len(m.functions) {
         body = body + generate_function(m.functions[fi], funcs);
@@ -188,12 +200,69 @@ public function generate_entity(e: IrEntity, funcs: Array<IrFunction>) returns S
     }
     let mutable mi: Int = 0;
     while mi < len(e.methods) {
-        out = out + generate_method(e, e.methods[mi], funcs);
+        out = out + generate_method(e, e.methods[mi], funcs, false);
         out = out + "\n";
         mi = mi + 1;
     }
     out = out + rbrace() + "\n";
     return out;
+}
+
+// generate_trait — mirrors generateTrait: `trait Name { fn m(&mut self, p: T) -> R; }`
+// (or `pub trait`). Method signatures only (no body); Void return -> `);`.
+public function generate_trait(t: IrTrait) returns String {
+    let mutable out: String = "trait " + t.name + " " + lbrace() + "\n";
+    if t.is_public {
+        out = "pub trait " + t.name + " " + lbrace() + "\n";
+    }
+    let mutable mi: Int = 0;
+    while mi < len(t.methods) {
+        let tm: IrFunction = t.methods[mi];
+        let mutable sig: String = "    fn " + tm.name + "(&mut self";
+        let mutable pi: Int = 0;
+        while pi < len(tm.params) {
+            sig = sig + ", " + tm.params[pi].name + ": " + map_type(tm.params[pi].param_type);
+            pi = pi + 1;
+        }
+        if tm.return_type.name == "Void" {
+            sig = sig + ");\n";
+        } else {
+            sig = sig + ") -> " + map_type(tm.return_type) + ";\n";
+        }
+        out = out + sig;
+        mi = mi + 1;
+    }
+    out = out + rbrace() + "\n";
+    return out;
+}
+
+// generate_impl_block — mirrors generateImplBlock: `impl Trait for Entity { ... }`,
+// each method emitted with an always-`&mut self` receiver (in_impl=true). The entity
+// is looked up (by name) for invariant checks; a missing one uses an empty entity.
+public function generate_impl_block(ib: IrImplBlock, entities: Array<IrEntity>, funcs: Array<IrFunction>) returns String {
+    let e: IrEntity = find_ir_entity(entities, ib.entity_name);
+    let mutable out: String = "impl " + ib.trait_name + " for " + ib.entity_name + " " + lbrace() + "\n";
+    let mutable mi: Int = 0;
+    while mi < len(ib.methods) {
+        out = out + generate_method(e, ib.methods[mi], funcs, true);
+        out = out + "\n";
+        mi = mi + 1;
+    }
+    out = out + rbrace() + "\n";
+    return out;
+}
+
+// find_ir_entity — the entity named `name`, or an empty entity (no invariants) if
+// absent (mirrors generateImplBlock's synthesized fallback).
+function find_ir_entity(entities: Array<IrEntity>, name: String) returns IrEntity {
+    let mutable i: Int = 0;
+    while i < len(entities) {
+        if entities[i].name == name {
+            return entities[i];
+        }
+        i = i + 1;
+    }
+    return IrEntity("", false, compiler_ir.empty_ir_param_array(), compiler_ir.empty_ir_contract_array(), false, compiler_ir.empty_ir_function(), compiler_ir.empty_ir_function_array());
 }
 
 // generate_constructor — mirrors generateConstructor: `fn new(params) -> Name`,
@@ -339,11 +408,15 @@ public function default_value(t: IrType) returns String {
 // generate_method — mirrors generateMethod: `&self`/`&mut self` per method_mutates_self,
 // old captures, requires, a labeled `'body:` block (non-Void with ensures/invariants)
 // or plain body, ensures, and the invariant check. Braces via lbrace()/rbrace().
-public function generate_method(e: IrEntity, m: IrFunction, funcs: Array<IrFunction>) returns String {
+public function generate_method(e: IrEntity, m: IrFunction, funcs: Array<IrFunction>, in_impl: Bool) returns String {
     let mutated: Array<String> = collect_mutated_vars(m.body);
+    // Impl-block methods always take `&mut self` (to match the trait declaration);
+    // a plain entity method uses `&self` when it does not mutate self.
     let mutable receiver: String = "&mut self";
-    if not method_mutates_self(m.body) {
-        receiver = "&self";
+    if not in_impl {
+        if not method_mutates_self(m.body) {
+            receiver = "&self";
+        }
     }
     let ret_void: Bool = m.return_type.name == "Void";
     let mutable out: String = "    fn " + m.name + "(" + receiver;
@@ -1164,7 +1237,9 @@ public function generate_method_call(e: IrExpr, funcs: Array<IrFunction>) return
         if i > 1 {
             out = out + ", ";
         }
-        out = out + generate_expr(e.children[i], funcs);
+        // General method-call args are cloned if non-Copy places (mirrors stage1's
+        // cloneIfNeeded on each arg in the general path — e.g. an entity arg).
+        out = out + clone_if_needed(generate_expr(e.children[i], funcs), e.children[i]);
         i = i + 1;
     }
     out = out + ")";

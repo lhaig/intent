@@ -331,6 +331,17 @@ from enums+entities, 25/25) self-host byte-equal.
   function-call special case). **Future<T>** -> `tokio::task::JoinHandle<T>` (map_type;
   fully qualified, so no `use` injection).
 
+## Update — traits + impl blocks
+
+`examples/handler_trait.intent` self-hosts byte-equal (diff-emit 29/29). New `IrTrait`
+(method sigs reuse IrFunction) emits `trait Name { fn m(&mut self, …) -> R; }`;
+`IrImplBlock` emits `impl Trait for Entity { … }` with each method forced to `&mut
+self` (a new `in_impl` flag on `generate_method`, mirroring stage1's `inImplBlock`).
+Impl methods lower like entity methods (self.field types resolve against the impl's
+entity, looked up by name). The general method-call path now clones non-Copy place
+args (`start.execute(ctx.clone())`), matching stage1's cloneIfNeeded. Decl order:
+entities, enums, traits, impls, functions, intents, tests.
+
 ## References
 
 - [`internal/ir/nodes.go`](../../internal/ir/nodes.go) — the port target for this slice.
