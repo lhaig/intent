@@ -2732,3 +2732,17 @@ ir_test 17, lower_test 131 (+2 entity cases), bank_account cargo 3/3.
 NEXT: generics (generic_stack — monomorphization: Stack<Int>/Stack<String> ->
 distinct concrete types) -> traits (handler_trait) -> Map (map_demo) -> async
 (async_demo, task_queue) -> char/string interp (char_string_demo) -> js_demo.
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 19: js_demo (free win from enums + entities) (diff-emit 25/25)
+
+`examples/js_demo.intent` self-hosts byte-equal with NO new compiler code — it uses
+only enums (Color) + an entity (Counter) + functions with contracts, all supported by
+slices 17-18. Added to the diff-emit corpus (**25/25 EQUAL**); confirms the enum +
+entity machinery generalises. 16 real examples now self-host.
+
+NEXT (each large, each needs new machinery): generics/monomorphization (generic_stack),
+receiver-type method dispatch (map_demo needs Map->HashMap + use-injection; char_string_demo
+needs char literals with \u escapes + String/Char receiver methods + String indexing),
+traits (handler_trait), async (async_demo, task_queue).
