@@ -330,6 +330,8 @@ public entity Parser {
         let mutable reqs: Array<Expr> = [];
         let mutable enss: Array<Expr> = [];
         let mutable decs: Array<Expr> = [];
+        let mutable reqs_raw: Array<String> = [];
+        let mutable enss_raw: Array<String> = [];
         while self.is_contract_kw() and self.error == "" {
             let kw_tok: Token = self.advance();
             let kw: String = kw_tok.text;
@@ -337,14 +339,20 @@ public entity Parser {
             // contract-typing diagnostics anchor at requires/ensures (matching
             // stage1 RequiresClause/EnsuresClause.Pos(), the keyword). Inert to
             // the formatter (ADR 0054).
+            let raw_start: Int = self.position;
             let mutable pred: Expr = self.parse_expr();
             pred.line = kw_tok.line;
             pred.column = kw_tok.column;
+            // Phase 55 / ADR 0059: capture the clause's raw text (tokens joined by
+            // single spaces) for byte-equal contract assert! messages downstream.
+            let raw: String = self.clause_raw_text(raw_start);
             if kw == "requires" {
                 reqs.push(pred);
+                reqs_raw.push(raw);
             } else {
                 if kw == "ensures" {
                     enss.push(pred);
+                    enss_raw.push(raw);
                 } else {
                     decs.push(pred);
                 }
@@ -355,6 +363,8 @@ public entity Parser {
         fd.requires_clauses = reqs;
         fd.ensures_clauses = enss;
         fd.decreases_clauses = decs;
+        fd.requires_raw = reqs_raw;
+        fd.ensures_raw = enss_raw;
         fd.type_params = type_params;
         fd.type_param_lines = self.tp_lines;
         fd.type_param_columns = self.tp_columns;
@@ -368,6 +378,25 @@ public entity Parser {
         }
         let t: String = self.peek_text();
         return t == "requires" or t == "ensures" or t == "decreases";
+    }
+
+    // clause_raw_text — the source text of the tokens from `start` up to (but not
+    // including) the current position, joined by single spaces. Mirrors stage1
+    // parser.extractRawText; used for byte-equal contract assert! messages (ADR
+    // 0059). Called right after a contract predicate is parsed, with `start` being
+    // the position of the predicate's first token.
+    method clause_raw_text(start: Int) returns String {
+        let end_pos: Int = self.position - 1;
+        let mutable out: String = "";
+        let mutable i: Int = start;
+        while i <= end_pos {
+            if i > start {
+                out = out + " ";
+            }
+            out = out + self.tokens[i].text;
+            i = i + 1;
+        }
+        return out;
     }
 
     method parse_block() returns Block {

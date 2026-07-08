@@ -2299,3 +2299,35 @@ Byte-equal now: **hello, divergence_demo**. The rest each need a specific unbuil
 Each is a substantial, byte-exact slice (the remaining bulk of the ~4000 LOC lower.go+rustbe.go
 port). NEXT recommended: contracts (unlocks the most examples) — start with the shared-AST
 raw-text enrichment sub-task, then the ensures labeled-block emit.
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 6: CONTRACTS (diff-emit 9/9, FOUR real examples)
+
+The biggest unlock so far. `requires`/`ensures` now emit byte-equal, so
+`examples/fibonacci.intent` (and `target_specific_demo`) self-host. diff-emit is
+**9/9 EQUAL** — four real examples (hello, divergence_demo, fibonacci,
+target_specific_demo) + 5 fixtures.
+
+Three sub-tasks:
+- **A. Shared-AST enrichment** (the flagged blocker): stage1's contract `RawText` is
+  the clause's tokens joined by single spaces (`parser.go:extractRawText`). Added
+  `requires_raw`/`ensures_raw: Array<String>` to `shared/ast.intent` FunctionDecl
+  (defaulted, ADR 0054 style) + a `clause_raw_text(start)` parser method that joins
+  `tokens[start..position-1].text` with " ", captured in the top-level function
+  contract loop. **Verified inert**: selfcheck-formatter/checker, diff-checker 86/86,
+  diff-formatter 22/22, diff-linter 26/26, go test all still green.
+- **B. Lowering**: `lower_contracts` pairs each predicate Expr with its raw text into
+  IrContracts. `result` (ex_ident "result", stage1's reserved ResultExpr) lowers to a
+  var-ref emitting `__result`.
+- **C. Emit**: requires -> `assert!(PRED, "Precondition failed: <raw>")`; ensures (with
+  non-Void return) -> the `let __result: T = 'body: { ... };` labeled block + post
+  asserts + `__result`. Threaded `in_labeled` through generate_stmts/stmt/if/while/for
+  so `return X` inside the block becomes `break 'body X`. Added `assert_eq` builtin.
+
+Deferred: old() in ensures (bank_account), --strip-contracts (assert!->debug_assert!),
+entity-method contracts (the other two parser contract loops), arg cloning in assert_eq.
+
+Gates green: diff-emit 9/9, selfcheck-formatter 7/7, selfcheck-checker 13/13, ir_test
+8/8, lower_test 115/115, diff-checker/formatter/linter, go test, validate all OK.
+NEXT: arrays/Map (sorted_check, array_sum) or entities (bank_account).

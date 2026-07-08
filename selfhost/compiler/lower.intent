@@ -51,8 +51,26 @@ public function lower_function(f: FunctionDecl) returns IrFunction {
         params.push(IrParam(p.name, compiler_ir.ir_type_named(p.type_name)));
         i = i + 1;
     }
+    let reqs: Array<IrContract> = lower_contracts(f.requires_clauses, f.requires_raw);
+    let enss: Array<IrContract> = lower_contracts(f.ensures_clauses, f.ensures_raw);
     let body: Array<IrStmt> = lower_block(f.body);
-    return IrFunction(f.name, f.is_entry, f.is_public, f.is_async, params, compiler_ir.ir_type_named(f.return_type), compiler_ir.empty_ir_contract_array(), compiler_ir.empty_ir_contract_array(), body);
+    return IrFunction(f.name, f.is_entry, f.is_public, f.is_async, params, compiler_ir.ir_type_named(f.return_type), reqs, enss, body);
+}
+
+// lower_contracts — pair each contract predicate Expr with its captured raw text
+// (Phase 55 shared-AST enrichment, ADR 0059) into IrContracts. The predicate is
+// lowered like any expr, so `result` in an ensures clause becomes __result. old()
+// captures in ensures are deferred to a later sub-slice (no corpus entry uses
+// them yet). requires_raw / ensures_raw are parallel to the clause arrays.
+public function lower_contracts(preds: Array<Expr>, raws: Array<String>) returns Array<IrContract> {
+    let mutable out: Array<IrContract> = compiler_ir.empty_ir_contract_array();
+    let mutable i: Int = 0;
+    while i < len(preds) {
+        let p: Expr = preds[i];
+        out.push(IrContract(lower_expr(p), raws[i], p.line, p.column));
+        i = i + 1;
+    }
+    return out;
 }
 
 // lower_test — mirrors lowerTest. The AST already stores annotations as their
@@ -152,6 +170,12 @@ public function lower_expr(e: Expr) returns IrExpr {
         return compiler_ir.ir_string_lit("\"" + e.str_value + "\"");
     }
     if e.kind == shared_ast.ex_ident() {
+        // `result` in an ensures clause is stage1's ResultExpr, emitted as the
+        // synthetic __result binding of the ensures labeled block. The stage2 AST
+        // has no dedicated node (result is reserved, so no real variable collides).
+        if e.name == "result" {
+            return compiler_ir.ir_var_ref("__result");
+        }
         return compiler_ir.ir_var_ref(e.name);
     }
     if e.kind == shared_ast.ex_binop() {

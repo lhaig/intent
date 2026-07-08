@@ -150,4 +150,19 @@ test "lowers a string literal by re-quoting the AST's unquoted content" {
     assert(printcall.call_kind == compiler_ir.callkind_builtin());
 }
 
+test "lowers requires/ensures with captured raw text and result -> __result" {
+    let src: String = "module c version \"1.0.0\";\n\nfunction f(n: Int) returns Int\n    requires n >= 0\n    ensures result >= 0\n" + lbrace() + "\n    return n;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "c.intent");
+    let func: IrFunction = m.functions[0];
+    assert(len(func.requires_clauses) == 1);
+    assert(func.requires_clauses[0].raw_text == "n >= 0");
+    assert(func.requires_clauses[0].expr.kind == compiler_ir.irex_binary());
+    assert(len(func.ensures_clauses) == 1);
+    assert(func.ensures_clauses[0].raw_text == "result >= 0");
+    let post: IrExpr = func.ensures_clauses[0].expr;
+    assert(post.children[0].kind == compiler_ir.irex_var());
+    assert(post.children[0].name == "__result");
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

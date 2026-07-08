@@ -15,13 +15,14 @@ byte-equal against stage1 before landing; all pre-existing gates stayed green th
 **NEXT FRONT — scale the emitter construct-by-construct** (PRD "Then scale up"). Each slice:
 grow `lower.intent` + `rustbe.intent` for one construct, add a byte-equal corpus entry to
 `selfhost/compiler/diff-emit.sh`. Order (✅ = done, byte-equal-gated in diff-emit):
-✅ let-bindings & locals → ✅ arithmetic/comparison/logical binops → ✅ if/while/for + assignment
-→ ✅ user functions & calls & args → ✅ strings & `print` → **NEXT: contracts** → arrays/Map →
+✅ let-bindings & locals → ✅ binops → ✅ if/while/for + assignment → ✅ functions & calls →
+✅ strings & `print` → ✅ contracts (requires/ensures) → **NEXT: arrays/Map** →
 entities (structs) + field access + methods → enums + match → Result/Option/`?` → generics →
 closures/lambdas → async → char/float + string concat/interp. The 22 `TESTED_EXAMPLES` are the
 target corpus. Emitter must stay COMPLETE per supported construct (unlike the checker).
 
-**diff-emit is at 7/7** — TWO real examples (`hello`, `divergence_demo`) plus 5 fixtures
+**diff-emit is at 9/9** — FOUR real examples (`hello`, `divergence_demo`, `fibonacci`,
+`target_specific_demo`) plus 5 fixtures
 (`let_locals`, `binops`, `control_flow`, `functions`, `strings`). Supported constructs:
 entry+non-entry functions & params & calls, `return`, `let`/`let mutable`, var refs, int/bool/
 string literals, all binops (`(l op r)`, `implies`), if/else(+1-level else-if)/while/for-in,

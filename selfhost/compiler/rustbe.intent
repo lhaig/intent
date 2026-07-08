@@ -44,24 +44,18 @@ public function generate(m: IrModule) returns String {
 }
 
 // generate_function — mirrors generateFunction. A single-file ENTRY function
-// becomes `fn __intent_main() -> i64` plus a `fn main` wrapper. A non-entry
-// function emits its signature (params + return type) and body. Deferred to
-// later slices: async (tokio), contracts (requires/ensures assert! + the ensures
-// labeled block), and Array/Map params passed by reference (needs the call-site
-// borrow logic too).
+// becomes `fn __intent_main() -> i64` plus a `fn main` wrapper (stage1's entry
+// path ignores contracts). A non-entry function emits its signature, requires
+// asserts, then either an ensures `'body:` labeled block (when it has ensures and
+// a non-Void return) or the plain body followed by any ensures asserts. Deferred:
+// async (tokio); old() in ensures; Array/Map by-ref params; --strip-contracts.
 public function generate_function(f: IrFunction) returns String {
     if f.is_async {
         return "// unsupported: async function " + f.name + "\n";
     }
-    if len(f.requires_clauses) > 0 {
-        return "// unsupported: requires clause on " + f.name + "\n";
-    }
-    if len(f.ensures_clauses) > 0 {
-        return "// unsupported: ensures clause on " + f.name + "\n";
-    }
     if f.is_entry {
         let mutable out: String = "fn __intent_main() -> i64 " + lbrace() + "\n";
-        out = out + generate_stmts(f.body, 1);
+        out = out + generate_stmts(f.body, 1, false);
         out = out + rbrace() + "\n";
         out = out + "\n";
         out = out + "fn main() " + lbrace() + "\n";
@@ -70,6 +64,7 @@ public function generate_function(f: IrFunction) returns String {
         out = out + rbrace() + "\n";
         return out;
     }
+    let ret_ty: String = map_type(f.return_type);
     let mutable sig: String = "fn " + f.name + "(";
     let mutable i: Int = 0;
     while i < len(f.params) {
@@ -79,10 +74,34 @@ public function generate_function(f: IrFunction) returns String {
         sig = sig + f.params[i].name + ": " + map_type(f.params[i].param_type);
         i = i + 1;
     }
-    sig = sig + ") -> " + map_type(f.return_type) + " " + lbrace() + "\n";
-    sig = sig + generate_stmts(f.body, 1);
+    sig = sig + ") -> " + ret_ty + " " + lbrace() + "\n";
+    sig = sig + generate_contracts(f.requires_clauses, "Precondition failed: ");
+    let needs_labeled: Bool = len(f.ensures_clauses) > 0 and f.return_type.name != "Void";
+    if needs_labeled {
+        sig = sig + "    let __result: " + ret_ty + " = 'body: " + lbrace() + "\n";
+        sig = sig + generate_stmts(f.body, 2, true);
+        sig = sig + "    " + rbrace() + ";\n";
+        sig = sig + generate_contracts(f.ensures_clauses, "Postcondition failed: ");
+        sig = sig + "    __result\n";
+    } else {
+        sig = sig + generate_stmts(f.body, 1, false);
+        sig = sig + generate_contracts(f.ensures_clauses, "Postcondition failed: ");
+    }
     sig = sig + rbrace() + "\n";
     return sig;
+}
+
+// generate_contracts — one `assert!(PRED, "PREFIX<raw>");` per clause at the
+// function-body indent (level 1). Mirrors the requires / ensures assert emission.
+// Uses assert! (not debug_assert!); --strip-contracts parity is a later concern.
+public function generate_contracts(clauses: Array<IrContract>, prefix: String) returns String {
+    let mutable out: String = "";
+    let mutable i: Int = 0;
+    while i < len(clauses) {
+        out = out + "    assert!(" + generate_expr(clauses[i].expr) + ", \"" + prefix + clauses[i].raw_text + "\");\n";
+        i = i + 1;
+    }
+    return out;
 }
 
 // generate_test — mirrors generateTest. Test name is sanitised to a Rust-legal
@@ -94,30 +113,38 @@ public function generate_test(t: IrTest) returns String {
     let fn_name: String = "__test_" + sanitise_test_name(t.name);
     let mutable out: String = "#[test]\n";
     out = out + "fn " + fn_name + "() " + lbrace() + "\n";
-    out = out + generate_stmts(t.body, 1);
+    out = out + generate_stmts(t.body, 1, false);
     out = out + rbrace() + "\n";
     return out;
 }
 
 // generate_stmts — emit each statement at the given indent level, in order.
-public function generate_stmts(stmts: Array<IrStmt>, level: Int) returns String {
+// in_labeled propagates the ensures `'body:` context so a `return` inside it (at
+// any nesting depth) becomes `break 'body`.
+public function generate_stmts(stmts: Array<IrStmt>, level: Int, in_labeled: Bool) returns String {
     let mutable out: String = "";
     let mutable i: Int = 0;
     while i < len(stmts) {
-        out = out + generate_stmt(stmts[i], level);
+        out = out + generate_stmt(stmts[i], level, in_labeled);
         i = i + 1;
     }
     return out;
 }
 
-// generate_stmt — mirrors generateStmt for the trivial subset (return, expr).
-// A bare `return;` is irst_return carrying the irex_void placeholder. Other
-// statement kinds land per slice; the fallback fails the gate loudly.
-public function generate_stmt(s: IrStmt, level: Int) returns String {
+// generate_stmt — mirrors generateStmt. Inside an ensures labeled block
+// (in_labeled), `return X` becomes `break 'body X` and bare `return` becomes
+// `break 'body`. Unsupported kinds fail the gate loudly.
+public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool) returns String {
     let ind: String = indent_str(level);
     if s.kind == compiler_ir.irst_return() {
         if s.expr.kind == compiler_ir.irex_void() {
+            if in_labeled {
+                return ind + "break 'body;\n";
+            }
             return ind + "return;\n";
+        }
+        if in_labeled {
+            return ind + "break 'body " + generate_expr(s.expr) + ";\n";
         }
         return ind + "return " + generate_expr(s.expr) + ";\n";
     }
@@ -136,13 +163,13 @@ public function generate_stmt(s: IrStmt, level: Int) returns String {
         return ind + generate_expr(s.target) + " = " + generate_expr(s.expr) + ";\n";
     }
     if s.kind == compiler_ir.irst_if() {
-        return generate_if(s, level);
+        return generate_if(s, level, in_labeled);
     }
     if s.kind == compiler_ir.irst_while() {
-        return generate_while(s, level);
+        return generate_while(s, level, in_labeled);
     }
     if s.kind == compiler_ir.irst_for() {
-        return generate_for(s, level);
+        return generate_for(s, level, in_labeled);
     }
     return ind + "// unsupported stmt\n";
 }
@@ -154,10 +181,10 @@ public function generate_stmt(s: IrStmt, level: Int) returns String {
 // stage1. Bodies indent one level deeper than the `if`.
 // Braces in the emitted Rust go through lbrace()/rbrace() — a literal `{`/`}` in
 // an Intent string lexes as string interpolation.
-public function generate_if(s: IrStmt, level: Int) returns String {
+public function generate_if(s: IrStmt, level: Int, in_labeled: Bool) returns String {
     let ind: String = indent_str(level);
     let mutable out: String = ind + "if " + generate_expr(s.expr) + " " + lbrace() + "\n";
-    out = out + generate_stmts(s.then_body, level + 1);
+    out = out + generate_stmts(s.then_body, level + 1, in_labeled);
     out = out + ind + rbrace();
     if s.has_else {
         let mutable is_else_if: Bool = false;
@@ -169,11 +196,11 @@ public function generate_if(s: IrStmt, level: Int) returns String {
         if is_else_if {
             let ei: IrStmt = s.else_body[0];
             out = out + " else if " + generate_expr(ei.expr) + " " + lbrace() + "\n";
-            out = out + generate_stmts(ei.then_body, level + 1);
+            out = out + generate_stmts(ei.then_body, level + 1, in_labeled);
             out = out + ind + rbrace();
             if ei.has_else {
                 out = out + " else " + lbrace() + "\n";
-                out = out + generate_stmts(ei.else_body, level + 1);
+                out = out + generate_stmts(ei.else_body, level + 1, in_labeled);
                 out = out + ind + rbrace() + "\n";
             } else {
                 out = out + "\n";
@@ -181,7 +208,7 @@ public function generate_if(s: IrStmt, level: Int) returns String {
             return out;
         }
         out = out + " else " + lbrace() + "\n";
-        out = out + generate_stmts(s.else_body, level + 1);
+        out = out + generate_stmts(s.else_body, level + 1, in_labeled);
         out = out + ind + rbrace() + "\n";
         return out;
     }
@@ -191,17 +218,17 @@ public function generate_if(s: IrStmt, level: Int) returns String {
 
 // generate_while — mirrors generateWhileStmt's no-contract path: `while COND {`
 // ... `}`. Loop invariants / decreases (the contract path) land with contracts.
-public function generate_while(s: IrStmt, level: Int) returns String {
+public function generate_while(s: IrStmt, level: Int, in_labeled: Bool) returns String {
     let ind: String = indent_str(level);
     let mutable out: String = ind + "while " + generate_expr(s.expr) + " " + lbrace() + "\n";
-    out = out + generate_stmts(s.then_body, level + 1);
+    out = out + generate_stmts(s.then_body, level + 1, in_labeled);
     out = out + ind + rbrace() + "\n";
     return out;
 }
 
 // generate_for — mirrors generateForInStmt: `for VAR in (START..END) {` for a
 // range iterable, else `for VAR in EXPR.iter() {`.
-public function generate_for(s: IrStmt, level: Int) returns String {
+public function generate_for(s: IrStmt, level: Int, in_labeled: Bool) returns String {
     let ind: String = indent_str(level);
     let mutable out: String = ind + "for " + s.name + " in ";
     if s.expr.kind == compiler_ir.irex_range() {
@@ -210,7 +237,7 @@ public function generate_for(s: IrStmt, level: Int) returns String {
         out = out + generate_expr(s.expr) + ".iter()";
     }
     out = out + " " + lbrace() + "\n";
-    out = out + generate_stmts(s.then_body, level + 1);
+    out = out + generate_stmts(s.then_body, level + 1, in_labeled);
     out = out + ind + rbrace() + "\n";
     return out;
 }
@@ -363,6 +390,11 @@ public function generate_call(e: IrExpr) returns String {
 public function generate_builtin_call(e: IrExpr) returns String {
     if e.name == "assert" {
         return "assert!(" + generate_expr(e.children[0]) + ", \"assertion failed\")";
+    }
+    if e.name == "assert_eq" {
+        // assert_eq!(a, b, "assertion failed"). Non-Copy-arg cloning and the
+        // entity-eq special case land with the arrays/entities slices.
+        return "assert_eq!(" + generate_expr(e.children[0]) + ", " + generate_expr(e.children[1]) + ", \"assertion failed\")";
     }
     if e.name == "print" {
         // println!("{}", ARG) — the "{}" braces go through lbrace()/rbrace().

@@ -93,6 +93,20 @@ test "control-flow statements carry bodies, defaults, and ranges" {
     assert(rng.children[1].int_value == 5);
 }
 
+test "a function carries requires/ensures contracts with raw text" {
+    let pred: IrExpr = compiler_ir.ir_binary(">=", compiler_ir.ir_var_ref("n"), compiler_ir.ir_int_lit(0));
+    let c: IrContract = IrContract(pred, "n >= 0", 3, 5);
+    assert(c.raw_text == "n >= 0");
+    assert(c.line == 3);
+    assert(c.expr.kind == compiler_ir.irex_binary());
+    let mutable reqs: Array<IrContract> = compiler_ir.empty_ir_contract_array();
+    reqs.push(c);
+    let func: IrFunction = IrFunction("f", false, false, false, compiler_ir.empty_ir_param_array(), compiler_ir.ir_type_named("Int"), reqs, compiler_ir.empty_ir_contract_array(), compiler_ir.empty_ir_stmt_array());
+    assert(len(func.requires_clauses) == 1);
+    assert(func.requires_clauses[0].raw_text == "n >= 0");
+    assert(len(func.ensures_clauses) == 0);
+}
+
 test "a hello-shaped module holds its entry function and test" {
     let mutable body: Array<IrStmt> = [];
     body.push(IrStmt(compiler_ir.irst_return(), compiler_ir.ir_int_lit(0)));
