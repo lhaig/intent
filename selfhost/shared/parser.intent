@@ -386,10 +386,16 @@ public entity Parser {
     // 0059). Called right after a contract predicate is parsed, with `start` being
     // the position of the predicate's first token.
     method clause_raw_text(start: Int) returns String {
-        let end_pos: Int = self.position - 1;
+        return self.raw_text_range(start, self.position - 1);
+    }
+
+    // raw_text_range — the source text of tokens [start, end_incl] joined by single
+    // spaces (mirrors stage1 parser.extractRawText). Used for contract and invariant
+    // raw text (ADR 0059).
+    method raw_text_range(start: Int, end_incl: Int) returns String {
         let mutable out: String = "";
         let mutable i: Int = start;
-        while i <= end_pos {
+        while i <= end_incl {
             if i > start {
                 out = out + " ";
             }
@@ -1078,6 +1084,7 @@ public entity Parser {
         let mutable has_ctor: Bool = false;
         let mutable ctor: FunctionDecl = shared_ast.empty_function_decl();
         let mutable invariants: Array<Expr> = [];
+        let mutable invariants_raw: Array<String> = [];
         while not self.at_end() and not self.check(shared_lexer.tk_rbrace()) and self.error == "" {
             if self.check(shared_lexer.kw_field_marker()) {
                 let fcmts: Array<String> = self.tokens[self.position].comments_before;
@@ -1099,7 +1106,13 @@ public entity Parser {
                         methods.push(md);
                     } else {
                         if self.check(shared_lexer.kw_invariant_marker()) {
+                            // Capture the invariant's raw source text (the expr tokens
+                            // between `invariant` and `;`, joined by single spaces) for
+                            // byte-equal `Invariant failed: <raw>` assert messages (ADR
+                            // 0059). inv_expr_start is the token after `invariant`.
+                            let inv_expr_start: Int = self.position + 1;
                             invariants.push(self.parse_invariant_decl());
+                            invariants_raw.push(self.raw_text_range(inv_expr_start, self.position - 2));
                         } else {
                             self.fail("expected 'field', 'constructor', 'method', or 'invariant' in entity body");
                             let mutable ed_err: EntityDecl = EntityDecl(name_tok.text, is_public, fields, methods, has_ctor, ctor, invariants, line, cmts);
@@ -1107,6 +1120,7 @@ public entity Parser {
                             ed_err.type_param_lines = self.tp_lines;
                             ed_err.type_param_columns = self.tp_columns;
                             ed_err.column = entity_tok.column;
+                            ed_err.invariants_raw = invariants_raw;
                             return ed_err;
                         }
                     }
@@ -1119,6 +1133,7 @@ public entity Parser {
         ed.type_param_lines = self.tp_lines;
         ed.type_param_columns = self.tp_columns;
         ed.column = entity_tok.column;
+        ed.invariants_raw = invariants_raw;
         return ed;
     }
 
@@ -1153,6 +1168,8 @@ public entity Parser {
         let mutable reqs: Array<Expr> = [];
         let mutable enss: Array<Expr> = [];
         let mutable decs: Array<Expr> = [];
+        let mutable reqs_raw: Array<String> = [];
+        let mutable enss_raw: Array<String> = [];
         while self.is_contract_kw() and self.error == "" {
             let kw_tok: Token = self.advance();
             let kw: String = kw_tok.text;
@@ -1160,14 +1177,18 @@ public entity Parser {
             // contract-typing diagnostics anchor at requires/ensures (matching
             // stage1 RequiresClause/EnsuresClause.Pos(), the keyword). Inert to
             // the formatter (ADR 0054).
+            let raw_start: Int = self.position;
             let mutable pred: Expr = self.parse_expr();
             pred.line = kw_tok.line;
             pred.column = kw_tok.column;
+            let raw: String = self.clause_raw_text(raw_start);
             if kw == "requires" {
                 reqs.push(pred);
+                reqs_raw.push(raw);
             } else {
                 if kw == "ensures" {
                     enss.push(pred);
+                    enss_raw.push(raw);
                 } else {
                     decs.push(pred);
                 }
@@ -1178,6 +1199,8 @@ public entity Parser {
         fd.requires_clauses = reqs;
         fd.ensures_clauses = enss;
         fd.decreases_clauses = decs;
+        fd.requires_raw = reqs_raw;
+        fd.ensures_raw = enss_raw;
         fd.column = ctor_tok.column;
         return fd;
     }
@@ -1201,6 +1224,8 @@ public entity Parser {
         let mutable reqs: Array<Expr> = [];
         let mutable enss: Array<Expr> = [];
         let mutable decs: Array<Expr> = [];
+        let mutable reqs_raw: Array<String> = [];
+        let mutable enss_raw: Array<String> = [];
         while self.is_contract_kw() and self.error == "" {
             let kw_tok: Token = self.advance();
             let kw: String = kw_tok.text;
@@ -1208,14 +1233,18 @@ public entity Parser {
             // contract-typing diagnostics anchor at requires/ensures (matching
             // stage1 RequiresClause/EnsuresClause.Pos(), the keyword). Inert to
             // the formatter (ADR 0054).
+            let raw_start: Int = self.position;
             let mutable pred: Expr = self.parse_expr();
             pred.line = kw_tok.line;
             pred.column = kw_tok.column;
+            let raw: String = self.clause_raw_text(raw_start);
             if kw == "requires" {
                 reqs.push(pred);
+                reqs_raw.push(raw);
             } else {
                 if kw == "ensures" {
                     enss.push(pred);
+                    enss_raw.push(raw);
                 } else {
                     decs.push(pred);
                 }
@@ -1226,6 +1255,8 @@ public entity Parser {
         md.requires_clauses = reqs;
         md.ensures_clauses = enss;
         md.decreases_clauses = decs;
+        md.requires_raw = reqs_raw;
+        md.ensures_raw = enss_raw;
         md.column = method_tok.column;
         return md;
     }

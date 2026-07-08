@@ -141,6 +141,10 @@ public function irex_float() returns Int {
     return 18;
 } // str_value = the raw float lexeme (e.g. "3.14"); emitted verbatim as f64
 
+public function irex_field() returns Int {
+    return 19;
+} // children[0] = object, name = field; emits `object.field`
+
 // --- Call-kind constants ----------------------------------------------------
 // Mirrors internal/ir CallKind iota so the backend dispatches identically.
 public function callkind_function() returns Int {
@@ -352,7 +356,24 @@ public entity IrContract {
     }
 }
 
+// --- Old capture ------------------------------------------------------------
+// One `old(expr)` capture hoisted to the top of a method/constructor body as
+// `let <name> = <expr>;`, so an ensures clause can reference the pre-mutation
+// value. Mirrors stage1 ir.OldCapture (name + expr).
+public entity IrOldCapture {
+    field name: String;
+    field expr: IrExpr;
+
+    constructor(name: String, expr: IrExpr) {
+        self.name = name;
+        self.expr = expr;
+    }
+}
+
 // --- Function ---------------------------------------------------------------
+// Also models entity constructors and methods (both are FunctionDecl in the AST):
+// old_captures is populated for methods/constructors whose ensures use old(); it
+// defaults empty (ADR 0054 additive) so the 9-arg constructor call sites stay put.
 public entity IrFunction {
     field name: String;
     field is_entry: Bool;
@@ -363,6 +384,7 @@ public entity IrFunction {
     field requires_clauses: Array<IrContract>;
     field ensures_clauses: Array<IrContract>;
     field body: Array<IrStmt>;
+    field old_captures: Array<IrOldCapture>;
 
     constructor(name: String, is_entry: Bool, is_public: Bool, is_async: Bool, params: Array<IrParam>, return_type: IrType, requires_clauses: Array<IrContract>, ensures_clauses: Array<IrContract>, body: Array<IrStmt>) {
         self.name = name;
@@ -374,6 +396,51 @@ public entity IrFunction {
         self.requires_clauses = requires_clauses;
         self.ensures_clauses = ensures_clauses;
         self.body = body;
+        self.old_captures = empty_ir_old_capture_array();
+    }
+}
+
+// --- Entity -----------------------------------------------------------------
+// A struct + impl block. fields reuse IrParam (name + type). constructor/methods
+// are IrFunctions. invariants carry raw text for the __check_invariants asserts.
+public entity IrEntity {
+    field name: String;
+    field is_public: Bool;
+    field fields: Array<IrParam>;
+    field invariants: Array<IrContract>;
+    field has_constructor: Bool;
+    field constructor_fn: IrFunction;
+    field methods: Array<IrFunction>;
+
+    constructor(name: String, is_public: Bool, fields: Array<IrParam>, invariants: Array<IrContract>, has_constructor: Bool, constructor_fn: IrFunction, methods: Array<IrFunction>) {
+        self.name = name;
+        self.is_public = is_public;
+        self.fields = fields;
+        self.invariants = invariants;
+        self.has_constructor = has_constructor;
+        self.constructor_fn = constructor_fn;
+        self.methods = methods;
+    }
+}
+
+// --- Intent -----------------------------------------------------------------
+// An `intent` block, emitted as doc-comment lines + a compile-time-verified mod.
+// verifications is a list of already-dotted reference strings (e.g.
+// "BankAccount.invariant"), matching stage1's strings.Join(parts, "."). Named
+// `verifications` (not `verified_by`, a reserved word) — as the AST's IntentBlock does.
+public entity IrIntent {
+    field description: String;
+    field goals: Array<String>;
+    field constraints: Array<String>;
+    field guarantees: Array<String>;
+    field verifications: Array<String>;
+
+    constructor(description: String, goals: Array<String>, constraints: Array<String>, guarantees: Array<String>, verifications: Array<String>) {
+        self.description = description;
+        self.goals = goals;
+        self.constraints = constraints;
+        self.guarantees = guarantees;
+        self.verifications = verifications;
     }
 }
 
@@ -409,10 +476,12 @@ public entity IrModule {
     field path: String;
     field functions: Array<IrFunction>;
     field tests: Array<IrTest>;
-    // enums — the module's enum declarations. Defaulted empty (ADR 0054 additive) so
-    // the 7-arg constructor call sites stay put; lowering assigns them after. Other
-    // decl arrays (entities, traits, impls, intents, externs) land the same way.
+    // enums / entities / intents — the module's declarations. Defaulted empty (ADR
+    // 0054 additive) so the 7-arg constructor call sites stay put; lowering assigns
+    // them after. Other decl arrays (traits, impls, externs) land the same way.
     field enums: Array<IrEnum>;
+    field entities: Array<IrEntity>;
+    field intents: Array<IrIntent>;
 
     constructor(name: String, decl_name: String, package_name: String, is_entry: Bool, path: String, functions: Array<IrFunction>, tests: Array<IrTest>) {
         self.name = name;
@@ -423,6 +492,8 @@ public entity IrModule {
         self.functions = functions;
         self.tests = tests;
         self.enums = empty_ir_enum_array();
+        self.entities = empty_ir_entity_array();
+        self.intents = empty_ir_intent_array();
     }
 }
 
@@ -492,6 +563,31 @@ public function empty_ir_enum_array() returns Array<IrEnum> {
 public function empty_ir_enum_variant_array() returns Array<IrEnumVariant> {
     let mutable a: Array<IrEnumVariant> = [];
     return a;
+}
+
+public function empty_ir_entity_array() returns Array<IrEntity> {
+    let mutable a: Array<IrEntity> = [];
+    return a;
+}
+
+public function empty_ir_intent_array() returns Array<IrIntent> {
+    let mutable a: Array<IrIntent> = [];
+    return a;
+}
+
+public function empty_ir_old_capture_array() returns Array<IrOldCapture> {
+    let mutable a: Array<IrOldCapture> = [];
+    return a;
+}
+
+public function empty_string_array_array() returns Array<Array<String>> {
+    let mutable a: Array<Array<String>> = [];
+    return a;
+}
+
+// empty_ir_function — a placeholder IrFunction (for an entity with no constructor).
+public function empty_ir_function() returns IrFunction {
+    return IrFunction("", false, false, false, empty_ir_param_array(), ir_type_named("Void"), empty_ir_contract_array(), empty_ir_contract_array(), empty_ir_stmt_array());
 }
 
 // empty_string_array_ir — a fresh empty Array<String> (ir.intent imports nothing,
@@ -770,6 +866,15 @@ public function ir_index(object: IrExpr, index: IrExpr) returns IrExpr {
     kids.push(object);
     kids.push(index);
     return IrExpr(irex_index(), 0, "", false, "", kids, ir_type_named(""));
+}
+
+// ir_field — a field access (irex_field): children[0] is the object, name is the
+// field. The Rust backend emits `object.field`. Type is left unknown (stamped only
+// where a later slice needs field-access arg cloning).
+public function ir_field(object: IrExpr, field_name: String) returns IrExpr {
+    let mutable kids: Array<IrExpr> = empty_ir_expr_array();
+    kids.push(object);
+    return IrExpr(irex_field(), 0, "", false, field_name, kids, ir_type_named(""));
 }
 
 // ir_method — a method call (irex_method): name is the method, children[0] is the

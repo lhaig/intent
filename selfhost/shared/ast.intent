@@ -437,6 +437,11 @@ public entity EntityDecl {
     field line: Int;
     field column: Int;
     field comments_before: Array<String>;
+    // Phase 55 / ADR 0059: per-invariant raw source text (tokens joined by single
+    // spaces), parallel to `invariants`, for byte-equal `Invariant failed: <raw>`
+    // assert messages in the compiler. Defaulted empty (additive, ADR 0054); the
+    // parser assigns it. Inert to the checker/formatter/linter.
+    field invariants_raw: Array<String>;
     // Phase 44: generic type parameters on the entity declaration, e.g. `<T>`
     // in `entity Stack<T> { ... }`. Defaulted empty; the parser assigns them
     // after the name token when a `<` follows.
@@ -461,6 +466,7 @@ public entity EntityDecl {
         self.type_param_lines = empty_int_array();
         self.type_param_columns = empty_int_array();
         self.column = 0;
+        self.invariants_raw = empty_string_array();
     }
 }
 

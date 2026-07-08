@@ -44,37 +44,50 @@ import "../shared/ast.intent";
 entity LowerScope {
     field names: Array<String>;
     field types: Array<IrType>;
-    // enums — the program's enum declarations, carried CONSTANT on the scope so the
-    // deep lower_expr chain can resolve variant constructors / unit-variant refs /
-    // match-pattern field names without threading a second parameter everywhere.
-    // Preserved verbatim by lower_scope_define (a field read clones it into the new
-    // scope's owned field), and seeded once by lower_scope_empty.
+    // enums / entities — the program's declarations, carried CONSTANT on the scope
+    // so the deep lower_expr chain can resolve variant constructors, unit-variant
+    // refs, match-pattern field names, and entity constructor calls without threading
+    // extra parameters. Preserved by lower_scope_define, seeded once by _empty.
     field enums: Array<EnumDecl>;
+    field entities: Array<EntityDecl>;
+    // self_name — what a `self` identifier lowers to: "self" (methods) or "__self"
+    // (constructors, where stage1 emits the struct being built). in_old — true while
+    // lowering an ensures clause, so an `old(expr)` call lowers to its captured var.
+    field self_name: String;
+    field in_old: Bool;
 
-    constructor(names: Array<String>, types: Array<IrType>, enums: Array<EnumDecl>) {
+    constructor(names: Array<String>, types: Array<IrType>, enums: Array<EnumDecl>, entities: Array<EntityDecl>, self_name: String, in_old: Bool) {
         self.names = names;
         self.types = types;
         self.enums = enums;
+        self.entities = entities;
+        self.self_name = self_name;
+        self.in_old = in_old;
     }
 }
 
-// lower_scope_empty — a fresh scope with no bindings, seeded with the program's
-// enum decls. The `enums` param is an immutable `&Vec`, so it is copied into a
-// LOCAL owned array before being moved into the field (gotcha (c)).
-function lower_scope_empty(enums: Array<EnumDecl>) returns LowerScope {
+// lower_scope_empty — a fresh scope with no bindings, seeded with the program's enum
+// and entity decls. The `&Vec` params are copied into LOCAL owned arrays before being
+// moved into the fields (gotcha (c)). self_name defaults "self", in_old false.
+function lower_scope_empty(enums: Array<EnumDecl>, entities: Array<EntityDecl>) returns LowerScope {
     let mutable e: Array<EnumDecl> = [];
     let mutable ei: Int = 0;
     while ei < len(enums) {
         e.push(enums[ei]);
         ei = ei + 1;
     }
-    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), e);
+    let mutable ent: Array<EntityDecl> = [];
+    let mutable enti: Int = 0;
+    while enti < len(entities) {
+        ent.push(entities[enti]);
+        enti = enti + 1;
+    }
+    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), e, ent, "self", false);
 }
 
-// lower_scope_define — a NEW scope with `name: ty` appended (copies the arrays,
-// mirroring the checker's scope_define_typed). Copying yields local owned arrays,
-// so a `&Vec` type arg still moves into the entity field (gotcha (c)). The enum
-// registry is carried over unchanged (the field read clones it into the new scope).
+// lower_scope_define — a NEW scope with `name: ty` appended (copies names/types,
+// mirroring the checker's scope_define_typed). The registries + self_name + in_old
+// carry over (field reads clone them into the new scope).
 function lower_scope_define(s: LowerScope, name: String, ty: IrType) returns LowerScope {
     let mutable new_names: Array<String> = shared_ast.empty_string_array();
     let mutable i: Int = 0;
@@ -90,7 +103,60 @@ function lower_scope_define(s: LowerScope, name: String, ty: IrType) returns Low
         ti = ti + 1;
     }
     new_types.push(ty);
-    return LowerScope(new_names, new_types, s.enums);
+    return LowerScope(new_names, new_types, s.enums, s.entities, s.self_name, s.in_old);
+}
+
+// lower_scope_with_self — a copy of `s` with self_name set (for constructor bodies,
+// where `self` lowers to `__self`).
+function lower_scope_with_self(s: LowerScope, name: String) returns LowerScope {
+    return LowerScope(s.names, s.types, s.enums, s.entities, name, s.in_old);
+}
+
+// lower_scope_with_old — a copy of `s` with in_old set (for ensures clauses, where
+// `old(expr)` lowers to its captured variable).
+function lower_scope_with_old(s: LowerScope, flag: Bool) returns LowerScope {
+    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, flag);
+}
+
+// is_known_entity — is `name` a declared entity? (Used to classify constructor calls.)
+function is_known_entity(entities: Array<EntityDecl>, name: String) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(entities) {
+        if entities[i].name == name {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// expr_to_text / mangle_old — mirror stage1 exprToText + mangleOldExpr: a stable
+// name for an `old(expr)` capture. self / identifier / field access are supported
+// (the corpus's old() targets); anything else falls back to "expr".
+function expr_to_text(e: Expr) returns String {
+    if e.kind == shared_ast.ex_ident() {
+        return e.name;
+    }
+    if e.kind == shared_ast.ex_field() {
+        return expr_to_text(e.children[0]) + "." + e.name;
+    }
+    return "expr";
+}
+
+function mangle_old(inner: Expr) returns String {
+    let text: String = expr_to_text(inner);
+    // Replace '.' with '_' (the only separator the corpus's old() targets produce).
+    let mutable out: String = "__old_";
+    let mutable i: Int = 0;
+    while i < len(text) {
+        if text[i] == '.' {
+            out = out + "_";
+        } else {
+            out = out + text[i].to_string();
+        }
+        i = i + 1;
+    }
+    return out;
 }
 
 // lower_scope_type_of — the IrType bound to `name`, or the empty/unknown type if
@@ -118,13 +184,13 @@ public function lower(prog: Program, path: String) returns IrModule {
     let mutable fns: Array<IrFunction> = compiler_ir.empty_ir_function_array();
     let mutable fi: Int = 0;
     while fi < len(prog.functions) {
-        fns.push(lower_function(prog.functions[fi], prog.enums));
+        fns.push(lower_function(prog.functions[fi], prog.enums, prog.entities));
         fi = fi + 1;
     }
     let mutable tsts: Array<IrTest> = compiler_ir.empty_ir_test_array();
     let mutable ti: Int = 0;
     while ti < len(prog.tests) {
-        tsts.push(lower_test(prog.tests[ti], prog.enums));
+        tsts.push(lower_test(prog.tests[ti], prog.enums, prog.entities));
         ti = ti + 1;
     }
     // Lower the enum declarations (their struct-style variants + field types), and
@@ -135,10 +201,167 @@ public function lower(prog: Program, path: String) returns IrModule {
         ens.push(lower_enum(prog.enums[eni]));
         eni = eni + 1;
     }
+    let mutable ents: Array<IrEntity> = compiler_ir.empty_ir_entity_array();
+    let mutable eei: Int = 0;
+    while eei < len(prog.entities) {
+        ents.push(lower_entity(prog.entities[eei], prog.enums, prog.entities));
+        eei = eei + 1;
+    }
+    let mutable ints: Array<IrIntent> = compiler_ir.empty_ir_intent_array();
+    let mutable ii: Int = 0;
+    while ii < len(prog.intent_blocks) {
+        ints.push(lower_intent(prog.intent_blocks[ii]));
+        ii = ii + 1;
+    }
     let decl_name: String = prog.module_decl.name;
     let mutable m: IrModule = IrModule(decl_name, decl_name, "", true, path, fns, tsts);
     m.enums = ens;
+    m.entities = ents;
+    m.intents = ints;
     return m;
+}
+
+// lower_entity — mirrors lowerEntity: fields (parsed types), invariants (with raw
+// text -> IrContract), the constructor (self -> __self), and methods (self -> self).
+// The enum/entity registries seed each member's scope.
+public function lower_entity(e: EntityDecl, enums: Array<EnumDecl>, entities: Array<EntityDecl>) returns IrEntity {
+    let mutable fields: Array<IrParam> = compiler_ir.empty_ir_param_array();
+    let mutable fi: Int = 0;
+    while fi < len(e.fields) {
+        let f: FieldDecl = e.fields[fi];
+        fields.push(IrParam(f.name, compiler_ir.ir_parse_type(f.type_name)));
+        fi = fi + 1;
+    }
+    // Invariants: lowered in a self-scope (self -> self), paired with raw text.
+    let inv_scope: LowerScope = lower_scope_empty(enums, entities);
+    let mutable invs: Array<IrContract> = compiler_ir.empty_ir_contract_array();
+    let mutable ivi: Int = 0;
+    while ivi < len(e.invariants) {
+        let iv: Expr = e.invariants[ivi];
+        invs.push(IrContract(lower_expr(iv, inv_scope), e.invariants_raw[ivi], iv.line, iv.column));
+        ivi = ivi + 1;
+    }
+    let mutable ctor: IrFunction = compiler_ir.empty_ir_function();
+    if e.has_constructor {
+        ctor = lower_member(e.ctor, "__self", enums, entities);
+    }
+    let mutable methods: Array<IrFunction> = compiler_ir.empty_ir_function_array();
+    let mutable mi: Int = 0;
+    while mi < len(e.methods) {
+        methods.push(lower_member(e.methods[mi], "self", enums, entities));
+        mi = mi + 1;
+    }
+    return IrEntity(e.name, e.is_public, fields, invs, e.has_constructor, ctor, methods);
+}
+
+// lower_member — lower a constructor or method (both FunctionDecl). self_name is
+// "__self" for a constructor, "self" for a method. Ensures are lowered in an
+// in_old scope so `old(expr)` becomes its captured variable; old captures are
+// scanned from the ensures ASTs (mirrors lowerConstructor / lowerMethod).
+public function lower_member(f: FunctionDecl, self_name: String, enums: Array<EnumDecl>, entities: Array<EntityDecl>) returns IrFunction {
+    let base: LowerScope = lower_scope_with_self(lower_scope_empty(enums, entities), self_name);
+    let mutable scope: LowerScope = base;
+    let mutable params: Array<IrParam> = compiler_ir.empty_ir_param_array();
+    let mutable i: Int = 0;
+    while i < len(f.params) {
+        let p: Param = f.params[i];
+        params.push(IrParam(p.name, compiler_ir.ir_parse_type(p.type_name)));
+        scope = lower_scope_define(scope, p.name, compiler_ir.ir_parse_type(p.type_name));
+        i = i + 1;
+    }
+    let reqs: Array<IrContract> = lower_contracts(f.requires_clauses, f.requires_raw, scope);
+    // Old captures: scan ensures ASTs for old(expr), collect unique (mangled name +
+    // lowered inner). The inner is lowered in the non-old scope (self stays as-is).
+    let old_caps: Array<IrOldCapture> = collect_old_captures(f.ensures_clauses, scope);
+    // Ensures lowered with in_old=true so old(expr) -> the captured var.
+    let ens_scope: LowerScope = lower_scope_with_old(scope, true);
+    let enss: Array<IrContract> = lower_contracts(f.ensures_clauses, f.ensures_raw, ens_scope);
+    let body: Array<IrStmt> = lower_block(f.body, scope);
+    let mutable func: IrFunction = IrFunction(f.name, f.is_entry, f.is_public, f.is_async, params, compiler_ir.ir_parse_type(f.return_type), reqs, enss, body);
+    func.old_captures = old_caps;
+    return func;
+}
+
+// collect_old_captures — scan each ensures AST for `old(expr)` calls, returning one
+// IrOldCapture (mangled name + lowered inner) per UNIQUE mangled name, in first-seen
+// order (mirrors the lowerer's oldCaptures dedup).
+function collect_old_captures(ens_preds: Array<Expr>, scope: LowerScope) returns Array<IrOldCapture> {
+    let mutable caps: Array<IrOldCapture> = compiler_ir.empty_ir_old_capture_array();
+    let mutable seen: Array<String> = shared_ast.empty_string_array();
+    let mutable i: Int = 0;
+    while i < len(ens_preds) {
+        caps = scan_old_into(ens_preds[i], scope, caps, seen);
+        seen = old_capture_names(caps);
+        i = i + 1;
+    }
+    return caps;
+}
+
+// old_capture_names — the mangled names already captured (for dedup).
+function old_capture_names(caps: Array<IrOldCapture>) returns Array<String> {
+    let mutable out: Array<String> = shared_ast.empty_string_array();
+    let mutable i: Int = 0;
+    while i < len(caps) {
+        out.push(caps[i].name);
+        i = i + 1;
+    }
+    return out;
+}
+
+// scan_old_into — walk an AST expr; for each `old(inner)` call whose mangled name is
+// not in `seen`, append an IrOldCapture. Returns the (possibly extended) captures.
+// Functional accumulation (arrays are immutable params), recursing children.
+function scan_old_into(e: Expr, scope: LowerScope, caps: Array<IrOldCapture>, seen: Array<String>) returns Array<IrOldCapture> {
+    let mutable out: Array<IrOldCapture> = caps;
+    if e.kind == shared_ast.ex_call() {
+        let callee: Expr = e.children[0];
+        if callee.kind == shared_ast.ex_ident() {
+            if callee.name == "old" {
+                if len(e.children) == 2 {
+                    let inner: Expr = e.children[1];
+                    let name: String = mangle_old(inner);
+                    if not string_in(seen, name) and not old_has(out, name) {
+                        out.push(IrOldCapture(name, lower_expr(inner, scope)));
+                    }
+                    return out;
+                }
+            }
+        }
+    }
+    let mutable i: Int = 0;
+    while i < len(e.children) {
+        out = scan_old_into(e.children[i], scope, out, seen);
+        i = i + 1;
+    }
+    return out;
+}
+
+function old_has(caps: Array<IrOldCapture>, name: String) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(caps) {
+        if caps[i].name == name {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+function string_in(arr: Array<String>, name: String) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(arr) {
+        if arr[i] == name {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// lower_intent — mirrors lowerIntent: copy the description/goals/constraints/
+// guarantees and the already-dotted verification reference strings.
+public function lower_intent(i: IntentBlock) returns IrIntent {
+    return IrIntent(i.description, i.goals, i.constraints, i.guarantees, i.verifications);
 }
 
 // lower_enum — mirrors lowerEnum: each variant's fields (name + parsed type) become
@@ -224,9 +447,9 @@ function resolve_variant_field_names(enums: Array<EnumDecl>, enum_name: String, 
 // lower_function — mirrors lowerFunction: params (types parsed structurally),
 // requires/ensures contracts (via lower_contracts), and the lowered body. `enums`
 // seeds the scope's enum registry (variant / match resolution).
-public function lower_function(f: FunctionDecl, enums: Array<EnumDecl>) returns IrFunction {
+public function lower_function(f: FunctionDecl, enums: Array<EnumDecl>, entities: Array<EntityDecl>) returns IrFunction {
     let mutable params: Array<IrParam> = compiler_ir.empty_ir_param_array();
-    let mutable scope: LowerScope = lower_scope_empty(enums);
+    let mutable scope: LowerScope = lower_scope_empty(enums, entities);
     let mutable i: Int = 0;
     while i < len(f.params) {
         let p: Param = f.params[i];
@@ -262,10 +485,10 @@ public function lower_contracts(preds: Array<Expr>, raws: Array<String>, scope: 
 
 // lower_test — mirrors lowerTest. The AST already stores annotations as their
 // canonical strings, which is exactly the IrTest.annotations shape.
-public function lower_test(t: TestDecl, enums: Array<EnumDecl>) returns IrTest {
-    // A test has no params; its body opens a fresh scope (seeded with the enum
-    // registry), growing as its own let-bindings land.
-    let body: Array<IrStmt> = lower_block(t.body, lower_scope_empty(enums));
+public function lower_test(t: TestDecl, enums: Array<EnumDecl>, entities: Array<EntityDecl>) returns IrTest {
+    // A test has no params; its body opens a fresh scope (seeded with the enum +
+    // entity registries), growing as its own let-bindings land.
+    let body: Array<IrStmt> = lower_block(t.body, lower_scope_empty(enums, entities));
     return IrTest(t.name, t.is_async, t.annotations, body);
 }
 
@@ -408,6 +631,11 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
         // has no dedicated node (result is reserved, so no real variable collides).
         if e.name == "result" {
             return compiler_ir.ir_var_ref("__result");
+        }
+        // `self` lowers to the scope's self name: "self" in methods, "__self" in a
+        // constructor (where stage1 emits the struct being built).
+        if e.name == "self" {
+            return compiler_ir.ir_var_ref(scope.self_name);
         }
         // A bare identifier that names an enum variant is a UNIT variant construction
         // (stage1's Identifier -> CallVariant), e.g. `return Running;` -> `Status::
@@ -557,8 +785,26 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
     if e.kind == shared_ast.ex_index() {
         return compiler_ir.ir_index(lower_expr(e.children[0], scope), lower_expr(e.children[1], scope));
     }
+    if e.kind == shared_ast.ex_field() {
+        // `object.field` — name is the field, children[0] the object. Mirrors stage1
+        // FieldAccessExpr. (An `obj.method(...)` CALL is handled in ex_call below,
+        // where the callee is this ex_field.)
+        return compiler_ir.ir_field(lower_expr(e.children[0], scope), e.name);
+    }
     if e.kind == shared_ast.ex_call() {
         let callee: Expr = e.children[0];
+        // `old(expr)` inside an ensures clause -> the pre-mutation capture variable
+        // (in_old scope). The capture itself is hoisted at method start (see
+        // collect_old_captures); here the reference lowers to its mangled name.
+        if scope.in_old {
+            if callee.kind == shared_ast.ex_ident() {
+                if callee.name == "old" {
+                    if len(e.children) == 2 {
+                        return compiler_ir.ir_var_ref(mangle_old(e.children[1]));
+                    }
+                }
+            }
+        }
         let mutable args: Array<IrExpr> = compiler_ir.empty_ir_expr_array();
         let mutable i: Int = 1;
         while i < len(e.children) {
@@ -592,6 +838,13 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
                 vc.field_names = resolve_variant_field_names(scope.enums, var_enum, callee.name);
                 vc.enum_name = var_enum;
                 return vc;
+            }
+            // A callee naming a declared entity is a constructor call (stage1
+            // CallConstructor): `BankAccount(...)` -> `BankAccount::new(...)`.
+            if is_known_entity(scope.entities, callee.name) {
+                let mutable cc: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, callee.name, args, compiler_ir.ir_type_named(callee.name));
+                cc.call_kind = compiler_ir.callkind_constructor();
+                return cc;
             }
         }
         let mutable call: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, callee.name, args, compiler_ir.ir_type_named(""));

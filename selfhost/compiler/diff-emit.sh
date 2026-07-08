@@ -49,6 +49,7 @@ CORPUS=(
   "examples/io_demo.intent"
   "examples/enum_basic.intent"
   "examples/shape_area.intent"
+  "examples/bank_account.intent"
   "selfhost/compiler/emit-fixtures/let_locals.intent"
   "selfhost/compiler/emit-fixtures/binops.intent"
   "selfhost/compiler/emit-fixtures/control_flow.intent"

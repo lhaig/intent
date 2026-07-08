@@ -39,9 +39,15 @@ public function generate(m: IrModule) returns String {
     let mutable out: String = "// Generated Rust code from Intent\n";
     out = out + "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n";
     out = out + "\n";
-    // Enum declarations emit before functions (stage1 Generate order: entities,
-    // enums, traits, impls, functions, intents, tests). Entities/traits/impls land
-    // with their slices.
+    // Decl emission order mirrors stage1 Generate: entities, enums, traits, impls,
+    // functions, intents, tests (traits/impls land with their slices). Each decl is
+    // followed by a blank line.
+    let mutable eei: Int = 0;
+    while eei < len(m.entities) {
+        out = out + generate_entity(m.entities[eei], funcs);
+        out = out + "\n";
+        eei = eei + 1;
+    }
     let mutable eni: Int = 0;
     while eni < len(m.enums) {
         out = out + generate_enum(m.enums[eni]);
@@ -53,6 +59,12 @@ public function generate(m: IrModule) returns String {
         out = out + generate_function(m.functions[fi], funcs);
         out = out + "\n";
         fi = fi + 1;
+    }
+    let mutable ii: Int = 0;
+    while ii < len(m.intents) {
+        out = out + generate_intent(m.intents[ii]);
+        out = out + "\n";
+        ii = ii + 1;
     }
     let mutable ti: Int = 0;
     while ti < len(m.tests) {
@@ -109,6 +121,436 @@ public function generate_enum(en: IrEnum) returns String {
         i = i + 1;
     }
     out = out + rbrace() + "\n";
+    return out;
+}
+
+// generate_entity — mirrors generateEntity: a `#[derive(Clone, Debug)] struct` plus
+// an `impl` block holding `__check_invariants` (if any invariants), the constructor
+// (if any), and the methods, each member followed by a blank line. Braces via
+// lbrace()/rbrace().
+public function generate_entity(e: IrEntity, funcs: Array<IrFunction>) returns String {
+    let mutable out: String = "#[derive(Clone, Debug)]\n";
+    out = out + "struct " + e.name + " " + lbrace() + "\n";
+    let mutable fi: Int = 0;
+    while fi < len(e.fields) {
+        out = out + "    " + e.fields[fi].name + ": " + map_type(e.fields[fi].param_type) + ",\n";
+        fi = fi + 1;
+    }
+    out = out + rbrace() + "\n";
+    out = out + "\n";
+    out = out + "impl " + e.name + " " + lbrace() + "\n";
+    let has_inv: Bool = len(e.invariants) > 0;
+    if has_inv {
+        out = out + "    fn __check_invariants(&self) " + lbrace() + "\n";
+        let mutable ivi: Int = 0;
+        while ivi < len(e.invariants) {
+            out = out + "        assert!(" + generate_expr(e.invariants[ivi].expr, funcs) + ", \"Invariant failed: " + e.invariants[ivi].raw_text + "\");\n";
+            ivi = ivi + 1;
+        }
+        out = out + "    " + rbrace() + "\n";
+        out = out + "\n";
+    }
+    if e.has_constructor {
+        out = out + generate_constructor(e, funcs);
+        out = out + "\n";
+    }
+    let mutable mi: Int = 0;
+    while mi < len(e.methods) {
+        out = out + generate_method(e, e.methods[mi], funcs);
+        out = out + "\n";
+        mi = mi + 1;
+    }
+    out = out + rbrace() + "\n";
+    return out;
+}
+
+// generate_constructor — mirrors generateConstructor: `fn new(params) -> Name`,
+// requires asserts, a struct literal (direct `__self.field = expr` inits hoisted,
+// other fields defaulted), the non-init body statements, ensures asserts (self is
+// __self here — set during lowering), the invariant check, and `__self`.
+public function generate_constructor(e: IrEntity, funcs: Array<IrFunction>) returns String {
+    let c: IrFunction = e.constructor_fn;
+    let mutated: Array<String> = collect_mutated_vars(c.body);
+    let mutable out: String = "    fn new(";
+    let mutable pi: Int = 0;
+    while pi < len(c.params) {
+        if pi > 0 {
+            out = out + ", ";
+        }
+        out = out + c.params[pi].name + ": " + map_type(c.params[pi].param_type);
+        pi = pi + 1;
+    }
+    out = out + ") -> " + e.name + " " + lbrace() + "\n";
+    let mutable ri: Int = 0;
+    while ri < len(c.requires_clauses) {
+        out = out + "        assert!(" + generate_expr(c.requires_clauses[ri].expr, funcs) + ", \"Precondition failed: " + c.requires_clauses[ri].raw_text + "\");\n";
+        ri = ri + 1;
+    }
+    out = out + "        let mut __self = " + e.name + " " + lbrace() + "\n";
+    let mutable fi: Int = 0;
+    while fi < len(e.fields) {
+        let fname: String = e.fields[fi].name;
+        if ctor_has_direct_init(c.body, fname) {
+            out = out + "            " + fname + ": " + generate_expr(ctor_direct_init(c.body, fname), funcs) + ",\n";
+        } else {
+            out = out + "            " + fname + ": " + default_value(e.fields[fi].param_type) + ",\n";
+        }
+        fi = fi + 1;
+    }
+    out = out + "        " + rbrace() + ";\n";
+    out = out + generate_ctor_body_rest(c.body, funcs, mutated);
+    let mutable ei: Int = 0;
+    while ei < len(c.ensures_clauses) {
+        out = out + "        assert!(" + generate_expr(c.ensures_clauses[ei].expr, funcs) + ", \"Postcondition failed: " + c.ensures_clauses[ei].raw_text + "\");\n";
+        ei = ei + 1;
+    }
+    if len(e.invariants) > 0 {
+        out = out + "        __self.__check_invariants();\n";
+    }
+    out = out + "        __self\n";
+    out = out + "    " + rbrace() + "\n";
+    return out;
+}
+
+// is_self_field_target — is `t` a `__self.<field>` place (a constructor direct init)?
+function is_self_field_target(t: IrExpr) returns Bool {
+    if t.kind == compiler_ir.irex_field() {
+        if t.children[0].kind == compiler_ir.irex_var() {
+            return t.children[0].name == "__self";
+        }
+    }
+    return false;
+}
+
+// ctor_has_direct_init / ctor_direct_init — the FIRST `__self.<fname> = expr;`
+// assignment in the constructor body (mirrors splitConstructorInits' first-wins).
+function ctor_has_direct_init(body: Array<IrStmt>, fname: String) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(body) {
+        let s: IrStmt = body[i];
+        if s.kind == compiler_ir.irst_assign() {
+            if is_self_field_target(s.target) {
+                if s.target.name == fname {
+                    return true;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+function ctor_direct_init(body: Array<IrStmt>, fname: String) returns IrExpr {
+    let mutable i: Int = 0;
+    while i < len(body) {
+        let s: IrStmt = body[i];
+        if s.kind == compiler_ir.irst_assign() {
+            if is_self_field_target(s.target) {
+                if s.target.name == fname {
+                    return s.expr;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return compiler_ir.ir_void_expr();
+}
+
+// generate_ctor_body_rest — emit constructor body statements that were NOT hoisted
+// into the struct literal (i.e. not the first `__self.field = ...` per field), at
+// level 2. Mirrors splitConstructorInits' bodyRest.
+function generate_ctor_body_rest(body: Array<IrStmt>, funcs: Array<IrFunction>, mutated: Array<String>) returns String {
+    let mutable out: String = "";
+    let mutable seen: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(body) {
+        let s: IrStmt = body[i];
+        let mutable consumed: Bool = false;
+        if s.kind == compiler_ir.irst_assign() {
+            if is_self_field_target(s.target) {
+                if not name_in_array(seen, s.target.name) {
+                    seen.push(s.target.name);
+                    consumed = true;
+                }
+            }
+        }
+        if not consumed {
+            out = out + generate_stmt(s, 2, false, funcs, mutated);
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+// default_value — mirrors defaultValue for the primitive/collection field types the
+// corpus needs; entity/enum/char defaults (rare — the corpus always direct-inits
+// its fields) hit a loud marker until their slice.
+public function default_value(t: IrType) returns String {
+    if t.name == "Int" {
+        return "0i64";
+    }
+    if t.name == "Float" {
+        return "0.0";
+    }
+    if t.name == "String" {
+        return "String::new()";
+    }
+    if t.name == "Bool" {
+        return "false";
+    }
+    if t.name == "Array" {
+        return "Vec::new()";
+    }
+    return "/* unsupported default: " + t.name + " */";
+}
+
+// generate_method — mirrors generateMethod: `&self`/`&mut self` per method_mutates_self,
+// old captures, requires, a labeled `'body:` block (non-Void with ensures/invariants)
+// or plain body, ensures, and the invariant check. Braces via lbrace()/rbrace().
+public function generate_method(e: IrEntity, m: IrFunction, funcs: Array<IrFunction>) returns String {
+    let mutated: Array<String> = collect_mutated_vars(m.body);
+    let mutable receiver: String = "&mut self";
+    if not method_mutates_self(m.body) {
+        receiver = "&self";
+    }
+    let ret_void: Bool = m.return_type.name == "Void";
+    let mutable out: String = "    fn " + m.name + "(" + receiver;
+    let mutable pi: Int = 0;
+    while pi < len(m.params) {
+        out = out + ", " + m.params[pi].name + ": " + map_type(m.params[pi].param_type);
+        pi = pi + 1;
+    }
+    if ret_void {
+        out = out + ") " + lbrace() + "\n";
+    } else {
+        out = out + ") -> " + map_type(m.return_type) + " " + lbrace() + "\n";
+    }
+    let mutable oi: Int = 0;
+    while oi < len(m.old_captures) {
+        out = out + "        let " + m.old_captures[oi].name + " = " + generate_expr(m.old_captures[oi].expr, funcs) + ";\n";
+        oi = oi + 1;
+    }
+    let mutable ri: Int = 0;
+    while ri < len(m.requires_clauses) {
+        out = out + "        assert!(" + generate_expr(m.requires_clauses[ri].expr, funcs) + ", \"Precondition failed: " + m.requires_clauses[ri].raw_text + "\");\n";
+        ri = ri + 1;
+    }
+    let has_inv: Bool = len(e.invariants) > 0;
+    let needs_labeled: Bool = not ret_void and (len(m.ensures_clauses) > 0 or has_inv);
+    if needs_labeled {
+        out = out + "        let __result: " + map_type(m.return_type) + " = 'body: " + lbrace() + "\n";
+        out = out + generate_stmts(m.body, 3, true, funcs, mutated);
+        out = out + "        " + rbrace() + ";\n";
+        out = out + generate_method_ensures(m, funcs);
+        if has_inv {
+            out = out + "        self.__check_invariants();\n";
+        }
+        out = out + "        __result\n";
+    } else {
+        out = out + generate_stmts(m.body, 2, false, funcs, mutated);
+        out = out + generate_method_ensures(m, funcs);
+        if has_inv {
+            out = out + "        self.__check_invariants();\n";
+        }
+    }
+    out = out + "    " + rbrace() + "\n";
+    return out;
+}
+
+// generate_method_ensures — the ensures asserts at level 2 (shared by the labeled
+// and plain method paths).
+function generate_method_ensures(m: IrFunction, funcs: Array<IrFunction>) returns String {
+    let mutable out: String = "";
+    let mutable ei: Int = 0;
+    while ei < len(m.ensures_clauses) {
+        out = out + "        assert!(" + generate_expr(m.ensures_clauses[ei].expr, funcs) + ", \"Postcondition failed: " + m.ensures_clauses[ei].raw_text + "\");\n";
+        ei = ei + 1;
+    }
+    return out;
+}
+
+// method_mutates_self — mirrors methodMutatesSelf: true if the body assigns a self
+// field or calls a (possibly mutating) method on self, recursing into blocks.
+public function method_mutates_self(stmts: Array<IrStmt>) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(stmts) {
+        if stmt_mutates_self(stmts[i]) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+function stmt_mutates_self(s: IrStmt) returns Bool {
+    if s.kind == compiler_ir.irst_assign() {
+        if targets_mut_self(s.target) {
+            return true;
+        }
+        return expr_mutates_self(s.expr);
+    }
+    if s.kind == compiler_ir.irst_expr() or s.kind == compiler_ir.irst_let() or s.kind == compiler_ir.irst_return() {
+        return expr_mutates_self(s.expr);
+    }
+    if s.kind == compiler_ir.irst_if() {
+        if method_mutates_self(s.then_body) {
+            return true;
+        }
+        return method_mutates_self(s.else_body);
+    }
+    if s.kind == compiler_ir.irst_while() or s.kind == compiler_ir.irst_for() {
+        return method_mutates_self(s.then_body);
+    }
+    return false;
+}
+
+function targets_mut_self(t: IrExpr) returns Bool {
+    if t.kind == compiler_ir.irex_field() {
+        if t.children[0].kind == compiler_ir.irex_var() {
+            if t.children[0].name == "self" {
+                return true;
+            }
+        }
+        return targets_mut_self(t.children[0]);
+    }
+    if t.kind == compiler_ir.irex_index() {
+        return targets_mut_self(t.children[0]);
+    }
+    return false;
+}
+
+function expr_mutates_self(e: IrExpr) returns Bool {
+    if e.kind == compiler_ir.irex_method() {
+        if e.children[0].kind == compiler_ir.irex_var() {
+            if e.children[0].name == "self" {
+                return true;
+            }
+        }
+        if is_self_or_self_field(e.children[0]) {
+            return is_mutating_method(e.name);
+        }
+    }
+    return false;
+}
+
+function is_self_or_self_field(e: IrExpr) returns Bool {
+    if e.kind == compiler_ir.irex_var() {
+        return e.name == "self";
+    }
+    if e.kind == compiler_ir.irex_field() {
+        return is_self_or_self_field(e.children[0]);
+    }
+    if e.kind == compiler_ir.irex_index() {
+        return is_self_or_self_field(e.children[0]);
+    }
+    return false;
+}
+
+function is_mutating_method(name: String) returns Bool {
+    return name == "push" or name == "pop" or name == "insert" or name == "remove" or name == "set" or name == "clear" or name == "sort" or name == "reverse";
+}
+
+// generate_intent — mirrors generateIntent: doc-comment lines for the description /
+// goals / constraints / guarantees / verified_by refs, then a compile-time-verified
+// module `mod __intent_<sanitised> { ... }`.
+public function generate_intent(it: IrIntent) returns String {
+    let mutable out: String = "// Intent: " + it.description + "\n";
+    let mutable gi: Int = 0;
+    while gi < len(it.goals) {
+        out = out + "// Goal: " + it.goals[gi] + "\n";
+        gi = gi + 1;
+    }
+    let mutable ci: Int = 0;
+    while ci < len(it.constraints) {
+        out = out + "// Constraint: " + it.constraints[ci] + "\n";
+        ci = ci + 1;
+    }
+    let mutable gui: Int = 0;
+    while gui < len(it.guarantees) {
+        out = out + "// Guarantee: " + it.guarantees[gui] + "\n";
+        gui = gui + 1;
+    }
+    let mutable vi: Int = 0;
+    while vi < len(it.verifications) {
+        out = out + "// Verified by: " + it.verifications[vi] + "\n";
+        vi = vi + 1;
+    }
+    out = out + "\n";
+    out = out + "#[cfg(test)]\n";
+    out = out + "mod " + mangle_intent_name(it.description) + " " + lbrace() + "\n";
+    out = out + "    // Intent verification completed at compile time.\n";
+    out = out + rbrace() + "\n";
+    return out;
+}
+
+// mangle_intent_name — mirrors mangleIntentName: lowercase, collapse non-[a-z0-9]
+// runs to `_`, trim both ends, prefix a leading digit with `_`, empty -> "__intent";
+// prefixed with "__intent_".
+public function mangle_intent_name(desc: String) returns String {
+    let mutable b: String = "";
+    let mutable prev_us: Bool = false;
+    let mutable i: Int = 0;
+    while i < len(desc) {
+        let c: Char = desc[i];
+        let cp: Int = c.to_codepoint();
+        if cp >= 97 and cp <= 122 {
+            b = b + c.to_string();
+            prev_us = false;
+        } else {
+            if cp >= 65 and cp <= 90 {
+                b = b + c.to_string().to_lowercase();
+                prev_us = false;
+            } else {
+                if cp >= 48 and cp <= 57 {
+                    b = b + c.to_string();
+                    prev_us = false;
+                } else {
+                    if not prev_us {
+                        b = b + "_";
+                        prev_us = true;
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    let mutable out: String = trim_both_underscores(b);
+    if len(out) > 0 {
+        let d: Int = out[0].to_codepoint();
+        if d >= 48 and d <= 57 {
+            out = "_" + out;
+        }
+    }
+    if out == "" {
+        out = "__intent";
+    }
+    return "__intent_" + out;
+}
+
+// trim_both_underscores — s without leading/trailing '_' (codepoint 95).
+function trim_both_underscores(s: String) returns String {
+    let n: Int = len(s);
+    let mutable first: Int = 0 - 1;
+    let mutable last: Int = 0 - 1;
+    let mutable i: Int = 0;
+    while i < n {
+        if s[i].to_codepoint() != 95 {
+            if first < 0 {
+                first = i;
+            }
+            last = i;
+        }
+        i = i + 1;
+    }
+    if first < 0 {
+        return "";
+    }
+    let mutable out: String = "";
+    let mutable j: Int = first;
+    while j <= last {
+        out = out + s[j].to_string();
+        j = j + 1;
+    }
     return out;
 }
 
@@ -481,6 +923,15 @@ public function generate_expr(e: IrExpr, funcs: Array<IrFunction>) returns Strin
         // Map indexing land with their slices; the corpus indexes only Vecs.
         return generate_expr(e.children[0], funcs) + "[" + generate_expr(e.children[1], funcs) + " as usize]";
     }
+    if e.kind == compiler_ir.irex_field() {
+        // object.field. A field read off an indexed Vec element clones (mirrors
+        // stage1's FieldAccessExpr .clone() when the object is an IndexExpr).
+        let obj: String = generate_expr(e.children[0], funcs);
+        if e.children[0].kind == compiler_ir.irex_index() {
+            return obj + "." + e.name + ".clone()";
+        }
+        return obj + "." + e.name;
+    }
     if e.kind == compiler_ir.irex_method() {
         return generate_method_call(e, funcs);
     }
@@ -826,6 +1277,21 @@ public function generate_call(e: IrExpr, funcs: Array<IrFunction>) returns Strin
     }
     if e.call_kind == compiler_ir.callkind_variant() {
         return generate_variant_constructor(e, funcs);
+    }
+    if e.call_kind == compiler_ir.callkind_constructor() {
+        // Entity constructor call: `Name::new(args)`, each arg cloned if a non-Copy
+        // place (mirrors stage1's CallConstructor cloneIfNeeded on each arg).
+        let mutable out: String = e.name + "::new(";
+        let mutable ci: Int = 0;
+        while ci < len(e.children) {
+            if ci > 0 {
+                out = out + ", ";
+            }
+            out = out + clone_if_needed(generate_expr(e.children[ci], funcs), e.children[ci]);
+            ci = ci + 1;
+        }
+        out = out + ")";
+        return out;
     }
     let mutable out: String = e.name + "(";
     let mutable i: Int = 0;

@@ -2695,3 +2695,40 @@ Gates green: diff-emit 23/23, selfcheck-formatter 7/7, selfcheck-checker 13/13,
 ir_test 17, lower_test 129 (+ enum lowering case). No Go / shared/* touched. NEXT:
 entities (bank_account) -> generics (generic_stack) -> traits (handler_trait) -> Map
 (map_demo) -> async (async_demo, task_queue) -> char/string interp (char_string_demo).
+
+---
+
+## 2026-07-08 — Phase 55 scale-up slice 18: entities (structs + impl + ctor + methods + invariants + old + intents) (diff-emit 24/24)
+
+`examples/bank_account.intent` now self-hosts byte-equal — the FIFTEENTH real
+example and the largest single-file slice. diff-emit is **24/24 EQUAL**.
+
+- **Shared enrichment** (touches shared/*, ADR 0054 additive): `EntityDecl.invariants_raw`
+  (invariants had no raw text) + capturing `requires_raw`/`ensures_raw` in
+  `parse_constructor_decl`/`parse_method_decl` (they never did — a latent gap that
+  only surfaced when the compiler consumed the raw text). All shared gates stay green
+  (diff-checker 86/86, diff-formatter 22/22, diff-linter 26/26, go test, validate,
+  selfcheck-*) — the additions are inert to checker/formatter/linter.
+- **IrEntity/IrEnum/IrIntent/IrOldCapture + irex_field** (ir.intent). Constructor and
+  methods reuse IrFunction (+ old_captures field). self/result/old are modelled as
+  synthetic var-refs (no new nodes): `self` -> `ir_var_ref(scope.self_name)` ("self"
+  in methods, "__self" in constructors); `old(x)` (in an in_old ensures scope) -> the
+  hoisted capture var; only irex_field is genuinely new.
+- **Backend**: generate_entity (struct + impl), generate_constructor (requires,
+  hoisted struct-literal direct inits + defaults, body-rest, ensures, invariant check,
+  __self), generate_method (&self/&mut self via method_mutates_self, old captures,
+  requires, labeled 'body: block, ensures, invariant check), generate_intent
+  (doc-comments + compile-time-verified mod, mangle_intent_name), constructor-call
+  (`Name::new(args)` cloned), field access, default_value.
+- **Registries on LowerScope**: enums + entities carried constant on the scope (seeded
+  once), plus self_name + in_old flags — so only lower_function/test/member gained
+  params, not the deep lower_expr chain. **Traps**: `verified_by`/`ensures` reserved
+  (IR field `verifications`, param `ens_preds`); local `fn` -> `func` (Rust keyword).
+
+Gates green: diff-emit 24/24, selfcheck-formatter 7/7, selfcheck-checker 13/13,
+diff-checker 86/86, diff-formatter 22/22, diff-linter 26/26, go test, validate,
+ir_test 17, lower_test 131 (+2 entity cases), bank_account cargo 3/3.
+
+NEXT: generics (generic_stack — monomorphization: Stack<Int>/Stack<String> ->
+distinct concrete types) -> traits (handler_trait) -> Map (map_demo) -> async
+(async_demo, task_queue) -> char/string interp (char_string_demo) -> js_demo.

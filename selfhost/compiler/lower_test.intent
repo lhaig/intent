@@ -403,4 +403,48 @@ test "lowers enum decls, variant construction, and enum-match patterns" {
     assert(len(mt.match_arms[1].bindings) == 0);
 }
 
+test "lowers an entity: fields, invariant raw, constructor (__self), method, old()" {
+    let src: String = "module m version \"1.0.0\";\n\nentity Acct " + lbrace() + "\n    field bal: Int;\n    invariant self.bal >= 0;\n    constructor(b: Int)\n        requires b >= 0\n    " + lbrace() + "\n        self.bal = b;\n    " + rbrace() + "\n    method dep(a: Int) returns Void\n        ensures self.bal == old(self.bal) + a\n    " + lbrace() + "\n        self.bal = self.bal + a;\n    " + rbrace() + "\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    assert(len(m.entities) == 1);
+    let en: IrEntity = m.entities[0];
+    assert(en.name == "Acct");
+    assert(en.fields[0].name == "bal");
+    assert(en.fields[0].param_type.name == "Int");
+    // Invariant lowered with raw text; self stays `self`.
+    assert(len(en.invariants) == 1);
+    assert(en.invariants[0].raw_text == "self . bal >= 0");
+    assert(en.invariants[0].expr.kind == compiler_ir.irex_binary());
+    // Constructor: self -> __self, so `self.bal = b` targets a __self field access.
+    assert(en.has_constructor);
+    let ctor: IrFunction = en.constructor_fn;
+    assert(len(ctor.requires_clauses) == 1);
+    assert(ctor.requires_clauses[0].raw_text == "b >= 0");
+    let asg: IrStmt = ctor.body[0];
+    assert(asg.kind == compiler_ir.irst_assign());
+    assert(asg.target.kind == compiler_ir.irex_field());
+    assert(asg.target.children[0].name == "__self");
+    // Method: self stays `self`; the ensures old(self.bal) becomes a capture.
+    let dep: IrFunction = en.methods[0];
+    assert(dep.name == "dep");
+    assert(len(dep.old_captures) == 1);
+    assert(dep.old_captures[0].name == "__old_self_bal");
+    // The ensures references the captured var (an irex_var to __old_self_bal).
+    assert(len(dep.ensures_clauses) == 1);
+    let post: IrExpr = dep.ensures_clauses[0].expr;
+    assert(post.children[1].children[0].kind == compiler_ir.irex_var());
+    assert(post.children[1].children[0].name == "__old_self_bal");
+}
+
+test "lowers an entity constructor call to callkind_constructor" {
+    let src: String = "module m version \"1.0.0\";\n\nentity P " + lbrace() + "\n    field x: Int;\n    constructor(x: Int) " + lbrace() + "\n        self.x = x;\n    " + rbrace() + "\n" + rbrace() + "\n\nentry function main() returns Int " + lbrace() + "\n    let p: P = P(5);\n    return 0;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "m.intent");
+    let ctor_call: IrExpr = m.functions[0].body[0].expr;
+    assert(ctor_call.kind == compiler_ir.irex_call());
+    assert(ctor_call.call_kind == compiler_ir.callkind_constructor());
+    assert(ctor_call.name == "P");
+}
+
 // 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

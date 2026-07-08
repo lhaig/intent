@@ -251,6 +251,42 @@ than the bridge): `error_handling` (StringConcat -> `format!`, `continue`/`break
 `io_demo` (IO builtins' `std::fs` emit, Float literals, and the `mutatedVars` analysis
 that makes method-call receivers `let mut`).
 
+## Update — entities: structs + impl + constructor + methods + invariants + old() + intents
+
+`examples/bank_account.intent` self-hosts byte-equal (diff-emit 24/24). This is the
+largest single-file slice: an entity lowers to a `#[derive(Clone, Debug)] struct` +
+`impl` block (`__check_invariants`, `fn new`, methods), with contract asserts, `old()`
+captures, and the `intent` block emitted as doc-comments + a compile-time-verified mod.
+
+- **Shared enrichment (touches `shared/*`).** Invariants had no raw text on the AST
+  (unlike `requires`/`ensures`, enriched earlier), so `EntityDecl.invariants_raw`
+  was added (additive, ADR 0054) and populated in `parse_entity_decl`. Constructors
+  and methods parse via `parse_constructor_decl`/`parse_method_decl`, which — unlike
+  `parse_function_decl` — did **not** capture `requires_raw`/`ensures_raw`; that was
+  added too (a latent gap that only surfaced once the compiler consumed the raw text).
+  All shared gates (`diff-checker`, `diff-formatter`, `diff-linter`, `go test`,
+  `validate`, `selfcheck-*`) stay green — the new fields/method are inert to the
+  checker/formatter/linter.
+- **self / result / old modelled as synthetic var-refs, not new IR nodes.** The
+  stage2 AST has no `ex_self`/`ex_old`/`ex_result` — `self` and `result` are
+  `ex_ident`s and `old(x)` is an `ex_call` on `"old"`. So `self` lowers to
+  `ir_var_ref(scope.self_name)` ("self" in methods, "__self" in a constructor, where
+  stage1 emits the struct being built), `result` to `__result`, and `old(x)` (in an
+  `in_old` ensures scope) to `ir_var_ref(<mangled>)` with the capture hoisted at
+  method start. Only `irex_field` is a genuinely new node. This sidesteps threading
+  an `inConstructor`/`ensuresContext` flag through the whole backend `generate_expr`.
+- **`methodMutatesSelf` picks `&self`/`&mut self`.** Mirrored exactly (self-field
+  assignment or a method call on self ⇒ `&mut self`), keeping the backend free
+  functions (gotcha (b)) rather than a generator entity.
+- **Enum + entity registries carried on `LowerScope`.** Constant program tables
+  (enums from the previous slice, now entities) ride the already-threaded scope
+  (seeded once, preserved by `lower_scope_define`), plus `self_name` and `in_old`
+  flags — so only `lower_function`/`lower_test`/`lower_member` gained parameters, not
+  the deep `lower_expr` chain.
+- **Two reserved-word / Rust-keyword traps.** `verified_by` and `ensures` are Intent
+  reserved words (IR field named `verifications`, param named `ens_preds`); a local
+  named `fn` emits as the Rust keyword `fn` (renamed `func`).
+
 ## References
 
 - [`internal/ir/nodes.go`](../../internal/ir/nodes.go) — the port target for this slice.
