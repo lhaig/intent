@@ -1,0 +1,8 @@
+module strings version "1.0.0";
+
+entry function main() returns Int {
+    let greeting: String = "hello, world";
+    print(greeting);
+    print("literal message");
+    return 0;
+}

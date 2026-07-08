@@ -1,0 +1,153 @@
+// selfhost/compiler/lower_test.intent — Phase 55 / ADR 0059.
+//
+// Slice 55b verification: parse examples/hello.intent's source and lower it,
+// asserting the resulting IR module has exactly the shape the Rust backend
+// (55c) will emit from. The hello source is embedded (not read_file) because
+// `intentc test` runs from a temp cwd where a relative read would miss it.
+// Not part of the selfcheck gates (mirrors check_test.intent).
+module compiler_lower_test version "0.1.0";
+
+import "lower.intent";
+
+import "ir.intent";
+
+import "../shared/parser.intent";
+
+import "../shared/ast.intent";
+
+// Literal braces in a string literal would lex as string interpolation, so the
+// embedded hello source injects them via char-to-string, exactly as
+// check_test.intent does (`lbrace()`/`rbrace()`).
+function lbrace() returns String {
+    return '{'.to_string();
+}
+
+function rbrace() returns String {
+    return '}'.to_string();
+}
+
+test "lowers hello.intent to the expected IR module" {
+    let src: String = "module hello version \"1.0.0\";\n\nentry function main() returns Int " + lbrace() + "\n    return 0;\n" + rbrace() + "\n\ntest \"hello entry returns zero\" " + lbrace() + "\n    assert(true);\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "examples/hello.intent");
+    assert(m.name == "hello");
+    assert(m.is_entry == true);
+    assert(m.path == "examples/hello.intent");
+    assert(len(m.functions) == 1);
+    assert(len(m.tests) == 1);
+    let f: IrFunction = m.functions[0];
+    assert(f.name == "main");
+    assert(f.is_entry == true);
+    assert(f.is_public == false);
+    assert(f.is_async == false);
+    assert(len(f.params) == 0);
+    assert(f.return_type.name == "Int");
+    assert(len(f.requires_clauses) == 0);
+    assert(len(f.ensures_clauses) == 0);
+    assert(len(f.body) == 1);
+    let ret: IrStmt = f.body[0];
+    assert(ret.kind == compiler_ir.irst_return());
+    assert(ret.expr.kind == compiler_ir.irex_int());
+    assert(ret.expr.int_value == 0);
+    assert(ret.expr.expr_type.name == "Int");
+    let t: IrTest = m.tests[0];
+    assert(t.name == "hello entry returns zero");
+    assert(t.is_async == false);
+    assert(len(t.body) == 1);
+    let es: IrStmt = t.body[0];
+    assert(es.kind == compiler_ir.irst_expr());
+    assert(es.expr.kind == compiler_ir.irex_call());
+    assert(es.expr.name == "assert");
+    assert(es.expr.call_kind == compiler_ir.callkind_builtin());
+    assert(es.expr.enum_name == "");
+    assert(len(es.expr.children) == 1);
+    let arg: IrExpr = es.expr.children[0];
+    assert(arg.kind == compiler_ir.irex_bool());
+    assert(arg.bool_value == true);
+    assert(arg.expr_type.name == "Bool");
+}
+
+test "lowers let-bindings and variable references" {
+    let src: String = "module let_locals version \"1.0.0\";\n\nentry function main() returns Int " + lbrace() + "\n    let x: Int = 42;\n    let mutable y: Int = x;\n    return y;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "let_locals.intent");
+    let body: Array<IrStmt> = m.functions[0].body;
+    assert(len(body) == 3);
+    let s0: IrStmt = body[0];
+    assert(s0.kind == compiler_ir.irst_let());
+    assert(s0.name == "x");
+    assert(s0.is_mutable == false);
+    assert(s0.let_type.name == "Int");
+    assert(s0.expr.kind == compiler_ir.irex_int());
+    assert(s0.expr.int_value == 42);
+    let s1: IrStmt = body[1];
+    assert(s1.kind == compiler_ir.irst_let());
+    assert(s1.name == "y");
+    assert(s1.is_mutable == true);
+    assert(s1.expr.kind == compiler_ir.irex_var());
+    assert(s1.expr.name == "x");
+    let s2: IrStmt = body[2];
+    assert(s2.kind == compiler_ir.irst_return());
+    assert(s2.expr.kind == compiler_ir.irex_var());
+    assert(s2.expr.name == "y");
+}
+
+test "lowers binary operators preserving parser precedence" {
+    let src: String = "module b version \"1.0.0\";\n\nentry function main() returns Int " + lbrace() + "\n    let a: Int = 1 + 2 * 3;\n    return a;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "b.intent");
+    let rhs: IrExpr = m.functions[0].body[0].expr;
+    assert(rhs.kind == compiler_ir.irex_binary());
+    assert(rhs.name == "+");
+    assert(rhs.children[0].kind == compiler_ir.irex_int());
+    assert(rhs.children[0].int_value == 1);
+    assert(rhs.children[1].kind == compiler_ir.irex_binary());
+    assert(rhs.children[1].name == "*");
+    assert(rhs.children[1].children[0].int_value == 2);
+    assert(rhs.children[1].children[1].int_value == 3);
+}
+
+test "lowers assignment (st_expr of ex_binop '=') to a distinct irst_assign" {
+    let src: String = "module a version \"1.0.0\";\n\nentry function main() returns Int " + lbrace() + "\n    let mutable x: Int = 0;\n    x = x + 1;\n    return x;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "a.intent");
+    let asg: IrStmt = m.functions[0].body[1];
+    assert(asg.kind == compiler_ir.irst_assign());
+    assert(asg.target.kind == compiler_ir.irex_var());
+    assert(asg.target.name == "x");
+    assert(asg.expr.kind == compiler_ir.irex_binary());
+    assert(asg.expr.name == "+");
+}
+
+test "lowers a non-entry function with params, and a call to it" {
+    let src: String = "module f version \"1.0.0\";\n\nfunction add(a: Int, b: Int) returns Int " + lbrace() + "\n    return a + b;\n" + rbrace() + "\n\nentry function main() returns Int " + lbrace() + "\n    return add(2, 3);\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "f.intent");
+    assert(len(m.functions) == 2);
+    let addfn: IrFunction = m.functions[0];
+    assert(addfn.name == "add");
+    assert(addfn.is_entry == false);
+    assert(len(addfn.params) == 2);
+    assert(addfn.params[0].name == "a");
+    assert(addfn.params[0].param_type.name == "Int");
+    let call: IrExpr = m.functions[1].body[0].expr;
+    assert(call.kind == compiler_ir.irex_call());
+    assert(call.name == "add");
+    assert(call.call_kind == compiler_ir.callkind_function());
+    assert(len(call.children) == 2);
+}
+
+test "lowers a string literal by re-quoting the AST's unquoted content" {
+    let src: String = "module s version \"1.0.0\";\n\nentry function main() returns Int " + lbrace() + "\n    let g: String = \"hi\";\n    print(g);\n    return 0;\n" + rbrace() + "\n";
+    let prog: Program = shared_parser.parse(src);
+    let m: IrModule = compiler_lower.lower(prog, "s.intent");
+    let lit: IrExpr = m.functions[0].body[0].expr;
+    assert(lit.kind == compiler_ir.irex_string());
+    assert(lit.str_value == "\"hi\"");
+    let printcall: IrExpr = m.functions[0].body[1].expr;
+    assert(printcall.kind == compiler_ir.irex_call());
+    assert(printcall.name == "print");
+    assert(printcall.call_kind == compiler_ir.callkind_builtin());
+}
+
+// 55c (rustbe.intent) will emit Rust byte-equal with stage1 from exactly this IR.

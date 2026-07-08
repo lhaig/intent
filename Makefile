@@ -1,4 +1,4 @@
-.PHONY: build test test-v clean install check-examples lint-examples fmt-check-examples emit-examples test-gen-examples test-examples gofmt-check validate diff-formatter selfcheck-formatter diff-linter diff-checker selfcheck-checker
+.PHONY: build test test-v clean install check-examples lint-examples fmt-check-examples emit-examples test-gen-examples test-examples gofmt-check validate diff-formatter selfcheck-formatter diff-linter diff-checker selfcheck-checker diff-emit
 
 # Flat examples (single-file). Subdirectory examples (attractor, multi_file, packages, ffi_blake3)
 # are exercised via their own entry points.
@@ -97,6 +97,13 @@ diff-linter: build
 # "No errors found." in both stages (no-false-positives gate).
 diff-checker: build
 	@./selfhost/checker/difftest-check.sh
+
+# Byte-equal emit gate (Phase 55 / ADR 0059): the stage2 (Intent) compiler emits
+# Rust byte-for-byte identical to stage1 `intentc build --emit` across a corpus
+# that grows construct-by-construct. Starts at 1/1 (hello.intent). Not part of
+# `make validate` — building + running the stage2 compiler is slow (cargo).
+diff-emit: build
+	@./selfhost/compiler/diff-emit.sh
 
 # Self-hosting readiness gate (Phase 54): the stage2 checker matches stage1
 # byte-for-byte on the compiler's OWN multi-file source (imports resolved,

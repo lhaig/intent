@@ -1,0 +1,8 @@
+module binops version "1.0.0";
+
+entry function main() returns Int {
+    let a: Int = 1 + 2 * 3 - 4;
+    let b: Bool = a > 5 and a < 100;
+    let c: Bool = b or false;
+    return a;
+}

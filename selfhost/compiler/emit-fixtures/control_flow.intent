@@ -1,0 +1,18 @@
+module control_flow version "1.0.0";
+
+entry function main() returns Int {
+    let mutable total: Int = 0;
+    let mutable i: Int = 0;
+    while i < 10 {
+        if i % 2 == 0 {
+            total = total + i;
+        } else {
+            total = total - 1;
+        }
+        i = i + 1;
+    }
+    for j in 0..5 {
+        total = total + j;
+    }
+    return total;
+}

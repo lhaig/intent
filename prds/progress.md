@@ -2107,3 +2107,195 @@ the diff-emit corpus only holds fully-supported programs.
 
 No code yet — this session prepared the durable kickoff so work continues cleanly
 after a context compaction. NEXT-STEPS + TASKS (Phase 55 rows 55a/b/c/+) updated.
+
+---
+
+## 2026-07-07 — Phase 55a DONE: IR node model (ADR 0059)
+
+Authored `selfhost/compiler/ir.intent` — the stage2 IR node model for the trivial
+subset `examples/hello.intent` lowers to, mirroring `internal/ir/nodes.go`:
+`IrProgram`/`IrModule`/`IrFunction`/`IrTest`/`IrParam`/`IrContract`, tagged `IrStmt`
+(`irst_expr`/`irst_return`) + `IrExpr` (`irex_void`/`int`/`string`/`bool`/`call`),
+the full `CallKind` 0–5, `IrType`, and construction/empty-array helpers.
+
+Design (ADR 0059): (D1) tagged-entity `kind: Int` + child arrays, not sum types —
+same trade as `shared/ast.intent`. (D2) `Ir`-prefixed names because Intent's
+post-merge namespace is flat for entity refs; `lower.intent` (55b) must import both
+`shared/ast` (Program/Expr/Stmt/Param) and this module. (D3) an **independent
+`IrType`** (shape-identical to the checker's `Type`) keeps `ir.intent` a
+dependency-free leaf — answering "reuse the checker in the emit path?" for the
+trivial subset: lowering assigns literal types structurally, no `CheckResult`
+threaded; a `checker.Type -> IrType` bridge is deferred to the slice that needs it.
+(D4) trivial-subset scope, grown per construct; `requires`/`ensures` are keywords so
+the fields are `requires_clauses`/`ensures_clauses`.
+
+Gates: added to `selfcheck-formatter` (5/5 EQUAL) + `selfcheck-checker` (**10/10**
+PASS, was 9/9). `ir_test.intent` (ungated, like `check_test.intent`) builds a
+hello-shaped `IrModule` — 4/4 runtime tests pass. `validate` OK, diff-checker 86/86,
+diff-formatter 22/22, diff-linter 26/26, `go test ./...` green. Caveat recorded:
+stage1 `intentc fmt` strips comments/reorders — the self-hosted source is a **stage2**
+formatter fixpoint. NEXT: 55b `lower.intent` (AST → IR for hello.intent).
+
+---
+
+## 2026-07-07 — Phase 55b DONE: AST → IR lowering for hello.intent
+
+Authored `selfhost/compiler/lower.intent` — `lower(prog, path) -> IrModule` plus
+`lower_function`/`lower_test`/`lower_block`/`lower_stmt`/`lower_expr`/
+`resolve_call_kind`, mirroring `internal/ir/lower.go` for the trivial subset. Leaf-ish
+module: imports `shared/ast` (lowers FROM) + `compiler/ir` (lowers INTO), no checker.
+
+Stage2-vs-Go AST mapping that mattered: a call's callee is `children[0]` (an
+ex_ident) with args `children[1..]` — not a `Function` field; a bare `return;` is
+st_return whose AST expr is `ex_void`, lowered to `ir_void_expr()`. Confirms ADR 0059
+D3: hello's literal types (Int/Bool) are assigned **structurally** by the `ir_*_lit`
+helpers — no `CheckResult` threaded, the lowering never touches the checker. Deferred
+per the per-construct discipline (ADR 0059 D4): contract lowering (stage2 AST carries
+no clause raw-text) and constructor/variant call classification (needs entity/enum
+tables) — hello uses neither.
+
+Gates: `lower.intent` added to `selfcheck-formatter` (**6/6** EQUAL) +
+`selfcheck-checker` (**11/11** PASS). `lower_test.intent` (ungated) parses embedded
+hello source and asserts the full lowered IR shape (main entry / return 0i64 / builtin
+`assert(true)` call) — passes under `intentc test` (109 total, 0 failed). Note: literal
+`{`/`}` in a string lex as interpolation, so the embedded source injects braces via
+`'{'.to_string()` helpers (same trick as check_test.intent). All prior gates green:
+diff-checker 86/86, diff-formatter 22/22, diff-linter 26/26, go test cached-OK.
+
+NEXT: 55c `rustbe.intent` — emit Rust byte-equal with stage1 `build --emit` on
+hello.intent, wire `build --emit --self-hosted` (mirror the Phase 54 harness:
+stage2CheckerBinary/runStage2Checker/stage2CheckPaths), add `make diff-emit` at 1/1.
+This is where the IR + lowering get exercised end-to-end and byte-equal-gated.
+
+---
+
+## 2026-07-07 — Phase 55c DONE: IR → Rust byte-equal; BOOTSTRAP LOOP CLOSED for hello
+
+Shipped the trivial-subset milestone. `examples/hello.intent` now emits Rust
+**byte-equal** between stage1 `intentc build --emit` and stage2 `intentc build
+--emit --self-hosted`. Intent compiles itself (front-end + IR + backend) for hello.
+
+- `selfhost/compiler/rustbe.intent` — `generate(IrModule) -> String` + generate_
+  function/test/stmts/stmt/expr/call/builtin_call/args + sanitise_test_name +
+  indent_str, mirroring rustbe.go for the entry-fn / return-int / #[test] /
+  `assert!` subset. Imports only `compiler/ir` (leaf-ish).
+- `selfhost/compiler/compile_main.intent` — stage2 CLI entry: read → parse → lower
+  → generate → print (single-file).
+- Harness (`cmd/intentc/main.go`): `--self-hosted` flag on `build --emit`;
+  `stage2CompilerBinary()` builds/caches the stage2 compiler (env override
+  `INTENT_STAGE2_COMPILE`), mirroring `stage2CheckerBinary` (ADR 0058). Strips the
+  one trailing print-newline, writes `<base>.rs`. Rust-target, single-file only.
+- `make diff-emit` (+ `selfhost/compiler/diff-emit.sh`) — byte-equal gate, **1/1**
+  (hello); grows per construct slice.
+
+Two Intent lexer constraints shaped rustbe (ADR 0059 update): literal `{`/`}` in a
+string lex as interpolation → braces emitted via `'{'.to_string()` helpers (the `\{`
+escape stays literal backslash-brace, unusable); `sanitise_test_name` mirrors stage1's
+ASCII rules via codepoints + `String.to_lowercase()`, not the Unicode is_alpha helpers.
+Emitter discipline: unsupported constructs emit a loud `// unsupported:` marker (fails
+diff-emit), never silently-wrong Rust.
+
+Gates ALL green: diff-emit 1/1, selfcheck-formatter **7/7** EQUAL, selfcheck-checker
+**13/13** PASS, new Go test `TestBuildEmitSelfHostedEnvOverride` (3 subtests, fake
+binary, no cargo), go test ./... OK, validate OK, diff-checker 86/86, diff-formatter
+22/22, diff-linter 26/26. gofmt clean.
+
+MILESTONE: the "thin first slice proves the whole pipeline end-to-end" goal (PRD) is
+met. NEXT front = scale construct-by-construct (PRD "Then scale up"): let-bindings &
+locals → arithmetic/comparison/logical binops → if/while/for → user functions & calls
+→ entities+fields+methods → enums+match → contracts (needs AST raw-text for assert!
+messages) → Result/Option/? → generics → closures → async. Each new construct: grow
+lower.intent + rustbe.intent, add a byte-equal-gated corpus entry to diff-emit.sh.
+
+---
+
+## 2026-07-07 — Phase 55 scale-up slice 1: let-bindings & locals (diff-emit 2/2)
+
+First construct beyond the thin milestone. `emit-fixtures/let_locals.intent` (`let x:
+Int = 42; let mutable y: Int = x; return y;`) emits byte-equal stage1 vs stage2.
+
+- IR (ir.intent): added `irst_let` (=3) + `irex_var` (=5); extended IrStmt with
+  name/is_mutable/let_type (defaulted in the ctor, assigned post-construction — the
+  irst_expr/irst_return call sites stay 2-arg); added `ir_var_ref` helper.
+- lower.intent: st_let → irst_let (name/is_mutable/type_name from AST); ex_ident →
+  ir_var_ref. (An ex_ident is a plain var ref in this subset; unit-enum-variant idents
+  come with the enum slice.)
+- rustbe.intent: `map_type` (Int→i64, Float→f64, String→String, Bool→bool, Void→(),
+  Char→char, + Array/Result/Option recursing through type_args; Map/Future/Fn/entity/
+  enum fail loudly pending their slices — Map needs a HashMap use-injection). irst_let →
+  `let [mut] NAME: TY = VAL;`; irex_var → the bare name. Note: `isMut = is_mutable`
+  matches stage1's `Mutable || mutatedVars[name]` for valid programs (only mutable vars
+  can be assigned, so mutation implies the flag).
+- New emit corpus dir `selfhost/compiler/emit-fixtures/`; diff-emit corpus now 2/2.
+
+Gates green: diff-emit 2/2 EQUAL, selfcheck-formatter EQUAL, selfcheck-checker 13/13,
+ir_test 5/5, lower_test 110/110, validate OK. No new ADR (covered by ADR 0059 D4). NEXT:
+arithmetic/comparison/logical binops (irex_binary + StringConcat detection + operator
+mapping), then if/while/for.
+
+---
+
+## 2026-07-07 — Phase 55 scale-up slice 2: binops (diff-emit 3/3)
+
+`emit-fixtures/binops.intent` (`1 + 2 * 3 - 4`, `a > 5 and a < 100`, `b or false`)
+emits byte-equal. Because both stages share the parser, the binary tree is identical,
+so recursive fully-parenthesised `(left op right)` emission is byte-equal for free.
+
+- IR: `irex_binary` (=6), name=operator text, children=[left, right]; `ir_binary` helper.
+- lower.intent: ex_binop → ir_binary (string-concat `+` → StringConcat deferred to the
+  strings slice; needs operand types).
+- rustbe.intent: `generate_binary` (`(l op r)`, `implies` → `(!l || r)`) + `map_op`
+  (mirrors mapOperator: and→&&, or→||). map_type extended earlier covers the let types.
+- diff-emit corpus now 3/3.
+
+Gates green: diff-emit 3/3 EQUAL, selfcheck-formatter OK, selfcheck-checker 13/13,
+ir_test 6/6, lower_test 111/111. NEXT: control flow (if/else, while, for-in) — blocks,
+else-if chains, `for x in a..b`; while invariants/decreases deferred with contracts.
+
+---
+
+## 2026-07-07 — Phase 55 scale-up slices 3-5: control flow, functions, strings (diff-emit 7/7, TWO real examples)
+
+Three more construct slices; diff-emit now **7/7 EQUAL** including a SECOND real example
+(`examples/divergence_demo.intent`) alongside hello — two real programs self-host.
+
+**Slice 3 — control flow (`control_flow.intent`):** if/else (+ one-level else-if flatten),
+while, for-in ranges, assignment, blocks. IR: `irst_if/while/for/assign`, `irex_range`;
+IrStmt gained then_body/else_body/has_else/target (defaulted). Key finding: the stage2 AST
+has **no `st_assign`** — `x = y` is a st_expr wrapping an ex_binop op "=" (children
+[target,value]); lower_stmt special-cases it to `irst_assign` (emit `target = value;`, not
+`(target = value);`). Fiddly emit replicated exactly: the then-block's closing `}` has NO
+trailing newline so ` else ` continues the line (generateIfStmt). All braces via lbrace()/
+rbrace().
+
+**Slice 4 — user functions & calls (`functions.intent`):** non-entry function emit
+(`fn NAME(p: T, …) -> RET { … }`); the call path already worked via generate_call. Deferred:
+Array/Map by-ref params, contracts (guarded by fail-loud checks in generate_function).
+
+**Slice 5 — strings & print (`strings.intent`):** string literals lower by RE-QUOTING the
+AST's unquoted content (`"\"" + str_value + "\""`) to match stage1's quoted StringLit.Value;
+`print` → `println!("{}", ARG)`. String concatenation (StringConcat, needs operand types)
+and interpolation still deferred.
+
+Gates green throughout: diff-emit 7/7, selfcheck-formatter OK, selfcheck-checker 13/13,
+ir_test 7/7, lower_test grown. No new ADR (all covered by ADR 0059 D4, per-construct scope).
+
+### Frontier analysis (probed all 22 examples against the stage2 emitter)
+Byte-equal now: **hello, divergence_demo**. The rest each need a specific unbuilt slice:
+- **Contracts** (fibonacci, sorted_check, bank_account, array_sum, …): `requires`/`ensures`
+  → `assert!` + the ensures `'body:` labeled block (return→`break 'body`). BLOCKER: the
+  assert message needs the clause's raw text, which stage1 builds as its **tokens joined by
+  single spaces** (`parser.go extractRawText`, e.g. `len ( arr ) > 0`). The stage2 AST does
+  NOT capture this — so contracts require enriching the SHARED parser/AST (additive, ADR
+  0054 style) to store per-clause raw text, a cross-cutting change touching fmt/lint/check.
+- **Arrays/Map** (sorted_check, array_sum, map_demo): array/map literals, indexing, `len`,
+  Array/Map types (`&Vec`/`HashMap` + HashMap use-injection), by-ref params + call borrow.
+- **Entities** (bank_account, shape_area): struct + constructor (`::new`) + methods + field
+  access + `self` + invariants.
+- **Enums + match** (enum_basic, result_option, error_handling), **Result/Option/`?`**,
+  **generics** (generic_stack — monomorphization), **closures** (closure_demo),
+  **async** (async_demo, task_queue), **char/float**, **string concat/interp** (char_string_demo).
+
+Each is a substantial, byte-exact slice (the remaining bulk of the ~4000 LOC lower.go+rustbe.go
+port). NEXT recommended: contracts (unlocks the most examples) — start with the shared-AST
+raw-text enrichment sub-task, then the ensures labeled-block emit.

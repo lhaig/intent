@@ -1,0 +1,406 @@
+// selfhost/compiler/ir.intent — Phase 55 / ADR 0059 stage2 self-hosted compiler.
+//
+// The target-independent Intermediate Representation, reimplemented in Intent.
+// This is the FIRST slice (55a): the IR node model for the trivial subset that
+// examples/hello.intent lowers to — Program/Module/Function/Test plus a handful
+// of Stmt/Expr kinds (expr-stmt, return, call, int/string/bool literal). It
+// mirrors internal/ir/nodes.go for exactly those kinds; more kinds land per
+// slice as constructs are added, each byte-equal-gated by `make diff-emit`.
+//
+// Design notes (mirror shared/ast.intent, ADR 0053/0054):
+//   - Each IR node is one entity with an Int `kind` discriminator + the fields
+//     used by all kinds it represents. Intent enums with payloads would force
+//     every field access through a single-expression match arm, so a sum-typed
+//     Stmt/Expr would be awkward to consume — the same trade the AST makes.
+//   - Mutually-recursive sizing is safe because nested children are reached via
+//     Array<...> (heap-allocated): IrExpr/IrExpr, IrStmt/IrExpr, IrFunction/
+//     IrStmt all participate.
+//   - Every IR entity is prefixed `Ir` so it coexists with the AST's flat
+//     (post-merge) namespace: lower.intent will import BOTH shared/ast (whose
+//     Program/Expr/Stmt/Param it lowers FROM) and this module (which it lowers
+//     INTO), and Intent resolves entity type references unqualified.
+//   - Types are modelled by IrType, shape-identical to the checker's Type
+//     (ADR 0053: name + type_args + fn_param_count) so a checker.Type -> IrType
+//     bridge in lowering is a trivial field copy when non-structural types are
+//     needed. Keeping IrType here (rather than importing the checker's Type)
+//     leaves this the lowest, dependency-free layer of the compiler.
+module compiler_ir version "0.1.0";
+
+// --- Statement kind constants -----------------------------------------------
+// IR-specific numbering (NOT the AST's st_* values). Additive across slices.
+public function irst_expr() returns Int {
+    return 1;
+} // expr = the wrapped expression
+
+public function irst_return() returns Int {
+    return 2;
+} // expr = return value, or irex_void for a bare `return;`
+
+public function irst_let() returns Int {
+    return 3;
+} // expr = rhs value; name / is_mutable / let_type carry the binding
+
+public function irst_if() returns Int {
+    return 4;
+} // expr = condition; then_body, else_body, has_else
+
+public function irst_while() returns Int {
+    return 5;
+} // expr = condition; then_body = loop body
+
+public function irst_for() returns Int {
+    return 6;
+} // name = loop var; expr = iterable; then_body = loop body
+
+public function irst_assign() returns Int {
+    return 7;
+} // target = assignment target; expr = assigned value
+
+// --- Expression kind constants ----------------------------------------------
+public function irex_void() returns Int {
+    return 0;
+} // placeholder for absent expr (bare `return;`)
+
+public function irex_int() returns Int {
+    return 1;
+} // int_value
+
+public function irex_string() returns Int {
+    return 2;
+} // str_value (quoted lexeme, as stage1 StringLit.Value carries it)
+
+public function irex_bool() returns Int {
+    return 3;
+} // bool_value
+
+public function irex_call() returns Int {
+    return 4;
+} // name = callee, children = args, call_kind, enum_name (variants)
+
+public function irex_var() returns Int {
+    return 5;
+} // name = referenced variable
+
+public function irex_binary() returns Int {
+    return 6;
+} // name = operator text, children = [left, right]
+
+public function irex_range() returns Int {
+    return 7;
+} // children = [start, end]
+
+// --- Call-kind constants ----------------------------------------------------
+// Mirrors internal/ir CallKind iota so the backend dispatches identically.
+public function callkind_function() returns Int {
+    return 0;
+}
+
+public function callkind_constructor() returns Int {
+    return 1;
+}
+
+public function callkind_variant() returns Int {
+    return 2;
+}
+
+public function callkind_builtin() returns Int {
+    return 3;
+}
+
+public function callkind_closure() returns Int {
+    return 4;
+}
+
+public function callkind_method() returns Int {
+    return 5;
+}
+
+// --- Type model -------------------------------------------------------------
+// Shape-identical to the checker's Type (ADR 0053). fn_param_count is
+// meaningful ONLY when name == "Fn" (0 for every other type).
+public entity IrType {
+    field name: String;
+    field type_args: Array<IrType>;
+    field fn_param_count: Int;
+
+    constructor(name: String, type_args: Array<IrType>, fn_param_count: Int) {
+        self.name = name;
+        self.type_args = type_args;
+        self.fn_param_count = fn_param_count;
+    }
+}
+
+// --- Expression node --------------------------------------------------------
+// Field usage by kind:
+//   irex_void   — no fields set (expr_type is "Void")
+//   irex_int    — int_value
+//   irex_string — str_value (the quoted source lexeme, e.g. "\"hello\"")
+//   irex_bool   — bool_value
+//   irex_call   — name (callee), children (args), call_kind, enum_name
+// call_kind defaults to callkind_function() and enum_name to "" in the
+// constructor; lowering assigns them after construction for calls (the AST's
+// match_arms/lambda_params follow the same defaulted-then-assigned pattern).
+public entity IrExpr {
+    field kind: Int;
+    field int_value: Int;
+    field str_value: String;
+    field bool_value: Bool;
+    field name: String;
+    field children: Array<IrExpr>;
+    field expr_type: IrType;
+    field call_kind: Int;
+    field enum_name: String;
+
+    constructor(kind: Int, int_value: Int, str_value: String, bool_value: Bool, name: String, children: Array<IrExpr>, expr_type: IrType) {
+        self.kind = kind;
+        self.int_value = int_value;
+        self.str_value = str_value;
+        self.bool_value = bool_value;
+        self.name = name;
+        self.children = children;
+        self.expr_type = expr_type;
+        self.call_kind = callkind_function();
+        self.enum_name = "";
+    }
+}
+
+// --- Statement node ---------------------------------------------------------
+// Field usage by kind:
+//   irst_expr   — expr (the wrapped expression)
+//   irst_return — expr (the value, or irex_void for a bare `return;`)
+//   irst_let    — expr (rhs value), name (binding), is_mutable, let_type
+//   irst_if     — expr (condition), then_body, else_body, has_else
+//   irst_while  — expr (condition), then_body (loop body)
+//   irst_for    — name (loop var), expr (iterable), then_body (loop body)
+//   irst_assign — target (assignment target), expr (assigned value)
+// All fields beyond kind/expr default in the constructor and are assigned
+// post-construction by lowering (the AST Expr's match_arms/lambda_params follow
+// the same defaulted-then-assigned pattern), so the irst_expr / irst_return call
+// sites stay two-argument.
+public entity IrStmt {
+    field kind: Int;
+    field expr: IrExpr;
+    field name: String;
+    field is_mutable: Bool;
+    field let_type: IrType;
+    field then_body: Array<IrStmt>;
+    field else_body: Array<IrStmt>;
+    field has_else: Bool;
+    field target: IrExpr;
+
+    constructor(kind: Int, expr: IrExpr) {
+        self.kind = kind;
+        self.expr = expr;
+        self.name = "";
+        self.is_mutable = false;
+        self.let_type = ir_type_named("");
+        self.then_body = empty_ir_stmt_array();
+        self.else_body = empty_ir_stmt_array();
+        self.has_else = false;
+        self.target = ir_void_expr();
+    }
+}
+
+// --- Parameter --------------------------------------------------------------
+public entity IrParam {
+    field name: String;
+    field param_type: IrType;
+
+    constructor(name: String, param_type: IrType) {
+        self.name = name;
+        self.param_type = param_type;
+    }
+}
+
+// --- Contract (requires / ensures / invariant clause) -----------------------
+// Line / Column are 1-indexed source positions copied from the AST (ADR 0034),
+// consumed by verify diagnostics. A zero Line means "no source position".
+public entity IrContract {
+    field expr: IrExpr;
+    field raw_text: String;
+    field line: Int;
+    field column: Int;
+
+    constructor(expr: IrExpr, raw_text: String, line: Int, column: Int) {
+        self.expr = expr;
+        self.raw_text = raw_text;
+        self.line = line;
+        self.column = column;
+    }
+}
+
+// --- Function ---------------------------------------------------------------
+public entity IrFunction {
+    field name: String;
+    field is_entry: Bool;
+    field is_public: Bool;
+    field is_async: Bool;
+    field params: Array<IrParam>;
+    field return_type: IrType;
+    field requires_clauses: Array<IrContract>;
+    field ensures_clauses: Array<IrContract>;
+    field body: Array<IrStmt>;
+
+    constructor(name: String, is_entry: Bool, is_public: Bool, is_async: Bool, params: Array<IrParam>, return_type: IrType, requires_clauses: Array<IrContract>, ensures_clauses: Array<IrContract>, body: Array<IrStmt>) {
+        self.name = name;
+        self.is_entry = is_entry;
+        self.is_public = is_public;
+        self.is_async = is_async;
+        self.params = params;
+        self.return_type = return_type;
+        self.requires_clauses = requires_clauses;
+        self.ensures_clauses = ensures_clauses;
+        self.body = body;
+    }
+}
+
+// --- Test -------------------------------------------------------------------
+// annotations mirror the AST's Array<String> canonical-string form (e.g.
+// "@target_specific(\"rust\")"); the multi-target dispatcher that parses them
+// is out of scope for the Rust-only first milestone.
+public entity IrTest {
+    field name: String;
+    field is_async: Bool;
+    field annotations: Array<String>;
+    field body: Array<IrStmt>;
+
+    constructor(name: String, is_async: Bool, annotations: Array<String>, body: Array<IrStmt>) {
+        self.name = name;
+        self.is_async = is_async;
+        self.annotations = annotations;
+        self.body = body;
+    }
+}
+
+// --- Module -----------------------------------------------------------------
+// One Intent source file after lowering. decl_name is the `module` declaration
+// name; package_name is the intent.toml package (empty for same-package
+// modules); is_entry marks the program entry file (its `entry` function becomes
+// `fn main`). Decl arrays other than functions/tests (entities, enums, traits,
+// impls, intents, externs) arrive with their respective construct slices.
+public entity IrModule {
+    field name: String;
+    field decl_name: String;
+    field package_name: String;
+    field is_entry: Bool;
+    field path: String;
+    field functions: Array<IrFunction>;
+    field tests: Array<IrTest>;
+
+    constructor(name: String, decl_name: String, package_name: String, is_entry: Bool, path: String, functions: Array<IrFunction>, tests: Array<IrTest>) {
+        self.name = name;
+        self.decl_name = decl_name;
+        self.package_name = package_name;
+        self.is_entry = is_entry;
+        self.path = path;
+        self.functions = functions;
+        self.tests = tests;
+    }
+}
+
+// --- Program ----------------------------------------------------------------
+// A multi-file Intent program after lowering.
+public entity IrProgram {
+    field modules: Array<IrModule>;
+
+    constructor(modules: Array<IrModule>) {
+        self.modules = modules;
+    }
+}
+
+// --- Helpers ----------------------------------------------------------------
+// Empty-array constructors (avoid bare `[]` literals whose element type can't
+// be inferred at the assignment site) — mirrors shared/ast.intent's empty_*.
+public function empty_ir_type_array() returns Array<IrType> {
+    let mutable a: Array<IrType> = [];
+    return a;
+}
+
+public function empty_ir_expr_array() returns Array<IrExpr> {
+    let mutable a: Array<IrExpr> = [];
+    return a;
+}
+
+public function empty_ir_stmt_array() returns Array<IrStmt> {
+    let mutable a: Array<IrStmt> = [];
+    return a;
+}
+
+public function empty_ir_param_array() returns Array<IrParam> {
+    let mutable a: Array<IrParam> = [];
+    return a;
+}
+
+public function empty_ir_contract_array() returns Array<IrContract> {
+    let mutable a: Array<IrContract> = [];
+    return a;
+}
+
+public function empty_ir_test_array() returns Array<IrTest> {
+    let mutable a: Array<IrTest> = [];
+    return a;
+}
+
+public function empty_ir_function_array() returns Array<IrFunction> {
+    let mutable a: Array<IrFunction> = [];
+    return a;
+}
+
+public function empty_ir_module_array() returns Array<IrModule> {
+    let mutable a: Array<IrModule> = [];
+    return a;
+}
+
+// ir_type_named — a leaf IrType with the given name (no type args).
+public function ir_type_named(name: String) returns IrType {
+    return IrType(name, empty_ir_type_array(), 0);
+}
+
+// ir_void_expr — the placeholder expression for an absent value (bare return).
+public function ir_void_expr() returns IrExpr {
+    return IrExpr(irex_void(), 0, "", false, "", empty_ir_expr_array(), ir_type_named("Void"));
+}
+
+// ir_int_lit / ir_string_lit / ir_bool_lit — typed literal constructors.
+// str_value for ir_string_lit is the quoted source lexeme (the Rust backend
+// appends ".to_string()" to it), matching stage1 StringLit.Value.
+public function ir_int_lit(value: Int) returns IrExpr {
+    return IrExpr(irex_int(), value, "", false, "", empty_ir_expr_array(), ir_type_named("Int"));
+}
+
+public function ir_string_lit(lexeme: String) returns IrExpr {
+    return IrExpr(irex_string(), 0, lexeme, false, "", empty_ir_expr_array(), ir_type_named("String"));
+}
+
+public function ir_bool_lit(value: Bool) returns IrExpr {
+    return IrExpr(irex_bool(), 0, "", value, "", empty_ir_expr_array(), ir_type_named("Bool"));
+}
+
+// ir_var_ref — a variable reference (irex_var). Its type is left unknown; the
+// Rust backend emits the bare name (unit-enum-variant qualification lands with
+// the enum slice, when the reference's type is populated).
+public function ir_var_ref(name: String) returns IrExpr {
+    return IrExpr(irex_var(), 0, "", false, name, empty_ir_expr_array(), ir_type_named(""));
+}
+
+// ir_binary — a binary operation (irex_binary): name is the operator text (e.g.
+// "+", "and", "implies") and children are [left, right]. Type is left unknown;
+// the Rust backend emits `(left op right)` and does not consult it.
+public function ir_binary(op: String, left: IrExpr, right: IrExpr) returns IrExpr {
+    let mutable kids: Array<IrExpr> = empty_ir_expr_array();
+    kids.push(left);
+    kids.push(right);
+    return IrExpr(irex_binary(), 0, "", false, op, kids, ir_type_named(""));
+}
+
+// ir_range — a range expression (irex_range): children are [start, end]. The
+// Rust backend emits `(start..end)`.
+public function ir_range(start: IrExpr, end_expr: IrExpr) returns IrExpr {
+    let mutable kids: Array<IrExpr> = empty_ir_expr_array();
+    kids.push(start);
+    kids.push(end_expr);
+    return IrExpr(irex_range(), 0, "", false, "", kids, ir_type_named(""));
+}
+
+// No entry function here — this is a library module imported by lower.intent /
+// compile_main.intent (same pattern as shared/ast.intent and checker/check.intent).

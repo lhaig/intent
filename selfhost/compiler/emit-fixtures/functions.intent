@@ -1,0 +1,14 @@
+module functions version "1.0.0";
+
+function add(a: Int, b: Int) returns Int {
+    return a + b;
+}
+
+function neg(x: Int) returns Int {
+    return 0 - x;
+}
+
+entry function main() returns Int {
+    let r: Int = add(2, 3);
+    return neg(r);
+}

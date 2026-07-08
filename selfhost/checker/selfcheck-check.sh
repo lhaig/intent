@@ -46,6 +46,10 @@ MODULES=(
   "selfhost/linter/lint_main.intent"
   "selfhost/formatter/format.intent"
   "selfhost/formatter/main.intent"
+  "selfhost/compiler/ir.intent"
+  "selfhost/compiler/lower.intent"
+  "selfhost/compiler/rustbe.intent"
+  "selfhost/compiler/compile_main.intent"
 )
 
 fail=0

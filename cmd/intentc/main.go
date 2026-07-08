@@ -27,7 +27,8 @@ var version = "dev"
 const usage = `intentc - The Intent language compiler
 
 Usage:
-  intentc build [--target <target>] [--emit] <file.intent>    Compile to binary or source
+  intentc build [--target <target>] [--emit] [--self-hosted] <file.intent>
+                                                               Compile to binary or source
   intentc check [--self-hosted] <file.intent>                  Parse and type-check only
   intentc verify <file.intent>                                 Verify contracts using Z3 SMT solver
   intentc test-gen [--emit] <file.intent>                      Generate Intent test blocks from contracts
@@ -46,6 +47,8 @@ Usage:
 Options:
   --target <target>   Target platform: rust (default), js, wasm
   --emit              Output generated source instead of building a binary
+  --self-hosted       With --emit: route through the stage2 (Intent) compiler
+                      (ADR 0059). Rust target only; single-file for now.
   --emit-rust         (deprecated) Same as --emit with --target rust
   --strip-contracts   Drop runtime contract checks from emitted output
                       (Phase 22 / ADR 0033). Rust: assert! -> debug_assert!,
@@ -129,6 +132,7 @@ func main() {
 
 func handleBuild(args []string) {
 	emit := false
+	selfHosted := false
 	target := "rust"
 	var filePath string
 	opts := backend.BuildOptions{}
@@ -142,6 +146,8 @@ func handleBuild(args []string) {
 			target = "rust"
 		case "--emit":
 			emit = true
+		case "--self-hosted":
+			selfHosted = true
 		case "--strip-contracts":
 			opts.StripContracts = true
 		case "--target":
@@ -182,6 +188,44 @@ func handleBuild(args []string) {
 	}
 
 	baseName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+
+	// Phase 55 / ADR 0059: --emit --self-hosted routes through the stage2
+	// (Intent) compiler instead of the Go backend. The stage2 binary prints the
+	// generated source to stdout; strip the single trailing newline print()
+	// appends and write <base>.rs, byte-equal with stage1 `intentc build --emit`.
+	if emit && selfHosted {
+		if target != "rust" {
+			fmt.Fprintln(os.Stderr, "Error: --self-hosted emit currently supports only --target rust")
+			os.Exit(1)
+		}
+		if isMulti {
+			fmt.Fprintln(os.Stderr, "Error: --self-hosted emit does not yet support multi-file programs")
+			os.Exit(1)
+		}
+		binPath, err := stage2CompilerBinary()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+			os.Exit(1)
+		}
+		stdout, exitCode, err := runStage2Checker(binPath, []string{filePath})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+			os.Exit(1)
+		}
+		if exitCode != 0 {
+			// compile_main reports usage / read / parse errors on stdout, exit 1.
+			fmt.Fprint(os.Stderr, stdout)
+			os.Exit(1)
+		}
+		rust := strings.TrimSuffix(stdout, "\n")
+		outPath := baseName + ".rs"
+		if werr := os.WriteFile(outPath, []byte(rust), 0644); werr != nil {
+			fmt.Fprintf(os.Stderr, "Error writing %s: %s\n", outPath, werr)
+			os.Exit(1)
+		}
+		fmt.Printf("Wrote %s\n", outPath)
+		return
+	}
 
 	if isMulti {
 		// Multi-file compilation path
@@ -1122,6 +1166,107 @@ func stage2CheckerBinary() (string, error) {
 	if err := os.Rename(builtBin, cachePath); err != nil {
 		if copyErr := copyFile(builtBin, cachePath, 0755); copyErr != nil {
 			return "", fmt.Errorf("could not install stage2 checker binary: %w", copyErr)
+		}
+	}
+
+	return cachePath, nil
+}
+
+// stage2CompilerBinary returns the path to the stage2 (Intent) compiler binary
+// that emits Rust, either from the INTENT_STAGE2_COMPILE env override or by
+// auto-building from selfhost/compiler/compile_main.intent (cached in
+// os.TempDir(), rebuilt when any selfhost/compiler/*.intent or
+// selfhost/shared/*.intent file is newer than the cache). Mirrors
+// stage2CheckerBinary (Phase 54); used by `intentc build --emit --self-hosted`.
+func stage2CompilerBinary() (string, error) {
+	if envPath := os.Getenv("INTENT_STAGE2_COMPILE"); envPath != "" {
+		info, err := os.Stat(envPath)
+		if err != nil {
+			return "", fmt.Errorf("INTENT_STAGE2_COMPILE=%q: %w", envPath, err)
+		}
+		if info.IsDir() || info.Mode()&0111 == 0 {
+			return "", fmt.Errorf("INTENT_STAGE2_COMPILE=%q is not an executable file", envPath)
+		}
+		return envPath, nil
+	}
+
+	srcDir := filepath.Join("selfhost", "compiler")
+	mainSrc := filepath.Join(srcDir, "compile_main.intent")
+	if _, err := os.Stat(mainSrc); err != nil {
+		return "", fmt.Errorf(
+			"stage2 compiler sources not found at selfhost/compiler/compile_main.intent; run from the repo root or set INTENT_STAGE2_COMPILE to a prebuilt binary",
+		)
+	}
+
+	cachePath := filepath.Join(os.TempDir(), "intent-stage2-compile")
+
+	// Staleness check: rebuild if cached binary is missing or any .intent file
+	// in selfhost/compiler/ or selfhost/shared/ is newer than the cache.
+	needBuild := false
+	cacheInfo, err := os.Stat(cachePath)
+	if err != nil {
+		needBuild = true
+	} else {
+		sharedDir := filepath.Join("selfhost", "shared")
+		for _, scanDir := range []string{srcDir, sharedDir} {
+			if needBuild {
+				break
+			}
+			entries, err := os.ReadDir(scanDir)
+			if err != nil {
+				continue
+			}
+			for _, e := range entries {
+				if !strings.HasSuffix(e.Name(), ".intent") {
+					continue
+				}
+				fi, err := e.Info()
+				if err != nil {
+					continue
+				}
+				if fi.ModTime().After(cacheInfo.ModTime()) {
+					needBuild = true
+					break
+				}
+			}
+		}
+	}
+
+	if !needBuild {
+		return cachePath, nil
+	}
+
+	intentc, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("could not determine intentc path: %w", err)
+	}
+
+	absSrc, err := filepath.Abs(mainSrc)
+	if err != nil {
+		return "", fmt.Errorf("could not resolve compile_main.intent path: %w", err)
+	}
+
+	buildDir, err := os.MkdirTemp("", "intent-stage2-compile-build-*")
+	if err != nil {
+		return "", fmt.Errorf("could not create build temp dir: %w", err)
+	}
+	defer os.RemoveAll(buildDir)
+
+	buildCmd := exec.Command(intentc, "build", "--target", "rust", absSrc)
+	buildCmd.Dir = buildDir
+	buildOut, buildErr := buildCmd.CombinedOutput()
+	if buildErr != nil {
+		return "", fmt.Errorf("stage2 compiler build failed: %w\n%s", buildErr, strings.TrimSpace(string(buildOut)))
+	}
+
+	builtBin := filepath.Join(buildDir, "compile_main")
+	if _, err := os.Stat(builtBin); err != nil {
+		return "", fmt.Errorf("stage2 compiler build succeeded but binary not found at %s: %w", builtBin, err)
+	}
+
+	if err := os.Rename(builtBin, cachePath); err != nil {
+		if copyErr := copyFile(builtBin, cachePath, 0755); copyErr != nil {
+			return "", fmt.Errorf("could not install stage2 compiler binary: %w", copyErr)
 		}
 	}
 

@@ -855,3 +855,71 @@ func TestCheckSelfHostedEnvOverride(t *testing.T) {
 		}
 	})
 }
+
+// TestBuildEmitSelfHostedEnvOverride tests `intentc build --emit --self-hosted`
+// with INTENT_STAGE2_COMPILE set to a fake compiler, exercising the full CLI
+// path (Phase 55 / ADR 0059) without needing cargo. The fake prints the Rust
+// plus one trailing newline (as print() does); the harness strips exactly that
+// newline and writes <base>.rs.
+func TestBuildEmitSelfHostedEnvOverride(t *testing.T) {
+	binary := buildTestBinary(t)
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "hello.intent")
+	src := "module hello version \"1.0\";\n\nentry function main() returns Int {\n    return 0;\n}\n"
+	if err := os.WriteFile(srcPath, []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("non-existent binary errors mentioning INTENT_STAGE2_COMPILE", func(t *testing.T) {
+		cmd := exec.Command(binary, "build", "--emit", "--self-hosted", srcPath)
+		cmd.Dir = t.TempDir()
+		cmd.Env = append(os.Environ(), "INTENT_STAGE2_COMPILE=/nonexistent/path/to/compile")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatal("expected non-zero exit, got success")
+		}
+		if !strings.Contains(string(out), "INTENT_STAGE2_COMPILE") {
+			t.Errorf("expected error mentioning INTENT_STAGE2_COMPILE, got: %s", out)
+		}
+	})
+
+	t.Run("fake compiler: writes <base>.rs with one trailing newline stripped", func(t *testing.T) {
+		rust := "// Generated Rust code from Intent\nfn main() {}\n\n"
+		fakeBin := makeFakeFormatter(t, tmpDir, "fake-compile-ok", rust+"\n", 0)
+		workDir := t.TempDir()
+		cmd := exec.Command(binary, "build", "--emit", "--self-hosted", srcPath)
+		cmd.Dir = workDir
+		cmd.Env = append(os.Environ(), "INTENT_STAGE2_COMPILE="+fakeBin)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("expected success, got %v\noutput: %s", err, out)
+		}
+		got, rerr := os.ReadFile(filepath.Join(workDir, "hello.rs"))
+		if rerr != nil {
+			t.Fatalf("expected hello.rs written: %v", rerr)
+		}
+		if string(got) != rust {
+			t.Errorf("emitted file mismatch\ngot:  %q\nwant: %q", string(got), rust)
+		}
+	})
+
+	t.Run("fake compiler exit 1: routed to stderr, no file, non-zero exit", func(t *testing.T) {
+		fakeBin := makeFakeFormatter(t, tmpDir, "fake-compile-err", "parse error: unexpected token\n", 1)
+		workDir := t.TempDir()
+		cmd := exec.Command(binary, "build", "--emit", "--self-hosted", srcPath)
+		cmd.Dir = workDir
+		cmd.Env = append(os.Environ(), "INTENT_STAGE2_COMPILE="+fakeBin)
+		stdoutBuf, stderrBuf := &strings.Builder{}, &strings.Builder{}
+		cmd.Stdout = stdoutBuf
+		cmd.Stderr = stderrBuf
+		if err := cmd.Run(); err == nil {
+			t.Fatal("expected non-zero exit when stage2 compiler fails")
+		}
+		if !strings.Contains(stderrBuf.String(), "parse error") {
+			t.Errorf("expected parse error on stderr, got: %q", stderrBuf.String())
+		}
+		if _, statErr := os.Stat(filepath.Join(workDir, "hello.rs")); statErr == nil {
+			t.Error("expected no hello.rs written on compiler failure")
+		}
+	})
+}

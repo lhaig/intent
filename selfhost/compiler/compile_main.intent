@@ -1,0 +1,51 @@
+// selfhost/compiler/compile_main.intent — Phase 55 / ADR 0059 stage2 compiler CLI.
+//
+// The stage2 self-hosted compiler as an invokable tool: reads one .intent file
+// (argv[1]), parses it, lowers the AST to IR, emits Rust, and prints it to
+// stdout. The Go harness (`intentc build --emit --self-hosted`) builds this
+// binary, runs it, strips the single trailing newline print() adds, and writes
+// the result to <base>.rs — byte-equal with stage1 `intentc build --emit`.
+//
+// Single-file only for the trivial subset (examples/hello.intent has no
+// imports); multi-file emit (LowerAll/GenerateAll + import discovery, mirroring
+// the Phase 54 checker harness) is a later milestone.
+//
+// Exit codes: 0 on success; 1 on usage / file-read / parse error.
+module compile_main version "0.1.0";
+
+import "rustbe.intent";
+
+import "lower.intent";
+
+import "ir.intent";
+
+import "../shared/parser.intent";
+
+import "../shared/ast.intent";
+
+entry function main() returns Int {
+    let argv: Array<String> = args();
+    if len(argv) < 2 {
+        print("usage: intent-compile <file.intent>");
+        return 1;
+    }
+    let entry_path: String = argv[1];
+    let r: Result<String, String> = read_file(entry_path);
+    if r.is_err() {
+        print("error: cannot read file: " + entry_path);
+        return 1;
+    }
+    let src: String = match r {
+        Ok(s) => s,
+        Err(_) => "",
+    };
+    let prog: Program = shared_parser.parse(src);
+    if prog.error != "" {
+        print("parse error: " + prog.error);
+        return 1;
+    }
+    let m: IrModule = compiler_lower.lower(prog, entry_path);
+    let rust: String = compiler_rustbe.generate(m);
+    print(rust);
+    return 0;
+}

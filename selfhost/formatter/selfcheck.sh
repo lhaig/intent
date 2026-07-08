@@ -48,13 +48,17 @@ if [ ! -x "$BIN" ]; then
 fi
 
 SHARED_DIR="$ROOT/selfhost/shared"
+COMPILER_DIR="$ROOT/selfhost/compiler"
 
 fail=0
 for entry in \
     "shared/lexer.intent:$SHARED_DIR/lexer.intent" \
     "shared/ast.intent:$SHARED_DIR/ast.intent" \
     "shared/parser.intent:$SHARED_DIR/parser.intent" \
-    "formatter/format.intent:$FMT_DIR/format.intent"; do
+    "formatter/format.intent:$FMT_DIR/format.intent" \
+    "compiler/ir.intent:$COMPILER_DIR/ir.intent" \
+    "compiler/lower.intent:$COMPILER_DIR/lower.intent" \
+    "compiler/rustbe.intent:$COMPILER_DIR/rustbe.intent"; do
   label="${entry%%:*}"
   src="${entry#*:}"
   base=$(basename "$src" .intent)

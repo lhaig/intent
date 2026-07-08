@@ -1,0 +1,474 @@
+// selfhost/compiler/rustbe.intent — Phase 55 / ADR 0059 stage2 self-hosted compiler.
+//
+// IR -> Rust source, reimplemented in Intent. Slice 55c: emits Rust byte-equal
+// with stage1 `intentc build --emit` for the trivial subset examples/hello.intent
+// uses (entry function returning an int literal + a test running `assert(bool)`).
+// Mirrors internal/rustbe/rustbe.go's Generate / generateFunction / generateTest
+// / generateStmt / generateExpr / generateBuiltinCall / sanitiseTestName for
+// exactly those cases; more emit lands per construct slice, each grown into the
+// `make diff-emit` corpus once byte-equal.
+//
+// Unlike the checker (sound-but-incomplete, ADR 0056), the emitter must be
+// COMPLETE for every construct it claims — so unsupported constructs emit a
+// `// unsupported: ...` marker that fails the byte-equal gate LOUDLY rather than
+// silently producing wrong Rust. They are unreachable for the current corpus.
+//
+// Note: a literal `{`/`}` in an Intent string literal lexes as string
+// interpolation, so every brace in the emitted Rust is injected via lbrace()/
+// rbrace() (char-to-string), the same technique check_test.intent uses.
+module compiler_rustbe version "0.1.0";
+
+import "ir.intent";
+
+// generate — an IR Module to Rust source. Mirrors Generate for the trivial
+// subset: header, then functions, then tests (each followed by a blank line).
+// Entities/enums/traits/impls/intents and the use-statement post-processing
+// (HashMap/reqwest/tokio) land with their construct slices.
+public function generate(m: IrModule) returns String {
+    let mutable out: String = "// Generated Rust code from Intent\n";
+    out = out + "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n";
+    out = out + "\n";
+    let mutable fi: Int = 0;
+    while fi < len(m.functions) {
+        out = out + generate_function(m.functions[fi]);
+        out = out + "\n";
+        fi = fi + 1;
+    }
+    let mutable ti: Int = 0;
+    while ti < len(m.tests) {
+        out = out + generate_test(m.tests[ti]);
+        out = out + "\n";
+        ti = ti + 1;
+    }
+    return out;
+}
+
+// generate_function — mirrors generateFunction. A single-file ENTRY function
+// becomes `fn __intent_main() -> i64` plus a `fn main` wrapper. A non-entry
+// function emits its signature (params + return type) and body. Deferred to
+// later slices: async (tokio), contracts (requires/ensures assert! + the ensures
+// labeled block), and Array/Map params passed by reference (needs the call-site
+// borrow logic too).
+public function generate_function(f: IrFunction) returns String {
+    if f.is_async {
+        return "// unsupported: async function " + f.name + "\n";
+    }
+    if len(f.requires_clauses) > 0 {
+        return "// unsupported: requires clause on " + f.name + "\n";
+    }
+    if len(f.ensures_clauses) > 0 {
+        return "// unsupported: ensures clause on " + f.name + "\n";
+    }
+    if f.is_entry {
+        let mutable out: String = "fn __intent_main() -> i64 " + lbrace() + "\n";
+        out = out + generate_stmts(f.body, 1);
+        out = out + rbrace() + "\n";
+        out = out + "\n";
+        out = out + "fn main() " + lbrace() + "\n";
+        out = out + "    let __exit_code = __intent_main();\n";
+        out = out + "    std::process::exit(__exit_code as i32);\n";
+        out = out + rbrace() + "\n";
+        return out;
+    }
+    let mutable sig: String = "fn " + f.name + "(";
+    let mutable i: Int = 0;
+    while i < len(f.params) {
+        if i > 0 {
+            sig = sig + ", ";
+        }
+        sig = sig + f.params[i].name + ": " + map_type(f.params[i].param_type);
+        i = i + 1;
+    }
+    sig = sig + ") -> " + map_type(f.return_type) + " " + lbrace() + "\n";
+    sig = sig + generate_stmts(f.body, 1);
+    sig = sig + rbrace() + "\n";
+    return sig;
+}
+
+// generate_test — mirrors generateTest. Test name is sanitised to a Rust-legal
+// identifier. Async tests (#[tokio::test]) land with the async slice.
+public function generate_test(t: IrTest) returns String {
+    if t.is_async {
+        return "// unsupported: async test " + t.name + "\n";
+    }
+    let fn_name: String = "__test_" + sanitise_test_name(t.name);
+    let mutable out: String = "#[test]\n";
+    out = out + "fn " + fn_name + "() " + lbrace() + "\n";
+    out = out + generate_stmts(t.body, 1);
+    out = out + rbrace() + "\n";
+    return out;
+}
+
+// generate_stmts — emit each statement at the given indent level, in order.
+public function generate_stmts(stmts: Array<IrStmt>, level: Int) returns String {
+    let mutable out: String = "";
+    let mutable i: Int = 0;
+    while i < len(stmts) {
+        out = out + generate_stmt(stmts[i], level);
+        i = i + 1;
+    }
+    return out;
+}
+
+// generate_stmt — mirrors generateStmt for the trivial subset (return, expr).
+// A bare `return;` is irst_return carrying the irex_void placeholder. Other
+// statement kinds land per slice; the fallback fails the gate loudly.
+public function generate_stmt(s: IrStmt, level: Int) returns String {
+    let ind: String = indent_str(level);
+    if s.kind == compiler_ir.irst_return() {
+        if s.expr.kind == compiler_ir.irex_void() {
+            return ind + "return;\n";
+        }
+        return ind + "return " + generate_expr(s.expr) + ";\n";
+    }
+    if s.kind == compiler_ir.irst_expr() {
+        return ind + generate_expr(s.expr) + ";\n";
+    }
+    if s.kind == compiler_ir.irst_let() {
+        let ty: String = map_type(s.let_type);
+        let val: String = generate_expr(s.expr);
+        if s.is_mutable {
+            return ind + "let mut " + s.name + ": " + ty + " = " + val + ";\n";
+        }
+        return ind + "let " + s.name + ": " + ty + " = " + val + ";\n";
+    }
+    if s.kind == compiler_ir.irst_assign() {
+        return ind + generate_expr(s.target) + " = " + generate_expr(s.expr) + ";\n";
+    }
+    if s.kind == compiler_ir.irst_if() {
+        return generate_if(s, level);
+    }
+    if s.kind == compiler_ir.irst_while() {
+        return generate_while(s, level);
+    }
+    if s.kind == compiler_ir.irst_for() {
+        return generate_for(s, level);
+    }
+    return ind + "// unsupported stmt\n";
+}
+
+// generate_if — mirrors generateIfStmt exactly, including its whitespace quirks:
+// the then-block's closing `}` is emitted WITHOUT a trailing newline, so ` else `
+// (or the terminating `\n`) continues on the same line. else-if is flattened one
+// level (`} else if COND {`); a deeper chain nests as `else { if ... }`, matching
+// stage1. Bodies indent one level deeper than the `if`.
+// Braces in the emitted Rust go through lbrace()/rbrace() — a literal `{`/`}` in
+// an Intent string lexes as string interpolation.
+public function generate_if(s: IrStmt, level: Int) returns String {
+    let ind: String = indent_str(level);
+    let mutable out: String = ind + "if " + generate_expr(s.expr) + " " + lbrace() + "\n";
+    out = out + generate_stmts(s.then_body, level + 1);
+    out = out + ind + rbrace();
+    if s.has_else {
+        let mutable is_else_if: Bool = false;
+        if len(s.else_body) == 1 {
+            if s.else_body[0].kind == compiler_ir.irst_if() {
+                is_else_if = true;
+            }
+        }
+        if is_else_if {
+            let ei: IrStmt = s.else_body[0];
+            out = out + " else if " + generate_expr(ei.expr) + " " + lbrace() + "\n";
+            out = out + generate_stmts(ei.then_body, level + 1);
+            out = out + ind + rbrace();
+            if ei.has_else {
+                out = out + " else " + lbrace() + "\n";
+                out = out + generate_stmts(ei.else_body, level + 1);
+                out = out + ind + rbrace() + "\n";
+            } else {
+                out = out + "\n";
+            }
+            return out;
+        }
+        out = out + " else " + lbrace() + "\n";
+        out = out + generate_stmts(s.else_body, level + 1);
+        out = out + ind + rbrace() + "\n";
+        return out;
+    }
+    out = out + "\n";
+    return out;
+}
+
+// generate_while — mirrors generateWhileStmt's no-contract path: `while COND {`
+// ... `}`. Loop invariants / decreases (the contract path) land with contracts.
+public function generate_while(s: IrStmt, level: Int) returns String {
+    let ind: String = indent_str(level);
+    let mutable out: String = ind + "while " + generate_expr(s.expr) + " " + lbrace() + "\n";
+    out = out + generate_stmts(s.then_body, level + 1);
+    out = out + ind + rbrace() + "\n";
+    return out;
+}
+
+// generate_for — mirrors generateForInStmt: `for VAR in (START..END) {` for a
+// range iterable, else `for VAR in EXPR.iter() {`.
+public function generate_for(s: IrStmt, level: Int) returns String {
+    let ind: String = indent_str(level);
+    let mutable out: String = ind + "for " + s.name + " in ";
+    if s.expr.kind == compiler_ir.irex_range() {
+        out = out + "(" + generate_expr(s.expr.children[0]) + ".." + generate_expr(s.expr.children[1]) + ")";
+    } else {
+        out = out + generate_expr(s.expr) + ".iter()";
+    }
+    out = out + " " + lbrace() + "\n";
+    out = out + generate_stmts(s.then_body, level + 1);
+    out = out + ind + rbrace() + "\n";
+    return out;
+}
+
+// generate_expr — mirrors generateExpr for the trivial subset. Int literals get
+// the i64 suffix; string literals (the quoted lexeme) get .to_string(); bools
+// map to true/false; calls dispatch on call_kind. Unsupported kinds fail loudly.
+public function generate_expr(e: IrExpr) returns String {
+    if e.kind == compiler_ir.irex_int() {
+        return e.int_value.to_string() + "i64";
+    }
+    if e.kind == compiler_ir.irex_bool() {
+        if e.bool_value {
+            return "true";
+        }
+        return "false";
+    }
+    if e.kind == compiler_ir.irex_string() {
+        return e.str_value + ".to_string()";
+    }
+    if e.kind == compiler_ir.irex_var() {
+        return e.name;
+    }
+    if e.kind == compiler_ir.irex_binary() {
+        return generate_binary(e);
+    }
+    if e.kind == compiler_ir.irex_range() {
+        return "(" + generate_expr(e.children[0]) + ".." + generate_expr(e.children[1]) + ")";
+    }
+    if e.kind == compiler_ir.irex_call() {
+        return generate_call(e);
+    }
+    return "/* unsupported expr */";
+}
+
+// generate_binary — mirrors generateExpr's BinaryExpr case: fully parenthesised
+// `(left op right)`, with `implies` lowered to `(!left || right)`. String
+// concatenation (a StringConcat node, or the PLUS-on-string-literal fallback)
+// lands with the strings slice; here every `+` is a numeric add.
+public function generate_binary(e: IrExpr) returns String {
+    let left: String = generate_expr(e.children[0]);
+    let right: String = generate_expr(e.children[1]);
+    if e.name == "implies" {
+        return "(!" + left + " || " + right + ")";
+    }
+    return "(" + left + " " + map_op(e.name) + " " + right + ")";
+}
+
+// map_op — mirrors mapOperator: operator source text to its Rust spelling
+// (and/or become &&/||). `implies` is handled in generate_binary, not here.
+public function map_op(op: String) returns String {
+    if op == "+" {
+        return "+";
+    }
+    if op == "-" {
+        return "-";
+    }
+    if op == "*" {
+        return "*";
+    }
+    if op == "/" {
+        return "/";
+    }
+    if op == "%" {
+        return "%";
+    }
+    if op == "==" {
+        return "==";
+    }
+    if op == "!=" {
+        return "!=";
+    }
+    if op == "<" {
+        return "<";
+    }
+    if op == ">" {
+        return ">";
+    }
+    if op == "<=" {
+        return "<=";
+    }
+    if op == ">=" {
+        return ">=";
+    }
+    if op == "and" {
+        return "&&";
+    }
+    if op == "or" {
+        return "||";
+    }
+    return "?";
+}
+
+// map_type — mirrors mapType for the primitives and the std-prelude generics
+// (Array/Result/Option, recursing through type_args). Map (needs a HashMap use
+// statement), Future, Fn, and entity/enum name mangling land with their slices;
+// an empty name (un-annotated / uninferred type) and everything else fail loudly.
+public function map_type(t: IrType) returns String {
+    if t.name == "Int" {
+        return "i64";
+    }
+    if t.name == "Float" {
+        return "f64";
+    }
+    if t.name == "String" {
+        return "String";
+    }
+    if t.name == "Bool" {
+        return "bool";
+    }
+    if t.name == "Void" {
+        return "()";
+    }
+    if t.name == "Char" {
+        return "char";
+    }
+    if t.name == "Array" {
+        if len(t.type_args) == 1 {
+            return "Vec<" + map_type(t.type_args[0]) + ">";
+        }
+        return "Vec<_>";
+    }
+    if t.name == "Result" {
+        if len(t.type_args) == 2 {
+            return "Result<" + map_type(t.type_args[0]) + ", " + map_type(t.type_args[1]) + ">";
+        }
+        return "Result<_, _>";
+    }
+    if t.name == "Option" {
+        if len(t.type_args) == 1 {
+            return "Option<" + map_type(t.type_args[0]) + ">";
+        }
+        return "Option<_>";
+    }
+    return "/* unsupported type: " + t.name + " */";
+}
+
+// generate_call — mirrors generateCallExpr. The trivial subset covers builtins
+// (assert) and plain function calls; constructor/variant emission lands with the
+// entities/enums slices (the lowering does not classify them yet either).
+public function generate_call(e: IrExpr) returns String {
+    if e.call_kind == compiler_ir.callkind_builtin() {
+        return generate_builtin_call(e);
+    }
+    return e.name + "(" + generate_args(e.children) + ")";
+}
+
+// generate_builtin_call — mirrors generateBuiltinCall. Only `assert` is needed
+// by the current corpus; other builtins fail loudly until their emit slice.
+public function generate_builtin_call(e: IrExpr) returns String {
+    if e.name == "assert" {
+        return "assert!(" + generate_expr(e.children[0]) + ", \"assertion failed\")";
+    }
+    if e.name == "print" {
+        // println!("{}", ARG) — the "{}" braces go through lbrace()/rbrace().
+        return "println!(\"" + lbrace() + rbrace() + "\", " + generate_expr(e.children[0]) + ")";
+    }
+    return "/* unsupported builtin: " + e.name + " */";
+}
+
+// generate_args — comma-separated argument expressions. The stage1 arg
+// borrow/clone rules are a later slice; the trivial subset's args are literals.
+public function generate_args(args: Array<IrExpr>) returns String {
+    let mutable out: String = "";
+    let mutable i: Int = 0;
+    while i < len(args) {
+        if i > 0 {
+            out = out + ", ";
+        }
+        out = out + generate_expr(args[i]);
+        i = i + 1;
+    }
+    return out;
+}
+
+// sanitise_test_name — mirrors sanitiseTestName exactly (ASCII rules, NOT the
+// Unicode is_alpha helpers): lowercase ASCII letters/digits kept, uppercase
+// lowercased, a leading digit prefixed with '_', every other run of characters
+// collapsed to a single '_', leading '_' suppressed, trailing '_' trimmed,
+// empty -> "unnamed". Codepoint comparisons avoid any reliance on Char ordering.
+public function sanitise_test_name(name: String) returns String {
+    let mutable b: String = "";
+    let mutable prev_underscore: Bool = true;
+    let mutable i: Int = 0;
+    while i < len(name) {
+        let c: Char = name[i];
+        let cp: Int = c.to_codepoint();
+        if cp >= 97 and cp <= 122 {
+            b = b + c.to_string();
+            prev_underscore = false;
+        } else {
+            if cp >= 65 and cp <= 90 {
+                b = b + c.to_string().to_lowercase();
+                prev_underscore = false;
+            } else {
+                if cp >= 48 and cp <= 57 {
+                    if len(b) == 0 {
+                        b = b + "_";
+                    }
+                    b = b + c.to_string();
+                    prev_underscore = false;
+                } else {
+                    if not prev_underscore {
+                        b = b + "_";
+                        prev_underscore = true;
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    let trimmed: String = trim_trailing_underscores(b);
+    if trimmed == "" {
+        return "unnamed";
+    }
+    return trimmed;
+}
+
+// trim_trailing_underscores — return s without any trailing '_' (codepoint 95).
+// Built char-by-char (no slicing / short-circuit assumptions).
+public function trim_trailing_underscores(s: String) returns String {
+    let n: Int = len(s);
+    let mutable last: Int = -1;
+    let mutable i: Int = 0;
+    while i < n {
+        if s[i].to_codepoint() != 95 {
+            last = i;
+        }
+        i = i + 1;
+    }
+    let mutable out: String = "";
+    let mutable j: Int = 0;
+    while j <= last {
+        out = out + s[j].to_string();
+        j = j + 1;
+    }
+    return out;
+}
+
+// indent_str — `level` copies of four spaces (mirrors indentStr).
+public function indent_str(level: Int) returns String {
+    let mutable s: String = "";
+    let mutable i: Int = 0;
+    while i < level {
+        s = s + "    ";
+        i = i + 1;
+    }
+    return s;
+}
+
+// lbrace / rbrace — literal `{` / `}` via char-to-string; a bare `{`/`}` in a
+// string literal would lex as string interpolation (see check_test.intent).
+public function lbrace() returns String {
+    return '{'.to_string();
+}
+
+public function rbrace() returns String {
+    return '}'.to_string();
+}
+
+// No entry function here — a library module imported by compile_main.intent.

@@ -1,4 +1,57 @@
-# Pickup Notes — 2026-07-07 (checker DONE; NEXT FRONT = Phase 55 self-hosted compiler — see prds/active/prd-phase-55-self-hosted-compiler.md)
+# Pickup Notes — 2026-07-07 (Phase 55 milestone + 5 scale-up slices DONE; NEXT = contracts — see prds/active/prd-phase-55-self-hosted-compiler.md)
+
+## ✅ PHASE 55 SHIPPED: milestone + 5 construct slices (2026-07-07) — ADR 0059
+
+The self-hosted compiler's back half exists in Intent:
+`selfhost/compiler/{ir,lower,rustbe,compile_main}.intent`, wired via `intentc build --emit
+--self-hosted` (harness mirrors Phase 54: `stage2CompilerBinary`, env
+`INTENT_STAGE2_COMPILE`). The bootstrap loop is closed for a growing corpus: **`make
+diff-emit` is 7/7 EQUAL** — TWO real examples (`hello`, `divergence_demo`) + 5 construct
+fixtures — plus `make selfcheck-formatter` (7/7) and `make selfcheck-checker` (13/13).
+Supported: functions/params/calls, let, binops, if/while/for + assignment, strings/print
+(see the frontier list below for the exact construct set). Every slice was verified
+byte-equal against stage1 before landing; all pre-existing gates stayed green throughout.
+
+**NEXT FRONT — scale the emitter construct-by-construct** (PRD "Then scale up"). Each slice:
+grow `lower.intent` + `rustbe.intent` for one construct, add a byte-equal corpus entry to
+`selfhost/compiler/diff-emit.sh`. Order (✅ = done, byte-equal-gated in diff-emit):
+✅ let-bindings & locals → ✅ arithmetic/comparison/logical binops → ✅ if/while/for + assignment
+→ ✅ user functions & calls & args → ✅ strings & `print` → **NEXT: contracts** → arrays/Map →
+entities (structs) + field access + methods → enums + match → Result/Option/`?` → generics →
+closures/lambdas → async → char/float + string concat/interp. The 22 `TESTED_EXAMPLES` are the
+target corpus. Emitter must stay COMPLETE per supported construct (unlike the checker).
+
+**diff-emit is at 7/7** — TWO real examples (`hello`, `divergence_demo`) plus 5 fixtures
+(`let_locals`, `binops`, `control_flow`, `functions`, `strings`). Supported constructs:
+entry+non-entry functions & params & calls, `return`, `let`/`let mutable`, var refs, int/bool/
+string literals, all binops (`(l op r)`, `implies`), if/else(+1-level else-if)/while/for-in,
+ranges, assignment, `print`/`assert` builtins, scalar + Array/Result/Option type mapping.
+
+**Frontier — each remaining example needs a specific unbuilt slice** (probed all 22):
+- **Contracts** (fibonacci, sorted_check, bank_account, array_sum, generic_stack, …) — the
+  biggest unlock. `requires`/`ensures` → `assert!(pred, "Pre/Postcondition failed: <raw>")`
+  plus the ensures `'body:` labeled block (`let __result: T = 'body: { … }; <post asserts>;
+  __result`, with `return x` inside becoming `break 'body x`). **BLOCKER:** the `<raw>` message
+  is the clause's **tokens joined by single spaces** (`parser.go:extractRawText`, e.g.
+  `len ( arr ) > 0`, `n >= 0`). The stage2 AST's `FunctionDecl.requires_clauses`/
+  `ensures_clauses` are `Array<Expr>` with NO raw text. So contracts need a SHARED front-end
+  enrichment sub-task first: capture per-clause raw text in `shared/parser.intent` +
+  `shared/ast.intent` (additive/defaulted, ADR 0054 style; the parser already has the tokens,
+  join their literals with " "). This touches the fmt/lint/check self-hosting gates — verify
+  selfcheck-formatter/checker + diff-* stay green. Then IrContract lowering (expr + raw_text +
+  line/col) and the labeled-block emit (mind `--strip-contracts`: assert! → debug_assert!).
+- **Arrays/Map**: literals, indexing (`arr[i as usize]`, String→`.chars()`), `len`
+  (`(x.len() as i64)`), `Array<T>`→`&Vec<T>` params + call-site borrow, `Map`→`HashMap` + the
+  `use std::collections::HashMap;` header injection (Generate's post-processing).
+- **Entities**: struct + constructor (`Entity::new`, `__self`) + methods (`&self`/`&mut self`,
+  `methodMutatesSelf`) + field access + invariants.
+- **Enums + match**, **Result/Option/`?`** (TryExpr), **generics** (monomorphization —
+  MangleGenericName, collectInstantiations), **closures/lambdas**, **async** (tokio/futures
+  use-injection, spawn/await, `#[tokio::main]`), **char/float** literals, **string
+  concat/interp** (StringConcat needs operand types; StringInterp → `format!`).
+
+Each is a substantial byte-exact slice — the remaining bulk of the ~4000 LOC lower.go+rustbe.go
+port. Recommended next: the contracts shared-AST-enrichment sub-task, then contract emit.
 
 ## ✅ SELF-HOSTING BLOCKER RESOLVED (Phase 54, 2026-07-03) — ADR 0058
 

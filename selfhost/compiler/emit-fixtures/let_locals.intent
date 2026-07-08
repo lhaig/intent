@@ -1,0 +1,7 @@
+module let_locals version "1.0.0";
+
+entry function main() returns Int {
+    let x: Int = 42;
+    let mutable y: Int = x;
+    return y;
+}

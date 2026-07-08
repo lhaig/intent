@@ -1,0 +1,123 @@
+// selfhost/compiler/ir_test.intent — Phase 55 / ADR 0059.
+//
+// Runtime smoke tests for the stage2 IR node model (slice 55a): the
+// tagged-entity constructors and kind discriminators instantiate and read
+// back correctly. `check`/`fmt` prove the model type-checks and formats; these
+// prove the constructors and field defaults behave at runtime, which the
+// lowering (55b) and Rust backend (55c) slices then build on. Not part of the
+// selfcheck gates (mirrors check_test.intent / format_test.intent).
+module compiler_ir_test version "0.1.0";
+
+import "ir.intent";
+
+test "literal constructors carry the right kind, value, and type" {
+    let i: IrExpr = compiler_ir.ir_int_lit(42);
+    assert(i.kind == compiler_ir.irex_int());
+    assert(i.int_value == 42);
+    assert(i.expr_type.name == "Int");
+    let s: IrExpr = compiler_ir.ir_string_lit("\"hi\"");
+    assert(s.kind == compiler_ir.irex_string());
+    assert(s.str_value == "\"hi\"");
+    assert(s.expr_type.name == "String");
+    let b: IrExpr = compiler_ir.ir_bool_lit(true);
+    assert(b.kind == compiler_ir.irex_bool());
+    assert(b.bool_value == true);
+    assert(b.expr_type.name == "Bool");
+}
+
+test "call expr defaults call_kind to function and can be reassigned" {
+    let mutable args: Array<IrExpr> = [];
+    args.push(compiler_ir.ir_bool_lit(true));
+    let mutable call: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, "assert", args, compiler_ir.ir_type_named("Void"));
+    assert(call.call_kind == compiler_ir.callkind_function());
+    assert(call.enum_name == "");
+    call.call_kind = compiler_ir.callkind_builtin();
+    assert(call.call_kind == compiler_ir.callkind_builtin());
+    assert(len(call.children) == 1);
+}
+
+test "return statement wraps a value; bare return uses the void placeholder" {
+    let ret: IrStmt = IrStmt(compiler_ir.irst_return(), compiler_ir.ir_int_lit(0));
+    assert(ret.kind == compiler_ir.irst_return());
+    assert(ret.expr.int_value == 0);
+    let bare: IrStmt = IrStmt(compiler_ir.irst_return(), compiler_ir.ir_void_expr());
+    assert(bare.expr.kind == compiler_ir.irex_void());
+}
+
+test "let statement defaults its binding fields, then carries them once set" {
+    let plain: IrStmt = IrStmt(compiler_ir.irst_let(), compiler_ir.ir_int_lit(42));
+    assert(plain.name == "");
+    assert(plain.is_mutable == false);
+    assert(plain.let_type.name == "");
+    let mutable ls: IrStmt = IrStmt(compiler_ir.irst_let(), compiler_ir.ir_var_ref("x"));
+    ls.name = "y";
+    ls.is_mutable = true;
+    ls.let_type = compiler_ir.ir_type_named("Int");
+    assert(ls.kind == compiler_ir.irst_let());
+    assert(ls.name == "y");
+    assert(ls.is_mutable == true);
+    assert(ls.let_type.name == "Int");
+    assert(ls.expr.kind == compiler_ir.irex_var());
+    assert(ls.expr.name == "x");
+}
+
+test "binary op carries operator text and two children" {
+    let bin: IrExpr = compiler_ir.ir_binary("+", compiler_ir.ir_int_lit(1), compiler_ir.ir_int_lit(2));
+    assert(bin.kind == compiler_ir.irex_binary());
+    assert(bin.name == "+");
+    assert(len(bin.children) == 2);
+    assert(bin.children[0].int_value == 1);
+    assert(bin.children[1].int_value == 2);
+    let vr: IrExpr = compiler_ir.ir_var_ref("z");
+    assert(vr.kind == compiler_ir.irex_var());
+    assert(vr.name == "z");
+}
+
+test "control-flow statements carry bodies, defaults, and ranges" {
+    let cond: IrExpr = compiler_ir.ir_binary("<", compiler_ir.ir_var_ref("i"), compiler_ir.ir_int_lit(10));
+    let mutable body: Array<IrStmt> = compiler_ir.empty_ir_stmt_array();
+    body.push(IrStmt(compiler_ir.irst_return(), compiler_ir.ir_int_lit(1)));
+    let mutable w: IrStmt = IrStmt(compiler_ir.irst_while(), cond);
+    w.then_body = body;
+    assert(w.kind == compiler_ir.irst_while());
+    assert(w.expr.kind == compiler_ir.irex_binary());
+    assert(len(w.then_body) == 1);
+    assert(w.has_else == false);
+    let mutable asg: IrStmt = IrStmt(compiler_ir.irst_assign(), compiler_ir.ir_int_lit(7));
+    asg.target = compiler_ir.ir_var_ref("q");
+    assert(asg.kind == compiler_ir.irst_assign());
+    assert(asg.target.name == "q");
+    let rng: IrExpr = compiler_ir.ir_range(compiler_ir.ir_int_lit(0), compiler_ir.ir_int_lit(5));
+    assert(rng.kind == compiler_ir.irex_range());
+    assert(len(rng.children) == 2);
+    assert(rng.children[1].int_value == 5);
+}
+
+test "a hello-shaped module holds its entry function and test" {
+    let mutable body: Array<IrStmt> = [];
+    body.push(IrStmt(compiler_ir.irst_return(), compiler_ir.ir_int_lit(0)));
+    let main_fn: IrFunction = IrFunction("main", true, false, false, compiler_ir.empty_ir_param_array(), compiler_ir.ir_type_named("Int"), compiler_ir.empty_ir_contract_array(), compiler_ir.empty_ir_contract_array(), body);
+    let mutable assert_args: Array<IrExpr> = [];
+    assert_args.push(compiler_ir.ir_bool_lit(true));
+    let mutable assert_call: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, "assert", assert_args, compiler_ir.ir_type_named("Void"));
+    assert_call.call_kind = compiler_ir.callkind_builtin();
+    let mutable test_body: Array<IrStmt> = [];
+    test_body.push(IrStmt(compiler_ir.irst_expr(), assert_call));
+    let mutable anns: Array<String> = [];
+    let hello_test: IrTest = IrTest("hello entry returns zero", false, anns, test_body);
+    let mutable fns: Array<IrFunction> = [];
+    fns.push(main_fn);
+    let mutable tests: Array<IrTest> = [];
+    tests.push(hello_test);
+    let m: IrModule = IrModule("hello", "hello", "", true, "examples/hello.intent", fns, tests);
+    assert(m.is_entry == true);
+    assert(len(m.functions) == 1);
+    assert(m.functions[0].is_entry == true);
+    assert(m.functions[0].name == "main");
+    assert(len(m.tests) == 1);
+    assert(m.tests[0].name == "hello entry returns zero");
+    let prog: IrProgram = IrProgram(compiler_ir.empty_ir_module_array());
+    assert(len(prog.modules) == 0);
+}
+
+// 55b (lower.intent) will construct exactly this shape from examples/hello.intent.

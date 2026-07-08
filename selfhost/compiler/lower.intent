@@ -1,0 +1,203 @@
+// selfhost/compiler/lower.intent — Phase 55 / ADR 0059 stage2 self-hosted compiler.
+//
+// AST -> IR lowering, reimplemented in Intent. Slice 55b: lowers the trivial
+// subset examples/hello.intent uses — one entry function with a `return <int>`,
+// and a test whose body is a single `assert(<bool>)` expr-stmt. Mirrors
+// internal/ir/lower.go's Lower / lowerFunction / lowerTest / lowerBlock /
+// lowerStmt / lowerExpr / resolveCallKind for exactly those cases; more cases
+// land per construct slice (each byte-equal-gated by `make diff-emit` in 55c).
+//
+// Type handling (ADR 0059 D3): the trivial subset's literal types are inferred
+// STRUCTURALLY (0 -> Int, "..." -> String, true -> Bool) via the ir_*_lit
+// helpers, so no checker CheckResult is threaded. Constructs whose types come
+// from inference (variable/field/method types, generics) will introduce a
+// checker.Type -> IrType bridge in the slice that needs it.
+module compiler_lower version "0.1.0";
+
+import "ir.intent";
+
+import "../shared/ast.intent";
+
+// lower — an AST Program to a single IR Module (the entry module: its `entry`
+// function becomes the program main in the backend). Mirrors Lower in lower.go
+// for the trivial subset (functions + tests; other decl kinds land per slice).
+public function lower(prog: Program, path: String) returns IrModule {
+    let mutable fns: Array<IrFunction> = compiler_ir.empty_ir_function_array();
+    let mutable fi: Int = 0;
+    while fi < len(prog.functions) {
+        fns.push(lower_function(prog.functions[fi]));
+        fi = fi + 1;
+    }
+    let mutable tsts: Array<IrTest> = compiler_ir.empty_ir_test_array();
+    let mutable ti: Int = 0;
+    while ti < len(prog.tests) {
+        tsts.push(lower_test(prog.tests[ti]));
+        ti = ti + 1;
+    }
+    let decl_name: String = prog.module_decl.name;
+    return IrModule(decl_name, decl_name, "", true, path, fns, tsts);
+}
+
+// lower_function — mirrors lowerFunction. Contracts (requires/ensures) are
+// deferred to the contracts slice: the stage2 AST carries only the predicate
+// Expr (no raw text), so byte-equal `assert!` injection needs its own slice.
+// hello.intent's main has none, so leaving the clause arrays empty is correct
+// for the trivial subset.
+public function lower_function(f: FunctionDecl) returns IrFunction {
+    let mutable params: Array<IrParam> = compiler_ir.empty_ir_param_array();
+    let mutable i: Int = 0;
+    while i < len(f.params) {
+        let p: Param = f.params[i];
+        params.push(IrParam(p.name, compiler_ir.ir_type_named(p.type_name)));
+        i = i + 1;
+    }
+    let body: Array<IrStmt> = lower_block(f.body);
+    return IrFunction(f.name, f.is_entry, f.is_public, f.is_async, params, compiler_ir.ir_type_named(f.return_type), compiler_ir.empty_ir_contract_array(), compiler_ir.empty_ir_contract_array(), body);
+}
+
+// lower_test — mirrors lowerTest. The AST already stores annotations as their
+// canonical strings, which is exactly the IrTest.annotations shape.
+public function lower_test(t: TestDecl) returns IrTest {
+    let body: Array<IrStmt> = lower_block(t.body);
+    return IrTest(t.name, t.is_async, t.annotations, body);
+}
+
+// lower_block — mirrors lowerBlock: lower each statement in order.
+public function lower_block(b: Block) returns Array<IrStmt> {
+    let mutable stmts: Array<IrStmt> = compiler_ir.empty_ir_stmt_array();
+    let mutable i: Int = 0;
+    while i < len(b.stmts) {
+        stmts.push(lower_stmt(b.stmts[i]));
+        i = i + 1;
+    }
+    return stmts;
+}
+
+// lower_stmt — mirrors lowerStmt for the supported subset (return, expr-stmt,
+// let-binding). A bare `return;` is st_return whose AST expr is ex_void; it
+// lowers to an irst_return carrying the ir_void_expr placeholder (the IR has no
+// nil). st_let carries name / is_mutable / type_name from the AST. Other
+// statement kinds land per slice; the fallback mirrors lowerStmt's default (a
+// `true` expr-stmt) and is unreachable for the diff-emit corpus.
+public function lower_stmt(s: Stmt) returns IrStmt {
+    if s.kind == shared_ast.st_return() {
+        if s.expr.kind == shared_ast.ex_void() {
+            return IrStmt(compiler_ir.irst_return(), compiler_ir.ir_void_expr());
+        }
+        return IrStmt(compiler_ir.irst_return(), lower_expr(s.expr));
+    }
+    if s.kind == shared_ast.st_expr() {
+        // Assignment `target = value` has no dedicated AST kind: the parser
+        // stores it as a st_expr wrapping an ex_binop with op "=" (children
+        // [target, value]) — see check.intent. Stage1 lowers that to a distinct
+        // AssignStmt (emitted `target = value;`, not `(target = value);`).
+        let inner: Expr = s.expr;
+        if inner.kind == shared_ast.ex_binop() {
+            if inner.name == "=" {
+                let mutable asg: IrStmt = IrStmt(compiler_ir.irst_assign(), lower_expr(inner.children[1]));
+                asg.target = lower_expr(inner.children[0]);
+                return asg;
+            }
+        }
+        return IrStmt(compiler_ir.irst_expr(), lower_expr(inner));
+    }
+    if s.kind == shared_ast.st_let() {
+        let mutable ls: IrStmt = IrStmt(compiler_ir.irst_let(), lower_expr(s.expr));
+        ls.name = s.name;
+        ls.is_mutable = s.is_mutable;
+        ls.let_type = compiler_ir.ir_type_named(s.type_name);
+        return ls;
+    }
+    if s.kind == shared_ast.st_if() {
+        let mutable ifs: IrStmt = IrStmt(compiler_ir.irst_if(), lower_expr(s.expr));
+        ifs.then_body = lower_block(s.then_block);
+        ifs.has_else = s.has_else;
+        if s.has_else {
+            ifs.else_body = lower_block(s.else_block);
+        }
+        return ifs;
+    }
+    if s.kind == shared_ast.st_while() {
+        let mutable ws: IrStmt = IrStmt(compiler_ir.irst_while(), lower_expr(s.expr));
+        ws.then_body = lower_block(s.then_block);
+        return ws;
+    }
+    if s.kind == shared_ast.st_for() {
+        let mutable fs: IrStmt = IrStmt(compiler_ir.irst_for(), lower_expr(s.expr));
+        fs.name = s.name;
+        fs.then_body = lower_block(s.then_block);
+        return fs;
+    }
+    return IrStmt(compiler_ir.irst_expr(), compiler_ir.ir_bool_lit(true));
+}
+
+// lower_expr — mirrors lowerExpr for the supported subset (int/bool literal,
+// identifier/variable reference, and call). A call's callee is children[0] (an
+// ex_ident) and its args are children[1..], per the stage2 AST's ex_call shape.
+// call_kind is resolved from the callee name; enum_name stays "" until the
+// enum/variant slice (where an ex_ident may instead be a unit variant).
+// Unsupported kinds fall back to the void placeholder and are unreachable for
+// the diff-emit corpus (grown per slice).
+public function lower_expr(e: Expr) returns IrExpr {
+    if e.kind == shared_ast.ex_int() {
+        return compiler_ir.ir_int_lit(e.int_value);
+    }
+    if e.kind == shared_ast.ex_bool() {
+        return compiler_ir.ir_bool_lit(e.bool_value);
+    }
+    if e.kind == shared_ast.ex_string() {
+        // The AST stores the unquoted content (escapes still raw); stage1's
+        // StringLit.Value is the quoted lexeme (the backend appends
+        // .to_string()), so re-wrap in quotes here.
+        return compiler_ir.ir_string_lit("\"" + e.str_value + "\"");
+    }
+    if e.kind == shared_ast.ex_ident() {
+        return compiler_ir.ir_var_ref(e.name);
+    }
+    if e.kind == shared_ast.ex_binop() {
+        // String concatenation (`+` on two strings) lowers to a distinct node in
+        // stage1 (it needs operand types); that lands with the strings slice.
+        return compiler_ir.ir_binary(e.name, lower_expr(e.children[0]), lower_expr(e.children[1]));
+    }
+    if e.kind == shared_ast.ex_range() {
+        return compiler_ir.ir_range(lower_expr(e.children[0]), lower_expr(e.children[1]));
+    }
+    if e.kind == shared_ast.ex_call() {
+        let callee: Expr = e.children[0];
+        let mutable args: Array<IrExpr> = compiler_ir.empty_ir_expr_array();
+        let mutable i: Int = 1;
+        while i < len(e.children) {
+            args.push(lower_expr(e.children[i]));
+            i = i + 1;
+        }
+        let mutable call: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, callee.name, args, compiler_ir.ir_type_named(""));
+        call.call_kind = resolve_call_kind(callee.name);
+        return call;
+    }
+    return compiler_ir.ir_void_expr();
+}
+
+// resolve_call_kind — mirrors resolveCallKind's builtin classification. Entity
+// constructors (CallConstructor) and enum variants (CallVariant) additionally
+// need the program's entity/enum tables; that classification lands with the
+// entities/enums slices, so for the trivial subset a non-builtin name is a
+// plain function call. The builtin set is copied verbatim from lower.go so the
+// backend dispatches identically once each builtin's emit slice lands.
+public function resolve_call_kind(name: String) returns Int {
+    if name == "print" or name == "len" or name == "read_file" or name == "write_file" or name == "create_dir" or name == "file_exists" or name == "env_get" or name == "http_post" or name == "http_get" or name == "json_get" or name == "json_path" or name == "emit_event" or name == "timestamp_ms" or name == "args" {
+        return compiler_ir.callkind_builtin();
+    }
+    if name == "Ok" or name == "Err" or name == "Some" or name == "None" {
+        return compiler_ir.callkind_builtin();
+    }
+    if name == "assert" or name == "assert_eq" or name == "assert_close" or name == "assert_panics" {
+        return compiler_ir.callkind_builtin();
+    }
+    if name == "char_from_codepoint" {
+        return compiler_ir.callkind_builtin();
+    }
+    return compiler_ir.callkind_function();
+}
+
+// No entry function here — a library module imported by compile_main.intent
+// (same pattern as the other selfhost library modules).
