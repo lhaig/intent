@@ -24,23 +24,20 @@ INTENTC="$ROOT/intentc"
 # is a repo-relative path. Pruthis list as gaps close (a passing allow-listed file fails
 # the sweep, prompting removal). See prds/progress.md (Phase 57) for the gap taxonomy.
 KNOWN_GAPS=(
-  # stage2 PARSER gap: trait-method signatures (async trait methods / contracts) — TASKS 53.
+  # EMITTER gap: HTTP builtins (http_post/http_get/json_get/json_path) + reqwest/serde_json
+  # `use` injection + the __intent_http_* helper block. These files import llm.intent.
   "examples/attractor/async_retry.intent"
   "examples/attractor/handlers.intent"
   "examples/attractor/main_async.intent"
   "examples/attractor/parallel.intent"
   "examples/attractor/retry.intent"
-  # EMITTER gap: async builtins await_all/await_any/timeout + `use futures;` injection.
-  "examples/attractor/edge_selection.intent"
   "examples/attractor/llm.intent"
-  "examples/attractor/persistence.intent"
-  "examples/attractor/validation.intent"
-  "examples/attractor/types.intent"
-  "selfhost/checker/check-fixtures/ck_builtin_await_all_async.intent"
   # extern / FFI emit.
   "examples/ffi_blake3/ffi_blake3.intent"
-  # multi-file DETECTION for package members (header only): stage1 build --emit treats a
-  # package member as multi-file; stage2CompilePaths uses IsMultiFile (no imports -> single).
+  # multi-file DETECTION for package members / project files (header + intent-block omission):
+  # stage1 build --emit treats a lone package/project member as multi-file; stage2CompilePaths
+  # uses IsMultiFile (no imports -> single-file) so a 1-module closure emits the single-file form.
+  "examples/attractor/types.intent"
   "examples/packages/app_pkg/main.intent"
   "examples/packages/types_pkg/types.intent"
 )

@@ -35,7 +35,7 @@ import "ir.intent";
 // Entities/enums/traits/impls/intents and the use-statement post-processing
 // (HashMap/reqwest/tokio) land with their construct slices.
 public function generate(m: IrModule) returns String {
-    let body: String = generate_module_body(m, m.functions);
+    let body: String = generate_module_body(m, m.functions, true);
     let mutable out: String = "// Generated Rust code from Intent\n";
     out = out + "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n";
     // Inject the HashMap use when the module actually uses a Map type (mirrors stage1's
@@ -43,6 +43,11 @@ public function generate(m: IrModule) returns String {
     // on the compiler's own `"HashMap<"` string literals when it self-hosts.
     if module_needs_hashmap(m) {
         out = out + "use std::collections::HashMap;\n";
+    }
+    // `use futures;` when await_all/await_any are used (mirror stage1's needsFutures,
+    // injected after any HashMap use). tokio is referenced by full path (no `use`).
+    if module_uses_futures(m) {
+        out = out + "use futures;\n";
     }
     out = out + "\n";
     out = out + body;
@@ -68,7 +73,7 @@ public function generate_all(prog: IrProgram) returns String {
     let mutable body: String = "";
     let mutable k: Int = 0;
     while k < len(prog.modules) {
-        body = body + generate_module_body(prog.modules[k], funcs);
+        body = body + generate_module_body(prog.modules[k], funcs, false);
         k = k + 1;
     }
     let mutable out: String = "// Generated Rust code from Intent (multi-file)\n";
@@ -85,6 +90,17 @@ public function generate_all(prog: IrProgram) returns String {
     if any_map {
         out = out + "use std::collections::HashMap;\n";
     }
+    let mutable any_futures: Bool = false;
+    let mutable fk: Int = 0;
+    while fk < len(prog.modules) {
+        if module_uses_futures(prog.modules[fk]) {
+            any_futures = true;
+        }
+        fk = fk + 1;
+    }
+    if any_futures {
+        out = out + "use futures;\n";
+    }
     out = out + "\n";
     out = out + body;
     return out;
@@ -95,7 +111,7 @@ public function generate_all(prog: IrProgram) returns String {
 // a blank line. `funcs` is the function table for cross-call param-borrow / arity
 // lookups: the module's own functions in single-file, or ALL modules' (mangled)
 // functions in multi-file so cross-module calls resolve. Shared by generate/generate_all.
-public function generate_module_body(m: IrModule, funcs: Array<IrFunction>) returns String {
+public function generate_module_body(m: IrModule, funcs: Array<IrFunction>, emit_intents: Bool) returns String {
     let mutable body: String = "";
     let mutable eei: Int = 0;
     while eei < len(m.entities) {
@@ -127,11 +143,15 @@ public function generate_module_body(m: IrModule, funcs: Array<IrFunction>) retu
         body = body + "\n";
         fi = fi + 1;
     }
-    let mutable ii: Int = 0;
-    while ii < len(m.intents) {
-        body = body + generate_intent(m.intents[ii]);
-        body = body + "\n";
-        ii = ii + 1;
+    // Intent blocks are emitted by single-file Generate but NOT by multi-file GenerateAll
+    // (stage1's GenerateAll per-module loop has no generateIntent), so emit_intents gates it.
+    if emit_intents {
+        let mutable ii: Int = 0;
+        while ii < len(m.intents) {
+            body = body + generate_intent(m.intents[ii]);
+            body = body + "\n";
+            ii = ii + 1;
+        }
     }
     // Tests inherit the mutated-var set leaked from the last function/method/ctor
     // (stage1 generateTest does not reset g.mutatedVars — see generate_test).
@@ -253,6 +273,103 @@ public function module_needs_hashmap(m: IrModule) returns Bool {
     return false;
 }
 
+// expr_uses_futures / stmt_uses_futures / module_uses_futures — does the module call the
+// futures-backed async builtins (await_all / await_any)? Drives the `use futures;` header
+// (mirror stage1's needsFutures). An IR walk, NOT a "futures::" body substring — the
+// compiler's own rustbe.intent carries "futures::" in string literals (as with HashMap).
+public function expr_uses_futures(e: IrExpr) returns Bool {
+    if e.kind == compiler_ir.irex_call() {
+        if e.name == "await_all" or e.name == "await_any" {
+            return true;
+        }
+    }
+    let mutable i: Int = 0;
+    while i < len(e.children) {
+        if expr_uses_futures(e.children[i]) {
+            return true;
+        }
+        i = i + 1;
+    }
+    let mutable j: Int = 0;
+    while j < len(e.match_arms) {
+        if expr_uses_futures(e.match_arms[j].body) {
+            return true;
+        }
+        j = j + 1;
+    }
+    return false;
+}
+
+public function stmt_uses_futures(s: IrStmt) returns Bool {
+    if expr_uses_futures(s.expr) {
+        return true;
+    }
+    if expr_uses_futures(s.target) {
+        return true;
+    }
+    let mutable i: Int = 0;
+    while i < len(s.then_body) {
+        if stmt_uses_futures(s.then_body[i]) {
+            return true;
+        }
+        i = i + 1;
+    }
+    let mutable j: Int = 0;
+    while j < len(s.else_body) {
+        if stmt_uses_futures(s.else_body[j]) {
+            return true;
+        }
+        j = j + 1;
+    }
+    return false;
+}
+
+function body_uses_futures(body: Array<IrStmt>) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(body) {
+        if stmt_uses_futures(body[i]) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+public function module_uses_futures(m: IrModule) returns Bool {
+    let mutable fi: Int = 0;
+    while fi < len(m.functions) {
+        if body_uses_futures(m.functions[fi].body) {
+            return true;
+        }
+        fi = fi + 1;
+    }
+    let mutable ei: Int = 0;
+    while ei < len(m.entities) {
+        let e: IrEntity = m.entities[ei];
+        if e.has_constructor {
+            if body_uses_futures(e.constructor_fn.body) {
+                return true;
+            }
+        }
+        let mutable mj: Int = 0;
+        while mj < len(e.methods) {
+            if body_uses_futures(e.methods[mj].body) {
+                return true;
+            }
+            mj = mj + 1;
+        }
+        ei = ei + 1;
+    }
+    let mutable ti: Int = 0;
+    while ti < len(m.tests) {
+        if body_uses_futures(m.tests[ti].body) {
+            return true;
+        }
+        ti = ti + 1;
+    }
+    return false;
+}
+
 // param_is_arrayref — is param `idx` of function `fn_name` an Array/Map (emitted
 // `&Vec`/`&HashMap`, so its call-site arg must be borrowed)? Mirrors the
 // g.functions[...].Params[i].Type check in generateCallExpr. Linear scan
@@ -322,7 +439,7 @@ public function generate_entity(e: IrEntity, funcs: Array<IrFunction>) returns S
         out = out + "    fn __check_invariants(&self) " + lbrace() + "\n";
         let mutable ivi: Int = 0;
         while ivi < len(e.invariants) {
-            out = out + "        assert!(" + generate_expr(e.invariants[ivi].expr, funcs) + ", \"Invariant failed: " + e.invariants[ivi].raw_text + "\");\n";
+            out = out + "        assert!(" + generate_expr(e.invariants[ivi].expr, funcs) + ", \"Invariant failed: " + escape_rust_string(e.invariants[ivi].raw_text) + "\");\n";
             ivi = ivi + 1;
         }
         out = out + "    " + rbrace() + "\n";
@@ -418,7 +535,7 @@ public function generate_constructor(e: IrEntity, funcs: Array<IrFunction>) retu
     out = out + ") -> " + e.name + " " + lbrace() + "\n";
     let mutable ri: Int = 0;
     while ri < len(c.requires_clauses) {
-        out = out + "        assert!(" + generate_expr(c.requires_clauses[ri].expr, funcs) + ", \"Precondition failed: " + c.requires_clauses[ri].raw_text + "\");\n";
+        out = out + "        assert!(" + generate_expr(c.requires_clauses[ri].expr, funcs) + ", \"Precondition failed: " + escape_rust_string(c.requires_clauses[ri].raw_text) + "\");\n";
         ri = ri + 1;
     }
     out = out + "        let mut __self = " + e.name + " " + lbrace() + "\n";
@@ -436,7 +553,7 @@ public function generate_constructor(e: IrEntity, funcs: Array<IrFunction>) retu
     out = out + generate_ctor_body_rest(c.body, funcs, mutated, compiler_ir.empty_string_array_ir());
     let mutable ei: Int = 0;
     while ei < len(c.ensures_clauses) {
-        out = out + "        assert!(" + generate_expr(c.ensures_clauses[ei].expr, funcs) + ", \"Postcondition failed: " + c.ensures_clauses[ei].raw_text + "\");\n";
+        out = out + "        assert!(" + generate_expr(c.ensures_clauses[ei].expr, funcs) + ", \"Postcondition failed: " + escape_rust_string(c.ensures_clauses[ei].raw_text) + "\");\n";
         ei = ei + 1;
     }
     if len(e.invariants) > 0 {
@@ -571,7 +688,7 @@ public function generate_method(e: IrEntity, m: IrFunction, funcs: Array<IrFunct
     }
     let mutable ri: Int = 0;
     while ri < len(m.requires_clauses) {
-        out = out + "        assert!(" + generate_expr(m.requires_clauses[ri].expr, funcs) + ", \"Precondition failed: " + m.requires_clauses[ri].raw_text + "\");\n";
+        out = out + "        assert!(" + generate_expr(m.requires_clauses[ri].expr, funcs) + ", \"Precondition failed: " + escape_rust_string(m.requires_clauses[ri].raw_text) + "\");\n";
         ri = ri + 1;
     }
     let has_inv: Bool = len(e.invariants) > 0;
@@ -602,7 +719,7 @@ function generate_method_ensures(m: IrFunction, funcs: Array<IrFunction>) return
     let mutable out: String = "";
     let mutable ei: Int = 0;
     while ei < len(m.ensures_clauses) {
-        out = out + "        assert!(" + generate_expr(m.ensures_clauses[ei].expr, funcs) + ", \"Postcondition failed: " + m.ensures_clauses[ei].raw_text + "\");\n";
+        out = out + "        assert!(" + generate_expr(m.ensures_clauses[ei].expr, funcs) + ", \"Postcondition failed: " + escape_rust_string(m.ensures_clauses[ei].raw_text) + "\");\n";
         ei = ei + 1;
     }
     return out;
@@ -859,11 +976,41 @@ public function generate_function(f: IrFunction, funcs: Array<IrFunction>) retur
 // generate_contracts — one `assert!(PRED, "PREFIX<raw>");` per clause at the
 // function-body indent (level 1). Mirrors the requires / ensures assert emission.
 // Uses assert! (not debug_assert!); --strip-contracts parity is a later concern.
+// escape_rust_string — escape a contract's raw text for embedding in the assert message
+// string literal (mirror stage1's escapeRustString): backslash, double-quote, newline,
+// tab. Char-by-char so a `\` maps before the char it would otherwise escape.
+public function escape_rust_string(s: String) returns String {
+    let mutable out: String = "";
+    let mutable i: Int = 0;
+    while i < len(s) {
+        let cp: Int = s[i].to_codepoint();
+        if cp == 92 {
+            out = out + "\\\\";
+        } else {
+            if cp == 34 {
+                out = out + "\\\"";
+            } else {
+                if cp == 10 {
+                    out = out + "\\n";
+                } else {
+                    if cp == 9 {
+                        out = out + "\\t";
+                    } else {
+                        out = out + s[i].to_string();
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
 public function generate_contracts(clauses: Array<IrContract>, prefix: String, funcs: Array<IrFunction>) returns String {
     let mutable out: String = "";
     let mutable i: Int = 0;
     while i < len(clauses) {
-        out = out + "    assert!(" + generate_expr(clauses[i].expr, funcs) + ", \"" + prefix + clauses[i].raw_text + "\");\n";
+        out = out + "    assert!(" + generate_expr(clauses[i].expr, funcs) + ", \"" + prefix + escape_rust_string(clauses[i].raw_text) + "\");\n";
         i = i + 1;
     }
     return out;
@@ -1423,11 +1570,25 @@ public function generate_method_call(e: IrExpr, funcs: Array<IrFunction>) return
         }
     }
     if recv_type == "String" {
-        // String methods (mirror generateMethodCallExpr's String case). len ->
-        // codepoint count. Others (to_lowercase/trim/starts_with/contains/split) land
-        // when a corpus example needs them.
+        // String methods (mirror generateMethodCallExpr's String case). len -> codepoint
+        // count; the rest take &str args via `.as_str()` and (trim/split) re-own to String.
         if e.name == "len" {
             return "(" + obj + ".chars().count() as i64)";
+        }
+        if e.name == "to_lowercase" {
+            return obj + ".to_lowercase()";
+        }
+        if e.name == "trim" {
+            return obj + ".trim().to_string()";
+        }
+        if e.name == "starts_with" {
+            return obj + ".starts_with(" + generate_expr(e.children[1], funcs) + ".as_str())";
+        }
+        if e.name == "contains" {
+            return obj + ".contains(" + generate_expr(e.children[1], funcs) + ".as_str())";
+        }
+        if e.name == "split" {
+            return obj + ".split(" + generate_expr(e.children[1], funcs) + ".as_str()).map(|s| s.to_string()).collect::<Vec<String>>()";
         }
     }
     if recv_type == "Map" {
@@ -1722,6 +1883,24 @@ public function generate_call(e: IrExpr, funcs: Array<IrFunction>) returns Strin
     if e.name == "sleep" {
         if len(e.children) == 1 {
             return "tokio::time::sleep(std::time::Duration::from_millis(" + generate_expr(e.children[0], funcs) + " as u64))";
+        }
+    }
+    // Async builtins (mirror generateCallExpr's await_all/await_any/timeout). Args are
+    // emitted plain (no clone), exactly as stage1. `use futures;` is injected by the
+    // module scan (module_uses_futures) in generate / generate_all.
+    if e.name == "await_all" {
+        if len(e.children) == 1 {
+            return "futures::future::join_all(" + generate_expr(e.children[0], funcs) + ").await.into_iter().map(|r| r.expect(\"spawned task panicked\")).collect::<Vec<_>>()";
+        }
+    }
+    if e.name == "await_any" {
+        if len(e.children) == 1 {
+            return "futures::future::select_all(" + generate_expr(e.children[0], funcs) + ").await.0.expect(\"spawned task panicked\")";
+        }
+    }
+    if e.name == "timeout" {
+        if len(e.children) == 2 {
+            return "tokio::time::timeout(std::time::Duration::from_millis(" + generate_expr(e.children[1], funcs) + " as u64), " + generate_expr(e.children[0], funcs) + ").await.map_err(|_| \"timeout\".to_string())";
         }
     }
     let mutable out: String = e.name + "(";

@@ -1347,6 +1347,13 @@ public entity Parser {
         self.expect(shared_lexer.tk_rparen(), "')' to close method params");
         self.expect(shared_lexer.kw_returns(), "'returns' after method params");
         let ret: String = self.parse_type_name();
+        // Trait-method contracts (requires/ensures/decreases) are parsed and DISCARDED:
+        // stage1's generateTrait emits only the signature (`fn name(...) -> ret;`), and
+        // the checker validates the clauses on the impls. Consume any before the `;`.
+        while self.is_contract_kw() and self.error == "" {
+            self.advance();
+            let clause: Expr = self.parse_expr();
+        }
         self.expect(shared_lexer.tk_semicolon(), "';' to end trait method signature");
         let mutable tms: TraitMethodSig = TraitMethodSig(name_tok.text, params, ret);
         tms.line = method_kw_tok.line;

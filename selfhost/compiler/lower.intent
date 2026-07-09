@@ -1302,13 +1302,30 @@ public function lower_stmt(s: Stmt, scope: LowerScope) returns IrStmt {
         return ws;
     }
     if s.kind == shared_ast.st_for() {
-        let mutable fs: IrStmt = IrStmt(compiler_ir.irst_for(), lower_expr(s.expr, scope));
+        let iter_ir: IrExpr = lower_expr(s.expr, scope);
+        let mutable fs: IrStmt = IrStmt(compiler_ir.irst_for(), iter_ir);
         fs.name = s.name;
-        // The loop variable's type is left unstamped (the body inherits the outer
-        // scope); a for-var VarRef gets the unknown type -> treated Copy -> never
-        // cloned. Binding the loop var's element type lands with a later slice if
-        // a corpus example needs a for-var arg cloned.
-        fs.then_body = lower_block(s.then_block, scope);
+        // Stamp the loop variable's element type into the body scope (mirrors stage1
+        // typing the for-var): a range yields Int, an Array<T> yields T, a String yields
+        // Char. This lets clone_if_needed clone a non-Copy for-var arg and string-concat
+        // detection fire on `acc + item` inside the loop. Unknown iterables leave it
+        // unstamped (-> Copy -> no clone), which is corpus-safe.
+        let mutable elem: IrType = compiler_ir.ir_type_named("");
+        if iter_ir.kind == compiler_ir.irex_range() {
+            elem = compiler_ir.ir_type_named("Int");
+        } else {
+            if iter_ir.expr_type.name == "Array" {
+                if len(iter_ir.expr_type.type_args) == 1 {
+                    elem = iter_ir.expr_type.type_args[0];
+                }
+            } else {
+                if iter_ir.expr_type.name == "String" {
+                    elem = compiler_ir.ir_type_named("Char");
+                }
+            }
+        }
+        let body_scope: LowerScope = lower_scope_define(scope, s.name, elem);
+        fs.then_body = lower_block(s.then_block, body_scope);
         return fs;
     }
     if s.kind == shared_ast.st_break() {
@@ -1554,7 +1571,10 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
             // would MOVE it (assignments don't clone), breaking later iterations.
             if not is_builtin {
                 if not a.is_wildcard {
-                    arm.enum_name = copy_str(scrut_enum);
+                    // Emitted `EnumName::Variant` pattern is mangled for a cross-module
+                    // enum (StageStatus -> TypesStageStatus). field_names still resolve on
+                    // the UNMANGLED scrut_enum (the enum registry is keyed by declared name).
+                    arm.enum_name = mangle_type_name(scrut_enum, scope.type_names, scope.type_prefixes);
                     if len(a.bindings) > 0 {
                         arm.field_names = resolve_variant_field_names(scope.enums, scrut_enum, a.variant);
                     }

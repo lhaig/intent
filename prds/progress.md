@@ -3096,3 +3096,39 @@ diff-emit 33/33 + diff-emit-self 4/4 hold):
 Gates: diff-emit-sweep OK (57/14/0), diff-emit 33/33, diff-emit-self 4/4,
 selfcheck-formatter, lower_test 137, ir_test 17. Only `selfhost/compiler/lower.intent`
 + the sweep script + Makefile touched.
+
+---
+
+## 2026-07-09 — Phase 57 batch 2: 9 emitter/parser gaps closed (sweep 61/10/0)
+
+Drove the sweep from 14 -> 10 catalogued gaps (four attractor files + ck_await_all now
+byte-equal, five trait files un-blocked from a parse error). All standing gates green
+(incl. the shared/* suite, since parser.intent was touched): diff-checker 86/86,
+diff-formatter 22/22, diff-linter 26/26, diff-emit 33/33, diff-emit-self 4/4,
+selfcheck-checker 13/13, go test.
+
+Emitter (rustbe.intent):
+- **async builtins** await_all/await_any/timeout in generate_call (stage1 forms:
+  futures::future::join_all/select_all, tokio::time::timeout) + `use futures;` injection
+  via an IR body-walk (module_uses_futures — NOT a "futures::" substring, which the
+  compiler's own source carries in string literals). Fixed ck_await_all.
+- **String methods** to_lowercase/trim/starts_with/contains/split (`.as_str()` args,
+  trim/split re-own to String) — the corpus never exercised them.
+- **contract raw-text escaping** (escape_rust_string): assert messages now escape
+  \\ " \n \t (a clause `path != ""` was emitting invalid `"""`). Applied at all 6 sites.
+Lowering (lower.intent):
+- **match-arm enum patterns mangled** (StageStatus::X -> TypesStageStatus::X cross-module).
+- **for-loop binding type stamped** (Array<T> -> T, range -> Int, String -> Char): fixes
+  in-loop string-concat (`acc + item` -> format!) and non-Copy for-var arg cloning.
+Multi-file (rustbe.intent):
+- **intent blocks gated to single-file** (generate_module_body emit_intents): stage1's
+  GenerateAll omits `// Intent:` blocks; single-file Generate emits them.
+Parser (shared/parser.intent):
+- **trait-method contracts parsed & discarded** (parse_trait_method_sig consumes
+  requires/ensures before `;`) — stage1's generateTrait emits only the signature. Un-blocked
+  5 attractor files from `expected ';' to end trait method signature` (they now DIVERGE on
+  HTTP only, next).
+
+Remaining KNOWN_GAPS (10): HTTP builtins + reqwest/serde + helper injection (6 files:
+attractor async_retry/handlers/main_async/parallel/retry + llm); extern/FFI (ffi_blake3);
+multi-file detection for lone package/project members (attractor/types, packages/*).
