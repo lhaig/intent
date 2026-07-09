@@ -3032,3 +3032,27 @@ built from the stage2 emit is identical to stage2. Drove the compile_main diverg
 Gates green: **diff-emit-self 4/4**, diff-emit 33/33, selfcheck-formatter OK,
 selfcheck-checker 13/13, lower_test 137, ir_test 17. Only `selfhost/compiler/*` +
 Makefile + the new gate script touched (no `selfhost/shared/*`, no Go).
+
+---
+
+## 2026-07-09 — Phase 56 slice 56.4 COMPLETE: stage3 bootstrap fixpoint (4/4) — PHASE 56 DONE
+
+**The self-hosted compiler is a proven fixpoint.** New gate `make bootstrap-stage3`:
+1. **stage1** (Go `intentc`) compiles `compile_main.intent` -> cargo -> **stage2** binary.
+2. **stage2** emits `compile_main.intent` -> cargo (`--release`) -> **stage3** binary.
+3. **stage3** re-emits the whole toolchain and it is BYTE-EQUAL with stage1: 4/4
+   (compiler, checker, formatter, linter).
+
+Since diff-emit-self already proved stage2's emit == stage1's emit, stage3 is built from
+the same bytes as stage2 and behaves identically — this gate demonstrates it end-to-end
+by actually building stage3 and running it. (Gotcha: build stage3 with `cargo build
+--release` to match intentc's own native build — a debug stage3 emits ~20x slower.)
+
+`selfhost/compiler/bootstrap-stage3.sh` + `make bootstrap-stage3`. No `.intent` source
+changed (script + Makefile only), so all other gates are unaffected.
+
+**PHASE 56 COMPLETE.** The Intent compiler + its full toolchain self-host: the compiler
+compiles itself (and the checker/formatter/linter) to byte-identical Rust across the
+example corpus AND its own multi-module source, verified by a stage1->stage2->stage3
+bootstrap fixpoint. Gates: bootstrap-stage3 4/4, diff-emit-self 4/4, diff-emit 33/33,
+selfcheck-checker 13/13, selfcheck-formatter, diff-checker/formatter/linter, go test.

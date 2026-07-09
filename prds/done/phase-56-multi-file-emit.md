@@ -1,6 +1,9 @@
 # PRD — Phase 56: Multi-File Emit → Full Bootstrap (stage2 emits its own source)
 
-**Status:** ACTIVE (kickoff 2026-07-09). Post-endgame of Phase 55: the single-file
+**Status:** ✅ COMPLETE (2026-07-09). All four slices landed. The Intent compiler fully
+self-hosts: it compiles itself and its whole toolchain to byte-identical Rust across the
+example corpus (diff-emit 33/33), the toolchain's own multi-module source (diff-emit-self
+4/4), and a verified stage1->stage2->stage3 bootstrap fixpoint (bootstrap-stage3 4/4). Post-endgame of Phase 55: the single-file
 Rust emitter self-hosts the full corpus (diff-emit 31/31). This phase extends the
 stage2 compiler to MULTI-FILE emit and drives toward the true capstone — the
 self-hosted compiler emitting its OWN (multi-module) source into a working stage3.
@@ -87,8 +90,10 @@ matches the existing stage2 deviation from stage1's structure.
   excluded). NOTE: the decl-name→file-base mangling was already handled by slice 1's
   decl-name qualifier entry in module_names.
 
-- **56.4 — stage3 bootstrap.** Compile the stage2-emitted Rust into a stage3 binary and
-  verify it matches stage2 (byte-equal emit / functional parity). Closes the full triangle.
+- ✅ **56.4 — stage3 bootstrap** (`make bootstrap-stage3` 4/4). stage1 builds stage2, stage2
+  builds stage3 (cargo `--release` to match intentc's native build), and stage3 re-emits the
+  whole toolchain BYTE-EQUAL with stage1. The compiler is a proven fixpoint; the triangle is
+  closed. Script `selfhost/compiler/bootstrap-stage3.sh`.
 
 ## Gates per slice
 

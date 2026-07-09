@@ -33,11 +33,22 @@ namePrefix/structPrefix through `generate_expr`).
   dispatch), plus `args()` builtin, a precise IR-Map HashMap trigger, and the free-fn
   Array-ref-param clone-on-let (methods/ctors take arrays BY VALUE, so excluded). New gate
   `make diff-emit-self`. The bootstrap triangle is closed.
-- **56.4 — NEXT: stage3 bootstrap** — compile the stage2-emitted Rust into a stage3 binary
-  and verify it is byte-equal / functionally identical to stage2. Given diff-emit-self is
-  4/4, stage3 emit should already equal stage2 emit; 56.4 is the end-to-end confirmation
-  (build the stage2 binary, have IT emit + cargo-build the toolchain, diff the binaries /
-  re-run the gates through stage3).
+- ✅ **56.4 — COMPLETE: stage3 bootstrap fixpoint** (`make bootstrap-stage3` 4/4). stage1
+  builds stage2, stage2 builds stage3 (cargo `--release`), stage3 re-emits the whole
+  toolchain BYTE-EQUAL with stage1. The compiler is a proven fixpoint.
+
+## ✅✅ PHASE 56 COMPLETE — the Intent compiler fully self-hosts (2026-07-09)
+
+The compiler compiles ITSELF and its whole toolchain (checker/formatter/linter) to
+byte-identical Rust — across the example corpus (diff-emit 33/33), the toolchain's own
+multi-module source (diff-emit-self 4/4), and a verified stage1->stage2->stage3 bootstrap
+fixpoint (bootstrap-stage3 4/4). Multi-file emit (lower_all/generate_all) with cross-module
+name mangling, type-origins, call/method return-type inference, and the full clone model.
+
+**Next fronts (optional, post-self-hosting):** the js/wasm backends in Intent (a separate
+mini-Phase-55 each); `--strip-contracts` parity in the stage2 emit; hardening the emitter
+beyond the current programs (arbitrary construct combinations). None are on the critical
+path — self-hosting is achieved.
   Expect: decl-name→file-base mangling (moduleManglings second pass: `shared_parser` →
   `parser_`), HashMap `use` injection, untested construct combinations.
 - **56.4 — stage3 bootstrap** — compile the stage2 emit into a stage3 binary; verify it

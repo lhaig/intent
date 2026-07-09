@@ -408,6 +408,26 @@ Closes the ADR 0027 deferred item. Manifest, semver, cache, and resolver are in 
 
 ---
 
+## Milestone 9: Self-Hosting -- COMPLETE (2026-07-09)
+
+The Intent toolchain is written in Intent and compiles itself. Four tools are
+self-hosted and byte-equal with their Go (stage1) counterparts:
+
+- **Formatter** (`intentc fmt --self-hosted`) -- Phase 42, a fixpoint on its own source.
+- **Linter** (`intentc lint --self-hosted`) -- Phase 43.
+- **Checker** (`intentc check --self-hosted`) -- Phases 45-54, incl. the compiler's own
+  multi-file source (ADR 0058).
+- **Compiler** (`intentc build --emit --self-hosted`) -- IR lowering + Rust backend in
+  Intent (Phase 55, single-file; Phase 56, multi-file with cross-module name mangling,
+  type-origins, and call/method return-type inference).
+
+The bootstrap is a proven fixpoint: **stage1** (Go) compiles the Intent compiler into
+**stage2**, **stage2** compiles it into **stage3**, and stage3 re-emits the entire
+toolchain byte-identical to stage1. Gates: `make diff-emit` (33/33 example corpus),
+`make diff-emit-self` (4/4 the toolchain's own source), `make bootstrap-stage3` (4/4
+the stage1->stage2->stage3 fixpoint), plus the per-tool `diff-*` / `selfcheck-*` gates.
+See ADR 0059 and `prds/done/phase-55-*` / `phase-56-*`.
+
 ## Milestone 8: Developer Experience
 
 ### LSP Server -- v1 SHIPPED (2026-05-30)

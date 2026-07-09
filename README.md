@@ -4,6 +4,8 @@ Intent is a programming language designed for AI code assistants to write, that 
 
 The language prioritizes **explicit contracts**, **declared intent**, and **verifiable correctness** over brevity. Every function carries preconditions and postconditions, every entity carries invariants, and intent blocks link natural-language goals to formal verification points. Programs can be tested in Intent itself (`test "..." { ... }` blocks) and edited in VS Code with full LSP support — diagnostics, hover, go-to-definition, completion, formatting, signature help, semantic-token highlighting, and Z3 verification status.
 
+**The toolchain self-hosts.** The formatter, linter, checker, and compiler are each written in Intent and produce output byte-identical to the original Go implementation — verified end-to-end by a `stage1 → stage2 → stage3` bootstrap fixpoint (`make bootstrap-stage3`), where the Intent compiler compiles itself and its whole toolchain. See [Milestone 9 in the roadmap](docs/ROADMAP.md).
+
 ## Prerequisites
 
 - **Go** 1.26+
