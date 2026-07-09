@@ -1,4 +1,4 @@
-.PHONY: build test test-v clean install check-examples lint-examples fmt-check-examples emit-examples test-gen-examples test-examples gofmt-check validate diff-formatter selfcheck-formatter diff-linter diff-checker selfcheck-checker diff-emit diff-emit-self bootstrap-stage3
+.PHONY: build test test-v clean install check-examples lint-examples fmt-check-examples emit-examples test-gen-examples test-examples gofmt-check validate diff-formatter selfcheck-formatter diff-linter diff-checker selfcheck-checker diff-emit diff-emit-self bootstrap-stage3 diff-emit-sweep
 
 # Flat examples (single-file). Subdirectory examples (attractor, multi_file, packages, ffi_blake3)
 # are exercised via their own entry points.
@@ -110,6 +110,12 @@ diff-emit: build
 # byte-equal with stage1. Kept out of `make validate` (slow: emits ~26k lines).
 diff-emit-self: build
 	@./selfhost/compiler/diff-emit-self.sh
+
+# Emitter-hardening sweep (Phase 57): differential emit over EVERY Intent program in
+# the repo (superset of diff-emit); fails on a regression or an allow-listed file that
+# starts passing. Finds emitter gaps the curated corpus misses.
+diff-emit-sweep: build
+	@./selfhost/compiler/diff-emit-sweep.sh
 
 # Stage3 bootstrap (Phase 56 slice 4): stage1 builds stage2, stage2 builds stage3, and
 # stage3 reproduces the whole toolchain byte-equal with stage1 — the fixpoint proof.

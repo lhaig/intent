@@ -667,7 +667,18 @@ function monomorphize_member(f: FunctionDecl, self_name: String, entity_name: St
 // function becomes the program main in the backend). Mirrors Lower in lower.go
 // for the trivial subset (functions + tests; other decl kinds land per slice).
 public function lower(prog: Program, path: String) returns IrModule {
-    return lower_module(prog, path, true, shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), prog.enums, prog.entities, shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array());
+    // Build this file's own function-return registry so single-file emit stamps call
+    // result types too (string-concat `a + str_call()` -> format!, chained dispatch).
+    // Module/type maps stay empty (single-file has no cross-module mangling).
+    let mutable func_names: Array<String> = shared_ast.empty_string_array();
+    let mutable func_returns: Array<IrType> = compiler_ir.empty_ir_type_array();
+    let mutable fi: Int = 0;
+    while fi < len(prog.functions) {
+        func_names.push(prog.functions[fi].name);
+        func_returns.push(compiler_ir.ir_parse_type(prog.functions[fi].return_type));
+        fi = fi + 1;
+    }
+    return lower_module(prog, path, true, shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), prog.enums, prog.entities, func_names, func_returns);
 }
 
 // lower_module — lower one Program of a (possibly multi-file) build. is_entry marks
@@ -690,7 +701,13 @@ public function lower_module(prog: Program, path: String, is_entry: Bool, module
     let mutable fns: Array<IrFunction> = compiler_ir.empty_ir_function_array();
     let mutable fi: Int = 0;
     while fi < len(prog.functions) {
-        fns.push(lower_function(prog.functions[fi], all_enums, all_entities, ctx));
+        // Generic functions (type params) are NOT emitted directly — stage1 emits only
+        // their monomorphizations (an uninstantiated generic fn emits nothing). Mirrors
+        // the generic-entity skip below. (Called generic free functions -> monomorphized
+        // funcs is a later slice; none in the corpus today.)
+        if len(prog.functions[fi].type_params) == 0 {
+            fns.push(lower_function(prog.functions[fi], all_enums, all_entities, ctx));
+        }
         fi = fi + 1;
     }
     let mutable tsts: Array<IrTest> = compiler_ir.empty_ir_test_array();

@@ -3056,3 +3056,43 @@ compiles itself (and the checker/formatter/linter) to byte-identical Rust across
 example corpus AND its own multi-module source, verified by a stage1->stage2->stage3
 bootstrap fixpoint. Gates: bootstrap-stage3 4/4, diff-emit-self 4/4, diff-emit 33/33,
 selfcheck-checker 13/13, selfcheck-formatter, diff-checker/formatter/linter, go test.
+
+---
+
+## 2026-07-09 — Phase 57 START: emitter hardening (differential sweep + first fixes)
+
+Post-self-hosting hardening — prove the stage2 emitter correct BEYOND the 22-example
+corpus. New harness `make diff-emit-sweep`: differential emit (stage1 vs stage2
+`--self-hosted`) over EVERY Intent program in the repo (auto-skips library modules /
+invalid fixtures), with a `KNOWN_GAPS` allow-list; fails on a regression or an
+allow-listed file that starts passing. **Now: 57 programs byte-equal, 14 catalogued
+gaps, 0 regressions.**
+
+The sweep immediately found real gaps; two fixed this session (no corpus regression,
+diff-emit 33/33 + diff-emit-self 4/4 hold):
+- **Single-file func-return registry**: `lower` (single-file) now builds the function
+  return-type registry from its own functions, so single-file emit stamps call result
+  types too — `a + str_call()` -> `format!` and chained dispatch. Fixed `ir.intent`,
+  `lower.intent`, `rustbe.intent`, `parser.intent` STANDALONE emit (they were only
+  byte-equal as part of the multi-file compile_main; now byte-equal single-file too).
+- **Generic free functions**: `lower_module` now skips functions with type params
+  (mirrors the generic-entity skip) — stage1 emits only monomorphizations, and an
+  uninstantiated generic fn emits nothing. Fixed `r15_unused_type_params`.
+
+**Catalogued KNOWN_GAPS (14, in diff-emit-sweep):**
+- **stage2 PARSER — trait-method signatures** (attractor async_retry/handlers/main_async/
+  parallel/retry): `expected ';' to end trait method signature` (async/contract trait
+  methods). Separate subsystem (`selfhost/shared/parser.intent`); TASKS row 53.
+- **EMITTER — async builtins** `await_all`/`await_any`/`timeout` + `use futures;`
+  injection (attractor edge_selection/llm/persistence/validation/types, ck_await_all).
+  stage1: `futures::future::join_all(...).await...` / `select_all` / `tokio::time::timeout`.
+  Injection needs an IR body-walk (the compiler's own `"futures::"` string literals rule
+  out a substring check — same lesson as the HashMap trigger).
+- **extern/FFI emit** (ffi_blake3).
+- **multi-file DETECTION for package members** (packages/app_pkg, types_pkg — header
+  only): stage1 `build --emit` treats a package member as multi-file; stage2CompilePaths
+  uses IsMultiFile (no imports -> single-file header).
+
+Gates: diff-emit-sweep OK (57/14/0), diff-emit 33/33, diff-emit-self 4/4,
+selfcheck-formatter, lower_test 137, ir_test 17. Only `selfhost/compiler/lower.intent`
++ the sweep script + Makefile touched.

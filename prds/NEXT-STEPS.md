@@ -45,10 +45,31 @@ multi-module source (diff-emit-self 4/4), and a verified stage1->stage2->stage3 
 fixpoint (bootstrap-stage3 4/4). Multi-file emit (lower_all/generate_all) with cross-module
 name mangling, type-origins, call/method return-type inference, and the full clone model.
 
-**Next fronts (optional, post-self-hosting):** the js/wasm backends in Intent (a separate
-mini-Phase-55 each); `--strip-contracts` parity in the stage2 emit; hardening the emitter
-beyond the current programs (arbitrary construct combinations). None are on the critical
-path — self-hosting is achieved.
+## ▶ PHASE 57 — emitter hardening (IN PROGRESS)
+
+Prove the stage2 emitter correct BEYOND the 22-example corpus. New harness `make
+diff-emit-sweep`: differential emit over EVERY Intent program in the repo (KNOWN_GAPS
+allow-list; fails on regression or a now-passing allow-listed file). **57 byte-equal, 14
+catalogued gaps, 0 regressions.** Fixed so far: single-file func-return registry (fixed
+standalone emit of ir/lower/rustbe/parser) and generic-free-function skip (r15).
+
+**REMAINING GAPS (KNOWN_GAPS in diff-emit-sweep):**
+- **EMITTER — async builtins** `await_all`/`await_any`/`timeout` + `use futures;` injection
+  (attractor edge_selection/llm/persistence/validation/types, ck_await_all). stage1 forms:
+  `futures::future::join_all(x).await.into_iter().map(|r| r.expect("spawned task panicked")).collect::<Vec<_>>()`,
+  `futures::future::select_all(x).await.0.expect(...)`, `tokio::time::timeout(Duration::from_millis(ms as u64), fut).await.map_err(|_| "timeout".to_string())`.
+  Add to generate_call (like `sleep`); futures injection needs an IR body-walk for
+  await_all/await_any calls (NOT a `"futures::"` substring — the compiler's own source has
+  it in string literals). NEXT — clearest emitter win.
+- **stage2 PARSER — trait-method signatures** (attractor async_retry/handlers/main_async/
+  parallel/retry): a `selfhost/shared/parser.intent` gap (async/contract trait methods),
+  TASKS row 53. Touching shared/* needs the full gate suite.
+- **extern/FFI emit** (ffi_blake3).
+- **multi-file DETECTION for package members** (packages/*) — header only; harness nuance
+  in stage2CompilePaths vs stage1's package-aware build --emit.
+
+**Other optional fronts:** js/wasm backends in Intent; `--strip-contracts` parity in the
+stage2 emit. None on the critical path — self-hosting is achieved.
   Expect: decl-name→file-base mangling (moduleManglings second pass: `shared_parser` →
   `parser_`), HashMap `use` injection, untested construct combinations.
 - **56.4 — stage3 bootstrap** — compile the stage2 emit into a stage3 binary; verify it
