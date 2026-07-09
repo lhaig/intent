@@ -83,8 +83,12 @@ entity LowerScope {
     // emitted `<name_prefix><fn>` because every non-entry function DEFINITION is prefixed
     // (mirrors stage1's `g.namePrefix + expr.Function`). EMPTY in single-file / entry.
     field name_prefix: String;
+    // func_names / func_returns — the GLOBAL free-function return-type registry, carried
+    // constant so lower_expr can stamp a call's result type. EMPTY in single-file.
+    field func_names: Array<String>;
+    field func_returns: Array<IrType>;
 
-    constructor(names: Array<String>, types: Array<IrType>, enums: Array<EnumDecl>, entities: Array<EntityDecl>, self_name: String, in_old: Bool, self_entity_name: String, join_handle_vars: Array<String>, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, name_prefix: String) {
+    constructor(names: Array<String>, types: Array<IrType>, enums: Array<EnumDecl>, entities: Array<EntityDecl>, self_name: String, in_old: Bool, self_entity_name: String, join_handle_vars: Array<String>, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, name_prefix: String, func_names: Array<String>, func_returns: Array<IrType>) {
         self.names = names;
         self.types = types;
         self.enums = enums;
@@ -98,6 +102,8 @@ entity LowerScope {
         self.type_names = type_names;
         self.type_prefixes = type_prefixes;
         self.name_prefix = name_prefix;
+        self.func_names = func_names;
+        self.func_returns = func_returns;
     }
 }
 
@@ -117,7 +123,7 @@ function lower_scope_empty(enums: Array<EnumDecl>, entities: Array<EntityDecl>) 
         ent.push(entities[enti]);
         enti = enti + 1;
     }
-    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), e, ent, "self", false, "", shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), "");
+    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), e, ent, "self", false, "", shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), "", shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array());
 }
 
 // lower_scope_apply_ctx — a copy of `s` with the module-qualifier map AND the type-
@@ -126,7 +132,7 @@ function lower_scope_empty(enums: Array<EnumDecl>, entities: Array<EntityDecl>) 
 // `mod.fn(args)` becomes `mod_fn(args)` and a cross-module type `Point` becomes
 // `TypesPoint`. Both maps are EMPTY in single-file, so nothing mangles.
 function lower_scope_apply_ctx(s: LowerScope, ctx: LowerCtx) returns LowerScope {
-    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, s.join_handle_vars, ctx.module_names, ctx.module_prefixes, ctx.type_names, ctx.type_prefixes, ctx.name_prefix);
+    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, s.join_handle_vars, ctx.module_names, ctx.module_prefixes, ctx.type_names, ctx.type_prefixes, ctx.name_prefix, ctx.func_names, ctx.func_returns);
 }
 
 // path_module_name — the module name for a source path: the file base with the
@@ -169,20 +175,29 @@ public entity LowerCtx {
     field module_prefixes: Array<String>;
     field type_names: Array<String>;
     field type_prefixes: Array<String>;
+    // func_names / func_returns — the GLOBAL free-function return-type registry (every
+    // module's free functions, by ORIGINAL name -> return IrType). Lets lower_expr stamp
+    // a call's result type so string-concat detection (`a + str_call()` -> format!) and
+    // receiver dispatch on a call result fire. Mirrors stage1 reading the checker's
+    // exprTypes. EMPTY in single-file.
+    field func_names: Array<String>;
+    field func_returns: Array<IrType>;
 
-    constructor(name_prefix: String, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>) {
+    constructor(name_prefix: String, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, func_names: Array<String>, func_returns: Array<IrType>) {
         self.name_prefix = name_prefix;
         self.module_names = module_names;
         self.module_prefixes = module_prefixes;
         self.type_names = type_names;
         self.type_prefixes = type_prefixes;
+        self.func_names = func_names;
+        self.func_returns = func_returns;
     }
 }
 
-// empty_lower_ctx — the single-file context: no name prefix, no module/type maps. Keeps
-// the single-file `lower` path byte-identical (no mangling ever fires).
+// empty_lower_ctx — the single-file context: no name prefix, no module/type/func maps.
+// Keeps the single-file `lower` path byte-identical (no mangling / stamping fires).
 public function empty_lower_ctx() returns LowerCtx {
-    return LowerCtx("", shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array());
+    return LowerCtx("", shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array());
 }
 
 // capitalize — first ASCII letter uppercased (mirrors stage1's structPrefix =
@@ -251,19 +266,19 @@ function lower_scope_define(s: LowerScope, name: String, ty: IrType) returns Low
         ti = ti + 1;
     }
     new_types.push(ty);
-    return LowerScope(new_names, new_types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix);
+    return LowerScope(new_names, new_types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix, s.func_names, s.func_returns);
 }
 
 // lower_scope_with_self — a copy of `s` with self_name + self_entity_name set (for
 // entity members: methods use "self", constructors "__self").
 function lower_scope_with_self(s: LowerScope, name: String, entity_name: String) returns LowerScope {
-    return LowerScope(s.names, s.types, s.enums, s.entities, name, s.in_old, entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix);
+    return LowerScope(s.names, s.types, s.enums, s.entities, name, s.in_old, entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix, s.func_names, s.func_returns);
 }
 
 // lower_scope_with_old — a copy of `s` with in_old set (for ensures clauses, where
 // `old(expr)` lowers to its captured variable).
 function lower_scope_with_old(s: LowerScope, flag: Bool) returns LowerScope {
-    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, flag, s.self_entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix);
+    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, flag, s.self_entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix, s.func_names, s.func_returns);
 }
 
 // lower_scope_add_joinhandle — a copy of `s` with `name` recorded as a spawn-bound
@@ -276,7 +291,7 @@ function lower_scope_add_joinhandle(s: LowerScope, name: String) returns LowerSc
         i = i + 1;
     }
     jh.push(name);
-    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, jh, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix);
+    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, jh, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix, s.func_names, s.func_returns);
 }
 
 // lookup_entity_field_type — the declared type of `field_name` in entity `ent_name`,
@@ -291,6 +306,41 @@ function lookup_entity_field_type(entities: Array<EntityDecl>, ent_name: String,
             while j < len(e.fields) {
                 if e.fields[j].name == field_name {
                     return compiler_ir.ir_parse_type(e.fields[j].type_name);
+                }
+                j = j + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return compiler_ir.ir_type_named("");
+}
+
+// lookup_func_return — a free function's declared return type by name, or the unknown
+// type if not found (builtins / unknown names leave the call's result untyped). Stamps a
+// call's expr_type so string-concat detection and result-receiver dispatch can fire.
+function lookup_func_return(func_names: Array<String>, func_returns: Array<IrType>, name: String) returns IrType {
+    let mutable i: Int = 0;
+    while i < len(func_names) {
+        if func_names[i] == name {
+            return func_returns[i];
+        }
+        i = i + 1;
+    }
+    return compiler_ir.ir_type_named("");
+}
+
+// lookup_method_return — the declared return type of `method_name` on entity `ent_name`,
+// or the unknown type if not found. Stamps a method call's result type so a chained call
+// (`self.peek().is_digit()`, peek returns Char) dispatches on the right receiver type.
+function lookup_method_return(entities: Array<EntityDecl>, ent_name: String, method_name: String) returns IrType {
+    let mutable i: Int = 0;
+    while i < len(entities) {
+        let e: EntityDecl = entities[i];
+        if e.name == ent_name {
+            let mutable j: Int = 0;
+            while j < len(e.methods) {
+                if e.methods[j].name == method_name {
+                    return compiler_ir.ir_parse_type(e.methods[j].return_type);
                 }
                 j = j + 1;
             }
@@ -617,7 +667,7 @@ function monomorphize_member(f: FunctionDecl, self_name: String, entity_name: St
 // function becomes the program main in the backend). Mirrors Lower in lower.go
 // for the trivial subset (functions + tests; other decl kinds land per slice).
 public function lower(prog: Program, path: String) returns IrModule {
-    return lower_module(prog, path, true, shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), prog.enums, prog.entities);
+    return lower_module(prog, path, true, shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), prog.enums, prog.entities, shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array());
 }
 
 // lower_module — lower one Program of a (possibly multi-file) build. is_entry marks
@@ -630,13 +680,13 @@ public function lower(prog: Program, path: String) returns IrModule {
 // for lookups/classification (is_known_entity for cross-module constructors, variant
 // resolution, self-field types) — mirroring stage1's global lowerer.entities. The per-
 // module prog.enums/prog.entities still drive which decls this module EMITS.
-public function lower_module(prog: Program, path: String, is_entry: Bool, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, all_enums: Array<EnumDecl>, all_entities: Array<EntityDecl>) returns IrModule {
+public function lower_module(prog: Program, path: String, is_entry: Bool, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, all_enums: Array<EnumDecl>, all_entities: Array<EntityDecl>, func_names: Array<String>, func_returns: Array<IrType>) returns IrModule {
     let mod_name: String = path_module_name(path);
     let mutable name_prefix: String = "";
     if not is_entry {
         name_prefix = mod_name + "_";
     }
-    let ctx: LowerCtx = LowerCtx(name_prefix, module_names, module_prefixes, type_names, type_prefixes);
+    let ctx: LowerCtx = LowerCtx(name_prefix, module_names, module_prefixes, type_names, type_prefixes, func_names, func_returns);
     let mutable fns: Array<IrFunction> = compiler_ir.empty_ir_function_array();
     let mutable fi: Int = 0;
     while fi < len(prog.functions) {
@@ -759,6 +809,10 @@ public function lower_all(progs: Array<Program>, paths: Array<String>) returns I
     // lowerer.entities). The per-module prog.* still drives which decls each module emits.
     let mutable all_enums: Array<EnumDecl> = [];
     let mutable all_entities: Array<EntityDecl> = [];
+    // Free-function return-type registry (every module's functions, by name -> return
+    // type) so a call's result type can be stamped during lowering.
+    let mutable func_names: Array<String> = shared_ast.empty_string_array();
+    let mutable func_returns: Array<IrType> = compiler_ir.empty_ir_type_array();
     let mutable g: Int = 0;
     while g < n {
         let mutable gei: Int = 0;
@@ -771,13 +825,19 @@ public function lower_all(progs: Array<Program>, paths: Array<String>) returns I
             all_entities.push(progs[g].entities[gni]);
             gni = gni + 1;
         }
+        let mutable gfi: Int = 0;
+        while gfi < len(progs[g].functions) {
+            func_names.push(progs[g].functions[gfi].name);
+            func_returns.push(compiler_ir.ir_parse_type(progs[g].functions[gfi].return_type));
+            gfi = gfi + 1;
+        }
         g = g + 1;
     }
     let mutable mods: Array<IrModule> = compiler_ir.empty_ir_module_array();
     let mutable j: Int = 0;
     while j < n {
         let is_entry: Bool = j == n - 1;
-        mods.push(lower_module(progs[j], paths[j], is_entry, mod_names, mod_prefixes, type_names, type_prefixes, all_enums, all_entities));
+        mods.push(lower_module(progs[j], paths[j], is_entry, mod_names, mod_prefixes, type_names, type_prefixes, all_enums, all_entities, func_names, func_returns));
         j = j + 1;
     }
     return IrProgram(mods);
@@ -1621,11 +1681,34 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
                 }
                 if found >= 0 {
                     let mangled: String = scope.module_prefixes[found] + callee.name;
-                    return IrExpr(compiler_ir.irex_call(), 0, "", false, mangled, args, compiler_ir.ir_type_named(""));
+                    // Stamp the cross-module call's result type (by the ORIGINAL fn name).
+                    return IrExpr(compiler_ir.irex_call(), 0, "", false, mangled, args, lookup_func_return(scope.func_names, scope.func_returns, callee.name));
                 }
             }
             let object: IrExpr = lower_expr(callee.children[0], scope);
-            return compiler_ir.ir_method(object, callee.name, args);
+            let mutable mc: IrExpr = compiler_ir.ir_method(object, callee.name, args);
+            // Stamp the method call's result type from the receiver entity's method
+            // signature (self -> the current self entity, else the object's stamped type),
+            // so a chained call dispatches on the right receiver type.
+            let mutable recv_ent: String = "";
+            if callee.children[0].kind == shared_ast.ex_ident() {
+                if callee.children[0].name == "self" {
+                    recv_ent = scope.self_entity_name;
+                }
+            }
+            if recv_ent == "" {
+                recv_ent = object.expr_type.name;
+            }
+            if recv_ent != "" {
+                mc.expr_type = lookup_method_return(scope.entities, recv_ent, callee.name);
+            }
+            // Builtin methods with a known String result: to_string (on any scalar),
+            // to_lowercase / trim (on String). Typing their result lets string-concat
+            // detection fire on `x + c.to_string()`.
+            if callee.name == "to_string" or callee.name == "to_lowercase" or callee.name == "trim" {
+                mc.expr_type = compiler_ir.ir_type_named("String");
+            }
+            return mc;
         }
         let kind: Int = resolve_call_kind(callee.name);
         // A non-builtin callee naming an enum variant is a DATA variant construction
@@ -1677,10 +1760,13 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
         // `g.namePrefix + expr.Function` for CallFunction. name_prefix is "" in the entry
         // module / single-file, so this is byte-unchanged there.
         let mutable fname: String = callee.name;
+        let mutable rty: IrType = compiler_ir.ir_type_named("");
         if kind == compiler_ir.callkind_function() {
             fname = scope.name_prefix + callee.name;
+            // Stamp the result type (by the ORIGINAL fn name) for concat / dispatch.
+            rty = lookup_func_return(scope.func_names, scope.func_returns, callee.name);
         }
-        let mutable call: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, fname, args, compiler_ir.ir_type_named(""));
+        let mutable call: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, fname, args, rty);
         call.call_kind = kind;
         return call;
     }

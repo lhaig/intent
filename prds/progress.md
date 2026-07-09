@@ -2998,3 +2998,37 @@ REMAINING (441, the next sub-slice — call/method RETURN-type inference):
 - **~64 residual clones + the `args()` builtin + 3 HashMap** (the substring HashMap
   trigger misfires on the compiler's `"HashMap<"` string literals — needs a precise
   IR-Map scan, not `contains_substring`).
+
+---
+
+## 2026-07-09 — Phase 56 slice 56.3 COMPLETE: FULL self-hosting (diff-emit-self 4/4)
+
+**The stage2 compiler emits the ENTIRE self-hosted toolchain's own multi-module source —
+compiler (8304 lines), checker (6307), formatter (5113), linter (5042) — BYTE-EQUAL with
+stage1.** New gate `make diff-emit-self` is 4/4. The bootstrap triangle is closed: a stage3
+built from the stage2 emit is identical to stage2. Drove the compile_main divergence
+441 -> 0 via call/method return-type inference + three final fixes:
+
+- **Free-function return-type registry** (`func_names`/`func_returns` on LowerCtx +
+  LowerScope, built in lower_all from all modules): lower_expr stamps a call's result type
+  (plain + module-qualified). `lower_ir_is_string` then detects `a + str_call()` -> the
+  string-concat is lowered to a StringConcat node -> `format!` (was ~214 divergences).
+- **Method return-type stamping**: an `irex_method`'s result is typed from the receiver
+  entity's method signature (self -> current self entity, else the receiver's stamped
+  type), plus the builtin string methods (`to_string`/`to_lowercase`/`trim` -> String).
+  Fixes chained dispatch (`self.peek().is_digit()` -> `is_ascii_digit`) and concat on
+  `c.to_string()`.
+- **`args()` builtin** -> `std::env::args().collect::<Vec<String>>()` (was a loud marker).
+- **Precise HashMap trigger** (`module_needs_hashmap` — a real IR-type scan of function
+  signatures / entity fields+methods / enum variants) replacing the
+  `contains_substring(body, "HashMap")` proxy, which misfired on the compiler's own
+  `"HashMap<"` string literals.
+- **Array-ref-param clone on let-binding** (stage1's arrayRefParams rule): a FREE-function
+  Array/Map param bound to an owned local clones (`let out: Vec = caps` -> `caps.clone()`);
+  `array_params` threaded through generate_stmts/stmt/if/while/for. Crucially METHOD /
+  constructor Array params are emitted BY VALUE (`Vec`, not `&Vec`), so they are NOT in
+  the set (verified: `parse_import_decl(leading_comments: Vec<String>)` moves, not clones).
+
+Gates green: **diff-emit-self 4/4**, diff-emit 33/33, selfcheck-formatter OK,
+selfcheck-checker 13/13, lower_test 137, ir_test 17. Only `selfhost/compiler/*` +
+Makefile + the new gate script touched (no `selfhost/shared/*`, no Go).

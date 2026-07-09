@@ -73,11 +73,19 @@ matches the existing stage2 deviation from stage1's structure.
   - **Deferred:** module-qualified constructor `mod.Entity(...)` (fixture uses unqualified
     cross-module `Point(...)`); traits across modules; `expr_type`/cast mangling.
 
-- **56.3 — emit the compiler's own source.** Feed `selfhost/shared/*` +
-  `selfhost/compiler/*` through `--emit --self-hosted`, byte-equal with stage1. Expect
-  gaps: the decl-name→file-base mangling (`shared_parser` qualifier → `parser_` prefix,
-  the moduleManglings second pass), `use std::collections::HashMap;` (Map-heavy), and
-  any construct combination the corpus didn't exercise.
+- ✅ **56.3 — emit the compiler's own source** (`make diff-emit-self` 4/4). The stage2
+  compiler emits the ENTIRE self-hosted toolchain byte-equal with stage1: compiler (8304
+  lines), checker (6307), formatter (5113), linter (5042). Divergence driven 2667 -> 0.
+  What it took, in order: same-module call prefixing; let-binding scope type kept unmangled
+  (`IrStmt.let_type_emit`) so cross-module-typed-local field lookups resolve; place-value
+  cloning in let/return/assign + field-access in clone_if_needed; `lower_test` ctx;
+  call/method RETURN-type inference (free-function return registry + method-return + builtin
+  string methods `to_string`/`to_lowercase`/`trim`) for string-concat `format!` and chained
+  char dispatch; the `args()` builtin; a precise IR-Map HashMap trigger (replacing the
+  substring proxy that misfired on the compiler's own `"HashMap<"` string literals); and the
+  free-function Array-ref-param clone-on-let (methods/ctors take arrays BY VALUE, so
+  excluded). NOTE: the decl-name→file-base mangling was already handled by slice 1's
+  decl-name qualifier entry in module_names.
 
 - **56.4 — stage3 bootstrap.** Compile the stage2-emitted Rust into a stage3 binary and
   verify it matches stage2 (byte-equal emit / functional parity). Closes the full triangle.

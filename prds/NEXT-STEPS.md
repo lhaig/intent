@@ -25,21 +25,19 @@ namePrefix/structPrefix through `generate_expr`).
   Global entity/enum registry threaded into `lower_module` for cross-module constructor
   classification. Fixture `emit-fixtures/multimod_entity/`. Limitation deferred to 56.3:
   chained field access on a cross-module-typed LOCAL (`local.field.method()`).
-- **56.3 — IN PROGRESS: emit the compiler's own source** (`selfhost/**`), byte-equal with
-  stage1. Probing `compile_main.intent` (stage2's own 8k-line source) started at **2667**
-  diverging lines; GROUNDWORK drove it to **441** (33/33 corpus stays green). Landed:
-  same-module call prefixing; let-binding scope type kept unmangled (`IrStmt.let_type_emit`)
-  — fixes cross-module-typed-local field lookups so clones fire; clone on place-values in
-  let/return/assign + field-access in clone_if_needed; `lower_test` threads the module ctx.
-  **REMAINING (441 = ONE sub-slice, call/method RETURN-type inference):** ~214 string-concat
-  (`stringvar + string_call` -> needs the call's result typed String -> `format!`); char-
-  method dispatch (`self.peek().is_digit()` -> `is_ascii_digit`, peek returns Char); ~64
-  residual clones; the `args()` builtin; and the HashMap trigger (substring misfires on the
-  compiler's `"HashMap<"` string literals -> needs a precise IR-Map scan). Build a global
-  function-return + method-return registry, thread it (like the entity registry), stamp
-  irex_call / irex_method expr_types, then re-probe.
-  NOTE: the decl-name→file-base mangling (moduleManglings second pass) turned out already
-  handled — `compiler_ir.foo()` resolves via the decl-name qualifier entry in module_names.
+- ✅ **56.3 — COMPLETE: FULL self-hosting** (`make diff-emit-self` 4/4). The stage2 compiler
+  emits the ENTIRE toolchain's own source byte-equal with stage1: compiler (8304 lines),
+  checker (6307), formatter (5113), linter (5042). Drove compile_main's divergence 2667 ->
+  0. Final sub-slice was call/method RETURN-type inference (free-function return registry +
+  method-return + builtin string methods -> string-concat `format!` and chained char
+  dispatch), plus `args()` builtin, a precise IR-Map HashMap trigger, and the free-fn
+  Array-ref-param clone-on-let (methods/ctors take arrays BY VALUE, so excluded). New gate
+  `make diff-emit-self`. The bootstrap triangle is closed.
+- **56.4 — NEXT: stage3 bootstrap** — compile the stage2-emitted Rust into a stage3 binary
+  and verify it is byte-equal / functionally identical to stage2. Given diff-emit-self is
+  4/4, stage3 emit should already equal stage2 emit; 56.4 is the end-to-end confirmation
+  (build the stage2 binary, have IT emit + cargo-build the toolchain, diff the binaries /
+  re-run the gates through stage3).
   Expect: decl-name→file-base mangling (moduleManglings second pass: `shared_parser` →
   `parser_`), HashMap `use` injection, untested construct combinations.
 - **56.4 — stage3 bootstrap** — compile the stage2 emit into a stage3 binary; verify it

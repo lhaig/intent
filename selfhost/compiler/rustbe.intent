@@ -38,9 +38,10 @@ public function generate(m: IrModule) returns String {
     let body: String = generate_module_body(m, m.functions);
     let mutable out: String = "// Generated Rust code from Intent\n";
     out = out + "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n";
-    // Inject the HashMap use statement when the body references it (mirrors stage1's
-    // needsHashMap post-processing — any Map type/literal emits `HashMap`).
-    if contains_substring(body, "HashMap") {
+    // Inject the HashMap use when the module actually uses a Map type (mirrors stage1's
+    // needsHashMap). A precise IR scan, not a body-substring check — the latter misfires
+    // on the compiler's own `"HashMap<"` string literals when it self-hosts.
+    if module_needs_hashmap(m) {
         out = out + "use std::collections::HashMap;\n";
     }
     out = out + "\n";
@@ -72,7 +73,16 @@ public function generate_all(prog: IrProgram) returns String {
     }
     let mutable out: String = "// Generated Rust code from Intent (multi-file)\n";
     out = out + "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n";
-    if contains_substring(body, "HashMap") {
+    // Inject once if ANY module uses a Map type (precise IR scan, not a body substring).
+    let mutable any_map: Bool = false;
+    let mutable hk: Int = 0;
+    while hk < len(prog.modules) {
+        if module_needs_hashmap(prog.modules[hk]) {
+            any_map = true;
+        }
+        hk = hk + 1;
+    }
+    if any_map {
         out = out + "use std::collections::HashMap;\n";
     }
     out = out + "\n";
@@ -152,6 +162,93 @@ public function contains_substring(hay: String, needle: String) returns Bool {
             return true;
         }
         i = i + 1;
+    }
+    return false;
+}
+
+// ir_type_has_map — does this type (or any nested type arg) name Map? The precise
+// needs-HashMap signal, replacing a `contains_substring(body, "HashMap")` proxy that
+// misfires on the compiler's own `"HashMap<"` string literals when it self-hosts.
+public function ir_type_has_map(t: IrType) returns Bool {
+    if t.name == "Map" {
+        return true;
+    }
+    let mutable i: Int = 0;
+    while i < len(t.type_args) {
+        if ir_type_has_map(t.type_args[i]) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// func_sig_has_map — does a function's signature (params or return) mention Map?
+public function func_sig_has_map(f: IrFunction) returns Bool {
+    if ir_type_has_map(f.return_type) {
+        return true;
+    }
+    let mutable i: Int = 0;
+    while i < len(f.params) {
+        if ir_type_has_map(f.params[i].param_type) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// module_needs_hashmap — does the module use a Map (HashMap) type anywhere the scan
+// reaches: function signatures, entity fields / ctor / methods, enum variant fields.
+// (Map literals/ops in a body always flow through one of these typed positions in the
+// corpus, so a signature-level scan is sufficient and precise.)
+public function module_needs_hashmap(m: IrModule) returns Bool {
+    let mutable fi: Int = 0;
+    while fi < len(m.functions) {
+        if func_sig_has_map(m.functions[fi]) {
+            return true;
+        }
+        fi = fi + 1;
+    }
+    let mutable ei: Int = 0;
+    while ei < len(m.entities) {
+        let e: IrEntity = m.entities[ei];
+        let mutable fj: Int = 0;
+        while fj < len(e.fields) {
+            if ir_type_has_map(e.fields[fj].param_type) {
+                return true;
+            }
+            fj = fj + 1;
+        }
+        if e.has_constructor {
+            if func_sig_has_map(e.constructor_fn) {
+                return true;
+            }
+        }
+        let mutable mj: Int = 0;
+        while mj < len(e.methods) {
+            if func_sig_has_map(e.methods[mj]) {
+                return true;
+            }
+            mj = mj + 1;
+        }
+        ei = ei + 1;
+    }
+    let mutable eni: Int = 0;
+    while eni < len(m.enums) {
+        let en: IrEnum = m.enums[eni];
+        let mutable vi: Int = 0;
+        while vi < len(en.variants) {
+            let mutable vfj: Int = 0;
+            while vfj < len(en.variants[vi].fields) {
+                if ir_type_has_map(en.variants[vi].fields[vfj].param_type) {
+                    return true;
+                }
+                vfj = vfj + 1;
+            }
+            vi = vi + 1;
+        }
+        eni = eni + 1;
     }
     return false;
 }
@@ -336,7 +433,7 @@ public function generate_constructor(e: IrEntity, funcs: Array<IrFunction>) retu
         fi = fi + 1;
     }
     out = out + "        " + rbrace() + ";\n";
-    out = out + generate_ctor_body_rest(c.body, funcs, mutated);
+    out = out + generate_ctor_body_rest(c.body, funcs, mutated, compiler_ir.empty_string_array_ir());
     let mutable ei: Int = 0;
     while ei < len(c.ensures_clauses) {
         out = out + "        assert!(" + generate_expr(c.ensures_clauses[ei].expr, funcs) + ", \"Postcondition failed: " + c.ensures_clauses[ei].raw_text + "\");\n";
@@ -397,7 +494,7 @@ function ctor_direct_init(body: Array<IrStmt>, fname: String) returns IrExpr {
 // generate_ctor_body_rest — emit constructor body statements that were NOT hoisted
 // into the struct literal (i.e. not the first `__self.field = ...` per field), at
 // level 2. Mirrors splitConstructorInits' bodyRest.
-function generate_ctor_body_rest(body: Array<IrStmt>, funcs: Array<IrFunction>, mutated: Array<String>) returns String {
+function generate_ctor_body_rest(body: Array<IrStmt>, funcs: Array<IrFunction>, mutated: Array<String>, array_params: Array<String>) returns String {
     let mutable out: String = "";
     let mutable seen: Array<String> = [];
     let mutable i: Int = 0;
@@ -413,7 +510,7 @@ function generate_ctor_body_rest(body: Array<IrStmt>, funcs: Array<IrFunction>, 
             }
         }
         if not consumed {
-            out = out + generate_stmt(s, 2, false, funcs, mutated);
+            out = out + generate_stmt(s, 2, false, funcs, mutated, array_params);
         }
         i = i + 1;
     }
@@ -481,7 +578,7 @@ public function generate_method(e: IrEntity, m: IrFunction, funcs: Array<IrFunct
     let needs_labeled: Bool = not ret_void and (len(m.ensures_clauses) > 0 or has_inv);
     if needs_labeled {
         out = out + "        let __result: " + map_type(m.return_type) + " = 'body: " + lbrace() + "\n";
-        out = out + generate_stmts(m.body, 3, true, funcs, mutated);
+        out = out + generate_stmts(m.body, 3, true, funcs, mutated, compiler_ir.empty_string_array_ir());
         out = out + "        " + rbrace() + ";\n";
         out = out + generate_method_ensures(m, funcs);
         if has_inv {
@@ -489,7 +586,7 @@ public function generate_method(e: IrEntity, m: IrFunction, funcs: Array<IrFunct
         }
         out = out + "        __result\n";
     } else {
-        out = out + generate_stmts(m.body, 2, false, funcs, mutated);
+        out = out + generate_stmts(m.body, 2, false, funcs, mutated, compiler_ir.empty_string_array_ir());
         out = out + generate_method_ensures(m, funcs);
         if has_inv {
             out = out + "        self.__check_invariants();\n";
@@ -713,7 +810,7 @@ public function generate_function(f: IrFunction, funcs: Array<IrFunction>) retur
     }
     if f.is_entry {
         let mutable out: String = fn_kw + "__intent_main() -> i64 " + lbrace() + "\n";
-        out = out + generate_stmts(f.body, 1, false, funcs, mutated);
+        out = out + generate_stmts(f.body, 1, false, funcs, mutated, array_param_names(f));
         out = out + rbrace() + "\n";
         out = out + "\n";
         if f.is_async {
@@ -747,12 +844,12 @@ public function generate_function(f: IrFunction, funcs: Array<IrFunction>) retur
     let needs_labeled: Bool = len(f.ensures_clauses) > 0 and f.return_type.name != "Void";
     if needs_labeled {
         sig = sig + "    let __result: " + ret_ty + " = 'body: " + lbrace() + "\n";
-        sig = sig + generate_stmts(f.body, 2, true, funcs, mutated);
+        sig = sig + generate_stmts(f.body, 2, true, funcs, mutated, array_param_names(f));
         sig = sig + "    " + rbrace() + ";\n";
         sig = sig + generate_contracts(f.ensures_clauses, "Postcondition failed: ", funcs);
         sig = sig + "    __result\n";
     } else {
-        sig = sig + generate_stmts(f.body, 1, false, funcs, mutated);
+        sig = sig + generate_stmts(f.body, 1, false, funcs, mutated, array_param_names(f));
         sig = sig + generate_contracts(f.ensures_clauses, "Postcondition failed: ", funcs);
     }
     sig = sig + rbrace() + "\n";
@@ -789,7 +886,7 @@ public function generate_test(t: IrTest, funcs: Array<IrFunction>, mutated: Arra
         fn_kw = "async fn ";
     }
     out = out + fn_kw + fn_name + "() " + lbrace() + "\n";
-    out = out + generate_stmts(t.body, 1, false, funcs, mutated);
+    out = out + generate_stmts(t.body, 1, false, funcs, mutated, compiler_ir.empty_string_array_ir());
     out = out + rbrace() + "\n";
     return out;
 }
@@ -907,11 +1004,27 @@ function append_names(a: Array<String>, b: Array<String>) returns Array<String> 
 // in_labeled propagates the ensures `'body:` context so a `return` inside it (at
 // any nesting depth) becomes `break 'body`. `mutated` is the function/test's
 // mutated-var set (see collect_mutated_vars), consulted by the `let` emit.
-public function generate_stmts(stmts: Array<IrStmt>, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>) returns String {
+// array_param_names — a function's Array/Map param names (emitted as &Vec/&HashMap
+// refs). A `let` binding one of them to an owned local must clone it (mirrors stage1's
+// arrayRefParams clone in LetStmt: `let out: Vec = caps` -> `caps.clone()`).
+public function array_param_names(f: IrFunction) returns Array<String> {
+    let mutable out: Array<String> = [];
+    let mutable i: Int = 0;
+    while i < len(f.params) {
+        let tn: String = f.params[i].param_type.name;
+        if tn == "Array" or tn == "Map" {
+            out.push(f.params[i].name);
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+public function generate_stmts(stmts: Array<IrStmt>, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>, array_params: Array<String>) returns String {
     let mutable out: String = "";
     let mutable i: Int = 0;
     while i < len(stmts) {
-        out = out + generate_stmt(stmts[i], level, in_labeled, funcs, mutated);
+        out = out + generate_stmt(stmts[i], level, in_labeled, funcs, mutated, array_params);
         i = i + 1;
     }
     return out;
@@ -920,7 +1033,7 @@ public function generate_stmts(stmts: Array<IrStmt>, level: Int, in_labeled: Boo
 // generate_stmt — mirrors generateStmt. Inside an ensures labeled block
 // (in_labeled), `return X` becomes `break 'body X` and bare `return` becomes
 // `break 'body`. Unsupported kinds fail the gate loudly.
-public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>) returns String {
+public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>, array_params: Array<String>) returns String {
     let ind: String = indent_str(level);
     if s.kind == compiler_ir.irst_return() {
         if s.expr.kind == compiler_ir.irex_void() {
@@ -943,7 +1056,18 @@ public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Ar
     if s.kind == compiler_ir.irst_let() {
         // A non-Copy field-access / index let value is cloned (gated by the let's
         // declared type, mirroring stage1's LetStmt clone).
-        let val: String = clone_place_value(gen_stmt_value(s.expr, funcs, level), s.expr, s.let_type);
+        let mutable val: String = clone_place_value(gen_stmt_value(s.expr, funcs, level), s.expr, s.let_type);
+        // Binding an Array/Map ref-PARAM to an owned local clones it (stage1's
+        // arrayRefParams rule): `let out: Vec = caps` -> `caps.clone()`.
+        if s.expr.kind == compiler_ir.irex_var() {
+            if name_in_array(array_params, s.expr.name) {
+                if s.let_type.name == "Array" or s.let_type.name == "Map" {
+                    if not ends_with_clone(val) {
+                        val = val + ".clone()";
+                    }
+                }
+            }
+        }
         // A `let` is emitted `mut` if the source said so OR the mutatedVars scan
         // saw it later assigned / used as a method receiver (mirrors stage1's
         // `stmt.Mutable || g.mutatedVars[stmt.Name]`).
@@ -976,13 +1100,13 @@ public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Ar
         return ind + "continue;\n";
     }
     if s.kind == compiler_ir.irst_if() {
-        return generate_if(s, level, in_labeled, funcs, mutated);
+        return generate_if(s, level, in_labeled, funcs, mutated, array_params);
     }
     if s.kind == compiler_ir.irst_while() {
-        return generate_while(s, level, in_labeled, funcs, mutated);
+        return generate_while(s, level, in_labeled, funcs, mutated, array_params);
     }
     if s.kind == compiler_ir.irst_for() {
-        return generate_for(s, level, in_labeled, funcs, mutated);
+        return generate_for(s, level, in_labeled, funcs, mutated, array_params);
     }
     return ind + "// unsupported stmt\n";
 }
@@ -994,10 +1118,10 @@ public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Ar
 // stage1. Bodies indent one level deeper than the `if`.
 // Braces in the emitted Rust go through lbrace()/rbrace() — a literal `{`/`}` in
 // an Intent string lexes as string interpolation.
-public function generate_if(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>) returns String {
+public function generate_if(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>, array_params: Array<String>) returns String {
     let ind: String = indent_str(level);
     let mutable out: String = ind + "if " + generate_expr(s.expr, funcs) + " " + lbrace() + "\n";
-    out = out + generate_stmts(s.then_body, level + 1, in_labeled, funcs, mutated);
+    out = out + generate_stmts(s.then_body, level + 1, in_labeled, funcs, mutated, array_params);
     out = out + ind + rbrace();
     if s.has_else {
         let mutable is_else_if: Bool = false;
@@ -1009,11 +1133,11 @@ public function generate_if(s: IrStmt, level: Int, in_labeled: Bool, funcs: Arra
         if is_else_if {
             let ei: IrStmt = s.else_body[0];
             out = out + " else if " + generate_expr(ei.expr, funcs) + " " + lbrace() + "\n";
-            out = out + generate_stmts(ei.then_body, level + 1, in_labeled, funcs, mutated);
+            out = out + generate_stmts(ei.then_body, level + 1, in_labeled, funcs, mutated, array_params);
             out = out + ind + rbrace();
             if ei.has_else {
                 out = out + " else " + lbrace() + "\n";
-                out = out + generate_stmts(ei.else_body, level + 1, in_labeled, funcs, mutated);
+                out = out + generate_stmts(ei.else_body, level + 1, in_labeled, funcs, mutated, array_params);
                 out = out + ind + rbrace() + "\n";
             } else {
                 out = out + "\n";
@@ -1021,7 +1145,7 @@ public function generate_if(s: IrStmt, level: Int, in_labeled: Bool, funcs: Arra
             return out;
         }
         out = out + " else " + lbrace() + "\n";
-        out = out + generate_stmts(s.else_body, level + 1, in_labeled, funcs, mutated);
+        out = out + generate_stmts(s.else_body, level + 1, in_labeled, funcs, mutated, array_params);
         out = out + ind + rbrace() + "\n";
         return out;
     }
@@ -1031,17 +1155,17 @@ public function generate_if(s: IrStmt, level: Int, in_labeled: Bool, funcs: Arra
 
 // generate_while — mirrors generateWhileStmt's no-contract path: `while COND {`
 // ... `}`. Loop invariants / decreases (the contract path) land with contracts.
-public function generate_while(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>) returns String {
+public function generate_while(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>, array_params: Array<String>) returns String {
     let ind: String = indent_str(level);
     let mutable out: String = ind + "while " + generate_expr(s.expr, funcs) + " " + lbrace() + "\n";
-    out = out + generate_stmts(s.then_body, level + 1, in_labeled, funcs, mutated);
+    out = out + generate_stmts(s.then_body, level + 1, in_labeled, funcs, mutated, array_params);
     out = out + ind + rbrace() + "\n";
     return out;
 }
 
 // generate_for — mirrors generateForInStmt: `for VAR in (START..END) {` for a
 // range iterable, else `for VAR in EXPR.iter() {`.
-public function generate_for(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>) returns String {
+public function generate_for(s: IrStmt, level: Int, in_labeled: Bool, funcs: Array<IrFunction>, mutated: Array<String>, array_params: Array<String>) returns String {
     let ind: String = indent_str(level);
     let mutable out: String = ind + "for " + s.name + " in ";
     if s.expr.kind == compiler_ir.irex_range() {
@@ -1050,7 +1174,7 @@ public function generate_for(s: IrStmt, level: Int, in_labeled: Bool, funcs: Arr
         out = out + generate_expr(s.expr, funcs) + ".iter()";
     }
     out = out + " " + lbrace() + "\n";
-    out = out + generate_stmts(s.then_body, level + 1, in_labeled, funcs, mutated);
+    out = out + generate_stmts(s.then_body, level + 1, in_labeled, funcs, mutated, array_params);
     out = out + ind + rbrace() + "\n";
     return out;
 }
@@ -1716,6 +1840,9 @@ public function generate_builtin_call(e: IrExpr, funcs: Array<IrFunction>) retur
     if e.name == "env_get" {
         let arg: String = clone_if_needed(generate_expr(e.children[0], funcs), e.children[0]);
         return "std::env::var(" + arg + ").ok()";
+    }
+    if e.name == "args" {
+        return "std::env::args().collect::<Vec<String>>()";
     }
     return "/* unsupported builtin: " + e.name + " */";
 }
