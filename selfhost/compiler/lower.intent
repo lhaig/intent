@@ -78,8 +78,13 @@ entity LowerScope {
     // mangle cross-module type references. EMPTY in single-file. Set via _apply_ctx.
     field type_names: Array<String>;
     field type_prefixes: Array<String>;
+    // name_prefix — the CURRENT module's function prefix (`ir_` for a non-entry module
+    // named ir.intent, "" for the entry module). A plain (same-module) function call is
+    // emitted `<name_prefix><fn>` because every non-entry function DEFINITION is prefixed
+    // (mirrors stage1's `g.namePrefix + expr.Function`). EMPTY in single-file / entry.
+    field name_prefix: String;
 
-    constructor(names: Array<String>, types: Array<IrType>, enums: Array<EnumDecl>, entities: Array<EntityDecl>, self_name: String, in_old: Bool, self_entity_name: String, join_handle_vars: Array<String>, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>) {
+    constructor(names: Array<String>, types: Array<IrType>, enums: Array<EnumDecl>, entities: Array<EntityDecl>, self_name: String, in_old: Bool, self_entity_name: String, join_handle_vars: Array<String>, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, name_prefix: String) {
         self.names = names;
         self.types = types;
         self.enums = enums;
@@ -92,6 +97,7 @@ entity LowerScope {
         self.module_prefixes = module_prefixes;
         self.type_names = type_names;
         self.type_prefixes = type_prefixes;
+        self.name_prefix = name_prefix;
     }
 }
 
@@ -111,7 +117,7 @@ function lower_scope_empty(enums: Array<EnumDecl>, entities: Array<EntityDecl>) 
         ent.push(entities[enti]);
         enti = enti + 1;
     }
-    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), e, ent, "self", false, "", shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array());
+    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), e, ent, "self", false, "", shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), "");
 }
 
 // lower_scope_apply_ctx — a copy of `s` with the module-qualifier map AND the type-
@@ -120,7 +126,7 @@ function lower_scope_empty(enums: Array<EnumDecl>, entities: Array<EntityDecl>) 
 // `mod.fn(args)` becomes `mod_fn(args)` and a cross-module type `Point` becomes
 // `TypesPoint`. Both maps are EMPTY in single-file, so nothing mangles.
 function lower_scope_apply_ctx(s: LowerScope, ctx: LowerCtx) returns LowerScope {
-    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, s.join_handle_vars, ctx.module_names, ctx.module_prefixes, ctx.type_names, ctx.type_prefixes);
+    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, s.join_handle_vars, ctx.module_names, ctx.module_prefixes, ctx.type_names, ctx.type_prefixes, ctx.name_prefix);
 }
 
 // path_module_name — the module name for a source path: the file base with the
@@ -245,19 +251,19 @@ function lower_scope_define(s: LowerScope, name: String, ty: IrType) returns Low
         ti = ti + 1;
     }
     new_types.push(ty);
-    return LowerScope(new_names, new_types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes);
+    return LowerScope(new_names, new_types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix);
 }
 
 // lower_scope_with_self — a copy of `s` with self_name + self_entity_name set (for
 // entity members: methods use "self", constructors "__self").
 function lower_scope_with_self(s: LowerScope, name: String, entity_name: String) returns LowerScope {
-    return LowerScope(s.names, s.types, s.enums, s.entities, name, s.in_old, entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes);
+    return LowerScope(s.names, s.types, s.enums, s.entities, name, s.in_old, entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix);
 }
 
 // lower_scope_with_old — a copy of `s` with in_old set (for ensures clauses, where
 // `old(expr)` lowers to its captured variable).
 function lower_scope_with_old(s: LowerScope, flag: Bool) returns LowerScope {
-    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, flag, s.self_entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes);
+    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, flag, s.self_entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix);
 }
 
 // lower_scope_add_joinhandle — a copy of `s` with `name` recorded as a spawn-bound
@@ -270,7 +276,7 @@ function lower_scope_add_joinhandle(s: LowerScope, name: String) returns LowerSc
         i = i + 1;
     }
     jh.push(name);
-    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, jh, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes);
+    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, jh, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix);
 }
 
 // lookup_entity_field_type — the declared type of `field_name` in entity `ent_name`,
@@ -640,7 +646,7 @@ public function lower_module(prog: Program, path: String, is_entry: Bool, module
     let mutable tsts: Array<IrTest> = compiler_ir.empty_ir_test_array();
     let mutable ti: Int = 0;
     while ti < len(prog.tests) {
-        tsts.push(lower_test(prog.tests[ti], all_enums, all_entities));
+        tsts.push(lower_test(prog.tests[ti], all_enums, all_entities, ctx));
         ti = ti + 1;
     }
     // Lower the enum declarations (their struct-style variants + field types), and
@@ -1121,10 +1127,11 @@ public function lower_contracts(preds: Array<Expr>, raws: Array<String>, scope: 
 
 // lower_test — mirrors lowerTest. The AST already stores annotations as their
 // canonical strings, which is exactly the IrTest.annotations shape.
-public function lower_test(t: TestDecl, enums: Array<EnumDecl>, entities: Array<EntityDecl>) returns IrTest {
+public function lower_test(t: TestDecl, enums: Array<EnumDecl>, entities: Array<EntityDecl>, ctx: LowerCtx) returns IrTest {
     // A test has no params; its body opens a fresh scope (seeded with the enum +
-    // entity registries), growing as its own let-bindings land.
-    let body: Array<IrStmt> = lower_block(t.body, lower_scope_empty(enums, entities));
+    // entity registries + the module ctx, so same-module calls in the test body carry
+    // the module prefix and cross-module type refs mangle).
+    let body: Array<IrStmt> = lower_block(t.body, lower_scope_apply_ctx(lower_scope_empty(enums, entities), ctx));
     return IrTest(t.name, t.is_async, t.annotations, body);
 }
 
@@ -1185,12 +1192,12 @@ public function lower_stmt(s: Stmt, scope: LowerScope) returns IrStmt {
         let mutable ls: IrStmt = IrStmt(compiler_ir.irst_let(), lower_expr(s.expr, scope));
         ls.name = s.name;
         ls.is_mutable = s.is_mutable;
-        // Emitted let type is mangled for cross-module references (`let p: Point` ->
-        // `let p: TypesPoint`). The binding also seeds the block scope; a mangled name
-        // does not affect clone/dispatch decisions (Copy-ness is name-independent), so
-        // it is byte-equal here. (Chained field access on a cross-module-typed local —
-        // `local.field.method()` — would need the scope type kept unmangled; deferred.)
-        ls.let_type = mangle_ir_type(compiler_ir.ir_parse_type(s.type_name), scope.type_names, scope.type_prefixes);
+        // let_type stays UNMANGLED — it seeds the block scope (so a cross-module-typed
+        // local's field lookups resolve, e.g. `md.functions[i]`) and gates the
+        // index/field clone by Copy-ness. let_type_emit is the mangled form used only
+        // for the emitted `let x: TYPE` annotation (`let p: TypesPoint`).
+        ls.let_type = compiler_ir.ir_parse_type(s.type_name);
+        ls.let_type_emit = mangle_ir_type(compiler_ir.ir_parse_type(s.type_name), scope.type_names, scope.type_prefixes);
         // An empty array literal assigned to a Map-typed let is a HashMap literal:
         // stamp the value's type Map so the backend emits `HashMap::new()` (mirrors
         // stage1's ArrayLit-with-Map-Type -> HashMap::new()).
@@ -1664,7 +1671,16 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
                 return cc;
             }
         }
-        let mutable call: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, callee.name, args, compiler_ir.ir_type_named(""));
+        // A plain (non-builtin) function call is a SAME-MODULE call — its target's
+        // definition carries the current module's prefix, so the call does too (`foo()`
+        // in ir.intent -> `ir_foo()`). Builtins are never prefixed. Mirrors stage1's
+        // `g.namePrefix + expr.Function` for CallFunction. name_prefix is "" in the entry
+        // module / single-file, so this is byte-unchanged there.
+        let mutable fname: String = callee.name;
+        if kind == compiler_ir.callkind_function() {
+            fname = scope.name_prefix + callee.name;
+        }
+        let mutable call: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, fname, args, compiler_ir.ir_type_named(""));
         call.call_kind = kind;
         return call;
     }

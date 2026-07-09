@@ -929,7 +929,9 @@ public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Ar
             }
             return ind + "return;\n";
         }
-        let rv: String = gen_stmt_value(s.expr, funcs, level);
+        // A non-Copy field-access / index return value is cloned to avoid moving out of
+        // its owner (mirrors stage1's ReturnStmt clone, gated by the value's own type).
+        let rv: String = clone_place_value(gen_stmt_value(s.expr, funcs, level), s.expr, s.expr.expr_type);
         if in_labeled {
             return ind + "break 'body " + rv + ";\n";
         }
@@ -939,7 +941,9 @@ public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Ar
         return ind + gen_stmt_value(s.expr, funcs, level) + ";\n";
     }
     if s.kind == compiler_ir.irst_let() {
-        let val: String = gen_stmt_value(s.expr, funcs, level);
+        // A non-Copy field-access / index let value is cloned (gated by the let's
+        // declared type, mirroring stage1's LetStmt clone).
+        let val: String = clone_place_value(gen_stmt_value(s.expr, funcs, level), s.expr, s.let_type);
         // A `let` is emitted `mut` if the source said so OR the mutatedVars scan
         // saw it later assigned / used as a method receiver (mirrors stage1's
         // `stmt.Mutable || g.mutatedVars[stmt.Name]`).
@@ -952,14 +956,18 @@ public function generate_stmt(s: IrStmt, level: Int, in_labeled: Bool, funcs: Ar
             }
             return ind + "let " + s.name + " = " + val + ";\n";
         }
-        let ty: String = map_type(s.let_type);
+        // Annotation uses the MANGLED type; the Copy-check above used the unmangled one.
+        let ty: String = map_type(s.let_type_emit);
         if is_mut {
             return ind + "let mut " + s.name + ": " + ty + " = " + val + ";\n";
         }
         return ind + "let " + s.name + ": " + ty + " = " + val + ";\n";
     }
     if s.kind == compiler_ir.irst_assign() {
-        return ind + generate_expr(s.target, funcs) + " = " + gen_stmt_value(s.expr, funcs, level) + ";\n";
+        // A non-Copy field-access / index assigned value is cloned (gated by the value's
+        // own type, mirroring stage1's AssignStmt clone).
+        let av: String = clone_place_value(gen_stmt_value(s.expr, funcs, level), s.expr, s.expr.expr_type);
+        return ind + generate_expr(s.target, funcs) + " = " + av + ";\n";
     }
     if s.kind == compiler_ir.irst_break() {
         return ind + "break;\n";
@@ -1774,12 +1782,27 @@ public function clone_if_needed(arg_str: String, arg: IrExpr) returns String {
     if ends_with_clone(arg_str) {
         return arg_str;
     }
-    if arg.kind == compiler_ir.irex_var() or arg.kind == compiler_ir.irex_index() {
+    if arg.kind == compiler_ir.irex_var() or arg.kind == compiler_ir.irex_index() or arg.kind == compiler_ir.irex_field() {
         if not compiler_ir.ir_is_copy_type(arg.expr_type) {
             return arg_str + ".clone()";
         }
     }
     return arg_str;
+}
+
+// clone_place_value — mirror stage1's let / assign / return clone of a non-Copy
+// field-access or index value: a bare read there would move out of its owner. `ty`
+// gates the clone by its Copy-ness — the let's declared type for a let, the value's
+// own type for assign/return (matching stage1's LetStmt vs Assign/Return logic).
+public function clone_place_value(val: String, e: IrExpr, ty: IrType) returns String {
+    if e.kind == compiler_ir.irex_field() or e.kind == compiler_ir.irex_index() {
+        if not compiler_ir.ir_is_copy_type(ty) {
+            if not ends_with_clone(val) {
+                return val + ".clone()";
+            }
+        }
+    }
+    return val;
 }
 
 // sanitise_test_name — mirrors sanitiseTestName exactly (ASCII rules, NOT the

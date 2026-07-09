@@ -299,6 +299,12 @@ public entity IrStmt {
     field else_body: Array<IrStmt>;
     field has_else: Bool;
     field target: IrExpr;
+    // let_type_emit — the EMITTED (mangled) form of a let's declared type, used for the
+    // `let x: TYPE` annotation in multi-file emit. let_type itself stays UNMANGLED so it
+    // seeds the block scope + gates the index/field clone by Copy-ness, keeping cross-
+    // module-typed-local field lookups working. Defaulted empty (ADR 0054 additive);
+    // lowering assigns it. In single-file both are identical (nothing mangles).
+    field let_type_emit: IrType;
 
     constructor(kind: Int, expr: IrExpr) {
         self.kind = kind;
@@ -310,6 +316,7 @@ public entity IrStmt {
         self.else_body = empty_ir_stmt_array();
         self.has_else = false;
         self.target = ir_void_expr();
+        self.let_type_emit = ir_type_named("");
     }
 }
 

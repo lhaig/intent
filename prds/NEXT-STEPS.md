@@ -25,12 +25,21 @@ namePrefix/structPrefix through `generate_expr`).
   Global entity/enum registry threaded into `lower_module` for cross-module constructor
   classification. Fixture `emit-fixtures/multimod_entity/`. Limitation deferred to 56.3:
   chained field access on a cross-module-typed LOCAL (`local.field.method()`).
-- **56.3 — NEXT: emit the compiler's own source** (`selfhost/**`), byte-equal with stage1.
-  Now needs: decl-name→file-base mangling (moduleManglings second pass — `shared_parser`
-  qualifier -> `parser_` prefix, since file base != module decl name there); the deferred
-  chained-field-access-on-local fix; `use std::collections::HashMap;` (Map-heavy); any
-  untested construct combination. Probe stage1 emit of `selfhost/compiler/compile_main.intent`
-  and diff against `--self-hosted` to get the exact work list.
+- **56.3 — IN PROGRESS: emit the compiler's own source** (`selfhost/**`), byte-equal with
+  stage1. Probing `compile_main.intent` (stage2's own 8k-line source) started at **2667**
+  diverging lines; GROUNDWORK drove it to **441** (33/33 corpus stays green). Landed:
+  same-module call prefixing; let-binding scope type kept unmangled (`IrStmt.let_type_emit`)
+  — fixes cross-module-typed-local field lookups so clones fire; clone on place-values in
+  let/return/assign + field-access in clone_if_needed; `lower_test` threads the module ctx.
+  **REMAINING (441 = ONE sub-slice, call/method RETURN-type inference):** ~214 string-concat
+  (`stringvar + string_call` -> needs the call's result typed String -> `format!`); char-
+  method dispatch (`self.peek().is_digit()` -> `is_ascii_digit`, peek returns Char); ~64
+  residual clones; the `args()` builtin; and the HashMap trigger (substring misfires on the
+  compiler's `"HashMap<"` string literals -> needs a precise IR-Map scan). Build a global
+  function-return + method-return registry, thread it (like the entity registry), stamp
+  irex_call / irex_method expr_types, then re-probe.
+  NOTE: the decl-name→file-base mangling (moduleManglings second pass) turned out already
+  handled — `compiler_ir.foo()` resolves via the decl-name qualifier entry in module_names.
   Expect: decl-name→file-base mangling (moduleManglings second pass: `shared_parser` →
   `parser_`), HashMap `use` injection, untested construct combinations.
 - **56.4 — stage3 bootstrap** — compile the stage2 emit into a stage3 binary; verify it

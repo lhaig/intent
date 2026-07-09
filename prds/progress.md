@@ -2960,3 +2960,41 @@ only a match-in-assignment reindent in `capitalize`).
 Gates green: diff-emit 33/33, selfcheck-formatter OK, selfcheck-checker 13/13, lower_test
 137 (+ cross-module mangling case), ir_test 17. Only `selfhost/compiler/*` touched (no
 `selfhost/shared/*`, no Go). NEXT: 56.3 emit the compiler's own `selfhost/**` source.
+
+---
+
+## 2026-07-09 — Phase 56 slice 56.3 GROUNDWORK: compiler-self-emit divergence 2667 -> 441
+
+Probing `intentc build --emit --self-hosted selfhost/compiler/compile_main.intent` against
+stage1 (the ultimate self-hosting target — stage2 emitting its own 8k-line multi-module
+source) started at **2667** diverging lines. This groundwork drives it to **441**, all
+byte-equal-safe (diff-emit stays 33/33, no corpus regression). NOT yet a completed slice —
+the remaining 441 is a single well-defined sub-slice (call/method return-type inference).
+
+Landed (each verified against the 33/33 corpus + probed against the compiler source):
+- **Same-module function-call prefix** (the biggest, ~668 lines): a plain (non-builtin)
+  call in a non-entry module is emitted `<module-prefix><fn>` (`empty_string_array_ir()`
+  in ir.intent -> `ir_empty_string_array_ir()`), because every non-entry function
+  DEFINITION is prefixed. Mirrors stage1's `g.namePrefix + expr.Function`. `name_prefix`
+  now rides on `LowerScope` (via `lower_scope_apply_ctx`); "" in entry/single-file.
+- **let-binding scope type kept UNMANGLED** (fixes the slice-2 deferral, ~600+ clone
+  lines): `IrStmt` gained `let_type_emit` (mangled, for the `let x: TYPE` annotation)
+  while `let_type` stays unmangled so it seeds the block scope + gates clone Copy-ness.
+  This makes cross-module-typed-LOCAL field lookups resolve (`md.functions[i]` where
+  `md: IrModule`) — previously the mangled binding broke the lookup so clones never fired.
+- **clone on place-values in let / return / assign** (`clone_place_value`): a non-Copy
+  field-access or index value is cloned (mirrors stage1's LetStmt/AssignStmt/ReturnStmt
+  clone). `clone_if_needed` also now handles field access (stage1 clones `FieldAccessExpr`).
+- **`lower_test` threads the module ctx** so test-body same-module calls get the prefix
+  (`lex(...)` in a lexer.intent test -> `lexer_lex(...)`) and cross-module type refs mangle.
+
+REMAINING (441, the next sub-slice — call/method RETURN-type inference):
+- **~214 string-concat**: `stringvar + string_returning_call` emits `(a + b)` instead of
+  `format!("{}{}", a, b)` because a call's result type isn't inferred (concat detection
+  needs both operands typed String). Needs a global function-return-type registry + call
+  expr_type stamping (like the entity registry already threaded).
+- **char-method dispatch**: `self.peek().is_digit()` (peek returns Char) emits the general
+  `.is_digit()` not `(...).is_ascii_digit()` — same root cause (method return type).
+- **~64 residual clones + the `args()` builtin + 3 HashMap** (the substring HashMap
+  trigger misfires on the compiler's `"HashMap<"` string literals — needs a precise
+  IR-Map scan, not `contains_substring`).
