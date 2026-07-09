@@ -3132,3 +3132,35 @@ Parser (shared/parser.intent):
 Remaining KNOWN_GAPS (10): HTTP builtins + reqwest/serde + helper injection (6 files:
 attractor async_retry/handlers/main_async/parallel/retry + llm); extern/FFI (ffi_blake3);
 multi-file detection for lone package/project members (attractor/types, packages/*).
+
+---
+
+## 2026-07-09 — Phase 57 batch 3: HTTP + async cluster closed (sweep 66/5/0)
+
+The whole attractor HTTP/async cluster now emits byte-equal (5 files: async_retry,
+handlers, main_async, parallel, retry — down from 10 to 5 KNOWN_GAPS). All gates green:
+diff-emit 33/33, diff-emit-self 4/4, selfcheck-formatter, lower_test 137, ir_test 17.
+Only rustbe.intent + lower.intent touched (no shared/*).
+
+- **HTTP builtins** (generate_builtin_call): http_post/http_get (-> __intent_http_* helpers),
+  json_get (serde_json inline), json_path (the multi-line closure, braces via lbrace/rbrace),
+  emit_event, timestamp_ms. Plus reqwest/serde_json `use` injection + the __intent_http_*
+  helper block (http_helpers) inserted before the first fn — all gated by IR body-walk
+  scans (module_needs_reqwest/_serde/_tokio; module_calls_any generalises the futures walk).
+- **trait-method-sig param/return types mangled** (lower_trait + ctx): NodeAttr ->
+  TypesNodeAttr in `fn execute(...) -> ...;`.
+- **async fn return type Future-peel** (fn_return_type): `async fn f() -> Result<..>` (not
+  JoinHandle<..>) for a fn declared `returns Future<Result<..>>` — `async fn` is already a
+  future (mirror stage1's fnReturnType/fnResultType).
+- **Future clone guard** (clone_if_needed): a Future/JoinHandle var is non-Copy but not
+  Clone -> never `.clone()` it (mirror isFutureType).
+- **async builtins not module-prefixed** (lower_expr): sleep/await_all/await_any/timeout
+  stay unprefixed (module-independent; the backend emits tokio::/futures:: for them), which
+  also lets the futures scan match their original names.
+- **injectAsyncUseStatements blank-line quirk** (module_needs_tokio): an async module with
+  a `use` statement but no futures gets an extra blank line after the use block.
+
+Remaining KNOWN_GAPS (5): extern/FFI (ffi_blake3); multi-file detection for lone
+package/project members emitted alone (attractor/llm, attractor/types, packages/app_pkg,
+packages/types_pkg — header + intent-block omission; the stage2 emitter is correct, it is a
+build --emit detection nuance).

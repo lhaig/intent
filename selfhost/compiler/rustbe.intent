@@ -44,13 +44,40 @@ public function generate(m: IrModule) returns String {
     if module_needs_hashmap(m) {
         out = out + "use std::collections::HashMap;\n";
     }
+    // reqwest/serde_json (mirror needsReqwest/needsSerdeJson): http_* need both; json_*
+    // need serde only. Order: HashMap, reqwest, serde, futures.
+    let nr: Bool = module_needs_reqwest(m);
+    if nr {
+        out = out + "use reqwest;\n";
+        out = out + "use serde_json;\n";
+    } else {
+        if module_needs_serde(m) {
+            out = out + "use serde_json;\n";
+        }
+    }
     // `use futures;` when await_all/await_any are used (mirror stage1's needsFutures,
     // injected after any HashMap use). tokio is referenced by full path (no `use`).
-    if module_uses_futures(m) {
+    let nf: Bool = module_uses_futures(m);
+    if nf {
         out = out + "use futures;\n";
+    }
+    // injectAsyncUseStatements quirk: when the module is async (needsTokio) but has no
+    // futures, it inserts an EMPTY use line after the last use statement — an extra blank
+    // line — iff there is at least one use statement. Replicate for byte-equality.
+    let has_use: Bool = module_needs_hashmap(m) or nr or module_needs_serde(m);
+    if module_needs_tokio(m) {
+        if not nf {
+            if has_use {
+                out = out + "\n";
+            }
+        }
     }
     out = out + "\n";
     out = out + body;
+    // The reqwest helper block is inserted before the first user fn (needsReqwest only).
+    if nr {
+        out = insert_http_helpers(out);
+    }
     return out;
 }
 
@@ -90,19 +117,55 @@ public function generate_all(prog: IrProgram) returns String {
     if any_map {
         out = out + "use std::collections::HashMap;\n";
     }
+    let mutable any_reqwest: Bool = false;
+    let mutable any_serde: Bool = false;
     let mutable any_futures: Bool = false;
     let mutable fk: Int = 0;
     while fk < len(prog.modules) {
+        if module_needs_reqwest(prog.modules[fk]) {
+            any_reqwest = true;
+        }
+        if module_needs_serde(prog.modules[fk]) {
+            any_serde = true;
+        }
         if module_uses_futures(prog.modules[fk]) {
             any_futures = true;
         }
         fk = fk + 1;
     }
+    if any_reqwest {
+        out = out + "use reqwest;\n";
+        out = out + "use serde_json;\n";
+    } else {
+        if any_serde {
+            out = out + "use serde_json;\n";
+        }
+    }
     if any_futures {
         out = out + "use futures;\n";
     }
+    // injectAsyncUseStatements empty-line quirk (see generate): async + a use statement +
+    // no futures -> an extra blank line after the use block.
+    let mutable any_tokio: Bool = false;
+    let mutable tk: Int = 0;
+    while tk < len(prog.modules) {
+        if module_needs_tokio(prog.modules[tk]) {
+            any_tokio = true;
+        }
+        tk = tk + 1;
+    }
+    if any_tokio {
+        if not any_futures {
+            if any_map or any_reqwest or any_serde {
+                out = out + "\n";
+            }
+        }
+    }
     out = out + "\n";
     out = out + body;
+    if any_reqwest {
+        out = insert_http_helpers(out);
+    }
     return out;
 }
 
@@ -273,26 +336,26 @@ public function module_needs_hashmap(m: IrModule) returns Bool {
     return false;
 }
 
-// expr_uses_futures / stmt_uses_futures / module_uses_futures — does the module call the
-// futures-backed async builtins (await_all / await_any)? Drives the `use futures;` header
-// (mirror stage1's needsFutures). An IR walk, NOT a "futures::" body substring — the
-// compiler's own rustbe.intent carries "futures::" in string literals (as with HashMap).
-public function expr_uses_futures(e: IrExpr) returns Bool {
+// expr_calls_any / stmt_calls_any / module_calls_any — does the module call any builtin
+// whose name is in `names`? An IR walk over every body (a "reqwest::"/"futures::" body
+// substring would misfire on the compiler's own string literals, as with HashMap). Drives
+// the async/HTTP `use` + helper injection (mirror stage1's needsFutures/needsReqwest/…).
+public function expr_calls_any(e: IrExpr, names: Array<String>) returns Bool {
     if e.kind == compiler_ir.irex_call() {
-        if e.name == "await_all" or e.name == "await_any" {
+        if name_in_array(names, e.name) {
             return true;
         }
     }
     let mutable i: Int = 0;
     while i < len(e.children) {
-        if expr_uses_futures(e.children[i]) {
+        if expr_calls_any(e.children[i], names) {
             return true;
         }
         i = i + 1;
     }
     let mutable j: Int = 0;
     while j < len(e.match_arms) {
-        if expr_uses_futures(e.match_arms[j].body) {
+        if expr_calls_any(e.match_arms[j].body, names) {
             return true;
         }
         j = j + 1;
@@ -300,23 +363,23 @@ public function expr_uses_futures(e: IrExpr) returns Bool {
     return false;
 }
 
-public function stmt_uses_futures(s: IrStmt) returns Bool {
-    if expr_uses_futures(s.expr) {
+public function stmt_calls_any(s: IrStmt, names: Array<String>) returns Bool {
+    if expr_calls_any(s.expr, names) {
         return true;
     }
-    if expr_uses_futures(s.target) {
+    if expr_calls_any(s.target, names) {
         return true;
     }
     let mutable i: Int = 0;
     while i < len(s.then_body) {
-        if stmt_uses_futures(s.then_body[i]) {
+        if stmt_calls_any(s.then_body[i], names) {
             return true;
         }
         i = i + 1;
     }
     let mutable j: Int = 0;
     while j < len(s.else_body) {
-        if stmt_uses_futures(s.else_body[j]) {
+        if stmt_calls_any(s.else_body[j], names) {
             return true;
         }
         j = j + 1;
@@ -324,10 +387,10 @@ public function stmt_uses_futures(s: IrStmt) returns Bool {
     return false;
 }
 
-function body_uses_futures(body: Array<IrStmt>) returns Bool {
+function body_calls_any(body: Array<IrStmt>, names: Array<String>) returns Bool {
     let mutable i: Int = 0;
     while i < len(body) {
-        if stmt_uses_futures(body[i]) {
+        if stmt_calls_any(body[i], names) {
             return true;
         }
         i = i + 1;
@@ -335,10 +398,10 @@ function body_uses_futures(body: Array<IrStmt>) returns Bool {
     return false;
 }
 
-public function module_uses_futures(m: IrModule) returns Bool {
+public function module_calls_any(m: IrModule, names: Array<String>) returns Bool {
     let mutable fi: Int = 0;
     while fi < len(m.functions) {
-        if body_uses_futures(m.functions[fi].body) {
+        if body_calls_any(m.functions[fi].body, names) {
             return true;
         }
         fi = fi + 1;
@@ -347,13 +410,13 @@ public function module_uses_futures(m: IrModule) returns Bool {
     while ei < len(m.entities) {
         let e: IrEntity = m.entities[ei];
         if e.has_constructor {
-            if body_uses_futures(e.constructor_fn.body) {
+            if body_calls_any(e.constructor_fn.body, names) {
                 return true;
             }
         }
         let mutable mj: Int = 0;
         while mj < len(e.methods) {
-            if body_uses_futures(e.methods[mj].body) {
+            if body_calls_any(e.methods[mj].body, names) {
                 return true;
             }
             mj = mj + 1;
@@ -362,7 +425,57 @@ public function module_uses_futures(m: IrModule) returns Bool {
     }
     let mutable ti: Int = 0;
     while ti < len(m.tests) {
-        if body_uses_futures(m.tests[ti].body) {
+        if body_calls_any(m.tests[ti].body, names) {
+            return true;
+        }
+        ti = ti + 1;
+    }
+    return false;
+}
+
+// module_uses_futures / _needs_reqwest / _needs_serde — the specific builtin-set queries
+// (mirror stage1's needsFutures / needsReqwest / needsSerdeJson). http_* imply serde too.
+public function module_uses_futures(m: IrModule) returns Bool {
+    let names: Array<String> = ["await_all", "await_any"];
+    return module_calls_any(m, names);
+}
+
+public function module_needs_reqwest(m: IrModule) returns Bool {
+    let names: Array<String> = ["http_post", "http_get"];
+    return module_calls_any(m, names);
+}
+
+public function module_needs_serde(m: IrModule) returns Bool {
+    let names: Array<String> = ["http_post", "http_get", "json_get", "json_path"];
+    return module_calls_any(m, names);
+}
+
+// module_needs_tokio — does the module emit any `async fn`/`#[tokio::test]` (mirror
+// stage1's needsTokio)? Any async function/method/test suffices — spawn/sleep/await only
+// occur inside async bodies. Used for the injectAsyncUseStatements blank-line quirk.
+public function module_needs_tokio(m: IrModule) returns Bool {
+    let mutable fi: Int = 0;
+    while fi < len(m.functions) {
+        if m.functions[fi].is_async {
+            return true;
+        }
+        fi = fi + 1;
+    }
+    let mutable ei: Int = 0;
+    while ei < len(m.entities) {
+        let e: IrEntity = m.entities[ei];
+        let mutable mj: Int = 0;
+        while mj < len(e.methods) {
+            if e.methods[mj].is_async {
+                return true;
+            }
+            mj = mj + 1;
+        }
+        ei = ei + 1;
+    }
+    let mutable ti: Int = 0;
+    while ti < len(m.tests) {
+        if m.tests[ti].is_async {
             return true;
         }
         ti = ti + 1;
@@ -789,6 +902,20 @@ function expr_mutates_self(e: IrExpr) returns Bool {
     return false;
 }
 
+// fn_return_type — the Rust signature return type (mirror fnReturnType/fnResultType).
+// For an async fn declared `returns Future<T>`, peel the Future: `async fn f() -> T`
+// already yields a future, so emitting JoinHandle<T> would be wrong.
+public function fn_return_type(f: IrFunction) returns String {
+    if f.is_async {
+        if f.return_type.name == "Future" {
+            if len(f.return_type.type_args) == 1 {
+                return map_type(f.return_type.type_args[0]);
+            }
+        }
+    }
+    return map_type(f.return_type);
+}
+
 function is_self_or_self_field(e: IrExpr) returns Bool {
     if e.kind == compiler_ir.irex_var() {
         return e.name == "self";
@@ -942,7 +1069,7 @@ public function generate_function(f: IrFunction, funcs: Array<IrFunction>) retur
         out = out + rbrace() + "\n";
         return out;
     }
-    let ret_ty: String = map_type(f.return_type);
+    let ret_ty: String = fn_return_type(f);
     let mutable sig: String = fn_kw + f.name + "(";
     let mutable i: Int = 0;
     while i < len(f.params) {
@@ -2023,7 +2150,120 @@ public function generate_builtin_call(e: IrExpr, funcs: Array<IrFunction>) retur
     if e.name == "args" {
         return "std::env::args().collect::<Vec<String>>()";
     }
+    // HTTP / JSON / event builtins (mirror generateBuiltinCall). http_* call the injected
+    // __intent_http_* helpers; the `use reqwest;`/`use serde_json;` headers are injected by
+    // the module scan (module_needs_reqwest/_serde) in generate / generate_all.
+    if e.name == "http_post" {
+        if len(e.children) == 3 {
+            return "__intent_http_post(&" + generate_expr(e.children[0], funcs) + ", &" + generate_expr(e.children[1], funcs) + ", &" + generate_expr(e.children[2], funcs) + ")";
+        }
+    }
+    if e.name == "http_get" {
+        if len(e.children) == 2 {
+            return "__intent_http_get(&" + generate_expr(e.children[0], funcs) + ", &" + generate_expr(e.children[1], funcs) + ")";
+        }
+    }
+    if e.name == "json_get" {
+        if len(e.children) == 2 {
+            return "serde_json::from_str::<serde_json::Value>(&" + generate_expr(e.children[0], funcs) + ").ok().and_then(|v| v.get(&*" + generate_expr(e.children[1], funcs) + ").and_then(|v| v.as_str().map(|s| s.to_string())))";
+        }
+    }
+    if e.name == "json_path" {
+        if len(e.children) == 2 {
+            return json_path_block(generate_expr(e.children[0], funcs), generate_expr(e.children[1], funcs));
+        }
+    }
+    if e.name == "emit_event" {
+        if len(e.children) == 2 {
+            return "eprintln!(\"[EVENT] " + lbrace() + rbrace() + ": " + lbrace() + rbrace() + "\", " + generate_expr(e.children[0], funcs) + ", " + generate_expr(e.children[1], funcs) + ")";
+        }
+    }
+    if e.name == "timestamp_ms" {
+        return lbrace() + " use std::time::" + lbrace() + "SystemTime, UNIX_EPOCH" + rbrace() + "; SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64 " + rbrace();
+    }
     return "/* unsupported builtin: " + e.name + " */";
+}
+
+// json_path_block — the multi-line closure stage1 emits for json_path(json, path). Braces
+// via lbrace()/rbrace() (a literal `{` in an Intent string lexes as interpolation).
+public function json_path_block(json_arg: String, path_arg: String) returns String {
+    let nl: String = "\n";
+    let mutable s: String = lbrace() + nl;
+    s = s + "    let __jp_json: &str = &" + json_arg + ";" + nl;
+    s = s + "    let __jp_path: &str = &" + path_arg + ";" + nl;
+    s = s + "    (|| -> Option<String> " + lbrace() + nl;
+    s = s + "        let val: serde_json::Value = serde_json::from_str(__jp_json).ok()?;" + nl;
+    s = s + "        let mut current = &val;" + nl;
+    s = s + "        for component in __jp_path.split('.') " + lbrace() + nl;
+    s = s + "            if let Ok(idx) = component.parse::<usize>() " + lbrace() + nl;
+    s = s + "                current = current.get(idx)?;" + nl;
+    s = s + "            " + rbrace() + " else " + lbrace() + nl;
+    s = s + "                current = current.get(component)?;" + nl;
+    s = s + "            " + rbrace() + nl;
+    s = s + "        " + rbrace() + nl;
+    s = s + "        Some(match current " + lbrace() + nl;
+    s = s + "            serde_json::Value::String(s) => s.clone()," + nl;
+    s = s + "            other => other.to_string()," + nl;
+    s = s + "        " + rbrace() + ")" + nl;
+    s = s + "    " + rbrace() + ")()" + nl;
+    s = s + rbrace();
+    return s;
+}
+
+// http_helpers — the __intent_http_post / __intent_http_get reqwest helper block stage1
+// injects (emitHttpHelpers), verbatim. Leading "\n" so it slots before the first `fn `.
+public function http_helpers() returns String {
+    let nl: String = "\n";
+    let mutable s: String = nl + "fn __intent_http_post(url: &str, headers_json: &str, body: &str) -> Result<String, String> " + lbrace() + nl;
+    s = s + "    let client = reqwest::blocking::Client::new();" + nl;
+    s = s + "    let mut req = client.post(url);" + nl;
+    s = s + "    if let Ok(hdrs) = serde_json::from_str::<serde_json::Value>(headers_json) " + lbrace() + nl;
+    s = s + "        if let Some(obj) = hdrs.as_object() " + lbrace() + nl;
+    s = s + "            for (k, v) in obj " + lbrace() + nl;
+    s = s + "                if let Some(s) = v.as_str() " + lbrace() + nl;
+    s = s + "                    req = req.header(k.as_str(), s);" + nl;
+    s = s + "                " + rbrace() + nl;
+    s = s + "            " + rbrace() + nl;
+    s = s + "        " + rbrace() + nl;
+    s = s + "    " + rbrace() + nl;
+    s = s + "    req.body(body.to_string()).send().and_then(|r| r.text()).map_err(|e| e.to_string())" + nl;
+    s = s + rbrace() + nl + nl;
+    s = s + "fn __intent_http_get(url: &str, headers_json: &str) -> Result<String, String> " + lbrace() + nl;
+    s = s + "    let client = reqwest::blocking::Client::new();" + nl;
+    s = s + "    let mut req = client.get(url);" + nl;
+    s = s + "    if let Ok(hdrs) = serde_json::from_str::<serde_json::Value>(headers_json) " + lbrace() + nl;
+    s = s + "        if let Some(obj) = hdrs.as_object() " + lbrace() + nl;
+    s = s + "            for (k, v) in obj " + lbrace() + nl;
+    s = s + "                if let Some(s) = v.as_str() " + lbrace() + nl;
+    s = s + "                    req = req.header(k.as_str(), s);" + nl;
+    s = s + "                " + rbrace() + nl;
+    s = s + "            " + rbrace() + nl;
+    s = s + "        " + rbrace() + nl;
+    s = s + "    " + rbrace() + nl;
+    s = s + "    req.send().and_then(|r| r.text()).map_err(|e| e.to_string())" + nl;
+    s = s + rbrace() + nl;
+    return s;
+}
+
+// insert_http_helpers — insert the reqwest helper block before the first `\nfn ` in the
+// output (mirror stage1's `strings.Index(result, "\nfn ")` insertion). If no `\nfn ` is
+// found (no functions), append.
+public function insert_http_helpers(out: String) returns String {
+    let n: Int = len(out);
+    let mutable idx: Int = 0 - 1;
+    let mutable i: Int = 0;
+    while i <= n - 4 {
+        if out[i..i + 4] == "\nfn " {
+            idx = i;
+            i = n;
+        } else {
+            i = i + 1;
+        }
+    }
+    if idx < 0 {
+        return out + http_helpers();
+    }
+    return out[0..idx] + http_helpers() + out[idx..n];
 }
 
 // generate_args — comma-separated argument expressions (no borrow/clone). Used by
@@ -2086,6 +2326,11 @@ public function clone_if_needed(arg_str: String, arg: IrExpr) returns String {
         return arg_str;
     }
     if ends_with_clone(arg_str) {
+        return arg_str;
+    }
+    // Future/JoinHandle values are non-Copy but NOT Clone (a spawn handle can't be
+    // cloned) — stage1's cloneIfNeeded excludes them (isFutureType guard).
+    if arg.expr_type.name == "Future" {
         return arg_str;
     }
     if arg.kind == compiler_ir.irex_var() or arg.kind == compiler_ir.irex_index() or arg.kind == compiler_ir.irex_field() {

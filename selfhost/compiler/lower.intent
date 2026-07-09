@@ -755,7 +755,7 @@ public function lower_module(prog: Program, path: String, is_entry: Bool, module
     let mutable trs: Array<IrTrait> = compiler_ir.empty_ir_trait_array();
     let mutable tri: Int = 0;
     while tri < len(prog.traits) {
-        trs.push(lower_trait(prog.traits[tri], all_enums, all_entities));
+        trs.push(lower_trait(prog.traits[tri], all_enums, all_entities, ctx));
         tri = tri + 1;
     }
     let mutable imps: Array<IrImplBlock> = compiler_ir.empty_ir_impl_array();
@@ -862,7 +862,7 @@ public function lower_all(progs: Array<Program>, paths: Array<String>) returns I
 
 // lower_trait — mirrors lowerTrait: each method signature (TraitMethodSig) becomes an
 // IrFunction (name/params/return, empty body). Enum/entity registries seed param types.
-public function lower_trait(t: TraitDecl, enums: Array<EnumDecl>, entities: Array<EntityDecl>) returns IrTrait {
+public function lower_trait(t: TraitDecl, enums: Array<EnumDecl>, entities: Array<EntityDecl>, ctx: LowerCtx) returns IrTrait {
     let mutable methods: Array<IrFunction> = compiler_ir.empty_ir_function_array();
     let mutable mi: Int = 0;
     while mi < len(t.methods) {
@@ -871,10 +871,13 @@ public function lower_trait(t: TraitDecl, enums: Array<EnumDecl>, entities: Arra
         let mutable pi: Int = 0;
         while pi < len(tm.params) {
             let p: Param = tm.params[pi];
-            params.push(IrParam(p.name, compiler_ir.ir_parse_type(p.type_name)));
+            // Trait-method-sig param/return types are mangled for emission (cross-module
+            // NodeAttr -> TypesNodeAttr). The trait name itself is not mangled (traits
+            // are not in the type-origins map — mirrors stage1's generateTrait).
+            params.push(IrParam(p.name, mangle_ir_type(compiler_ir.ir_parse_type(p.type_name), ctx.type_names, ctx.type_prefixes)));
             pi = pi + 1;
         }
-        methods.push(IrFunction(tm.name, false, false, false, params, compiler_ir.ir_parse_type(tm.return_type), compiler_ir.empty_ir_contract_array(), compiler_ir.empty_ir_contract_array(), compiler_ir.empty_ir_stmt_array()));
+        methods.push(IrFunction(tm.name, false, false, false, params, mangle_ir_type(compiler_ir.ir_parse_type(tm.return_type), ctx.type_names, ctx.type_prefixes), compiler_ir.empty_ir_contract_array(), compiler_ir.empty_ir_contract_array(), compiler_ir.empty_ir_stmt_array()));
         mi = mi + 1;
     }
     return IrTrait(t.name, t.is_public, methods);
@@ -1799,9 +1802,17 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
         let mutable fname: String = callee.name;
         let mutable rty: IrType = compiler_ir.ir_type_named("");
         if kind == compiler_ir.callkind_function() {
-            fname = scope.name_prefix + callee.name;
-            // Stamp the result type (by the ORIGINAL fn name) for concat / dispatch.
-            rty = lookup_func_return(scope.func_names, scope.func_returns, callee.name);
+            // The async builtins (sleep/await_all/await_any/timeout) are module-independent
+            // — the backend emits them specially (tokio::/futures::), so they must NOT get
+            // the current module's name prefix, and the `use futures;` scan matches their
+            // ORIGINAL names. Everything else is a same-module call and is prefixed.
+            if callee.name == "sleep" or callee.name == "await_all" or callee.name == "await_any" or callee.name == "timeout" {
+                fname = callee.name;
+            } else {
+                fname = scope.name_prefix + callee.name;
+                // Stamp the result type (by the ORIGINAL fn name) for concat / dispatch.
+                rty = lookup_func_return(scope.func_names, scope.func_returns, callee.name);
+            }
         }
         let mutable call: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, fname, args, rty);
         call.call_kind = kind;
