@@ -27,12 +27,25 @@ import "../shared/ast.intent";
 entry function main() returns Int {
     let argv: Array<String> = args();
     if len(argv) < 2 {
-        print("usage: intent-compile <file.intent> [<dep.intent> ... <entry.intent>]");
+        print("usage: intent-compile [--multi] <file.intent> [<dep.intent> ... <entry.intent>]");
         return 1;
     }
-    if len(argv) == 2 {
+    // A leading `--multi` (set by the Go harness when the entry IsMultiFile — has imports
+    // OR is a package member) forces the multi-file path even for a single-module closure,
+    // matching stage1's EmitProjectToTarget (the "(multi-file)" header + omitted intents).
+    let mutable start: Int = 1;
+    let mutable force_multi: Bool = false;
+    if argv[1] == "--multi" {
+        force_multi = true;
+        start = 2;
+    }
+    if len(argv) - start < 1 {
+        print("usage: intent-compile [--multi] <file.intent> [<dep.intent> ... <entry.intent>]");
+        return 1;
+    }
+    if len(argv) - start == 1 and not force_multi {
         // Single-file path — byte-identical to the pre-multi-file behaviour.
-        let entry_path: String = argv[1];
+        let entry_path: String = argv[start];
         let r: Result<String, String> = read_file(entry_path);
         if r.is_err() {
             print("error: cannot read file: " + entry_path);
@@ -52,10 +65,10 @@ entry function main() returns Int {
         print(rust);
         return 0;
     }
-    // Multi-file path — argv[1..] are the import closure (deps first, entry last).
+    // Multi-file path — argv[start..] are the import closure (deps first, entry last).
     let mutable paths: Array<String> = [];
     let mutable progs: Array<Program> = [];
-    let mutable i: Int = 1;
+    let mutable i: Int = start;
     while i < len(argv) {
         let p: String = argv[i];
         let r: Result<String, String> = read_file(p);

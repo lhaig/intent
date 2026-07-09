@@ -1054,7 +1054,13 @@ func stage2CheckPaths(entryPath string) []string {
 // sorted path as the program entry and emits modules in that order. Contrast
 // stage2CheckPaths, which passes the entry FIRST (its path drives diagnostics);
 // emit ordering is output-significant, so the order differs deliberately.
-// Single-file programs (or any discovery failure) fall back to the entry alone.
+//
+// When the entry is multi-file (has imports OR is a package member with intent.toml —
+// stage1's IsMultiFile), the args are prefixed with a "--multi" sentinel so the stage2
+// binary uses the multi-file path (GenerateAll: "(multi-file)" header, intent blocks
+// omitted) even when the closure is a SINGLE module (a lone package/project member).
+// This matches stage1's EmitProjectToTarget, which runs for any IsMultiFile entry.
+// A true single-file program (or any discovery failure) falls back to the entry alone.
 func stage2CompilePaths(entryPath string) []string {
 	isMulti, err := compiler.IsMultiFile(entryPath)
 	if err != nil || !isMulti {
@@ -1072,7 +1078,7 @@ func stage2CompilePaths(entryPath string) []string {
 	if err != nil || len(sorted) == 0 {
 		return []string{entryPath}
 	}
-	return sorted
+	return append([]string{"--multi"}, sorted...)
 }
 
 func runStage2Checker(binaryPath string, filePaths []string) (stdout string, exitCode int, err error) {

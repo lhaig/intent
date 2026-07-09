@@ -26,13 +26,11 @@ INTENTC="$ROOT/intentc"
 KNOWN_GAPS=(
   # extern / FFI emit (ExternDecl -> Rust FFI bindings + the from-clause).
   "examples/ffi_blake3/ffi_blake3.intent"
-  # multi-file DETECTION for lone package/project members (header + intent-block omission):
-  # stage1 build --emit treats a lone package/project member as multi-file; stage2CompilePaths
-  # uses IsMultiFile (no imports -> single-file) so a 1-module closure emits the single-file form.
-  "examples/attractor/llm.intent"
-  "examples/attractor/types.intent"
+  # cross-PACKAGE qualified calls: `types_pkg.Point(...)` -> `TypesPoint::new(...)` and
+  # `types_pkg.f(...)` -> `types_f(...)`. Needs the package-name qualifier in the module
+  # map + module-qualified-constructor detection (the package name comes from intent.toml,
+  # which the stage2 lowering does not see — only the Go registry does).
   "examples/packages/app_pkg/main.intent"
-  "examples/packages/types_pkg/types.intent"
 )
 is_known() { local f="$1"; for k in "${KNOWN_GAPS[@]}"; do [ "$k" = "$f" ] && return 0; done; return 1; }
 
