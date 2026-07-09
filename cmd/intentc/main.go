@@ -198,16 +198,12 @@ func handleBuild(args []string) {
 			fmt.Fprintln(os.Stderr, "Error: --self-hosted emit currently supports only --target rust")
 			os.Exit(1)
 		}
-		if isMulti {
-			fmt.Fprintln(os.Stderr, "Error: --self-hosted emit does not yet support multi-file programs")
-			os.Exit(1)
-		}
 		binPath, err := stage2CompilerBinary()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 			os.Exit(1)
 		}
-		stdout, exitCode, err := runStage2Checker(binPath, []string{filePath})
+		stdout, exitCode, err := runStage2Checker(binPath, stage2CompilePaths(filePath))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 			os.Exit(1)
@@ -1050,6 +1046,33 @@ func stage2CheckPaths(entryPath string) []string {
 		paths = append(paths, p)
 	}
 	return paths
+}
+
+// stage2CompilePaths returns the argument list for the stage2 compiler binary:
+// the entry file's transitive import closure in TOPOLOGICAL order (dependencies
+// first, entry LAST). This mirrors stage1's ir.LowerAll, which treats the last
+// sorted path as the program entry and emits modules in that order. Contrast
+// stage2CheckPaths, which passes the entry FIRST (its path drives diagnostics);
+// emit ordering is output-significant, so the order differs deliberately.
+// Single-file programs (or any discovery failure) fall back to the entry alone.
+func stage2CompilePaths(entryPath string) []string {
+	isMulti, err := compiler.IsMultiFile(entryPath)
+	if err != nil || !isMulti {
+		return []string{entryPath}
+	}
+	registry, err := compiler.NewModuleRegistry(entryPath)
+	if err != nil {
+		return []string{entryPath}
+	}
+	depDiag, err := registry.DiscoverDependencies()
+	if err != nil || (depDiag != nil && depDiag.HasErrors()) {
+		return []string{entryPath}
+	}
+	sorted, err := registry.TopologicalSort()
+	if err != nil || len(sorted) == 0 {
+		return []string{entryPath}
+	}
+	return sorted
 }
 
 func runStage2Checker(binaryPath string, filePaths []string) (stdout string, exitCode int, err error) {

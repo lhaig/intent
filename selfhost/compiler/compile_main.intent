@@ -1,14 +1,15 @@
 // selfhost/compiler/compile_main.intent — Phase 55 / ADR 0059 stage2 compiler CLI.
 //
-// The stage2 self-hosted compiler as an invokable tool: reads one .intent file
-// (argv[1]), parses it, lowers the AST to IR, emits Rust, and prints it to
-// stdout. The Go harness (`intentc build --emit --self-hosted`) builds this
-// binary, runs it, strips the single trailing newline print() adds, and writes
-// the result to <base>.rs — byte-equal with stage1 `intentc build --emit`.
+// The stage2 self-hosted compiler as an invokable tool. It reads one or more
+// .intent files (argv[1..]), parses each, lowers the AST to IR, emits Rust, and
+// prints it to stdout. The Go harness (`intentc build --emit --self-hosted`)
+// builds this binary, runs it, strips the single trailing newline print() adds,
+// and writes the result to <base>.rs — byte-equal with stage1 `intentc build --emit`.
 //
-// Single-file only for the trivial subset (examples/hello.intent has no
-// imports); multi-file emit (LowerAll/GenerateAll + import discovery, mirroring
-// the Phase 54 checker harness) is a later milestone.
+// Single file (one arg)  -> lower + generate     (byte-equal with stage1 single-file).
+// Multiple files (N args) -> lower_all + generate_all: the args are the entry's
+// import closure in TOPOLOGICAL order (dependencies first, ENTRY last), matching
+// stage1's ir.LowerAll; the Go harness (stage2CompilePaths) supplies that order.
 //
 // Exit codes: 0 on success; 1 on usage / file-read / parse error.
 module compile_main version "0.1.0";
@@ -26,26 +27,57 @@ import "../shared/ast.intent";
 entry function main() returns Int {
     let argv: Array<String> = args();
     if len(argv) < 2 {
-        print("usage: intent-compile <file.intent>");
+        print("usage: intent-compile <file.intent> [<dep.intent> ... <entry.intent>]");
         return 1;
     }
-    let entry_path: String = argv[1];
-    let r: Result<String, String> = read_file(entry_path);
-    if r.is_err() {
-        print("error: cannot read file: " + entry_path);
-        return 1;
+    if len(argv) == 2 {
+        // Single-file path — byte-identical to the pre-multi-file behaviour.
+        let entry_path: String = argv[1];
+        let r: Result<String, String> = read_file(entry_path);
+        if r.is_err() {
+            print("error: cannot read file: " + entry_path);
+            return 1;
+        }
+        let src: String = match r {
+            Ok(s) => s,
+            Err(_) => "",
+        };
+        let prog: Program = shared_parser.parse(src);
+        if prog.error != "" {
+            print("parse error: " + prog.error);
+            return 1;
+        }
+        let m: IrModule = compiler_lower.lower(prog, entry_path);
+        let rust: String = compiler_rustbe.generate(m);
+        print(rust);
+        return 0;
     }
-    let src: String = match r {
-        Ok(s) => s,
-        Err(_) => "",
-    };
-    let prog: Program = shared_parser.parse(src);
-    if prog.error != "" {
-        print("parse error: " + prog.error);
-        return 1;
+    // Multi-file path — argv[1..] are the import closure (deps first, entry last).
+    let mutable paths: Array<String> = [];
+    let mutable progs: Array<Program> = [];
+    let mutable i: Int = 1;
+    while i < len(argv) {
+        let p: String = argv[i];
+        let r: Result<String, String> = read_file(p);
+        if r.is_err() {
+            print("error: cannot read file: " + p);
+            return 1;
+        }
+        let src: String = match r {
+            Ok(s) => s,
+            Err(_) => "",
+        };
+        let prog: Program = shared_parser.parse(src);
+        if prog.error != "" {
+            print("parse error: " + prog.error);
+            return 1;
+        }
+        paths.push(p);
+        progs.push(prog);
+        i = i + 1;
     }
-    let m: IrModule = compiler_lower.lower(prog, entry_path);
-    let rust: String = compiler_rustbe.generate(m);
+    let prog_ir: IrProgram = compiler_lower.lower_all(progs, paths);
+    let rust: String = compiler_rustbe.generate_all(prog_ir);
     print(rust);
     return 0;
 }

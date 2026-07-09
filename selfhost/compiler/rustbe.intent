@@ -35,11 +35,57 @@ import "ir.intent";
 // Entities/enums/traits/impls/intents and the use-statement post-processing
 // (HashMap/reqwest/tokio) land with their construct slices.
 public function generate(m: IrModule) returns String {
-    let funcs: Array<IrFunction> = m.functions;
-    // Build the body first; the header's `use` statements depend on what it emits.
-    // Decl emission order mirrors stage1 Generate: entities, enums, traits, impls,
-    // functions, intents, tests (traits/impls land with their slices). Each decl is
-    // followed by a blank line.
+    let body: String = generate_module_body(m, m.functions);
+    let mutable out: String = "// Generated Rust code from Intent\n";
+    out = out + "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n";
+    // Inject the HashMap use statement when the body references it (mirrors stage1's
+    // needsHashMap post-processing — any Map type/literal emits `HashMap`).
+    if contains_substring(body, "HashMap") {
+        out = out + "use std::collections::HashMap;\n";
+    }
+    out = out + "\n";
+    out = out + body;
+    return out;
+}
+
+// generate_all — mirrors rustbe.GenerateAll: emit each module's body in topological
+// order (names already mangled at lowering), under the multi-file header, injecting the
+// HashMap use once if any module needs it. Cross-module calls resolve against the
+// global function table (every module's mangled functions).
+public function generate_all(prog: IrProgram) returns String {
+    let mutable funcs: Array<IrFunction> = compiler_ir.empty_ir_function_array();
+    let mutable mi: Int = 0;
+    while mi < len(prog.modules) {
+        let md: IrModule = prog.modules[mi];
+        let mutable fj: Int = 0;
+        while fj < len(md.functions) {
+            funcs.push(md.functions[fj]);
+            fj = fj + 1;
+        }
+        mi = mi + 1;
+    }
+    let mutable body: String = "";
+    let mutable k: Int = 0;
+    while k < len(prog.modules) {
+        body = body + generate_module_body(prog.modules[k], funcs);
+        k = k + 1;
+    }
+    let mutable out: String = "// Generated Rust code from Intent (multi-file)\n";
+    out = out + "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n";
+    if contains_substring(body, "HashMap") {
+        out = out + "use std::collections::HashMap;\n";
+    }
+    out = out + "\n";
+    out = out + body;
+    return out;
+}
+
+// generate_module_body — the per-module declaration emission. Decl order mirrors stage1
+// Generate: entities, enums, traits, impls, functions, intents, tests, each followed by
+// a blank line. `funcs` is the function table for cross-call param-borrow / arity
+// lookups: the module's own functions in single-file, or ALL modules' (mangled)
+// functions in multi-file so cross-module calls resolve. Shared by generate/generate_all.
+public function generate_module_body(m: IrModule, funcs: Array<IrFunction>) returns String {
     let mutable body: String = "";
     let mutable eei: Int = 0;
     while eei < len(m.entities) {
@@ -86,16 +132,7 @@ public function generate(m: IrModule) returns String {
         body = body + "\n";
         ti = ti + 1;
     }
-    let mutable out: String = "// Generated Rust code from Intent\n";
-    out = out + "#![allow(unused_parens, unused_variables, unused_mut, dead_code, private_interfaces)]\n";
-    // Inject the HashMap use statement when the body references it (mirrors stage1's
-    // needsHashMap post-processing — any Map type/literal emits `HashMap`).
-    if contains_substring(body, "HashMap") {
-        out = out + "use std::collections::HashMap;\n";
-    }
-    out = out + "\n";
-    out = out + body;
-    return out;
+    return body;
 }
 
 // contains_substring — does `hay` contain `needle`? (Simple linear scan for the

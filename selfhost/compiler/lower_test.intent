@@ -67,6 +67,45 @@ test "lowers hello.intent to the expected IR module" {
     assert(arg.expr_type.name == "Bool");
 }
 
+test "lower_all mangles imported-module functions and module-qualified calls" {
+    assert(compiler_lower.path_module_name("examples/multi_file/math.intent") == "math");
+    assert(compiler_lower.path_module_name("math.intent") == "math");
+    assert(compiler_lower.path_module_name("math") == "math");
+    let math_src: String = "module math version \"1.0.0\";\n\npublic function add(a: Int, b: Int) returns Int " + lbrace() + "\n    return a + b;\n" + rbrace() + "\n";
+    let main_src: String = "module main version \"1.0.0\";\n\nimport \"math.intent\";\n\nentry function main() returns Int " + lbrace() + "\n    let s: Int = math.add(3, 4);\n    return 0;\n" + rbrace() + "\n";
+    let math_prog: Program = shared_parser.parse(math_src);
+    let main_prog: Program = shared_parser.parse(main_src);
+    let mutable progs: Array<Program> = [];
+    progs.push(math_prog);
+    progs.push(main_prog);
+    let mutable paths: Array<String> = [];
+    paths.push("math.intent");
+    paths.push("main.intent");
+    let p: IrProgram = compiler_lower.lower_all(progs, paths);
+    assert(len(p.modules) == 2);
+    // math module (non-entry): function prefixed, entry flag cleared.
+    let math_mod: IrModule = p.modules[0];
+    assert(math_mod.name == "math");
+    assert(math_mod.is_entry == false);
+    assert(len(math_mod.functions) == 1);
+    assert(math_mod.functions[0].name == "math_add");
+    assert(math_mod.functions[0].is_entry == false);
+    // main module (entry): entry function kept verbatim.
+    let main_mod: IrModule = p.modules[1];
+    assert(main_mod.name == "main");
+    assert(main_mod.is_entry == true);
+    assert(main_mod.functions[0].name == "main");
+    assert(main_mod.functions[0].is_entry == true);
+    // The module-qualified call math.add(3, 4) lowers to an irex_call named math_add.
+    let body: Array<IrStmt> = main_mod.functions[0].body;
+    let letst: IrStmt = body[0];
+    assert(letst.kind == compiler_ir.irst_let());
+    let call: IrExpr = letst.expr;
+    assert(call.kind == compiler_ir.irex_call());
+    assert(call.name == "math_add");
+    assert(len(call.children) == 2);
+}
+
 test "lowers let-bindings and variable references" {
     let src: String = "module let_locals version \"1.0.0\";\n\nentry function main() returns Int " + lbrace() + "\n    let x: Int = 42;\n    let mutable y: Int = x;\n    return y;\n" + rbrace() + "\n";
     let prog: Program = shared_parser.parse(src);

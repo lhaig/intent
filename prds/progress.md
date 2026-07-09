@@ -2878,3 +2878,46 @@ lower_test (+ generics case), ir_test, generic_stack cargo. No shared/* touched.
 
 **Phase 55 endgame reached: the Intent compiler compiles itself to byte-equal Rust for
 the full example corpus (front-end since Phase 42-54; IR+backend this phase).**
+
+---
+
+## 2026-07-09 — Phase 56 slice 56.1: multi-file emit (diff-emit 32/32)
+
+`examples/multi_file/main.intent` (a 2-module program: non-entry `math` + entry `main`)
+now self-hosts byte-equal — the first MULTI-FILE emit. `intentc build --emit --self-hosted`
+no longer rejects multi-file input; it routes through `lower_all`/`generate_all` mirroring
+stage1's `ir.LowerAll` / `rustbe.GenerateAll`. **diff-emit is 32/32 EQUAL.**
+
+- **Go harness** (`cmd/intentc/main.go`): `stage2CompilePaths(entry)` returns the import
+  closure in TOPOLOGICAL order (deps first, ENTRY last — contrast `stage2CheckPaths`,
+  which puts entry first because its path drives diagnostics; emit order is
+  output-significant). The `--emit --self-hosted` branch passes it and the multi-file
+  rejection is gone.
+- **Design decision — mangle at LOWERING, not backend.** Stage1 builds `moduleManglings`
+  in `GenerateAll` and threads `namePrefix`/`structPrefix` through the whole generator.
+  The stage2 backend is free-functions (gotcha b), so instead a non-entry module's decls
+  get their FINAL mangled names in the IR (`lower_module`) and a `mod.fn(args)` call is
+  lowered to a pre-mangled `irex_call` named `mod_fn`. The backend needs NO per-module
+  prefix state; byte output is identical (the gate enforces it) with far less churn.
+- **`lower.intent`**: `LowerScope` +`module_names`/`module_prefixes` (the global qualifier→
+  prefix map; carried CONSTANT like enums/entities, threaded via the 5 copy helpers; EMPTY
+  in single-file → single-file emit byte-unchanged). `path_module_name` (file base minus
+  dir + `.intent`). `LowerCtx` (per-module name_prefix + the global map). `lower` is now a
+  thin wrapper over `lower_module(prog, path, is_entry, mod_names, mod_prefixes)`; new
+  `lower_all(progs, paths)` builds the qualifier map (non-entry file-base + decl name →
+  file-base + "_") and lowers each module with is_entry = (it is the last path). The
+  ex_field-callee site: if the receiver is an ident in `scope.module_names`, emit a
+  pre-mangled `irex_call` (stage1 detects this via typeOf(object)==nil; membership is the
+  regression-safe equivalent — self/locals are never module names). `lower_function` takes
+  a `LowerCtx`, prefixes non-entry function names, and clears their entry flag.
+- **`rustbe.intent`**: extracted `generate_module_body(m, funcs)` (the per-module decl
+  emission), added `generate_all(prog)` (multi-file header, a GLOBAL funcs table across
+  all modules for cross-module param-borrow/arity, once-at-end HashMap injection).
+  `generate` now calls `generate_module_body(m, m.functions)`.
+- **`compile_main.intent`**: N==1 keeps the single-file `lower`/`generate` path (byte-equal
+  31 corpus files); N>1 parses each path then `lower_all`/`generate_all`.
+
+Gates green: diff-emit 32/32 (added `examples/multi_file/main.intent`),
+selfcheck-formatter OK, selfcheck-checker 13/13, lower_test 136 (+ the lower_all/
+path_module_name case), ir_test 17, `go test ./cmd/intentc/... ./internal/compiler/...` ok.
+No `selfhost/shared/*` touched. NEXT: 56.2 cross-module entities/enums (structPrefix).

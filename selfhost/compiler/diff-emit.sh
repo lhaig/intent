@@ -13,6 +13,10 @@
 # construct is supported. It starts at 1/1 (hello.intent) and grows per slice as
 # constructs land. A divergence fails the gate.
 #
+# Multi-file programs (e.g. examples/multi_file/main.intent) route through
+# lower_all/generate_all: the Go harness (stage2CompilePaths) passes the import
+# closure in topological order and the stage2 binary lowers+emits all modules.
+#
 # Both emits write <base>.rs into the current directory, so each file is emitted
 # in its own temp dir (stage1 output moved aside before the stage2 run). The
 # stage2 compiler binary is built once and passed via INTENT_STAGE2_COMPILE so
@@ -57,6 +61,7 @@ CORPUS=(
   "examples/handler_trait.intent"
   "examples/char_string_demo.intent"
   "examples/generic_stack.intent"
+  "examples/multi_file/main.intent"
   "selfhost/compiler/emit-fixtures/let_locals.intent"
   "selfhost/compiler/emit-fixtures/binops.intent"
   "selfhost/compiler/emit-fixtures/control_flow.intent"

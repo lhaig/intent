@@ -1,3 +1,36 @@
+# Pickup Notes — 2026-07-09 (Phase 56 STARTED — multi-file emit; slice 56.1 done, diff-emit 32/32. Phase 55 remains complete. See prds/active/prd-phase-56-multi-file-emit.md)
+
+## ▶ PHASE 56 — multi-file emit → full bootstrap (stage2 emits its own source)
+
+The single-file emitter self-hosts the full corpus (Phase 55). Phase 56 extends the
+stage2 compiler to MULTI-FILE emit (stage1's `ir.LowerAll` / `rustbe.GenerateAll`),
+driving toward the true capstone: emitting the compiler's OWN multi-module source into a
+working stage3. **Design decision (ADR 0059 update / PRD): mangling is resolved at
+LOWERING, not in the backend** — a non-entry module's decls get their final mangled names
+in the IR and `mod.fn(args)` lowers to a pre-mangled `irex_call`, so the backend needs no
+per-module prefix state (same byte-equal output, far less churn than threading
+namePrefix/structPrefix through `generate_expr`).
+
+- ✅ **56.1 — functions + module-qualified calls** (`examples/multi_file`, diff-emit 32/32).
+  Go `stage2CompilePaths` (import closure, TOPOLOGICAL order, entry LAST); `LowerScope`
+  +`module_names`/`module_prefixes` (empty in single-file → single-file emit byte-unchanged);
+  `path_module_name`; `LowerCtx`; `lower` → `lower_module` + `lower_all`; ex_field-callee
+  module detection → pre-mangled `irex_call`; `generate` split into `generate_module_body`
+  + `generate_all`; `compile_main` N>1 branch. Gates: diff-emit 32/32, selfcheck-formatter
+  OK, selfcheck-checker 13/13, lower_test 136, ir_test 17, go test cmd/intentc+compiler ok.
+- **56.2 — NEXT: cross-module entities/enums/traits** (structPrefix + typeOrigins). A
+  non-entry module's struct/enum/impl names get the capitalised file-base prefix; cross-
+  module type refs resolve to the defining module's prefix (stage1 `typeOrigins`). Extend
+  `lower_module` to prefix type decls + thread `LowerCtx` through `lower_member`; add an
+  attractor-style multi-file example to the corpus.
+- **56.3 — emit the compiler's own source** (`selfhost/**`), byte-equal with stage1.
+  Expect: decl-name→file-base mangling (moduleManglings second pass: `shared_parser` →
+  `parser_`), HashMap `use` injection, untested construct combinations.
+- **56.4 — stage3 bootstrap** — compile the stage2 emit into a stage3 binary; verify it
+  matches stage2. Closes the full triangle.
+
+---
+
 # Pickup Notes — 2026-07-08 (Phase 55 COMPLETE — the self-hosted compiler emits byte-equal Rust for the ENTIRE example corpus; see prds/active/prd-phase-55-self-hosted-compiler.md)
 
 ## ✅✅ PHASE 55 COMPLETE: the self-hosted compiler self-hosts the full corpus (2026-07-07..08) — ADR 0059
