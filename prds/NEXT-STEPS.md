@@ -18,12 +18,19 @@ namePrefix/structPrefix through `generate_expr`).
   module detection → pre-mangled `irex_call`; `generate` split into `generate_module_body`
   + `generate_all`; `compile_main` N>1 branch. Gates: diff-emit 32/32, selfcheck-formatter
   OK, selfcheck-checker 13/13, lower_test 136, ir_test 17, go test cmd/intentc+compiler ok.
-- **56.2 — NEXT: cross-module entities/enums/traits** (structPrefix + typeOrigins). A
-  non-entry module's struct/enum/impl names get the capitalised file-base prefix; cross-
-  module type refs resolve to the defining module's prefix (stage1 `typeOrigins`). Extend
-  `lower_module` to prefix type decls + thread `LowerCtx` through `lower_member`; add an
-  attractor-style multi-file example to the corpus.
-- **56.3 — emit the compiler's own source** (`selfhost/**`), byte-equal with stage1.
+- ✅ **56.2 — cross-module entities/enums** (structPrefix + typeOrigins), diff-emit 33/33.
+  Type-origins map (entity/enum -> Capitalised file base) threaded on LowerCtx/LowerScope;
+  mangle EMISSION-side IR only (decl names, field/param/return/let types, ctor-call names,
+  variant enum_names) — `expr_type`/`EntityDecl` registry stay unmangled so lookups resolve.
+  Global entity/enum registry threaded into `lower_module` for cross-module constructor
+  classification. Fixture `emit-fixtures/multimod_entity/`. Limitation deferred to 56.3:
+  chained field access on a cross-module-typed LOCAL (`local.field.method()`).
+- **56.3 — NEXT: emit the compiler's own source** (`selfhost/**`), byte-equal with stage1.
+  Now needs: decl-name→file-base mangling (moduleManglings second pass — `shared_parser`
+  qualifier -> `parser_` prefix, since file base != module decl name there); the deferred
+  chained-field-access-on-local fix; `use std::collections::HashMap;` (Map-heavy); any
+  untested construct combination. Probe stage1 emit of `selfhost/compiler/compile_main.intent`
+  and diff against `--self-hosted` to get the exact work list.
   Expect: decl-name→file-base mangling (moduleManglings second pass: `shared_parser` →
   `parser_`), HashMap `use` injection, untested construct combinations.
 - **56.4 — stage3 bootstrap** — compile the stage2 emit into a stage3 binary; verify it

@@ -53,11 +53,25 @@ matches the existing stage2 deviation from stage1's structure.
     injection).
   - `compile_main.intent`: N==1 single-file path unchanged; N>1 → `lower_all`/`generate_all`.
 
-- **56.2 — cross-module entities/enums/traits** (structPrefix + typeOrigins). A non-entry
-  module's `struct`/`enum`/`impl` names get the capitalised file-base prefix, and type
-  references across modules resolve to the defining module's prefix (stage1
-  `typeOrigins`). Extend `lower_module` to prefix type decls + `LowerCtx`/`lower_member`
-  threading; add an attractor-style multi-file example to the corpus.
+- ✅ **56.2 — cross-module entities/enums** (structPrefix + typeOrigins), diff-emit 33/33.
+  - Type-origins map (entity/enum name -> Capitalised-file-base prefix; "" for the entry
+    module) built in `lower_all` from ALL modules; threaded on `LowerCtx` + `LowerScope`.
+  - Mangling is applied at the EMISSION-side IR only — entity/enum decl names, field
+    types, param/return types, let annotation types, constructor-call names, and
+    variant/unit-variant `enum_name` — via `mangle_type_name`/`mangle_ir_type`.
+    `expr_type` and the `EntityDecl` registry stay UNMANGLED so lowering-time lookups
+    (self/field types, dispatch, clone) keep resolving on the declared names.
+  - Global entity/enum REGISTRY (all modules') threaded into `lower_module` so a cross-
+    module constructor (`Point(...)` in another module) is classified as a constructor
+    (stage1's global `lowerer.entities`). `capitalize` helper added.
+  - Fixture `selfhost/compiler/emit-fixtures/multimod_entity/` (entity as field/param/
+    return type, cross-module constructor, unit-variant enum). Two `lower_test` cases.
+  - **Known limitation (deferred to 56.3):** chained field access on a cross-module-typed
+    LOCAL (`local.field.method()`) — the block scope stores the local's mangled type, so
+    the field lookup would miss. Not hit by the corpus; fix when 56.3 needs it (keep the
+    scope binding unmangled while emitting the mangled annotation).
+  - **Deferred:** module-qualified constructor `mod.Entity(...)` (fixture uses unqualified
+    cross-module `Point(...)`); traits across modules; `expr_type`/cast mangling.
 
 - **56.3 — emit the compiler's own source.** Feed `selfhost/shared/*` +
   `selfhost/compiler/*` through `--emit --self-hosted`, byte-equal with stage1. Expect

@@ -1,0 +1,30 @@
+module types version "1.0.0";
+
+public enum Shape {
+    Circle,
+    Square,
+}
+
+public entity Point {
+    field x: Int;
+    field y: Int;
+
+    constructor(x: Int, y: Int) {
+        self.x = x;
+        self.y = y;
+    }
+
+    method sum() returns Int {
+        return self.x + self.y;
+    }
+}
+
+public entity Line {
+    field a: Point;
+    field b: Point;
+
+    constructor(a: Point, b: Point) {
+        self.a = a;
+        self.b = b;
+    }
+}

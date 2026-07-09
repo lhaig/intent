@@ -106,6 +106,43 @@ test "lower_all mangles imported-module functions and module-qualified calls" {
     assert(len(call.children) == 2);
 }
 
+test "lower_all mangles cross-module entities, enums, constructor and variant refs" {
+    assert(compiler_lower.capitalize("types") == "Types");
+    assert(compiler_lower.capitalize("ir") == "Ir");
+    assert(compiler_lower.capitalize("") == "");
+    let names: Array<String> = ["Point", "Shape"];
+    let prefixes: Array<String> = ["Types", "Types"];
+    assert(compiler_lower.mangle_type_name("Point", names, prefixes) == "TypesPoint");
+    assert(compiler_lower.mangle_type_name("Int", names, prefixes) == "Int");
+    let types_src: String = "module types version \"1.0.0\";\n\npublic enum Shape " + lbrace() + "\n    Circle,\n    Square,\n" + rbrace() + "\n\npublic entity Point " + lbrace() + "\n    field x: Int;\n\n    constructor(x: Int) " + lbrace() + "\n        self.x = x;\n" + rbrace() + "\n" + rbrace() + "\n";
+    let main_src: String = "module main version \"1.0.0\";\n\nimport \"types.intent\";\n\nentry function main() returns Int " + lbrace() + "\n    let p: Point = Point(3);\n    let s: Shape = Circle;\n    return 0;\n" + rbrace() + "\n";
+    let mutable progs: Array<Program> = [];
+    progs.push(shared_parser.parse(types_src));
+    progs.push(shared_parser.parse(main_src));
+    let mutable paths: Array<String> = [];
+    paths.push("types.intent");
+    paths.push("main.intent");
+    let p: IrProgram = compiler_lower.lower_all(progs, paths);
+    // types module (non-entry): entity + enum names get the capitalised prefix.
+    let tmod: IrModule = p.modules[0];
+    assert(len(tmod.entities) == 1);
+    assert(tmod.entities[0].name == "TypesPoint");
+    assert(len(tmod.enums) == 1);
+    assert(tmod.enums[0].name == "TypesShape");
+    // entry module: constructor call `Point(3)` -> mangled constructor name; unit
+    // variant `Circle` -> mangled enum_name; let annotations mangled.
+    let emod: IrModule = p.modules[1];
+    let ebody: Array<IrStmt> = emod.functions[0].body;
+    let letp: IrStmt = ebody[0];
+    assert(letp.let_type.name == "TypesPoint");
+    assert(letp.expr.call_kind == compiler_ir.callkind_constructor());
+    assert(letp.expr.name == "TypesPoint");
+    let lets: IrStmt = ebody[1];
+    assert(lets.let_type.name == "TypesShape");
+    assert(lets.expr.call_kind == compiler_ir.callkind_variant());
+    assert(lets.expr.enum_name == "TypesShape");
+}
+
 test "lowers let-bindings and variable references" {
     let src: String = "module let_locals version \"1.0.0\";\n\nentry function main() returns Int " + lbrace() + "\n    let x: Int = 42;\n    let mutable y: Int = x;\n    return y;\n" + rbrace() + "\n";
     let prog: Program = shared_parser.parse(src);

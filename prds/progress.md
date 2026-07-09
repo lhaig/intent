@@ -2921,3 +2921,42 @@ Gates green: diff-emit 32/32 (added `examples/multi_file/main.intent`),
 selfcheck-formatter OK, selfcheck-checker 13/13, lower_test 136 (+ the lower_all/
 path_module_name case), ir_test 17, `go test ./cmd/intentc/... ./internal/compiler/...` ok.
 No `selfhost/shared/*` touched. NEXT: 56.2 cross-module entities/enums (structPrefix).
+
+---
+
+## 2026-07-09 — Phase 56 slice 56.2: cross-module entities/enums (diff-emit 33/33)
+
+A cross-module entity/enum program (`selfhost/compiler/emit-fixtures/multimod_entity/`:
+an entity used as field/param/return type, a cross-module constructor call, and a unit-
+variant enum reference) now self-hosts byte-equal — mirroring stage1's structPrefix +
+typeOrigins. **diff-emit is 33/33 EQUAL.**
+
+- **Type-origins map** built in `lower_all` from ALL modules' entities+enums (name ->
+  Capitalised file base; "" for the entry module -> unchanged), threaded on `LowerCtx`
+  (decl-level) and `LowerScope` (body-level). `capitalize` helper added.
+- **Mangle at EMISSION-side IR only** (`mangle_type_name` / `mangle_ir_type`): entity/enum
+  decl names, field types, param + return types, let annotation types, constructor-call
+  names, and variant/unit-variant `enum_name`. Critically, `expr_type` and the `EntityDecl`
+  registry stay UNMANGLED, so lowering-time lookups (self/field types, receiver dispatch,
+  clone decisions) keep resolving on the declared names — the same separation stage1 gets
+  by mangling only in the backend. Emitted param/return/let types are mangled while the
+  scope-stored copies stay unmangled.
+- **Global entity/enum REGISTRY** (all modules') threaded into `lower_module` and used for
+  is_known_entity / variant / field lookups (per-module `prog.*` still drives which decls a
+  module EMITS). This is why a cross-module `Point(...)` is classified as a constructor —
+  mirrors stage1's global `lowerer.entities`. Fixes the initial divergence where the entry
+  module didn't recognise imported entities.
+- **Known limitation (deferred to 56.3):** chained field access on a cross-module-typed
+  LOCAL (`local.field.method()`) — the block scope stores the local's mangled let type, so
+  the field lookup misses. Not exercised by the corpus. Fix when 56.3 needs it (keep the
+  scope binding unmangled while emitting the mangled annotation, e.g. a separate emit-type).
+
+Threading: `LowerScope`/`LowerCtx` gained `type_names`/`type_prefixes` (parallel arrays);
+`lower_scope_set_modules` became `lower_scope_apply_ctx`; `lower_module` gained the global
+registry + type-origins params; `lower_entity`/`lower_member`/`lower_enum`/`lower_impl` take
+`LowerCtx`. `lower.intent` was re-canonicalised through the stage2 formatter (gotcha g;
+only a match-in-assignment reindent in `capitalize`).
+
+Gates green: diff-emit 33/33, selfcheck-formatter OK, selfcheck-checker 13/13, lower_test
+137 (+ cross-module mangling case), ir_test 17. Only `selfhost/compiler/*` touched (no
+`selfhost/shared/*`, no Go). NEXT: 56.3 emit the compiler's own `selfhost/**` source.

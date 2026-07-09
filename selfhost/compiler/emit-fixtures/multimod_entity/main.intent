@@ -1,0 +1,20 @@
+module main version "1.0.0";
+
+import "types.intent";
+
+function origin() returns Point {
+    return Point(0, 0);
+}
+
+function dist(p: Point) returns Int {
+    return p.sum();
+}
+
+entry function main() returns Int {
+    let o: Point = origin();
+    let p: Point = Point(3, 4);
+    let ln: Line = Line(o, p);
+    let s: Shape = Circle;
+    print(dist(p));
+    return 0;
+}
