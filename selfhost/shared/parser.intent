@@ -1444,11 +1444,14 @@ public entity Parser {
     }
 
     method parse_extern_decl(leading_comments: Array<String>) returns ExternDecl {
+        // `extern function NAME(params) returns T from "crate::path" [requires/ensures];`
+        // (mirrors parseExternFunctionDecl, ADR 0028). The `from` is a contextual ident;
+        // extern contracts are parsed and discarded (the decl emits no Rust — only its
+        // CALLS do, as `crate::path(args)`; contracts are checked, not emitted).
         let extern_tok: Token = self.expect(shared_lexer.kw_extern_marker(), "'extern'");
         let line: Int = extern_tok.line;
         let cmts: Array<String> = leading_comments;
-        let target_tok: Token = self.expect(shared_lexer.tk_string(), "target string literal");
-        self.expect(shared_lexer.kw_function(), "'function' after extern target");
+        self.expect(shared_lexer.kw_function(), "'function' after extern");
         let name_tok: Token = self.expect(shared_lexer.tk_ident(), "extern function name");
         self.expect(shared_lexer.tk_lparen(), "'(' after extern function name");
         let mutable params: Array<Param> = [];
@@ -1461,8 +1464,18 @@ public entity Parser {
         self.expect(shared_lexer.tk_rparen(), "')' to close extern params");
         self.expect(shared_lexer.kw_returns(), "'returns' after extern params");
         let ret: String = self.parse_type_name();
+        let mutable rust_path: String = "";
+        if self.check(shared_lexer.tk_ident()) and self.peek_text() == "from" {
+            self.advance();
+            let path_tok: Token = self.expect(shared_lexer.tk_string(), "target string literal after 'from'");
+            rust_path = self.unquote(path_tok.text);
+        }
+        while self.is_contract_kw() and self.error == "" {
+            self.advance();
+            let clause: Expr = self.parse_expr();
+        }
         self.expect(shared_lexer.tk_semicolon(), "';' to end extern declaration");
-        let mutable ext: ExternDecl = ExternDecl(self.unquote(target_tok.text), name_tok.text, params, ret, line, cmts);
+        let mutable ext: ExternDecl = ExternDecl(rust_path, name_tok.text, params, ret, line, cmts);
         ext.column = extern_tok.column;
         return ext;
     }
@@ -2235,12 +2248,14 @@ test "test declaration captures name and body" {
 }
 
 test "extern declaration captures target + signature" {
-    let src: String = "module m version \"1.0\"; extern \"rust\" function panic(msg: String) returns Void;";
+    // `extern function NAME(params) returns T from "crate::path" [requires/ensures];`
+    // (ADR 0028). target holds the from-path; contracts are parsed and discarded.
+    let src: String = "module m version \"1.0\"; extern function panic(msg: String) returns Void from \"std::process::abort\" requires true;";
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
     assert_eq(len(prog.externs), 1);
     let e: ExternDecl = prog.externs[0];
-    assert_eq(e.target, "rust");
+    assert_eq(e.target, "std::process::abort");
     assert_eq(e.func_name, "panic");
     assert_eq(len(e.params), 1);
     assert_eq(e.params[0].name, "msg");

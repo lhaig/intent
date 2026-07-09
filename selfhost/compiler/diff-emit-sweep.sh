@@ -23,16 +23,11 @@ INTENTC="$ROOT/intentc"
 # KNOWN_GAPS — programs with catalogued, not-yet-closed emitter/parser gaps. Each entry
 # is a repo-relative path. Pruthis list as gaps close (a passing allow-listed file fails
 # the sweep, prompting removal). See prds/progress.md (Phase 57) for the gap taxonomy.
+# All known emitter gaps are closed — the stage2 emitter matches stage1 on EVERY Intent
+# program in the repo. Add an entry here only if a new gap is discovered and deferred.
 KNOWN_GAPS=(
-  # extern / FFI emit (ExternDecl -> Rust FFI bindings + the from-clause).
-  "examples/ffi_blake3/ffi_blake3.intent"
-  # cross-PACKAGE qualified calls: `types_pkg.Point(...)` -> `TypesPoint::new(...)` and
-  # `types_pkg.f(...)` -> `types_f(...)`. Needs the package-name qualifier in the module
-  # map + module-qualified-constructor detection (the package name comes from intent.toml,
-  # which the stage2 lowering does not see — only the Go registry does).
-  "examples/packages/app_pkg/main.intent"
 )
-is_known() { local f="$1"; for k in "${KNOWN_GAPS[@]}"; do [ "$k" = "$f" ] && return 0; done; return 1; }
+is_known() { local f="$1"; for k in ${KNOWN_GAPS[@]+"${KNOWN_GAPS[@]}"}; do [ "$k" = "$f" ] && return 0; done; return 1; }
 
 BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/intent-sweep.XXXXXX")
 trap 'rm -rf "$BUILD_DIR"' EXIT

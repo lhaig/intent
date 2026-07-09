@@ -3164,3 +3164,33 @@ Remaining KNOWN_GAPS (5): extern/FFI (ffi_blake3); multi-file detection for lone
 package/project members emitted alone (attractor/llm, attractor/types, packages/app_pkg,
 packages/types_pkg — header + intent-block omission; the stage2 emitter is correct, it is a
 build --emit detection nuance).
+
+---
+
+## 2026-07-09 — Phase 57 COMPLETE: emitter hardening — 0 gaps, sweep 71/0/0
+
+Every emitter gap is closed. `make diff-emit-sweep` is **71 byte-equal, 0 known gaps,
+0 regressions** — the stage2 emitter matches stage1 on EVERY emittable Intent program in
+the repo. Final batches (after the HTTP/async cluster):
+
+- **Lone package/project members** (llm, attractor/types, packages/types_pkg): the Go
+  harness prefixes `--multi` when the entry IsMultiFile (has imports OR intent.toml), and
+  compile_main honours it — using generate_all even for a single-module closure (matches
+  stage1's EmitProjectToTarget). Fixes header + intent-block omission.
+- **Cross-package qualified calls** (packages/app_pkg): the package-name qualifier (derived
+  from the module's parent-directory name via path_parent_dir, since intent.toml is invisible
+  to the stage2 lowering) is added to the module map, and a module-qualified call to an ENTITY
+  is a constructor (`types_pkg.Point(...)` -> `TypesPoint::new(...)`).
+- **extern / FFI** (ffi_blake3): fixed the stage2 parser (`extern function NAME(params)
+  returns T from "crate::path" [requires/ensures];` — the `from` clause + parse-and-discard
+  contracts, mirroring parseExternFunctionDecl); an extern call emits its Rust path directly
+  (blake3_hash_hex -> blake3_intent::hash_hex) via an extern registry threaded on the scope;
+  the extern decl emits nothing. Cascade fixes: format_extern_decl emits the new syntax; the
+  parser/lint extern tests updated.
+
+**PHASE 57 COMPLETE.** The self-hosted emitter is proven correct beyond the 22-example
+corpus: 71 programs (all examples incl. attractor's async/HTTP/traits + all packages + the
+whole selfhost toolchain standalone) emit byte-equal with stage1. Full gate suite green:
+diff-emit-sweep 71/0/0, diff-emit 33/33, diff-emit-self 4/4, bootstrap-stage3 4/4,
+diff-checker 86/86, diff-formatter 22/22, diff-linter 26/26, selfcheck-checker 13/13,
+selfcheck-formatter, lower_test 137, ir_test 17, format_test 210, lint_test 190, go test.

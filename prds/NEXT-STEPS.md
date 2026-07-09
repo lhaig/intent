@@ -45,31 +45,30 @@ multi-module source (diff-emit-self 4/4), and a verified stage1->stage2->stage3 
 fixpoint (bootstrap-stage3 4/4). Multi-file emit (lower_all/generate_all) with cross-module
 name mangling, type-origins, call/method return-type inference, and the full clone model.
 
-## ▶ PHASE 57 — emitter hardening (IN PROGRESS)
+## ✅✅ PHASE 57 COMPLETE — emitter hardening (2026-07-09)
 
-Prove the stage2 emitter correct BEYOND the 22-example corpus. New harness `make
-diff-emit-sweep`: differential emit over EVERY Intent program in the repo (KNOWN_GAPS
-allow-list; fails on regression or a now-passing allow-listed file). **57 byte-equal, 14
-catalogued gaps, 0 regressions.** Fixed so far: single-file func-return registry (fixed
-standalone emit of ir/lower/rustbe/parser) and generic-free-function skip (r15).
+The stage2 emitter is proven correct BEYOND the 22-example corpus. Harness `make
+diff-emit-sweep` runs a differential emit (stage1 vs stage2 `--self-hosted`) over EVERY
+Intent program in the repo: **71 byte-equal, 0 known gaps, 0 regressions**. All 14
+originally-catalogued gaps are closed — single-file func registry, generic free functions,
+async builtins (await_all/await_any/timeout) + futures injection, String methods, contract
+raw-text escaping, match-arm enum mangling, for-loop binding types, intent-block multi-file
+gating, trait-method contracts (parser), async fn Future-peel, Future clone guard,
+async-builtin prefix exclusion, the injectAsyncUseStatements blank quirk, HTTP builtins +
+reqwest/serde/helper injection, cross-module trait-sig mangling, lone-package-member
+multi-file detection (`--multi`), cross-package qualified calls + module-qualified
+constructors, and extern/FFI (`from` clause + Rust-path calls).
 
-**REMAINING GAPS (KNOWN_GAPS in diff-emit-sweep):**
-- **EMITTER — async builtins** `await_all`/`await_any`/`timeout` + `use futures;` injection
-  (attractor edge_selection/llm/persistence/validation/types, ck_await_all). stage1 forms:
-  `futures::future::join_all(x).await.into_iter().map(|r| r.expect("spawned task panicked")).collect::<Vec<_>>()`,
-  `futures::future::select_all(x).await.0.expect(...)`, `tokio::time::timeout(Duration::from_millis(ms as u64), fut).await.map_err(|_| "timeout".to_string())`.
-  Add to generate_call (like `sleep`); futures injection needs an IR body-walk for
-  await_all/await_any calls (NOT a `"futures::"` substring — the compiler's own source has
-  it in string literals). NEXT — clearest emitter win.
-- **stage2 PARSER — trait-method signatures** (attractor async_retry/handlers/main_async/
-  parallel/retry): a `selfhost/shared/parser.intent` gap (async/contract trait methods),
-  TASKS row 53. Touching shared/* needs the full gate suite.
-- **extern/FFI emit** (ffi_blake3).
-- **multi-file DETECTION for package members** (packages/*) — header only; harness nuance
-  in stage2CompilePaths vs stage1's package-aware build --emit.
+Full gate suite green: diff-emit-sweep 71/0/0, diff-emit 33/33, diff-emit-self 4/4,
+bootstrap-stage3 4/4, diff-checker 86/86, diff-formatter 22/22, diff-linter 26/26,
+selfcheck-checker 13/13, selfcheck-formatter, lower_test/ir_test/format_test/lint_test,
+go test.
 
-**Other optional fronts:** js/wasm backends in Intent; `--strip-contracts` parity in the
-stage2 emit. None on the critical path — self-hosting is achieved.
+**Optional future fronts (none on the critical path — self-hosting is achieved and
+hardened):** js/wasm backends in Intent (a separate mini-Phase-55 each); `--strip-contracts`
+parity in the stage2 emit; extern-contract preservation in the formatter round-trip (the
+emitter drops them, matching stage1's codegen, but `fmt` on an extern-with-contracts loses
+them — ungated).
   Expect: decl-name→file-base mangling (moduleManglings second pass: `shared_parser` →
   `parser_`), HashMap `use` injection, untested construct combinations.
 - **56.4 — stage3 bootstrap** — compile the stage2 emit into a stage3 binary; verify it

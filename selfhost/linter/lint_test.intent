@@ -682,13 +682,13 @@ test "R3/R5 ORDER: R5 naming fires before R3 contracts for same method" {
 }
 
 // --- R4: extern contracts (43.8) ----------------------------------------------
-// R4 always fires — stage2 parse_extern_decl does not parse requires/ensures,
-// so every successfully-parsed extern has no contracts.
-// Extern syntax: extern "target" function name(...) returns T;
+// R4 always fires — stage2 parse_extern_decl parses requires/ensures but DISCARDS them
+// (they are not stored on ExternDecl), so every parsed extern has no contracts.
+// Extern syntax: extern function name(...) returns T from "crate::path";
 // ExternDecl.func_name holds the function name.
 
 test "R4: extern always produces no-contracts diag" {
-    let src: String = "module m version \"1.0\"; extern \"rust\" function panic(msg: String) returns Void;";
+    let src: String = "module m version \"1.0\"; extern function panic(msg: String) returns Void from \"std::process::abort\";";
     let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "extern function 'panic' has no requires/ensures; FFI declarations should document the boundary contract"), true);
