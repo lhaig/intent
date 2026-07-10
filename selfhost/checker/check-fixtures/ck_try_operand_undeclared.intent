@@ -1,0 +1,9 @@
+// stage1: undeclared variable 'missing'
+// An undeclared variable inside a `?` (try) operand must be reported (the
+// checker recurses the try operand). Phase 48 spawn/try operand recursion.
+module ck_try_operand_undeclared version "0.1.0";
+
+function f() returns Result<Int, String> {
+    let y: Int = missing?;
+    return Ok(y);
+}

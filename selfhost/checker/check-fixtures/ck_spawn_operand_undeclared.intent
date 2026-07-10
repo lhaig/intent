@@ -1,0 +1,12 @@
+// stage1: undeclared variable 'missing'
+// An undeclared variable inside a spawned call must be reported (the checker
+// recurses the spawn operand). Phase 48 spawn/try operand recursion.
+module ck_spawn_operand_undeclared version "0.1.0";
+
+async function g(n: Int) returns Int {
+    return n;
+}
+
+function f() returns Void {
+    let h: Future<Int> = spawn g(missing);
+}

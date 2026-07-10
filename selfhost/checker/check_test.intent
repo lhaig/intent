@@ -1365,3 +1365,20 @@ test "match: consistent typed-binding arms are clean (no false positive)" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+test "spawn operand: undeclared variable inside a spawned call is reported" {
+    let g_src: String = "async function g(n: Int) returns Int " + lbrace() + " return n; " + rbrace();
+    let f_src: String = "function f() returns Void " + lbrace() + " let h: Future<Int> = spawn g(missing); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + g_src + " " + f_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "undeclared variable 'missing'");
+}
+
+test "try operand: undeclared variable inside a try (?) expression is reported" {
+    let f_src: String = "function f() returns Result<Int, String> " + lbrace() + " let y: Int = missing?; return Ok(y); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + f_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "undeclared variable 'missing'");
+}

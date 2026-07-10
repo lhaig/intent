@@ -1264,6 +1264,30 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
         }
         return diags;
     }
+    if e.kind == shared_ast.ex_spawn() {
+        // `spawn <call>` — recurse the operand so undeclared vars / arity errors
+        // inside the spawned call surface (stage1 checkSpawnExpr -> checkCallExpr,
+        // checker.go:3182). The spawn-shape / non-async-target errors are a
+        // separate deferred gap; this only closes operand name-checking.
+        let mutable spd: Array<CheckDiag> = check_expr_names(e.children[0], scope, fn_names, fn_counts, var_names, var_counts, prog);
+        let mutable spi: Int = 0;
+        while spi < len(spd) {
+            diags.push(spd[spi]);
+            spi = spi + 1;
+        }
+        return diags;
+    }
+    if e.kind == shared_ast.ex_try() {
+        // `<expr>?` — recurse the operand (stage1 checkTryExpr recurses the inner
+        // expression first, checker.go:3025) so undeclared vars inside are reported.
+        let mutable trd: Array<CheckDiag> = check_expr_names(e.children[0], scope, fn_names, fn_counts, var_names, var_counts, prog);
+        let mutable tri: Int = 0;
+        while tri < len(trd) {
+            diags.push(trd[tri]);
+            tri = tri + 1;
+        }
+        return diags;
+    }
     if e.kind == shared_ast.ex_array() {
         let mutable ai: Int = 0;
         while ai < len(e.children) {
