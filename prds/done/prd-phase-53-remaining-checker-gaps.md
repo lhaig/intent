@@ -1,3 +1,5 @@
+> **Phase 53 SHIPPED (core)** — entity has-no-constructor + extern param/return unknown-type shipped in the self-hosted checker; the remaining narrow gaps moved to `prds/backlog/prd-phase-58-checker-parity-tail.md`. Kept for history.
+
 # PRD — Phase 53: Remaining Checker Gaps (extern, trait contracts, generic arity)
 
 ## 1. Introduction / Overview

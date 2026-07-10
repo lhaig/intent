@@ -1,3 +1,5 @@
+> **SUPERSEDED by Phase 48** — this planned work was folded into the Phase 48 expression-inference slices (see `prds/done/prd-phase-48-expression-inference.md`). Kept for history.
+
 # PRD — Phase 51: Argument-Type Mismatch + Method-Call Arity
 
 ## 1. Introduction / Overview

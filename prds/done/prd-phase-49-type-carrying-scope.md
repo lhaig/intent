@@ -1,3 +1,5 @@
+> **SUPERSEDED by Phase 48** — this planned work was folded into the Phase 48 expression-inference slices (see `prds/done/prd-phase-48-expression-inference.md`). Kept for history.
+
 # PRD — Phase 49: Type-Carrying Scope (ident / field / call-return inference)
 
 ## 1. Introduction / Overview

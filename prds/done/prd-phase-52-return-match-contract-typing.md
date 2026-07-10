@@ -1,3 +1,5 @@
+> **SUPERSEDED by Phase 48** — this planned work was folded into the Phase 48 expression-inference slices (see `prds/done/prd-phase-48-expression-inference.md`). Kept for history.
+
 # PRD — Phase 52: Return-Type + Match + Contract Type Checks
 
 ## 1. Introduction / Overview
