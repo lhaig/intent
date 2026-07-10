@@ -69,7 +69,7 @@ jobs:
           else
             cp intentc "${ARCHIVE}/"
           fi
-          cp README.md AGENT.md "${ARCHIVE}/"
+          cp README.md AGENTS.md "${ARCHIVE}/"
           cp -r examples/ "${ARCHIVE}/examples/"
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
         shell: bash
