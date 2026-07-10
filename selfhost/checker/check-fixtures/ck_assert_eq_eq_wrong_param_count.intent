@@ -1,0 +1,14 @@
+// stage1: entity 'P' eq method must take exactly one parameter (other: P)
+module ck_assert_eq_eq_wrong_param_count version "0.1.0";
+
+entity P {
+    field x: Int;
+
+    method eq(other: P, extra: Int) returns Bool {
+        return true;
+    }
+}
+
+function f(a: P, b: P) returns Void {
+    assert_eq(a, b);
+}

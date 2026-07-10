@@ -221,6 +221,89 @@ public function empty_type_array() returns Array<Type> {
     return a;
 }
 
+// type_to_string — render a Type as stage1 Type.String() does: `Name` for a
+// leaf, `Name<arg, arg>` for a generic. (Fn types never reach here: inference
+// returns Unknown for lambdas/function refs.)
+public function type_to_string(t: Type) returns String {
+    if len(t.type_args) == 0 {
+        return t.name;
+    }
+    let mutable s: String = t.name + "<";
+    let mutable i: Int = 0;
+    while i < len(t.type_args) {
+        if i > 0 {
+            s = s + ", ";
+        }
+        s = s + type_to_string(t.type_args[i]);
+        i = i + 1;
+    }
+    return s + ">";
+}
+
+// type_equal — structural equality: same name and pairwise-equal type args
+// (mirrors stage1 Type.Equal() for the name+generic-args shape).
+public function type_equal(a: Type, b: Type) returns Bool {
+    if a.name != b.name {
+        return false;
+    }
+    if len(a.type_args) != len(b.type_args) {
+        return false;
+    }
+    let mutable i: Int = 0;
+    while i < len(a.type_args) {
+        if not type_equal(a.type_args[i], b.type_args[i]) {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+// assert_eq_unsupported_reason — why `t` cannot be compared with assert_eq, or ""
+// if it can. Mirrors stage1 assertEqUnsupportedReason (checker.go:3249): order
+// Float -> Map -> Future -> entity(no-eq / eq-signature) -> generic recursion.
+// The Float case is by name; Map/Future by name (before the generic branch);
+// generic recursion (Array/Option/Result) reports the first non-comparable arg.
+public function assert_eq_unsupported_reason(t: Type, prog: Program) returns String {
+    if t.name == "Float" {
+        return "assert_eq does not support Float; use assert_close(actual, expected, epsilon) for floating-point comparisons";
+    }
+    if t.name == "Map" {
+        return "assert_eq does not support Map; compare maps via their keys() and get(key, default) instead";
+    }
+    if t.name == "Future" {
+        return "assert_eq does not support Future; await it first and compare the resolved value";
+    }
+    if name_seen(collect_entity_names(prog), t.name) {
+        let decls: Array<FunctionDecl> = entity_method_decls(prog, t.name, "eq");
+        if len(decls) == 0 {
+            return "entity '" + t.name + "' used in assert_eq but has no eq method; define 'method eq(other: " + t.name + ") returns Bool' to enable equality checks";
+        }
+        let m: FunctionDecl = decls[0];
+        if m.return_type != "Bool" {
+            return "entity '" + t.name + "' has an eq method but it does not return Bool";
+        }
+        if len(m.params) != 1 {
+            return "entity '" + t.name + "' eq method must take exactly one parameter (other: " + t.name + ")";
+        }
+        if m.params[0].type_name != t.name {
+            return "entity '" + t.name + "' eq method must take a parameter of type " + t.name;
+        }
+        return "";
+    }
+    if len(t.type_args) > 0 {
+        let mutable i: Int = 0;
+        while i < len(t.type_args) {
+            let r: String = assert_eq_unsupported_reason(t.type_args[i], prog);
+            if r != "" {
+                return "assert_eq on " + type_to_string(t) + " is unsupported because " + r;
+            }
+            i = i + 1;
+        }
+    }
+    return "";
+}
+
 // type_is_ident_char — characters parse_type treats as part of a base name:
 // alphanumerics plus '_', mirroring the lexer's identifier rule.
 
@@ -1455,16 +1538,13 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                 if callee.name == "assert_eq" and len(e.children) == 3 {
                     let aet: Type = infer_expr_type(e.children[1], scope, prog);
                     let eet: Type = infer_expr_type(e.children[2], scope, prog);
-                    if (not is_unknown_type(aet)) and (not is_unknown_type(eet)) and len(aet.type_args) == 0 and len(eet.type_args) == 0 {
-                        if aet.name != eet.name {
-                            diags.push(CheckDiag(callee.line, callee.column, "assert_eq() type mismatch: actual is " + aet.name + ", expected is " + eet.name));
+                    if (not is_unknown_type(aet)) and (not is_unknown_type(eet)) {
+                        if not type_equal(aet, eet) {
+                            diags.push(CheckDiag(callee.line, callee.column, "assert_eq() type mismatch: actual is " + type_to_string(aet) + ", expected is " + type_to_string(eet)));
                         } else {
-                            if aet.name == "Float" {
-                                diags.push(CheckDiag(callee.line, callee.column, "assert_eq does not support Float; use assert_close(actual, expected, epsilon) for floating-point comparisons"));
-                            } else {
-                                if name_seen(collect_entity_names(prog), aet.name) and len(entity_method_decls(prog, aet.name, "eq")) == 0 {
-                                    diags.push(CheckDiag(callee.line, callee.column, "entity '" + aet.name + "' used in assert_eq but has no eq method; define 'method eq(other: " + aet.name + ") returns Bool' to enable equality checks"));
-                                }
+                            let reason: String = assert_eq_unsupported_reason(aet, prog);
+                            if reason != "" {
+                                diags.push(CheckDiag(callee.line, callee.column, reason));
                             }
                         }
                     }

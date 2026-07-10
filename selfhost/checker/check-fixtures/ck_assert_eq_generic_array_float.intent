@@ -1,0 +1,6 @@
+// stage1: assert_eq on Array<Float> is unsupported because assert_eq does not support Float; use assert_close(actual, expected, epsilon) for floating-point comparisons
+module ck_assert_eq_generic_array_float version "0.1.0";
+
+function f(a: Array<Float>, b: Array<Float>) returns Void {
+    assert_eq(a, b);
+}

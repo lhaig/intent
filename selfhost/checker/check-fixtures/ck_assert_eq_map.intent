@@ -1,0 +1,6 @@
+// stage1: assert_eq does not support Map; compare maps via their keys() and get(key, default) instead
+module ck_assert_eq_map version "0.1.0";
+
+function f(a: Map<String, Int>, b: Map<String, Int>) returns Void {
+    assert_eq(a, b);
+}

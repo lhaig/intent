@@ -1,0 +1,14 @@
+// stage1: entity 'P' has an eq method but it does not return Bool
+module ck_assert_eq_eq_wrong_return version "0.1.0";
+
+entity P {
+    field x: Int;
+
+    method eq(other: P) returns Int {
+        return 0;
+    }
+}
+
+function f(a: P, b: P) returns Void {
+    assert_eq(a, b);
+}

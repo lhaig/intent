@@ -1406,3 +1406,45 @@ test "non-async test with no await produces no warning" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+test "assert_eq: entity eq method with non-Bool return is rejected" {
+    let en: String = "entity P " + lbrace() + " field x: Int; method eq(other: P) returns Int " + lbrace() + " return 0; " + rbrace() + " " + rbrace();
+    let fn_src: String = "function f(a: P, b: P) returns Void " + lbrace() + " assert_eq(a, b); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + en + " " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "entity 'P' has an eq method but it does not return Bool");
+}
+
+test "assert_eq: entity eq method with wrong param type is rejected" {
+    let en: String = "entity P " + lbrace() + " field x: Int; method eq(other: Int) returns Bool " + lbrace() + " return true; " + rbrace() + " " + rbrace();
+    let fn_src: String = "function f(a: P, b: P) returns Void " + lbrace() + " assert_eq(a, b); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + en + " " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "entity 'P' eq method must take a parameter of type P");
+}
+
+test "assert_eq: Map operands are rejected" {
+    let fn_src: String = "function f(a: Map<String, Int>, b: Map<String, Int>) returns Void " + lbrace() + " assert_eq(a, b); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "assert_eq does not support Map; compare maps via their keys() and get(key, default) instead");
+}
+
+test "assert_eq: generic recursion reports Array<Float>" {
+    let fn_src: String = "function f(a: Array<Float>, b: Array<Float>) returns Void " + lbrace() + " assert_eq(a, b); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "assert_eq on Array<Float> is unsupported because assert_eq does not support Float; use assert_close(actual, expected, epsilon) for floating-point comparisons");
+}
+
+test "assert_eq: entity with a proper eq method is accepted" {
+    let en: String = "entity P " + lbrace() + " field x: Int; method eq(other: P) returns Bool " + lbrace() + " return true; " + rbrace() + " " + rbrace();
+    let fn_src: String = "function f(a: P, b: P) returns Void " + lbrace() + " assert_eq(a, b); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + en + " " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

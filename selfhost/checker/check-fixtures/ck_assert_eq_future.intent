@@ -1,0 +1,6 @@
+// stage1: assert_eq does not support Future; await it first and compare the resolved value
+module ck_assert_eq_future version "0.1.0";
+
+function f(a: Future<Int>, b: Future<Int>) returns Void {
+    assert_eq(a, b);
+}
