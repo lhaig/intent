@@ -1488,3 +1488,23 @@ test "entity with a constructor is constructed cleanly" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+test "extern: unknown param type is reported" {
+    let src: String = "module m version \"1.0\"; extern function f(w: Widget) returns Int from \"c::f\";";
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "unknown type 'Widget'");
+}
+
+test "extern: unknown return type is reported" {
+    let src: String = "module m version \"1.0\"; extern function f(x: Int) returns Widget from \"c::f\";";
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "unknown type 'Widget'");
+}
+
+test "extern: known param and return types are accepted" {
+    let src: String = "module m version \"1.0\"; extern function f(x: Int) returns String from \"c::f\";";
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

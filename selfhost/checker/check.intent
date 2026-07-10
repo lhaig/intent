@@ -2223,6 +2223,31 @@ function check_fn_signature_types(f: FunctionDecl, entity_names: Array<String>, 
     return diags;
 }
 
+// check_extern_signature_types — emit `unknown type 'BASE'` for any extern param
+// (anchored at the param) or return type (anchored at the EXTERN keyword, matching
+// stage1 registerFunctions:804-833 which uses ext.Pos() for the return, not the
+// return-type node). Externs carry no generic type params.
+function check_extern_signature_types(x: ExternDecl, entity_names: Array<String>, enum_names: Array<String>) returns Array<CheckDiag> {
+    let mutable diags: Array<CheckDiag> = [];
+    let no_tps: Array<String> = shared_ast.empty_string_array();
+    let mutable i: Int = 0;
+    while i < len(x.params) {
+        let p: Param = x.params[i];
+        let pt: Type = parse_type(p.type_name);
+        if not type_is_known(pt, entity_names, enum_names, no_tps) {
+            diags.push(CheckDiag(p.line, p.column, "unknown type '" + pt.name + "'"));
+        }
+        i = i + 1;
+    }
+    if x.return_type != "" {
+        let rt: Type = parse_type(x.return_type);
+        if not type_is_known(rt, entity_names, enum_names, no_tps) {
+            diags.push(CheckDiag(x.line, x.column, "unknown type '" + rt.name + "'"));
+        }
+    }
+    return diags;
+}
+
 function check_dup_functions(prog: Program) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable seen: Array<String> = [];
@@ -2244,6 +2269,18 @@ function check_dup_functions(prog: Program) returns Array<CheckDiag> {
             }
         }
         i = i + 1;
+    }
+    // Externs are registered here too (stage1 registerFunctions handles both):
+    // resolve their param/return annotation types for `unknown type`.
+    let mutable xi: Int = 0;
+    while xi < len(prog.externs) {
+        let edx: Array<CheckDiag> = check_extern_signature_types(prog.externs[xi], entity_names, enum_names);
+        let mutable ej: Int = 0;
+        while ej < len(edx) {
+            diags.push(edx[ej]);
+            ej = ej + 1;
+        }
+        xi = xi + 1;
     }
     return diags;
 }

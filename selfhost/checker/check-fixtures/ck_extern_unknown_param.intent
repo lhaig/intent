@@ -1,0 +1,4 @@
+// stage1: unknown type 'Widget'
+module ck_extern_unknown_param version "0.1.0";
+
+extern function f(w: Widget) returns Int from "c::f";
