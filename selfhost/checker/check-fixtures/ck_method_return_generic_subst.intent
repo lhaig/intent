@@ -1,0 +1,20 @@
+// stage1: type mismatch: cannot assign Int to String
+// A generic method's type-param return is substituted through the receiver's
+// type args (Box<Int>.get() -> Int), then feeds the let-mismatch check.
+module ck_method_return_generic_subst version "0.1.0";
+
+entity Box<T> {
+    field v: T;
+
+    constructor(v: T) {
+        self.v = v;
+    }
+
+    method get() returns T {
+        return self.v;
+    }
+}
+
+function f(b: Box<Int>) returns Void {
+    let s: String = b.get();
+}

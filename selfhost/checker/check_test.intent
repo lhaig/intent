@@ -1508,3 +1508,29 @@ test "extern: known param and return types are accepted" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+test "method-call inference: entity method return feeds let-mismatch" {
+    let en: String = "entity Counter " + lbrace() + " field n: Int; constructor(n: Int) " + lbrace() + " self.n = n; " + rbrace() + " method get() returns Int " + lbrace() + " return self.n; " + rbrace() + " " + rbrace();
+    let fn_src: String = "function f(c: Counter) returns Void " + lbrace() + " let s: String = c.get(); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + en + " " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "type mismatch: cannot assign Int to String");
+}
+
+test "method-call inference: generic type-param return is substituted" {
+    let en: String = "entity Box<T> " + lbrace() + " field v: T; constructor(v: T) " + lbrace() + " self.v = v; " + rbrace() + " method get() returns T " + lbrace() + " return self.v; " + rbrace() + " " + rbrace();
+    let fn_src: String = "function f(b: Box<Int>) returns Void " + lbrace() + " let s: String = b.get(); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + en + " " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "type mismatch: cannot assign Int to String");
+}
+
+test "method-call inference: matching type is accepted" {
+    let en: String = "entity Counter " + lbrace() + " field n: Int; constructor(n: Int) " + lbrace() + " self.n = n; " + rbrace() + " method get() returns Int " + lbrace() + " return self.n; " + rbrace() + " " + rbrace();
+    let fn_src: String = "function f(c: Counter) returns Void " + lbrace() + " let x: Int = c.get(); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + en + " " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

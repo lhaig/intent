@@ -1,0 +1,19 @@
+// stage1: type mismatch: cannot assign Int to String
+// Method-call return-type inference feeds the let-mismatch check.
+module ck_method_return_let_mismatch version "0.1.0";
+
+entity Counter {
+    field n: Int;
+
+    constructor(n: Int) {
+        self.n = n;
+    }
+
+    method get() returns Int {
+        return self.n;
+    }
+}
+
+function f(c: Counter) returns Void {
+    let s: String = c.get();
+}

@@ -723,8 +723,32 @@ public function infer_expr_type(e: Expr, scope: Scope, prog: Program) returns Ty
         }
         return entity_field_type(prog, obj_t.name, e.name);
     }
-    // call / method / index / match / array / range / lambda / try / await /
-    // spawn — deferred (need call-return / element inference). Unknown.
+    if e.kind == shared_ast.ex_call() {
+        let callee: Expr = e.children[0];
+        if callee.kind == shared_ast.ex_field() {
+            // Method call `recv.m(args)`: type it as m's declared return type,
+            // substituting a bare type-param return through the receiver's type
+            // args (stage1 checkMethodCallExpr:2529). Built-in-receiver methods
+            // (Array/Map/String/Char/Result/Option) are not resolved here → Unknown.
+            let recv_t: Type = infer_expr_type(callee.children[0], scope, prog);
+            if not is_unknown_type(recv_t) {
+                let midx: Int = find_entity_index(prog, recv_t.name);
+                if midx >= 0 {
+                    let mdecls: Array<FunctionDecl> = entity_method_decls(prog, recv_t.name, callee.name);
+                    if len(mdecls) > 0 {
+                        let mret: String = mdecls[0].return_type;
+                        if mret != "" {
+                            return substitute_type_param(parse_type(mret), prog.entities[midx], recv_t);
+                        }
+                    }
+                }
+            }
+            return type_unknown();
+        }
+        return type_unknown();
+    }
+    // index / match / array / range / lambda / try / await / spawn — deferred
+    // (need element / call-return inference). Unknown → sound skip.
     return type_unknown();
 }
 
@@ -1075,6 +1099,24 @@ function entity_method_decls(prog: Program, entity_name: String, method_name: St
         ii = ii + 1;
     }
     return out;
+}
+
+// substitute_type_param — if `rt` is a BARE type-param of entity `ent`, return the
+// receiver's concrete type arg at that position; otherwise `rt` unchanged. Mirrors
+// stage1 checkMethodCallExpr (checker.go:2529): only a return type that IS a type
+// param is substituted (a generic like Option<T> is returned raw, not recursed).
+function substitute_type_param(rt: Type, ent: EntityDecl, recv_t: Type) returns Type {
+    if len(rt.type_args) != 0 {
+        return rt;
+    }
+    let mutable i: Int = 0;
+    while i < len(ent.type_params) {
+        if ent.type_params[i] == rt.name and i < len(recv_t.type_args) {
+            return recv_t.type_args[i];
+        }
+        i = i + 1;
+    }
+    return rt;
 }
 
 // =============================================================================
