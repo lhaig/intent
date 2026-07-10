@@ -1,0 +1,28 @@
+module lib version "1.0.0";
+
+public enum Shape {
+    Circle(r: Int),
+    Rect(w: Int, h: Int),
+}
+
+public entity Pair<T> {
+    field a: T;
+    field b: T;
+
+    constructor(a: T, b: T) {
+        self.a = a;
+        self.b = b;
+    }
+
+    method first() returns T {
+        return self.a;
+    }
+}
+
+public function area(s: Shape) returns Int {
+    return match s {
+        Circle(r) => r,
+        Rect(w, h) => w * h,
+    };
+}
+

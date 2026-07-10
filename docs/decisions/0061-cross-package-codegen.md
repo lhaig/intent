@@ -93,7 +93,24 @@ qualified generic constructors, generic function calls, and enum variants
 the IR lowering rewrites a qualified generic/variant call to its bare form so
 monomorphization and variant construction happen in one place. Verified emit → compile →
 run on Rust and JS; `TestGenerateModuleQualifiedGenericAndVariant` locks it in. The bare
-forms (`Generic<T>(...)`, `Variant(...)`) continue to work unchanged.
+forms (`Generic<T>(...)`, `Variant(...)`) continue to work unchanged. The self-hosted
+stage2 front-end gained the same parsing (generic args after a field) and lowering (rewrite
+to bare) for qualified generic constructors, variants, and `module.enum.variant`, so those
+forms are `diff-emit`-gated (`multimod_qualified`); the qualified generic *function* form is
+not (stage2 does not monomorphize generic free functions — see below).
+
+### Follow-up: entry-only cross-module generic monomorphization in stage2 (fixed 2026-07-10)
+
+The stage2 backend monomorphized a generic only from the module that both defined and used
+it, so a generic instantiated *only* in the entry module of a multi-module build (e.g. a
+consumer constructing a dependency's `Pair<Int>`) emitted the constructor call but not the
+`struct`. Fixed in `selfhost/compiler/lower.intent`: `lower_all` now assigns each
+instantiation to the first module (topological order) that uses it — deduped globally —
+and passes it to `lower_module`; `collect_instantiations` detects generics against the
+global entity registry and picks up qualified (`ex_field` callee) instantiations, and the
+per-module monomorphization looks the decl up globally. The `examples/packages` demo now
+constructs its generic directly in the consumer (`Labeled<Int>(...)`), sweep-gated, instead
+of via a factory workaround.
 
 ### Follow-up: unqualified imported function calls (fixed 2026-07-10)
 
@@ -112,27 +129,29 @@ the self-hosted stage2 backend. Both are invisible to users — `intentc build` 
 which emits, compiles, and runs them correctly — but they constrain the byte-equal
 `diff-emit-sweep` gate, so the repo's swept programs avoid them:
 
-- A generic whose *only* instantiation is in the entry module of a multi-module build:
-  stage2 collects instantiations from the module that both defines and uses the generic,
-  so the `examples/packages` demo instantiates its generic through a dependency factory
-  (`make_labeled`) rather than directly in the consumer.
-- Unqualified calls to imported functions: stage2 emits the bare name, so no swept fixture
-  uses that form (the corpus and toolchain call cross-module functions qualified).
+- **Generic free functions.** stage2 does not monomorphize generic *functions* at all (only
+  generic entities); even a bare `identity<Int>()` diverges. So neither bare nor qualified
+  generic-function calls are swept, and `multimod_qualified` covers only the generic-entity
+  constructor, variants, and `module.enum.variant`.
+- **Unqualified calls to imported functions.** stage2 emits the bare name (the stage1 fix
+  added a `funcOrigins` map that stage2 lacks), so no swept fixture uses that form — the
+  corpus and toolchain call cross-module functions qualified.
 
-Teaching stage2's lowering to fold in the entry module's instantiations and to mangle
-unqualified imported calls is deferred to a later self-hosting slice.
+Teaching stage2 to monomorphize generic free functions and to mangle unqualified imported
+calls is deferred to a later self-hosting slice.
 
 ## Consequences
 
-- `make diff-emit` grows two fixtures — `multimod_enum` and `multimod_generic` — that
-  exercise data-variant construction and cross-module generic monomorphization, keeping
-  the fixes byte-equal between stage1 and stage2 (now 35/35). `bootstrap-stage3` still
-  holds; `diff-emit-sweep` is unchanged.
-- `examples/packages/types_pkg` + `app_pkg` gain a data-carrying enum and a generic
-  entity so the flagship cross-package example demonstrates the now-supported features.
-- The blanket "cross-package code generation is not yet fully supported" warning is
-  removed; DESIGN.md §15.9 is rewritten as the support matrix above with the two deferred
-  syntax limitations.
+- `make diff-emit` grows fixtures — `multimod_enum`, `multimod_generic`, and
+  `multimod_qualified` — that exercise data-variant construction, cross-module generic
+  monomorphization (including entry-only), and the module-qualified generic/variant syntax,
+  keeping the fixes byte-equal between stage1 and stage2. `bootstrap-stage3` still holds.
+- `examples/packages/types_pkg` + `app_pkg` gain a data-carrying enum and a generic entity
+  (constructed directly in the consumer) so the flagship cross-package example demonstrates
+  the supported features.
+- The blanket "cross-package code generation is not yet fully supported" warning is removed;
+  DESIGN.md §15.9 is rewritten as the support matrix above. All user-facing cross-package
+  forms now work; only the two internal stage2 self-hosting-parity gaps above remain.
 
 ## References
 

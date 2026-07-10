@@ -477,6 +477,23 @@ entry function main() returns Int {
 	}
 }
 
+// TestFormatModuleQualifiedGenericCall guards that the formatter preserves the type
+// arguments on a module-qualified generic call (pkg.Pair<Int>()); an earlier version
+// dropped them, silently changing pkg.Pair<Int>(...) into pkg.Pair(...).
+func TestFormatModuleQualifiedGenericCall(t *testing.T) {
+	src := `module test version "1.0";
+import lib_pkg;
+entry function main() returns Int {
+    let p: Pair<Int> = lib_pkg.Pair<Int>(1, 2);
+    return 0;
+}
+`
+	got := formatSource(t, src)
+	if !strings.Contains(got, "lib_pkg.Pair<Int>(1, 2)") {
+		t.Errorf("expected module-qualified generic call to keep its type args, got:\n%s", got)
+	}
+}
+
 func TestFormatTypeRef(t *testing.T) {
 	src := `module test version "1.0";
 entry function main() returns Int {

@@ -762,13 +762,21 @@ public entity Parser {
                 } else {
                     if self.check_consume(shared_lexer.tk_dot()) {
                         let fld: Token = self.expect(shared_lexer.tk_ident(), "field name after '.'");
+                        // A module-qualified generic call bakes the type args into the
+                        // field name the same way parse_primary does for a bare ident
+                        // (`pkg.Pair<Int>()` -> field name "Pair<Int>"), so the call and
+                        // lowering paths see one string. Mirrors the bare-ident case.
+                        let mutable fld_name: String = fld.text;
+                        if self.check(shared_lexer.tk_lt()) and self.lookahead_is_generic_call() {
+                            fld_name = fld_name + self.consume_generic_type_args();
+                        }
                         let mutable children: Array<Expr> = [];
                         children.push(e);
                         // ADR 0054: anchor the field/method-name position (matches
                         // stage1 FieldAccessExpr/MethodCallExpr.Pos() = the name
                         // token). Enables method-call arity/arg-type diagnostics
                         // (48i.2) to land on the method name. Additive/inert.
-                        let mutable e_fld: Expr = Expr(shared_ast.ex_field(), 0, "", false, fld.text, children);
+                        let mutable e_fld: Expr = Expr(shared_ast.ex_field(), 0, "", false, fld_name, children);
                         e_fld.line = fld.line;
                         e_fld.column = fld.column;
                         e = e_fld;

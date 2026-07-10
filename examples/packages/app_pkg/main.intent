@@ -11,7 +11,7 @@ entry function main() returns Int {
     let p2_class: Classification = types_pkg.classify(p2);
     print(types_pkg.rank(origin_class));
     print(types_pkg.rank(p2_class));
-    let tagged: Labeled<Int> = types_pkg.make_labeled("answer", 42);
+    let tagged: Labeled<Int> = Labeled<Int>("answer", 42);
     print(tagged.value_of());
     return 0;
 }

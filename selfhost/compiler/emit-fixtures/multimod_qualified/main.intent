@@ -1,0 +1,14 @@
+module main version "1.0.0";
+
+import "lib.intent";
+
+entry function main() returns Int {
+    let p: Pair<Int> = lib.Pair<Int>(1, 2);
+    let s: Shape = lib.Rect(3, 4);
+    let s2: Shape = lib.Shape.Circle(9);
+    print(p.first());
+    print(lib.area(s));
+    print(lib.area(s2));
+    return 0;
+}
+

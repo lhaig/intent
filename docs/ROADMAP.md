@@ -449,6 +449,27 @@ and the self-hosted Intent backend). New `diff-emit` fixtures `multimod_enum` /
 workarounds: module-qualified type-args/variants (`pkg.Generic<T>()`) and unqualified
 imported function calls.
 
+### Phase 60: Cross-package ergonomics completion -- DONE (2026-07-10)
+
+Closed the remaining cross-package gaps from Phase 59 ([ADR 0061](decisions/0061-cross-package-codegen.md)):
+
+- **Unqualified imported function calls (G6)** — `helper(...)` for an imported `helper`
+  type-checked but emitted the calling module's (empty) prefix; a `funcOrigins` map on both
+  backends now mangles it to the defining module's prefix.
+- **Module-qualified generic/variant syntax** — `pkg.Generic<T>()`, `pkg.Variant()`, and
+  `pkg.Enum.Variant()` now parse and lower (stage1 + stage2), rewriting to the bare form so
+  monomorphization / variant construction happen in one place.
+- **stage2 entry-only generic monomorphization** — the self-hosted backend now emits the
+  monomorphization for a generic instantiated only in the entry module (assigns each
+  instantiation to the first-using module in `lower_all`, deduped globally, decl resolved
+  against the global registry). The `examples/packages` demo constructs its generic directly
+  in the consumer again.
+
+Gates: `make diff-emit` 36/36 (new `multimod_qualified` fixture), `bootstrap-stage3` 4/4,
+`diff-emit-sweep` clean. Deferred (internal stage2 parity, not user-facing): generic *free
+function* monomorphization in stage2, and the stage2 `funcOrigins` mangling for unqualified
+imported calls.
+
 ## Milestone 8: Developer Experience
 
 ### LSP Server -- v1 SHIPPED (2026-05-30)

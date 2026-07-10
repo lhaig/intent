@@ -69,10 +69,6 @@ public function rank(c: Classification) returns Int {
     };
 }
 
-public function make_labeled(name: String, value: Int) returns Labeled<Int> {
-    return Labeled<Int>(name, value);
-}
-
 test "distance_squared of (0,0) and (3,4) is 25" {
     let p1: Point = Point(0.0, 0.0);
     let p2: Point = Point(3.0, 4.0);

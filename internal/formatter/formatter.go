@@ -604,7 +604,15 @@ func (f *formatter) formatExprPrec(e ast.Expression, parentPrec int) string {
 		for i, arg := range expr.Args {
 			args[i] = f.formatExpr(arg)
 		}
-		return fmt.Sprintf("%s.%s(%s)", obj, expr.Method, strings.Join(args, ", "))
+		typeArgsStr := ""
+		if len(expr.TypeArgs) > 0 {
+			typeArgStrs := make([]string, len(expr.TypeArgs))
+			for i, ta := range expr.TypeArgs {
+				typeArgStrs[i] = f.formatTypeRef(ta)
+			}
+			typeArgsStr = "<" + strings.Join(typeArgStrs, ", ") + ">"
+		}
+		return fmt.Sprintf("%s.%s%s(%s)", obj, expr.Method, typeArgsStr, strings.Join(args, ", "))
 
 	case *ast.FieldAccessExpr:
 		obj := f.formatExpr(expr.Object)

@@ -567,8 +567,15 @@ function insts_from_expr(entities: Array<EntityDecl>, e: Expr) returns Array<IrT
     if e.kind == shared_ast.ex_call() {
         if len(e.children) > 0 {
             let callee: Expr = e.children[0];
+            // Both a bare generic ctor `Pair<Int>()` (ex_ident callee) and a
+            // module-qualified one `pkg.Pair<Int>()` (ex_field callee) bake the type
+            // args into the callee name, so record either form's instantiation.
             if callee.kind == shared_ast.ex_ident() {
                 out = append_types(out, insts_from_type_string(entities, callee.name));
+            } else {
+                if callee.kind == shared_ast.ex_field() {
+                    out = append_types(out, insts_from_type_string(entities, callee.name));
+                }
             }
         }
     }
@@ -625,16 +632,16 @@ function insts_from_func(entities: Array<EntityDecl>, f: FunctionDecl) returns A
 
 // collect_instantiations — the deduped (by mangled name) list of generic-entity
 // instantiations used across the whole program (mirrors collectInstantiations).
-function collect_instantiations(prog: Program) returns Array<IrType> {
+function collect_instantiations(prog: Program, gen_entities: Array<EntityDecl>) returns Array<IrType> {
     let mutable all: Array<IrType> = compiler_ir.empty_ir_type_array();
     let mutable fi: Int = 0;
     while fi < len(prog.functions) {
-        all = append_types(all, insts_from_func(prog.entities, prog.functions[fi]));
+        all = append_types(all, insts_from_func(gen_entities, prog.functions[fi]));
         fi = fi + 1;
     }
     let mutable ti: Int = 0;
     while ti < len(prog.tests) {
-        all = append_types(all, insts_from_block(prog.entities, prog.tests[ti].body));
+        all = append_types(all, insts_from_block(gen_entities, prog.tests[ti].body));
         ti = ti + 1;
     }
     let mutable ei: Int = 0;
@@ -643,15 +650,15 @@ function collect_instantiations(prog: Program) returns Array<IrType> {
         if len(e.type_params) == 0 {
             let mutable fdi: Int = 0;
             while fdi < len(e.fields) {
-                all = append_types(all, insts_from_type_string(prog.entities, e.fields[fdi].type_name));
+                all = append_types(all, insts_from_type_string(gen_entities, e.fields[fdi].type_name));
                 fdi = fdi + 1;
             }
             if e.has_constructor {
-                all = append_types(all, insts_from_func(prog.entities, e.ctor));
+                all = append_types(all, insts_from_func(gen_entities, e.ctor));
             }
             let mutable mi: Int = 0;
             while mi < len(e.methods) {
-                all = append_types(all, insts_from_func(prog.entities, e.methods[mi]));
+                all = append_types(all, insts_from_func(gen_entities, e.methods[mi]));
                 mi = mi + 1;
             }
         }
@@ -661,7 +668,7 @@ function collect_instantiations(prog: Program) returns Array<IrType> {
     while ii < len(prog.impls) {
         let mutable mi2: Int = 0;
         while mi2 < len(prog.impls[ii].methods) {
-            all = append_types(all, insts_from_func(prog.entities, prog.impls[ii].methods[mi2]));
+            all = append_types(all, insts_from_func(gen_entities, prog.impls[ii].methods[mi2]));
             mi2 = mi2 + 1;
         }
         ii = ii + 1;
@@ -765,7 +772,9 @@ public function lower(prog: Program, path: String) returns IrModule {
         extern_paths.push(prog.externs[exi].target);
         exi = exi + 1;
     }
-    return lower_module(prog, path, true, shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), prog.enums, prog.entities, func_names, func_returns, extern_names, extern_paths);
+    // Single-file: every generic instantiation is emitted by the one module.
+    let single_monos: Array<IrType> = collect_instantiations(prog, prog.entities);
+    return lower_module(prog, path, true, shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), prog.enums, prog.entities, func_names, func_returns, extern_names, extern_paths, single_monos);
 }
 
 // lower_module — lower one Program of a (possibly multi-file) build. is_entry marks
@@ -778,7 +787,7 @@ public function lower(prog: Program, path: String) returns IrModule {
 // for lookups/classification (is_known_entity for cross-module constructors, variant
 // resolution, self-field types) — mirroring stage1's global lowerer.entities. The per-
 // module prog.enums/prog.entities still drive which decls this module EMITS.
-public function lower_module(prog: Program, path: String, is_entry: Bool, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, all_enums: Array<EnumDecl>, all_entities: Array<EntityDecl>, func_names: Array<String>, func_returns: Array<IrType>, extern_names: Array<String>, extern_paths: Array<String>) returns IrModule {
+public function lower_module(prog: Program, path: String, is_entry: Bool, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, all_enums: Array<EnumDecl>, all_entities: Array<EntityDecl>, func_names: Array<String>, func_returns: Array<IrType>, extern_names: Array<String>, extern_paths: Array<String>, emit_monos: Array<IrType>) returns IrModule {
     let mod_name: String = path_module_name(path);
     let mutable name_prefix: String = "";
     if not is_entry {
@@ -821,13 +830,16 @@ public function lower_module(prog: Program, path: String, is_entry: Bool, module
         }
         eei = eei + 1;
     }
-    // Collect generic-entity instantiations across the program and emit a
-    // monomorphized entity for each (mirrors collectInstantiations + monomorphizeEntity).
-    let insts: Array<IrType> = collect_instantiations(prog);
+    // Emit a monomorphized entity for each generic instantiation ASSIGNED to this
+    // module. lower_all assigns each instantiation to the first module (topological
+    // order) that uses it, so a generic instantiated in several modules is emitted
+    // once (mirrors stage1's collectInstantiations per-module + emit-time dedup). The
+    // decl is looked up in the GLOBAL entity registry so the entry module can
+    // monomorphize a generic defined in a dependency.
     let mutable insi: Int = 0;
-    while insi < len(insts) {
-        let inst: IrType = insts[insi];
-        let decl: EntityDecl = find_entity_decl(prog.entities, inst.name);
+    while insi < len(emit_monos) {
+        let inst: IrType = emit_monos[insi];
+        let decl: EntityDecl = find_entity_decl(all_entities, inst.name);
         if decl.name != "" {
             ents.push(monomorphize_entity(decl, inst.type_args, all_enums, all_entities));
         }
@@ -953,11 +965,29 @@ public function lower_all(progs: Array<Program>, paths: Array<String>) returns I
         }
         g = g + 1;
     }
+    // Assign each generic-entity instantiation to the FIRST module (topological order)
+    // that uses it, so a generic instantiated in several modules is monomorphized once.
+    // The instantiation may be defined in one module (e.g. a dependency) and used only
+    // in another (e.g. the entry module); collecting per module and deduping globally
+    // here — rather than each module monomorphizing its own — matches stage1's
+    // per-module collection plus emit-time dedup, and covers entry-only instantiations.
+    let mutable seen_monos: Array<String> = shared_ast.empty_string_array();
     let mutable mods: Array<IrModule> = compiler_ir.empty_ir_module_array();
     let mutable j: Int = 0;
     while j < n {
         let is_entry: Bool = j == n - 1;
-        mods.push(lower_module(progs[j], paths[j], is_entry, mod_names, mod_prefixes, type_names, type_prefixes, all_enums, all_entities, func_names, func_returns, extern_names, extern_paths));
+        let these: Array<IrType> = collect_instantiations(progs[j], all_entities);
+        let mutable emit_monos: Array<IrType> = compiler_ir.empty_ir_type_array();
+        let mutable ti: Int = 0;
+        while ti < len(these) {
+            let mn: String = compiler_ir.ir_mangle_generic_name(these[ti].name, these[ti].type_args);
+            if not string_in(seen_monos, mn) {
+                seen_monos.push(mn);
+                emit_monos.push(these[ti]);
+            }
+            ti = ti + 1;
+        }
+        mods.push(lower_module(progs[j], paths[j], is_entry, mod_names, mod_prefixes, type_names, type_prefixes, all_enums, all_entities, func_names, func_returns, extern_names, extern_paths, emit_monos));
         j = j + 1;
     }
     return IrProgram(mods);
@@ -1823,6 +1853,29 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
                     qi = qi + 1;
                 }
                 if found >= 0 {
+                    // Module-qualified generic entity constructor: `pkg.Pair<Int>(...)`.
+                    // The type args are baked into callee.name; if the base is a generic
+                    // entity, emit the monomorphized constructor (global name, no prefix),
+                    // mirroring the bare `Pair<Int>()` path.
+                    let gctype: IrType = compiler_ir.ir_parse_type(callee.name);
+                    if entity_is_generic(scope.entities, gctype.name) {
+                        if len(gctype.type_args) > 0 {
+                            let gmangled: String = compiler_ir.ir_mangle_generic_name(gctype.name, gctype.type_args);
+                            let mutable gcc: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, gmangled, args, compiler_ir.ir_type_named(gmangled));
+                            gcc.call_kind = compiler_ir.callkind_constructor();
+                            return gcc;
+                        }
+                    }
+                    // Module-qualified enum variant: `pkg.Rect(w, h)` -> `Shape::Rect { ... }`,
+                    // mirroring the bare `Rect(w, h)` variant path.
+                    let mq_var_enum: String = resolve_enum_for_variant(scope.enums, callee.name);
+                    if mq_var_enum != "" {
+                        let mutable mqvc: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, callee.name, args, compiler_ir.ir_type_named(mq_var_enum));
+                        mqvc.call_kind = compiler_ir.callkind_variant();
+                        mqvc.field_names = resolve_variant_field_names(scope.enums, mq_var_enum, callee.name);
+                        mqvc.enum_name = mangle_type_name(mq_var_enum, scope.type_names, scope.type_prefixes);
+                        return mqvc;
+                    }
                     // A module-qualified call to an ENTITY is a constructor
                     // (`types_pkg.Point(...)` -> `TypesPoint::new(...)`) — mangled by the
                     // type-origins map, not the function prefix. Otherwise a free-fn call.
@@ -1835,6 +1888,33 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
                     let mangled: String = scope.module_prefixes[found] + callee.name;
                     // Stamp the cross-module call's result type (by the ORIGINAL fn name).
                     return IrExpr(compiler_ir.irex_call(), 0, "", false, mangled, args, lookup_func_return(scope.func_names, scope.func_returns, callee.name));
+                }
+            }
+            // Module-qualified enum variant `pkg.Enum.Variant(args)`: the callee is a
+            // field access whose receiver is itself `pkg.Enum` (a field access on a
+            // module ident). If the method names a variant, lower it as a variant
+            // construction, mirroring the bare `Variant(args)` path.
+            if callee.children[0].kind == shared_ast.ex_field() {
+                let cinner: Expr = callee.children[0].children[0];
+                if cinner.kind == shared_ast.ex_ident() {
+                    let mutable emi: Int = 0;
+                    let mutable emfound: Bool = false;
+                    while emi < len(scope.module_names) {
+                        if scope.module_names[emi] == cinner.name {
+                            emfound = true;
+                        }
+                        emi = emi + 1;
+                    }
+                    if emfound {
+                        let ev: String = resolve_enum_for_variant(scope.enums, callee.name);
+                        if ev != "" {
+                            let mutable evc: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, callee.name, args, compiler_ir.ir_type_named(ev));
+                            evc.call_kind = compiler_ir.callkind_variant();
+                            evc.field_names = resolve_variant_field_names(scope.enums, ev, callee.name);
+                            evc.enum_name = mangle_type_name(ev, scope.type_names, scope.type_prefixes);
+                            return evc;
+                        }
+                    }
                 }
             }
             let object: IrExpr = lower_expr(callee.children[0], scope);
