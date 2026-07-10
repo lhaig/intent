@@ -274,10 +274,35 @@ public function mangle_type_name(name: String, type_names: Array<String>, type_p
     return name;
 }
 
+// is_user_type_name — true when name is a known user entity/enum (present in the
+// type-origins arrays). Used to distinguish a generic instantiation of a user type
+// (which monomorphizes to a global name) from a builtin generic like Array<T>.
+function is_user_type_name(name: String, type_names: Array<String>) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(type_names) {
+        if type_names[i] == name {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
 // mangle_ir_type — an IrType with every user entity/enum name (its own and nested
 // type_args) mangled through the type-origins map. Builtins (Int, Array, Map, Fn, …)
 // keep their names; their type_args are recursed so e.g. Array<Point> -> Array<TypesPoint>.
 public function mangle_ir_type(t: IrType, type_names: Array<String>, type_prefixes: Array<String>) returns IrType {
+    // A generic instantiation of a user entity/enum (type_args present and the base
+    // is a known user type) monomorphizes to a single global type (Pair<Int> ->
+    // Pair__Int) shared across every module — its base must NOT take a module prefix,
+    // and its args stay bare so map_type's __<args> suffix matches stage1 (which
+    // mangles from the unprefixed arg names). Prefixing produced dangling references
+    // like LibPair__Int with no matching struct.
+    if len(t.type_args) > 0 {
+        if is_user_type_name(t.name, type_names) {
+            return IrType(t.name, t.type_args, t.fn_param_count);
+        }
+    }
     let mutable margs: Array<IrType> = compiler_ir.empty_ir_type_array();
     let mutable i: Int = 0;
     while i < len(t.type_args) {

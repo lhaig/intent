@@ -276,11 +276,6 @@ func CompileProject(entryPath string) *Result {
 		return res
 	}
 
-	// Warn if cross-package imports are present (codegen doesn't handle them fully)
-	if registry.HasCrossPackageImports() {
-		diag.Warningf(0, 0, "cross-package type references (entities, enums, traits) in code generation have limited support; simple imports work but complex type hierarchies may produce incomplete output")
-	}
-
 	// Topological sort
 	sortedPaths, err := registry.TopologicalSort()
 	if err != nil {
@@ -398,10 +393,6 @@ func compileFromRegistryWithOptions(registry *ModuleRegistry, entryPath string, 
 	if diag.HasErrors() {
 		res.Diagnostics = diag
 		return res
-	}
-
-	if registry.HasCrossPackageImports() {
-		diag.Warningf(0, 0, "cross-package type references (entities, enums, traits) in code generation have limited support; simple imports work but complex type hierarchies may produce incomplete output")
 	}
 
 	sortedPaths, err := registry.TopologicalSort()
@@ -530,11 +521,6 @@ func VerifyProjectWithReport(entryPath string) (*VerifyOutput, error) {
 	}
 	if diag.HasErrors() {
 		return nil, fmt.Errorf("discovery errors:\n%s", diag.Format(entryPath))
-	}
-
-	// Warn if cross-package imports are present
-	if registry.HasCrossPackageImports() {
-		diag.Warningf(0, 0, "cross-package type references (entities, enums, traits) in code generation have limited support; simple imports work but complex type hierarchies may produce incomplete output")
 	}
 
 	// Topological sort

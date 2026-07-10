@@ -1,0 +1,19 @@
+module lib version "1.0.0";
+
+public entity Pair<T> {
+    field a: T;
+    field b: T;
+
+    constructor(a: T, b: T) {
+        self.a = a;
+        self.b = b;
+    }
+
+    method first() returns T {
+        return self.a;
+    }
+}
+
+public function make_int_pair(a: Int, b: Int) returns Pair<Int> {
+    return Pair<Int>(a, b);
+}

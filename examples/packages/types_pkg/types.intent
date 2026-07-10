@@ -1,5 +1,11 @@
 module types version "0.1.0";
 
+public enum Classification {
+    Origin,
+    OnAxis,
+    General(quadrant: Int),
+}
+
 public entity Point {
     field x: Float;
     field y: Float;
@@ -22,6 +28,20 @@ public entity Point {
     }
 }
 
+public entity Labeled<T> {
+    field name: String;
+    field value: T;
+
+    constructor(name: String, value: T) {
+        self.name = name;
+        self.value = value;
+    }
+
+    method value_of() returns T {
+        return self.value;
+    }
+}
+
 public function distance_squared(a: Point, b: Point) returns Float
     requires true
     ensures result >= 0.0
@@ -29,6 +49,28 @@ public function distance_squared(a: Point, b: Point) returns Float
     let dx: Float = b.get_x() - a.get_x();
     let dy: Float = b.get_y() - a.get_y();
     return dx * dx + dy * dy;
+}
+
+public function classify(p: Point) returns Classification {
+    if p.get_x() == 0.0 {
+        if p.get_y() == 0.0 {
+            return Origin;
+        }
+        return OnAxis;
+    }
+    return General(1);
+}
+
+public function rank(c: Classification) returns Int {
+    return match c {
+        Origin => 0,
+        OnAxis => 1,
+        General(q) => q + 1,
+    };
+}
+
+public function make_labeled(name: String, value: Int) returns Labeled<Int> {
+    return Labeled<Int>(name, value);
 }
 
 test "distance_squared of (0,0) and (3,4) is 25" {

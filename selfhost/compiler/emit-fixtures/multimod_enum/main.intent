@@ -1,0 +1,13 @@
+module main version "1.0.0";
+
+import "lib.intent";
+
+entry function main() returns Int {
+    let c: Shape = lib.make_circle(5);
+    let r: Shape = Rect(3, 4);
+    let e: Shape = Empty;
+    print(lib.shape_score(c));
+    print(lib.shape_score(r));
+    print(lib.shape_score(e));
+    return 0;
+}

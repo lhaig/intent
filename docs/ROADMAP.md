@@ -409,9 +409,6 @@ Implemented in commits 888f80b..257ccfe. ADR 0032 revised in-place. Adds the "fe
 ### Phase 17.B Annotation Implementation -- DONE (2026-05-30)
 Shipped per ADR 0031 in commit 4dacd6c. Lexer/parser/AST/checker/IR/runner all carry the `@target_specific("rust", ...)` annotation through; new `SkipAnnotation` classification keeps annotation skips distinct from the WASM-rejection skip. `examples/target_specific_demo.intent` demonstrates all four cases.
 
-### Package Registry Remote-Fetch -- DEFERRED (no user demand)
-Closes the ADR 0027 deferred item. Manifest, semver, cache, and resolver are in place; only the network-fetch step is stubbed. **Deferred until there are real users publishing Intent packages.** No point building a registry no one is going to push to.
-
 ---
 
 ## Milestone 9: Self-Hosting -- COMPLETE (2026-07-09)
@@ -435,6 +432,22 @@ toolchain byte-identical to stage1. Gates: `make diff-emit` (33/33 example corpu
 every repo program, Phase 57), `make bootstrap-stage3` (4/4 the stage1->stage2->stage3
 fixpoint), plus the per-tool `diff-*` / `selfcheck-*` gates. See ADR 0059 and
 `prds/done/phase-55-*` / `phase-56-*` (Phase 57 was gap-closing; see `prds/progress.md`).
+
+### Phase 59: Cross-package code generation -- DONE (2026-07-10)
+
+An audit found the "cross-package codegen not fully supported" caveat was largely stale:
+entities, methods, traits, qualified function calls, enums, generics, and nested type
+references already emitted, compiled, and ran across a package boundary on Rust and JS.
+Three real bugs were fixed ([ADR 0061](decisions/0061-cross-package-codegen.md)):
+Rust enum data-variant construction dropped its fields under a mangling (G1); JS enum
+construction used the unmangled name (G2); Rust multi-module generic monomorphization
+emitted duplicate structs and un-monomorphized signature types (G3, fixed in both the Go
+and the self-hosted Intent backend). New `diff-emit` fixtures `multimod_enum` /
+`multimod_generic` keep them byte-equal stage1↔stage2 (`make diff-emit` 35/35;
+`bootstrap-stage3` still a fixpoint). The blanket build warning is removed; DESIGN.md
+§15.9 now carries the support matrix. Two syntax limitations remain, documented with
+workarounds: module-qualified type-args/variants (`pkg.Generic<T>()`) and unqualified
+imported function calls.
 
 ## Milestone 8: Developer Experience
 

@@ -1742,7 +1742,14 @@ There is no `src/` subdirectory convention. This keeps the structure simple and 
 
 ### 15.9 Known Limitations
 
-**Cross-package code generation is not yet fully supported.** Dependency discovery, manifest resolution, and type checking work across package boundaries, but the code generation backends (Rust, JS, WASM) do not yet handle cross-package name mangling or linking. Only single-package builds produce fully correct output. Building a project with cross-package imports emits a compiler warning.
+**Cross-package code generation** works for the common cases on the Rust and JavaScript targets: entities (with constructors, contracts, invariants, and methods), traits (`impl` in a dependency, method called from the consumer), free functions called via a qualified name (`pkg.fn(...)`), enums (declaration, `match`, and unit/data-variant construction), generic entities and functions instantiated with explicit type arguments, and nested cross-package type references. See [ADR 0061](decisions/0061-cross-package-codegen.md) for the full support matrix and the fixes behind it.
+
+Two limitations remain (each produces a loud parse/compile error, not silent-wrong output, and has a workaround):
+
+- **Module-qualified type-argument / variant syntax** — `pkg.Generic<T>(...)` and `pkg.Enum.Variant(...)` do not parse. Construct with the bare form (`Generic<T>(...)`) or via a factory function exported from the dependency.
+- **Unqualified calls to imported functions** — `helper(...)` for an imported `helper` type-checks but is emitted unmangled. Qualify the call as `pkg.helper(...)`.
+
+WebAssembly builds additionally reject `test` declarations ([ADR 0029](decisions/0029-in-language-testing.md)), independent of packaging.
 
 ---
 

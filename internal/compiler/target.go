@@ -201,11 +201,6 @@ func EmitProjectToTarget(entryPath, target, baseName string, opts backend.BuildO
 		return fmt.Errorf("discovery errors:\n%s", diag.Format(entryPath))
 	}
 
-	// Warn if cross-package imports are present
-	if registry.HasCrossPackageImports() {
-		diag.Warningf(0, 0, "cross-package type references (entities, enums, traits) in code generation have limited support; simple imports work but complex type hierarchies may produce incomplete output")
-	}
-
 	// Topological sort
 	sortedPaths, err := registry.TopologicalSort()
 	if err != nil {

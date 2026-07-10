@@ -1,0 +1,19 @@
+module lib version "1.0.0";
+
+public enum Shape {
+    Circle(radius: Int),
+    Rect(w: Int, h: Int),
+    Empty,
+}
+
+public function make_circle(r: Int) returns Shape {
+    return Circle(r);
+}
+
+public function shape_score(s: Shape) returns Int {
+    return match s {
+        Circle(r) => r,
+        Rect(w, h) => w * h,
+        Empty => 0,
+    };
+}

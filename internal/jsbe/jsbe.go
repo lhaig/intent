@@ -412,6 +412,15 @@ func (g *generator) mangledEntityName(name string) string {
 }
 
 func (g *generator) mangledEnumName(name string) string {
+	// Consult typeOrigins first (like mangledClassName) so an imported enum
+	// resolves to its defining module's prefix even from a consumer generator,
+	// whose own classPrefix is empty. Without this, cross-module construction
+	// emitted the bare name (e.g. `Shape.Rect(...)` for a `const LibShape` object).
+	if g.typeOrigins != nil {
+		if prefix, ok := g.typeOrigins[name]; ok {
+			return prefix + name
+		}
+	}
 	if g.classPrefix != "" {
 		return g.classPrefix + name
 	}
@@ -1386,30 +1395,19 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr) string {
 }
 
 func (g *generator) generateVariantConstructor(expr *ir.CallExpr) string {
-	enumName := expr.EnumName
-
-	// Find variant declaration from IR enums
-	var variant *ir.EnumVariant
-	if e, ok := g.enums[enumName]; ok {
-		for _, v := range e.Variants {
-			if v.Name == expr.Function {
-				variant = v
-				break
-			}
-		}
-	}
-
-	// Unit variant
-	if variant == nil || len(variant.Fields) == 0 {
-		return fmt.Sprintf("%s.%s()", enumName, expr.Function)
-	}
-
-	// Data variant
+	// The enum object is declared under its module-mangled name (see
+	// generateEnumDecl), so construction must reference the mangled name too.
+	// Under a mangling (multi-module / cross-package builds) emitting the bare
+	// original name produced `Color.Red()` for a `const LibColor = {...}` object
+	// — a ReferenceError at runtime. JS variant construction is positional, so
+	// the args carry through directly with no field-name or cross-module enum
+	// lookup needed (an empty arg list yields the unit-variant form).
+	mangledName := g.mangledEnumName(expr.EnumName)
 	args := make([]string, len(expr.Args))
 	for i, arg := range expr.Args {
 		args[i] = g.generateExpr(arg)
 	}
-	return fmt.Sprintf("%s.%s(%s)", enumName, expr.Function, strings.Join(args, ", "))
+	return fmt.Sprintf("%s.%s(%s)", mangledName, expr.Function, strings.Join(args, ", "))
 }
 
 func (g *generator) generateMethodCallExpr(expr *ir.MethodCallExpr) string {

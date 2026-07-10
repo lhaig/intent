@@ -92,3 +92,4 @@ What follows from this decision? Trade-offs accepted.
 | 0058 | [Self-hosted checker — cross-module resolution via harness discovery + stage2 merge](0058-self-hosted-checker-cross-module-resolution.md) | 2026-07-03 | accepted (Phase 54) |
 | 0059 | [Self-hosted compiler — IR node model](0059-self-hosted-ir-node-model.md) | 2026-07-07 | accepted (Phase 55a) |
 | 0060 | [Osprey as an emit target — declined](0060-osprey-backend-declined.md) | 2026-07-09 | accepted (decision: decline) |
+| 0061 | [Cross-package code generation — support matrix and fixes](0061-cross-package-codegen.md) | 2026-07-10 | accepted (Phase 59) |

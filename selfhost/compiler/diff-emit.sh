@@ -63,6 +63,8 @@ CORPUS=(
   "examples/generic_stack.intent"
   "examples/multi_file/main.intent"
   "selfhost/compiler/emit-fixtures/multimod_entity/main.intent"
+  "selfhost/compiler/emit-fixtures/multimod_enum/main.intent"
+  "selfhost/compiler/emit-fixtures/multimod_generic/main.intent"
   "selfhost/compiler/emit-fixtures/let_locals.intent"
   "selfhost/compiler/emit-fixtures/binops.intent"
   "selfhost/compiler/emit-fixtures/control_flow.intent"

@@ -210,6 +210,17 @@ func GenerateAll(prog *ir.Program, opts Options) string {
 		}
 	}
 
+	// Build global enums map for cross-module variant-constructor lookups. Each
+	// module gets its own generator whose g.enums holds only that module's enums,
+	// so a consumer module constructing an imported enum's data variant needs
+	// this fallback to recover the variant's field names.
+	allEnums := make(map[string]*ir.Enum)
+	for _, mod := range prog.Modules {
+		for _, e := range mod.Enums {
+			allEnums[e.Name] = e
+		}
+	}
+
 	// Build global extern (FFI) functions map. Phase 15.
 	allExterns := make(map[string]*ir.ExternFunction)
 	for _, mod := range prog.Modules {
@@ -227,6 +238,12 @@ func GenerateAll(prog *ir.Program, opts Options) string {
 	needsSerdeJsonGlobal := false
 	needsTokioGlobal := false
 	needsFuturesGlobal := false
+	// Track top-level declarations already emitted, keyed by their final emitted
+	// name, so a generic monomorphization instantiated in more than one module
+	// (e.g. Pair__Int used by both a dependency and the entry module) is emitted
+	// once. Regular declarations get unique per-module mangled names, so this
+	// only ever collapses true duplicates (globally-named monomorphizations).
+	emitted := make(map[string]bool)
 	for _, mod := range prog.Modules {
 		g := &generator{
 			entities:        make(map[string]*ir.Entity),
@@ -238,6 +255,7 @@ func GenerateAll(prog *ir.Program, opts Options) string {
 			typeOrigins:     typeOrigins,
 			allFunctions:    allFunctions,
 			allEntities:     allEntities,
+			allEnums:        allEnums,
 			allExterns:      allExterns,
 			stripContracts:  opts.StripContracts,
 		}
@@ -261,12 +279,18 @@ func GenerateAll(prog *ir.Program, opts Options) string {
 		}
 
 		for _, e := range mod.Entities {
-			g.generateEntity(e)
-			g.emitLine("")
+			if key := "entity:" + g.mangledEntityName(e.Name); !emitted[key] {
+				emitted[key] = true
+				g.generateEntity(e)
+				g.emitLine("")
+			}
 		}
 		for _, e := range mod.Enums {
-			g.generateEnumDecl(e)
-			g.emitLine("")
+			if key := "enum:" + g.mangledEnumName(e.Name); !emitted[key] {
+				emitted[key] = true
+				g.generateEnumDecl(e)
+				g.emitLine("")
+			}
 		}
 		for _, t := range mod.Traits {
 			g.generateTrait(t)
@@ -277,8 +301,15 @@ func GenerateAll(prog *ir.Program, opts Options) string {
 			g.emitLine("")
 		}
 		for _, f := range mod.Functions {
-			g.generateFunction(f)
-			g.emitLine("")
+			fnName := f.Name
+			if g.namePrefix != "" {
+				fnName = g.namePrefix + f.Name
+			}
+			if key := "fn:" + fnName; !emitted[key] {
+				emitted[key] = true
+				g.generateFunction(f)
+				g.emitLine("")
+			}
 		}
 		for _, t := range mod.Tests {
 			g.generateTest(t)
@@ -361,6 +392,7 @@ type generator struct {
 	typeOrigins     map[string]string             // entity/enum name -> defining module's struct prefix
 	allFunctions    map[string]*ir.Function       // all functions across all modules (for cross-module ref lookups)
 	allEntities     map[string]*ir.Entity         // all entities across all modules (for cross-module constructor lookups)
+	allEnums        map[string]*ir.Enum           // all enums across all modules (for cross-module variant lookups)
 	allExterns      map[string]*ir.ExternFunction // all extern (FFI) functions across all modules
 	mutatedVars     map[string]bool               // variables assigned to in current function body
 
@@ -491,6 +523,16 @@ func (g *generator) mapType(t *checker.Type) string {
 		}
 		return "impl Fn()"
 	default:
+		// A generic instantiation of a user entity/enum (e.g. Pair<Int>) is
+		// monomorphized to a single global type (Pair__Int) shared across all
+		// modules, so it must NOT take a module prefix. mapType is reached with
+		// the still-generic annotation when a function signature in a dependency
+		// module carries it; emit the monomorphized name to match the lowered
+		// struct/enum instead of prefixing the base name (which produced dangling
+		// references like `LibPair`).
+		if (t.IsEntity || t.IsEnum) && t.IsGeneric && len(t.TypeParams) > 0 {
+			return ir.MangleGenericName(t.Name, t.TypeParams)
+		}
 		if t.IsEntity {
 			return g.mangledEntityName(t.Name)
 		}
@@ -1930,19 +1972,49 @@ func (g *generator) generateBuiltinCall(expr *ir.CallExpr, arrayRefParams map[st
 	return fmt.Sprintf("%s(%s)", expr.Function, strings.Join(args, ", "))
 }
 
-func (g *generator) generateVariantConstructor(expr *ir.CallExpr, arrayRefParams map[string]bool) string {
-	enumName := g.mangledEnumName(expr.EnumName)
-
-	// Find variant declaration from IR enums
-	var variant *ir.EnumVariant
-	if e, ok := g.enums[enumName]; ok {
+// lookupVariant finds a variant declaration by enum name and variant name,
+// tolerating the two ways an enum can be identified across a module boundary:
+// origName is what the defining module records (the enum's original name) and
+// mangledName is what a consumer module records (the module-mangled name). It
+// searches the per-module map first, then the cross-module allEnums fallback,
+// resolving by the original key and by reverse-matching the mangled name.
+func (g *generator) lookupVariant(origName, mangledName, variantName string) *ir.EnumVariant {
+	find := func(e *ir.Enum) *ir.EnumVariant {
 		for _, v := range e.Variants {
-			if v.Name == expr.Function {
-				variant = v
-				break
+			if v.Name == variantName {
+				return v
+			}
+		}
+		return nil
+	}
+	for _, m := range []map[string]*ir.Enum{g.enums, g.allEnums} {
+		if m == nil {
+			continue
+		}
+		if e, ok := m[origName]; ok {
+			return find(e)
+		}
+		for _, cand := range m {
+			if g.mangledEnumName(cand.Name) == mangledName {
+				return find(cand)
 			}
 		}
 	}
+	return nil
+}
+
+func (g *generator) generateVariantConstructor(expr *ir.CallExpr, arrayRefParams map[string]bool) string {
+	enumName := g.mangledEnumName(expr.EnumName)
+
+	// Find the variant declaration from the IR enums so data variants carry
+	// their fields. The enum map is keyed by each enum's original (unmangled)
+	// name, but expr.EnumName is inconsistent across a module boundary: the
+	// defining module records the original name ("Shape") while a consumer
+	// module records the already-mangled name ("LibShape"). Under a mangling the
+	// mismatched key missed, so data variants silently fell through to the
+	// unit-variant path below and dropped their fields. Resolve by the original
+	// key first, then by matching the mangled name (reverse lookup).
+	variant := g.lookupVariant(expr.EnumName, enumName, expr.Function)
 
 	// Unit variant
 	if variant == nil || len(variant.Fields) == 0 {

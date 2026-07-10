@@ -1,0 +1,11 @@
+module main version "1.0.0";
+
+import "lib.intent";
+
+entry function main() returns Int {
+    let p: Pair<Int> = Pair<Int>(1, 2);
+    let q: Pair<Int> = lib.make_int_pair(10, 20);
+    print(p.first());
+    print(q.first());
+    return 0;
+}
