@@ -13,16 +13,12 @@ is explicit rather than silent (ADR 0056: Unknown → skip is always safe).
 
 ## 2. Deferred items
 
-### Inference / name-resolution (ADR 0056 sound-but-incomplete)
-- **Method-call return-type inference.** `infer_expr_type` returns Unknown for a
-  method call; typing it needs generic type-param substitution through the
-  receiver's type args AND stage1's full built-in-method return-type table.
-  Consequence: checks keyed off a method-call result (let-mismatch, assert_eq,
-  arg-typing) skip on method-call operands.
-- **Contract-clause name/type recursion.** `requires`/`ensures` clauses are checked
-  for boolean-typedness but not recursed for undeclared-variable / argument /
-  operator errors. Needs `old()` and `result` handling (no stage2 AST nodes for
-  them) plus quantifier bound-var scope, without false-positives on valid contracts.
+> Two items originally listed here shipped in Phase 48 (2026-07-10) and are no longer
+> deferred: **method-call return-type inference** (user-entity methods, with bare
+> type-param substitution through the receiver's type args) and **contract-clause name/type
+> recursion** (`requires`/`ensures`/`invariant` clauses recursed through `check_expr_names`,
+> with `result`/`old()` handled as contract keywords). Built-in-method return typing (the
+> full stage1 table) remains Unknown — a sound skip.
 
 ### Needs new machinery
 - **impl-block-method contracts.** Contracts on impl-block methods are not checked

@@ -373,16 +373,18 @@ Remaining, in rough value order:
   parameter), and the **`await` EXPRESSION** async check (48j-c2e — reused scope.in_async;
   stamped the ex_await keyword position first per ADR 0054, then added the ex_await case that
   also recurses the operand, closing the latent await-operand recursion gap).
-- **STATUS 2026-07-10 — Phase 48 & 53 COMPLETE.** Of the items below, these SHIPPED
-  (diff-checker 100/100): spawn/try operand recursion, the async-test no-await warning (added
+- **STATUS 2026-07-10 — Phase 48 & 53 COMPLETE.** All of the items below SHIPPED
+  (diff-checker **104/104**): spawn/try operand recursion, the async-test no-await warning (added
   warning-severity support to the checker + `intentc check`), the full assert_eq comparable-set
   (eq-signature sub-checks + Map/Future rejection + generic recursion, via `type_to_string`/
-  `type_equal`), unary operator typing, entity has-no-constructor, extern param/return
-  unknown-type, and trait-method-contract fmt/lint fidelity. The rest — method-call return
-  inference, contract-clause name recursion, impl-method contracts, immutable-target
-  assignment/push, the FFI-bridgeability messages, the module-qualified has-no-constructor
-  variant, and the `@target_specific("wasm")` warning — are deferred sound-false-negatives now
-  tracked in `prds/backlog/prd-phase-58-checker-parity-tail.md`. Historical gap list retained below.
+  `type_equal`), unary operator typing, **method-call return-type inference** (bare type-param
+  substitution through the receiver), **contract-clause name recursion** (`result`/`old()` handled
+  as contract keywords), entity has-no-constructor, extern param/return unknown-type, and
+  trait-method-contract fmt/lint fidelity. The only remaining checker gaps — built-in-method
+  return typing, impl-method contracts, immutable-target assignment/push, the FFI-bridgeability
+  messages, the module-qualified has-no-constructor variant, and the `@target_specific("wasm")`
+  warning — are sound-false-negatives tracked in `prds/backlog/prd-phase-58-checker-parity-tail.md`.
+  Historical gap list retained below.
 - **Remaining Phase 48 gaps** (all sound false negatives / corpus-invisible today):
   - **assert_eq comparable-set — remainder** (entity no-eq-method is DONE, 48j-c2f): the
     eq-method SIGNATURE sub-checks (wrong return / param count / param type), plus Map/Future

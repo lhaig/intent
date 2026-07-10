@@ -73,8 +73,10 @@ operator typing**. Sibling Phase 53 items also landed: **entity has-no-construct
 checker tests, all self-check / formatter / linter / emit-sweep gates + `make validate`
 green throughout.
 
-A small set of remaining **sound false negatives** (method-call return-type inference,
-contract-clause name recursion) plus needs-machinery items (impl-method contracts,
-immutable-target assignment) and narrow edges are catalogued in
+Method-call return-type inference (user-entity methods, bare type-param substitution through
+the receiver) and contract-clause name recursion (`result`/`old()` handled as contract
+keywords) also shipped 2026-07-10 — `make diff-checker` **104/104**, ~302 checker tests. A
+residual set of **sound false negatives** (built-in-method return typing, impl-method
+contracts, immutable-target assignment, and narrow edges) is catalogued in
 [prd-phase-58-checker-parity-tail.md](../backlog/prd-phase-58-checker-parity-tail.md).
 They never emit a wrong diagnostic and never fire on valid code — safe to defer.
