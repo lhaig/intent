@@ -853,6 +853,53 @@ entry function main() returns Int {
 	}
 }
 
+// TestGenerateUnqualifiedImportedFunctionCall guards the G6 fix: a call to an
+// imported function written WITHOUT a module qualifier (`helper(...)` rather than
+// `types_pkg.helper(...)`) must still be emitted with the defining module's prefix
+// (`types_helper`), not the entry module's empty prefix (bare `helper`, which does
+// not exist as a Rust item).
+func TestGenerateUnqualifiedImportedFunctionCall(t *testing.T) {
+	typesSrc := `module types version "1.0.0";
+
+public function helper(x: Int) returns Int {
+    return x + 1;
+}
+`
+	mainSrc := `module main version "1.0.0";
+
+import types_pkg;
+
+entry function main() returns Int {
+    let d: Int = helper(41);
+    return d;
+}
+`
+	packageDirs := map[string]string{"types_pkg": "/project/libs/types_pkg"}
+	registry := map[string]*ast.Program{
+		"/project/libs/types_pkg/types.intent": makeProgram(t, typesSrc),
+		"/project/main.intent":                 makeProgram(t, mainSrc),
+	}
+	sortedPaths := []string{
+		"/project/libs/types_pkg/types.intent",
+		"/project/main.intent",
+	}
+
+	checkResult := checker.CheckAll(registry, sortedPaths, packageDirs)
+	if checkResult.Diagnostics.HasErrors() {
+		t.Fatalf("check errors: %s", checkResult.Diagnostics.Format("test"))
+	}
+
+	prog := ir.LowerAll(registry, sortedPaths, checkResult, packageDirs)
+	output := GenerateAll(prog, Options{})
+
+	if !strings.Contains(output, "types_helper(41i64)") {
+		t.Errorf("expected unqualified imported call to be mangled to 'types_helper(41i64)', got:\n%s", output)
+	}
+	if strings.Contains(output, "= helper(") {
+		t.Errorf("unqualified imported call must not emit the bare name 'helper(', got:\n%s", output)
+	}
+}
+
 // TestEntryFunctionInImportedModuleNoDuplicateMain guards against a multi-file
 // build emitting two `fn main`/`__intent_main` when an imported (non-entry)
 // module declares an `entry` function (e.g. selfhost/formatter/parser.intent's

@@ -87,24 +87,35 @@ compile error, and each has a straightforward workaround:
   `pkg.Enum.Variant(...)` do not parse. *Workaround:* construct with the bare form
   (`Generic<T>(...)`, which resolves through the flattened import namespace) or via a
   factory function exported from the dependency. Both are verified working.
-- **Unqualified calls to imported functions** — `helper(...)` where `helper` is imported
-  is accepted by the checker but emitted unmangled, so it fails to compile. *Workaround:*
-  qualify the call (`pkg.helper(...)`), which is the idiomatic form used throughout the
-  corpus.
 - **WASM `test` declarations** — unsupported per [ADR 0029](0029-in-language-testing.md);
   orthogonal to packaging. A test-free cross-package program emits to WASM.
 
+### Follow-up: unqualified imported function calls (fixed 2026-07-10)
+
+`helper(...)` for a `helper` imported from a dependency was accepted by the checker but
+emitted with the calling module's prefix (empty in the entry module) rather than the
+defining module's, so it failed to compile. Fixed on both backends with a `funcOrigins`
+map (function name → defining module's prefix, mirroring `typeOrigins`): a call that is
+not local to the current module uses the defining module's prefix. Unqualified imported
+calls now emit, compile, and run; Go unit tests
+(`TestGenerateUnqualifiedImportedFunctionCall` in each backend) lock it in.
+
 ### Self-hosting parity (internal, not user-facing)
 
-A generic whose *only* instantiation is in the entry module of a multi-module build is
-monomorphized by the primary Go (stage1) compiler but not yet by the self-hosted stage2
-backend, which collects instantiations from the module that both defines and uses the
-generic. This is invisible to users — `intentc build` runs stage1, which emits, compiles,
-and runs it correctly — but it constrains the byte-equal `diff-emit-sweep` gate, so the
-repo's `examples/packages` demo instantiates its generic through a dependency factory
-(`make_labeled`) rather than directly in the consumer. Teaching stage2's cross-module
-instantiation collection to fold in the entry module's instantiations is deferred to a
-later self-hosting slice.
+Two cross-module patterns are handled by the primary Go (stage1) compiler but not yet by
+the self-hosted stage2 backend. Both are invisible to users — `intentc build` runs stage1,
+which emits, compiles, and runs them correctly — but they constrain the byte-equal
+`diff-emit-sweep` gate, so the repo's swept programs avoid them:
+
+- A generic whose *only* instantiation is in the entry module of a multi-module build:
+  stage2 collects instantiations from the module that both defines and uses the generic,
+  so the `examples/packages` demo instantiates its generic through a dependency factory
+  (`make_labeled`) rather than directly in the consumer.
+- Unqualified calls to imported functions: stage2 emits the bare name, so no swept fixture
+  uses that form (the corpus and toolchain call cross-module functions qualified).
+
+Teaching stage2's lowering to fold in the entry module's instantiations and to mangle
+unqualified imported calls is deferred to a later self-hosting slice.
 
 ## Consequences
 

@@ -162,6 +162,19 @@ func GenerateAll(prog *ir.Program, opts Options) string {
 		}
 	}
 
+	// Build function-origins map: function name -> defining module's name prefix,
+	// for non-entry modules. An unqualified call to an imported function is
+	// emitted with the current module's prefix by default (empty in the entry
+	// module), so it must be mangled to the defining module's prefix instead.
+	funcOrigins := make(map[string]string)
+	for _, mod := range prog.Modules {
+		if !mod.IsEntry {
+			for _, f := range mod.Functions {
+				funcOrigins[f.Name] = mod.Name + "_"
+			}
+		}
+	}
+
 	var sb strings.Builder
 	sb.WriteString("// Generated JavaScript code from Intent (multi-file)\n\n")
 
@@ -173,6 +186,7 @@ func GenerateAll(prog *ir.Program, opts Options) string {
 			isEntryFile:     mod.IsEntry,
 			moduleManglings: moduleManglings,
 			typeOrigins:     typeOrigins,
+			funcOrigins:     funcOrigins,
 			stripContracts:  opts.StripContracts,
 		}
 
@@ -280,6 +294,7 @@ type generator struct {
 	isEntryFile     bool
 	moduleManglings map[string]string
 	typeOrigins     map[string]string // entity/enum name -> defining module's class prefix
+	funcOrigins     map[string]string // function name -> defining module's name prefix (unqualified imported calls)
 
 	// Phase 22 / ADR 0033: when true, drop runtime contract checks.
 	// Preconditions, postconditions, and invariant-bearing __checkInvariants
@@ -1244,10 +1259,14 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr) string {
 		// non-entry modules calling local functions emit "fn is not defined"
 		// at runtime.
 		fnName := expr.Function
-		if g.namePrefix != "" {
-			if _, isLocal := g.functions[expr.Function]; isLocal {
+		if _, isLocal := g.functions[expr.Function]; isLocal {
+			if g.namePrefix != "" {
 				fnName = g.namePrefix + expr.Function
 			}
+		} else if prefix, ok := g.funcOrigins[expr.Function]; ok {
+			// Unqualified call to an imported function: prefix with its defining
+			// module rather than the current module (empty in the entry module).
+			fnName = prefix + expr.Function
 		}
 		return fmt.Sprintf("%s(%s)", fnName, strings.Join(args, ", "))
 	}

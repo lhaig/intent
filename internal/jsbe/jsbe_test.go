@@ -1353,6 +1353,51 @@ entry function main() returns Int {
 	}
 }
 
+// TestGenerateUnqualifiedImportedFunctionCallJS guards the G6 fix on the JS
+// backend: an imported function called without a module qualifier must be emitted
+// with the defining module's prefix (types_helper), not the bare name.
+func TestGenerateUnqualifiedImportedFunctionCallJS(t *testing.T) {
+	typesSrc := `module types version "1.0.0";
+
+public function helper(x: Int) returns Int {
+    return x + 1;
+}
+`
+	mainSrc := `module main version "1.0.0";
+
+import types_pkg;
+
+entry function main() returns Int {
+    let d: Int = helper(41);
+    return d;
+}
+`
+	packageDirs := map[string]string{"types_pkg": "/project/libs/types_pkg"}
+	registry := map[string]*ast.Program{
+		"/project/libs/types_pkg/types.intent": makeJSProgram(t, typesSrc),
+		"/project/main.intent":                 makeJSProgram(t, mainSrc),
+	}
+	sortedPaths := []string{
+		"/project/libs/types_pkg/types.intent",
+		"/project/main.intent",
+	}
+
+	checkResult := checker.CheckAll(registry, sortedPaths, packageDirs)
+	if checkResult.Diagnostics.HasErrors() {
+		t.Fatalf("check errors: %s", checkResult.Diagnostics.Format("test"))
+	}
+
+	prog := ir.LowerAll(registry, sortedPaths, checkResult, packageDirs)
+	output := GenerateAll(prog, Options{})
+
+	if !strings.Contains(output, "types_helper(41)") {
+		t.Errorf("expected unqualified imported call to be mangled to 'types_helper(41)', got:\n%s", output)
+	}
+	if strings.Contains(output, "= helper(") {
+		t.Errorf("unqualified imported call must not emit the bare name 'helper(', got:\n%s", output)
+	}
+}
+
 // Phase 16 / ADR 0029: in-language testing framework — JS backend tests.
 
 func TestJSGenerateSimpleTest(t *testing.T) {

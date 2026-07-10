@@ -221,6 +221,23 @@ func GenerateAll(prog *ir.Program, opts Options) string {
 		}
 	}
 
+	// Build function-origins map: function name -> defining module's name prefix,
+	// for functions in non-entry modules. An unqualified call to an imported
+	// function (`helper(...)` rather than `pkg.helper(...)`) is emitted with the
+	// current module's prefix by default — empty in the entry module — so it must
+	// be mangled to the defining module's prefix instead, mirroring typeOrigins
+	// for types. Same-module calls stay local (see the isLocal check at the call
+	// site) so this only rewrites genuinely-imported unqualified calls.
+	funcOrigins := make(map[string]string)
+	for _, mod := range prog.Modules {
+		if mod.IsEntry {
+			continue
+		}
+		for _, f := range mod.Functions {
+			funcOrigins[f.Name] = mod.Name + "_"
+		}
+	}
+
 	// Build global extern (FFI) functions map. Phase 15.
 	allExterns := make(map[string]*ir.ExternFunction)
 	for _, mod := range prog.Modules {
@@ -256,6 +273,7 @@ func GenerateAll(prog *ir.Program, opts Options) string {
 			allFunctions:    allFunctions,
 			allEntities:     allEntities,
 			allEnums:        allEnums,
+			funcOrigins:     funcOrigins,
 			allExterns:      allExterns,
 			stripContracts:  opts.StripContracts,
 		}
@@ -393,6 +411,7 @@ type generator struct {
 	allFunctions    map[string]*ir.Function       // all functions across all modules (for cross-module ref lookups)
 	allEntities     map[string]*ir.Entity         // all entities across all modules (for cross-module constructor lookups)
 	allEnums        map[string]*ir.Enum           // all enums across all modules (for cross-module variant lookups)
+	funcOrigins     map[string]string             // function name -> defining module's name prefix (unqualified imported calls)
 	allExterns      map[string]*ir.ExternFunction // all extern (FFI) functions across all modules
 	mutatedVars     map[string]bool               // variables assigned to in current function body
 
@@ -1795,7 +1814,16 @@ func (g *generator) generateCallExpr(expr *ir.CallExpr, arrayRefParams map[strin
 			argStr = g.cloneIfNeeded(argStr, arg)
 			args[i] = argStr
 		}
-		return fmt.Sprintf("%s(%s)", g.namePrefix+expr.Function, strings.Join(args, ", "))
+		// An unqualified call resolves to a same-module function with the current
+		// module's prefix; if it is not local, it is an imported function called
+		// without a module qualifier, so use its defining module's prefix.
+		fnName := g.namePrefix + expr.Function
+		if _, isLocal := g.functions[expr.Function]; !isLocal {
+			if prefix, ok := g.funcOrigins[expr.Function]; ok {
+				fnName = prefix + expr.Function
+			}
+		}
+		return fmt.Sprintf("%s(%s)", fnName, strings.Join(args, ", "))
 	}
 }
 
