@@ -1,0 +1,24 @@
+// stage1: ensures clause must be boolean, got Int
+// An impl-block method's contract is checked for well-typedness (stage1
+// checkImplBlockBodies). Phase 58 impl-method contracts.
+module ck_impl_method_contract version "0.1.0";
+
+trait Doer {
+    method go() returns Int;
+}
+
+entity Worker {
+    field n: Int;
+
+    constructor(n: Int) {
+        self.n = n;
+    }
+}
+
+impl Doer for Worker {
+    method go() returns Int
+        ensures 5
+    {
+        return self.n;
+    }
+}

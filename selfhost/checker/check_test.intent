@@ -1557,3 +1557,22 @@ test "contract: valid clauses using result and params are clean" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+test "impl-method contract: non-boolean ensures on an impl method is rejected" {
+    let tr: String = "trait Doer " + lbrace() + " method go() returns Int; " + rbrace();
+    let en: String = "entity Worker " + lbrace() + " field n: Int; constructor(n: Int) " + lbrace() + " self.n = n; " + rbrace() + " " + rbrace();
+    let im: String = "impl Doer for Worker " + lbrace() + " method go() returns Int ensures 5 " + lbrace() + " return self.n; " + rbrace() + " " + rbrace();
+    let src: String = "module m version \"1.0\"; " + tr + " " + en + " " + im;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "ensures clause must be boolean, got Int");
+}
+
+test "impl-method contract: a valid boolean ensures is accepted" {
+    let tr: String = "trait Doer " + lbrace() + " method go() returns Int; " + rbrace();
+    let en: String = "entity Worker " + lbrace() + " field n: Int; constructor(n: Int) " + lbrace() + " self.n = n; " + rbrace() + " " + rbrace();
+    let im: String = "impl Doer for Worker " + lbrace() + " method go() returns Int ensures self.n >= 0 " + lbrace() + " return self.n; " + rbrace() + " " + rbrace();
+    let src: String = "module m version \"1.0\"; " + tr + " " + en + " " + im;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

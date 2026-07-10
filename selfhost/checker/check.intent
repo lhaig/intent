@@ -2736,6 +2736,44 @@ function check_entities(prog: Program, global: Scope, fn_names: Array<String>, f
 // check_impl_bodies walks each impl block's method bodies, mirroring stage1
 // checkImplBlockBodies (traits.go:206).
 
+// trait_method_reqs / trait_method_enss — the requires/ensures clauses declared on
+// trait `trait_name`'s method `mname` (empty if the trait or method is absent).
+// Used to check an impl-block method against the TRAIT's contracts as well as its
+// own (stage1 checkImplBlockBodies checks trait's clauses + impl's, in the impl scope).
+function trait_method_reqs(prog: Program, trait_name: String, mname: String) returns Array<Expr> {
+    let mutable ti: Int = 0;
+    while ti < len(prog.traits) {
+        if prog.traits[ti].name == trait_name {
+            let mutable mj: Int = 0;
+            while mj < len(prog.traits[ti].methods) {
+                if prog.traits[ti].methods[mj].name == mname {
+                    return prog.traits[ti].methods[mj].requires_clauses;
+                }
+                mj = mj + 1;
+            }
+        }
+        ti = ti + 1;
+    }
+    return shared_ast.empty_expr_array();
+}
+
+function trait_method_enss(prog: Program, trait_name: String, mname: String) returns Array<Expr> {
+    let mutable ti: Int = 0;
+    while ti < len(prog.traits) {
+        if prog.traits[ti].name == trait_name {
+            let mutable mj: Int = 0;
+            while mj < len(prog.traits[ti].methods) {
+                if prog.traits[ti].methods[mj].name == mname {
+                    return prog.traits[ti].methods[mj].ensures_clauses;
+                }
+                mj = mj + 1;
+            }
+        }
+        ti = ti + 1;
+    }
+    return shared_ast.empty_expr_array();
+}
+
 function check_impl_bodies(prog: Program, global: Scope, fn_names: Array<String>, fn_counts: Array<Int>, var_names: Array<String>, var_counts: Array<Int>) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable i: Int = 0;
@@ -2745,6 +2783,45 @@ function check_impl_bodies(prog: Program, global: Scope, fn_names: Array<String>
         while mi < len(ib.methods) {
             let m: FunctionDecl = ib.methods[mi];
             let meth_scope: Scope = make_method_scope(m, global, ib.entity_name);
+            // Contracts first (stage1 checkImplBlockBodies:264): the TRAIT method's
+            // requires then the impl method's, then the trait's ensures then the
+            // impl's — all checked in the impl method's scope (self + params).
+            let mutable all_req: Array<Expr> = [];
+            let tr_req: Array<Expr> = trait_method_reqs(prog, ib.trait_name, m.name);
+            let mutable tri: Int = 0;
+            while tri < len(tr_req) {
+                all_req.push(tr_req[tri]);
+                tri = tri + 1;
+            }
+            let mutable iri: Int = 0;
+            while iri < len(m.requires_clauses) {
+                all_req.push(m.requires_clauses[iri]);
+                iri = iri + 1;
+            }
+            let mutable rqd: Array<CheckDiag> = check_bool_contracts(all_req, "requires clause must be boolean, got ", meth_scope, fn_names, fn_counts, var_names, var_counts, prog);
+            let mutable rqi: Int = 0;
+            while rqi < len(rqd) {
+                diags.push(rqd[rqi]);
+                rqi = rqi + 1;
+            }
+            let mutable all_ens: Array<Expr> = [];
+            let tr_ens: Array<Expr> = trait_method_enss(prog, ib.trait_name, m.name);
+            let mutable tei: Int = 0;
+            while tei < len(tr_ens) {
+                all_ens.push(tr_ens[tei]);
+                tei = tei + 1;
+            }
+            let mutable iei: Int = 0;
+            while iei < len(m.ensures_clauses) {
+                all_ens.push(m.ensures_clauses[iei]);
+                iei = iei + 1;
+            }
+            let mutable ensd: Array<CheckDiag> = check_bool_contracts(all_ens, "ensures clause must be boolean, got ", meth_scope, fn_names, fn_counts, var_names, var_counts, prog);
+            let mutable eni: Int = 0;
+            while eni < len(ensd) {
+                diags.push(ensd[eni]);
+                eni = eni + 1;
+            }
             let mutable md: Array<CheckDiag> = check_body_stmts(m.body.stmts, 0, false, "", meth_scope, fn_names, fn_counts, var_names, var_counts, collect_entity_names(prog), collect_enum_names(prog), prog);
             let mutable mdi: Int = 0;
             while mdi < len(md) {
