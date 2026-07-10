@@ -1,0 +1,7 @@
+// stage1: cannot call remove() on immutable map 'm'
+module ck_immutable_remove version "0.1.0";
+
+function f() returns Void {
+    let m: Map<String, Int> = [];
+    m.remove("k");
+}

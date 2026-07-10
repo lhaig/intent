@@ -1,0 +1,7 @@
+// stage1: cannot assign to immutable variable 'x'
+module ck_immutable_assign_var version "0.1.0";
+
+function f() returns Void {
+    let x: Int = 5;
+    x = 6;
+}

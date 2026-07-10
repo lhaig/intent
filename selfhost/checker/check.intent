@@ -45,6 +45,12 @@ public entity Scope {
     field outer_names: Array<String>;
     field local_types: Array<Type>;
     field outer_types: Array<Type>;
+    // Phase 58: per-binding mutability, kept parallel to *_names. True for a
+    // `let mutable` binding; false for `let`, params, loop variables, and seeded
+    // global/self names. Consulted by the immutable-target checks (assign /
+    // index-assign / push / set / remove), mirroring stage1 Symbol.Mutable.
+    field local_mutable: Array<Bool>;
+    field outer_mutable: Array<Bool>;
     // Phase 48j-c2d: async context. True inside an async function/test body (and
     // every child scope it opens), mirroring stage1's c.inAsyncFunc, which the
     // await_*/timeout builtins and the `await` expression consult. Riding it on
@@ -53,19 +59,27 @@ public entity Scope {
     // it once per function/test entry.
     field in_async: Bool;
 
-    constructor(local_names: Array<String>, outer_names: Array<String>, local_types: Array<Type>, outer_types: Array<Type>, in_async: Bool) {
+    constructor(local_names: Array<String>, outer_names: Array<String>, local_types: Array<Type>, outer_types: Array<Type>, local_mutable: Array<Bool>, outer_mutable: Array<Bool>, in_async: Bool) {
         self.local_names = local_names;
         self.outer_names = outer_names;
         self.local_types = local_types;
         self.outer_types = outer_types;
+        self.local_mutable = local_mutable;
+        self.outer_mutable = outer_mutable;
         self.in_async = in_async;
     }
+}
+
+// empty_bool_array — a fresh, empty Array<Bool> (for the mutability tiers).
+public function empty_bool_array() returns Array<Bool> {
+    let mutable a: Array<Bool> = [];
+    return a;
 }
 
 // scope_empty — a fresh, empty scope with no names in any tier.
 
 public function scope_empty() returns Scope {
-    return Scope(shared_ast.empty_string_array(), shared_ast.empty_string_array(), empty_type_array(), empty_type_array(), false);
+    return Scope(shared_ast.empty_string_array(), shared_ast.empty_string_array(), empty_type_array(), empty_type_array(), empty_bool_array(), empty_bool_array(), false);
 }
 
 // scope_define — returns a new Scope with `name` added to local_names, typed
@@ -80,6 +94,13 @@ public function scope_define(s: Scope, name: String) returns Scope {
 // (Phase 48d; used to seed function/method parameters from their annotations).
 
 public function scope_define_typed(s: Scope, name: String, ty: Type) returns Scope {
+    return scope_define_mut(s, name, ty, false);
+}
+
+// scope_define_mut — like scope_define_typed but records the binding's mutability
+// (`let mutable` -> true), kept parallel with the name/type tiers. Phase 58.
+
+public function scope_define_mut(s: Scope, name: String, ty: Type, is_mut: Bool) returns Scope {
     let mutable new_local: Array<String> = [];
     let mutable i: Int = 0;
     while i < len(s.local_names) {
@@ -94,7 +115,14 @@ public function scope_define_typed(s: Scope, name: String, ty: Type) returns Sco
         ti = ti + 1;
     }
     new_local_t.push(ty);
-    return Scope(new_local, s.outer_names, new_local_t, s.outer_types, s.in_async);
+    let mutable new_local_m: Array<Bool> = [];
+    let mutable mi: Int = 0;
+    while mi < len(s.local_mutable) {
+        new_local_m.push(s.local_mutable[mi]);
+        mi = mi + 1;
+    }
+    new_local_m.push(is_mut);
+    return Scope(new_local, s.outer_names, new_local_t, s.outer_types, new_local_m, s.outer_mutable, s.in_async);
 }
 
 // scope_set_async — a copy of `s` with its async-context flag set to `flag`.
@@ -103,7 +131,7 @@ public function scope_define_typed(s: Scope, name: String, ty: Type) returns Sco
 // stage1 does not set c.inAsyncFunc during entity/impl checking). Phase 48j-c2d.
 
 public function scope_set_async(s: Scope, flag: Bool) returns Scope {
-    return Scope(s.local_names, s.outer_names, s.local_types, s.outer_types, flag);
+    return Scope(s.local_names, s.outer_names, s.local_types, s.outer_types, s.local_mutable, s.outer_mutable, flag);
 }
 
 // scope_enter — open a child scope. Flattens local (names AND types) into the
@@ -132,7 +160,18 @@ public function scope_enter(s: Scope) returns Scope {
         new_outer_t.push(s.local_types[oj]);
         oj = oj + 1;
     }
-    return Scope(shared_ast.empty_string_array(), new_outer, empty_type_array(), new_outer_t, s.in_async);
+    let mutable new_outer_m: Array<Bool> = [];
+    let mutable mi: Int = 0;
+    while mi < len(s.outer_mutable) {
+        new_outer_m.push(s.outer_mutable[mi]);
+        mi = mi + 1;
+    }
+    let mutable mj: Int = 0;
+    while mj < len(s.local_mutable) {
+        new_outer_m.push(s.local_mutable[mj]);
+        mj = mj + 1;
+    }
+    return Scope(shared_ast.empty_string_array(), new_outer, empty_type_array(), new_outer_t, empty_bool_array(), new_outer_m, s.in_async);
 }
 
 // scope_type_of — the inferred Type bound to `name`, or Unknown if not found or
@@ -149,6 +188,22 @@ public function scope_type_of(s: Scope, name: String) returns Type {
         return s.outer_types[ot];
     }
     return type_unknown();
+}
+
+// scope_is_known_immutable — true iff `name` resolves to a binding that is NOT
+// mutable (mirrors stage1's `sym != nil && !sym.Mutable`). Local shadows outer;
+// an unresolved name returns false (it is not a known immutable target).
+
+public function scope_is_known_immutable(s: Scope, name: String) returns Bool {
+    let lt: Int = scope_last_index(s.local_names, name);
+    if lt >= 0 {
+        return not s.local_mutable[lt];
+    }
+    let ot: Int = scope_last_index(s.outer_names, name);
+    if ot >= 0 {
+        return not s.outer_mutable[ot];
+    }
+    return false;
 }
 
 // scope_last_index — index of the LAST occurrence of `name` in `names`, or -1.
@@ -1719,6 +1774,23 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
                     diags.push(mrd[mri]);
                     mri = mri + 1;
                 }
+                // Immutable-receiver mutation (stage1 checkMethodCallExpr): push()
+                // on an immutable array, or set()/remove() on an immutable map, when
+                // the receiver is a known immutable local. Anchored at the receiver.
+                // Phase 58.
+                if recv.kind == shared_ast.ex_ident() {
+                    if scope_is_known_immutable(scope, recv.name) {
+                        if callee.name == "push" {
+                            diags.push(CheckDiag(callee.line, callee.column, "cannot call push() on immutable array '" + recv.name + "'"));
+                        }
+                        if callee.name == "set" {
+                            diags.push(CheckDiag(callee.line, callee.column, "cannot call set() on immutable map '" + recv.name + "'"));
+                        }
+                        if callee.name == "remove" {
+                            diags.push(CheckDiag(callee.line, callee.column, "cannot call remove() on immutable map '" + recv.name + "'"));
+                        }
+                    }
+                }
                 // Phase 48i.2: when the receiver is confidently a known USER
                 // entity and the method name resolves to exactly one declared
                 // method (body or trait-impl), check arity + argument types like
@@ -2448,7 +2520,9 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
                     } else {
                         bind_type = infer_expr_type(s.expr, cur_scope, prog);
                     }
-                    cur_scope = scope_define_typed(cur_scope, s.name, bind_type);
+                    // Phase 58: carry the binding's mutability (`let mutable` -> true)
+                    // so the immutable-target checks can flag writes to a plain `let`.
+                    cur_scope = scope_define_mut(cur_scope, s.name, bind_type, s.is_mutable);
                 }
             }
         }
@@ -2458,6 +2532,26 @@ function check_body_stmts(stmts: Array<Stmt>, loop_depth: Int, in_test: Bool, te
             while expri < len(exprd) {
                 diags.push(exprd[expri]);
                 expri = expri + 1;
+            }
+            // Immutable-target assignment (stage1 checkAssignStmt:1306), before the
+            // type-mismatch check. `x = ...` on a known immutable local, or
+            // `x[i] = ...` on an immutable array — both anchored at the statement
+            // position. Phase 58.
+            if s.expr.kind == shared_ast.ex_binop() and s.expr.name == "=" {
+                let tgt: Expr = s.expr.children[0];
+                if tgt.kind == shared_ast.ex_ident() {
+                    if scope_is_known_immutable(cur_scope, tgt.name) {
+                        diags.push(CheckDiag(s.line, s.column, "cannot assign to immutable variable '" + tgt.name + "'"));
+                    }
+                }
+                if tgt.kind == shared_ast.ex_index() {
+                    let obj: Expr = tgt.children[0];
+                    if obj.kind == shared_ast.ex_ident() {
+                        if scope_is_known_immutable(cur_scope, obj.name) {
+                            diags.push(CheckDiag(s.line, s.column, "cannot assign to index of immutable array '" + obj.name + "'"));
+                        }
+                    }
+                }
             }
             // Assignment type-mismatch (stage1 checkAssignStmt:1336). An
             // assignment `target = value` parses as an ex_binop with op "="

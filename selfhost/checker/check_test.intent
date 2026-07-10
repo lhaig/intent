@@ -1576,3 +1576,50 @@ test "impl-method contract: a valid boolean ensures is accepted" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+test "immutable: reassigning a let variable is rejected" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let x: Int = 5; x = 6; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "cannot assign to immutable variable 'x'");
+}
+
+test "immutable: reassigning a let mutable variable is accepted" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let mutable x: Int = 5; x = 6; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "immutable: index-assign to a let array is rejected" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let a: Array<Int> = [1]; a[0] = 2; " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "cannot assign to index of immutable array 'a'");
+}
+
+test "immutable: push on a let array is rejected" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let a: Array<Int> = [1]; a.push(2); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "cannot call push() on immutable array 'a'");
+}
+
+test "immutable: push on a let mutable array is accepted" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let mutable a: Array<Int> = [1]; a.push(2); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "immutable: set on a let map is rejected" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let mp: Map<String, Int> = []; mp.set(\"k\", 1); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "cannot call set() on immutable map 'mp'");
+}
+
+test "immutable: remove on a let map is rejected" {
+    let src: String = "module m version \"1.0\"; function f() returns Void " + lbrace() + " let mp: Map<String, Int> = []; mp.remove(\"k\"); " + rbrace();
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "cannot call remove() on immutable map 'mp'");
+}
