@@ -426,11 +426,12 @@ func (c *CallExpr) exprNode()       {}
 
 // MethodCallExpr represents a method call
 type MethodCallExpr struct {
-	Object Expression
-	Method string
-	Args   []Expression
-	Line   int
-	Column int
+	Object   Expression
+	Method   string
+	TypeArgs []*TypeRef // type arguments for a module-qualified generic call, e.g. pkg.Stack<Int>()
+	Args     []Expression
+	Line     int
+	Column   int
 }
 
 func (m *MethodCallExpr) Pos() (int, int) { return m.Line, m.Column }

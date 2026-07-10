@@ -80,15 +80,20 @@ already deduplicated, so no dedup change was needed there.
 
 ## Deferred limitations (documented, with workarounds)
 
-These remain and are **not** silent-wrong output — they surface as a loud parse or
-compile error, and each has a straightforward workaround:
-
-- **Module-qualified type-argument / variant syntax** — `pkg.Generic<T>(...)` and
-  `pkg.Enum.Variant(...)` do not parse. *Workaround:* construct with the bare form
-  (`Generic<T>(...)`, which resolves through the flattened import namespace) or via a
-  factory function exported from the dependency. Both are verified working.
 - **WASM `test` declarations** — unsupported per [ADR 0029](0029-in-language-testing.md);
   orthogonal to packaging. A test-free cross-package program emits to WASM.
+
+### Follow-up: module-qualified generic / variant syntax (fixed 2026-07-10)
+
+`pkg.Generic<T>(...)`, `pkg.Variant(...)`, and `pkg.Enum.Variant(...)` previously did not
+parse (or were rejected by the checker). They now work: the parser accepts type arguments
+after a module-qualified name and the `module.enum.variant` form; the checker resolves
+qualified generic constructors, generic function calls, and enum variants
+(`checkModuleQualifiedCall` + the `module.enum.variant` path in `checkMethodCallExpr`); and
+the IR lowering rewrites a qualified generic/variant call to its bare form so
+monomorphization and variant construction happen in one place. Verified emit → compile →
+run on Rust and JS; `TestGenerateModuleQualifiedGenericAndVariant` locks it in. The bare
+forms (`Generic<T>(...)`, `Variant(...)`) continue to work unchanged.
 
 ### Follow-up: unqualified imported function calls (fixed 2026-07-10)
 

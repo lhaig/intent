@@ -1396,6 +1396,30 @@ func (p *Parser) parsePostfix() ast.Expression {
 					continue
 				}
 			}
+			// Module-qualified generic call: pkg.Generic<Type, ...>(args). The
+			// `pkg.Generic` prefix parsed as a FieldAccessExpr (it was followed by
+			// `<`, not `(`); recover it here as a module-qualified call carrying the
+			// type arguments. tryParseTypeArgs backtracks on a real less-than, so a
+			// comparison like `a.b < c` still falls through to the operator parser.
+			if fa, ok := expr.(*ast.FieldAccessExpr); ok {
+				if typeArgs, ok := p.tryParseTypeArgs(); ok {
+					if p.check(lexer.LPAREN) {
+						p.advance()
+						args := p.parseArgList()
+						p.expect(lexer.RPAREN)
+						expr = &ast.MethodCallExpr{
+							Object:   fa.Object,
+							Method:   fa.Field,
+							TypeArgs: typeArgs,
+							Args:     args,
+							Line:     fa.Line,
+							Column:   fa.Column,
+						}
+						continue
+					}
+					break
+				}
+			}
 			break
 		} else if p.check(lexer.LPAREN) {
 			// function call - only valid if expr is an identifier

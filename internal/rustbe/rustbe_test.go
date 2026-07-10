@@ -900,6 +900,68 @@ entry function main() returns Int {
 	}
 }
 
+// TestGenerateModuleQualifiedGenericAndVariant guards the module-qualified
+// construction syntax: pkg.Generic<T>(), pkg.identity<T>(), pkg.Variant(), and
+// pkg.Enum.Variant() must lower identically to their bare forms (monomorphized
+// generic names, LibShape::Variant construction), not dangling module calls.
+func TestGenerateModuleQualifiedGenericAndVariant(t *testing.T) {
+	libSrc := `module lib version "1.0.0";
+
+public enum Shape { Circle(r: Int), Rect(w: Int, h: Int), }
+
+public entity Pair<T> {
+    field a: T;
+    field b: T;
+    constructor(a: T, b: T) { self.a = a; self.b = b; }
+    method first() returns T { return self.a; }
+}
+
+public function identity<T>(x: T) returns T { return x; }
+public function area(s: Shape) returns Int { return match s { Circle(r) => r, Rect(w, h) => w * h, }; }
+`
+	mainSrc := `module main version "1.0.0";
+
+import lib_pkg;
+
+entry function main() returns Int {
+    let p: Pair<Int> = lib_pkg.Pair<Int>(1, 2);
+    let s: Shape = lib_pkg.Rect(3, 4);
+    let s2: Shape = lib_pkg.Shape.Circle(9);
+    let same: Int = lib_pkg.identity<Int>(7);
+    return p.first() + lib_pkg.area(s) + lib_pkg.area(s2) + same;
+}
+`
+	packageDirs := map[string]string{"lib_pkg": "/project/libs/lib_pkg"}
+	registry := map[string]*ast.Program{
+		"/project/libs/lib_pkg/lib.intent": makeProgram(t, libSrc),
+		"/project/main.intent":             makeProgram(t, mainSrc),
+	}
+	sortedPaths := []string{"/project/libs/lib_pkg/lib.intent", "/project/main.intent"}
+
+	checkResult := checker.CheckAll(registry, sortedPaths, packageDirs)
+	if checkResult.Diagnostics.HasErrors() {
+		t.Fatalf("check errors: %s", checkResult.Diagnostics.Format("test"))
+	}
+
+	prog := ir.LowerAll(registry, sortedPaths, checkResult, packageDirs)
+	output := GenerateAll(prog, Options{})
+
+	wants := []string{
+		"Pair__Int::new(1i64, 2i64)",          // qualified generic ctor -> monomorphized
+		"LibShape::Rect { w: 3i64, h: 4i64 }", // qualified variant
+		"LibShape::Circle { r: 9i64 }",        // pkg.Enum.Variant
+		"identity__Int(7i64)",                 // qualified generic function -> monomorphized
+	}
+	for _, w := range wants {
+		if !strings.Contains(output, w) {
+			t.Errorf("expected output to contain %q, got:\n%s", w, output)
+		}
+	}
+	if strings.Contains(output, "Pair::new(") || strings.Contains(output, "lib_Rect(") || strings.Contains(output, "lib_identity(") {
+		t.Errorf("qualified forms must not emit un-monomorphized/module-call names, got:\n%s", output)
+	}
+}
+
 // TestEntryFunctionInImportedModuleNoDuplicateMain guards against a multi-file
 // build emitting two `fn main`/`__intent_main` when an imported (non-entry)
 // module declares an `entry` function (e.g. selfhost/formatter/parser.intent's

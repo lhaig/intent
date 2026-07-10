@@ -1068,6 +1068,39 @@ func (l *lowerer) lowerExpr(e ast.Expression) Expr {
 }
 
 func (l *lowerer) lowerMethodCallExpr(expr *ast.MethodCallExpr, orig ast.Expression) Expr {
+	// A module-qualified call to a generic entity constructor, a generic function,
+	// or an enum variant lowers identically to its bare form: the flat import
+	// namespace makes pkg.Pair<Int>(x) equivalent to Pair<Int>(x), pkg.identity<Int>(x)
+	// to identity<Int>(x), and pkg.Rect(w,h) to Rect(w,h). Rewrite to a CallExpr and
+	// reuse the CallExpr lowering so monomorphization and variant construction happen
+	// in exactly one place. Non-generic module functions and entity constructors keep
+	// the module-call path below (they already emit correctly).
+	rewriteToBare := false
+	if _, ok := expr.Object.(*ast.Identifier); ok && l.typeOf(expr.Object) == nil {
+		_, isGenEntity := l.genericEntityDecls[expr.Method]
+		_, isGenFunc := l.genericFuncDecls[expr.Method]
+		isVariant := l.resolveEnumForVariant(expr.Method) != ""
+		rewriteToBare = isGenEntity || isGenFunc || isVariant
+	} else if fa, ok := expr.Object.(*ast.FieldAccessExpr); ok {
+		// pkg.Enum.Variant(args): the object is a field access on a module name.
+		if _, ok := fa.Object.(*ast.Identifier); ok && l.typeOf(fa.Object) == nil {
+			rewriteToBare = l.resolveEnumForVariant(expr.Method) != ""
+		}
+	}
+	if rewriteToBare {
+		syn := &ast.CallExpr{
+			Function: expr.Method,
+			TypeArgs: expr.TypeArgs,
+			Args:     expr.Args,
+			Line:     expr.Line,
+			Column:   expr.Column,
+		}
+		if t := l.typeOf(orig); t != nil {
+			l.exprTypes[syn] = t
+		}
+		return l.lowerExpr(syn)
+	}
+
 	args := make([]Expr, len(expr.Args))
 	for i, a := range expr.Args {
 		args[i] = l.lowerExpr(a)
@@ -1308,6 +1341,17 @@ func (l *lowerer) scanExprForInstantiations(expr ast.Expression) {
 			l.scanExprForInstantiations(arg)
 		}
 	case *ast.MethodCallExpr:
+		// A module-qualified generic call (pkg.Pair<Int>(...) / pkg.identity<Int>(...))
+		// carries its type arguments here just like the bare CallExpr form, so record
+		// the instantiation so the monomorphization is emitted.
+		if len(e.TypeArgs) > 0 {
+			if _, isGenericEntity := l.genericEntityDecls[e.Method]; isGenericEntity {
+				l.recordEntityInstantiation(e.Method, e.TypeArgs)
+			}
+			if _, isGenericFunc := l.genericFuncDecls[e.Method]; isGenericFunc {
+				l.recordFuncInstantiation(e.Method, e.TypeArgs)
+			}
+		}
 		l.scanExprForInstantiations(e.Object)
 		for _, arg := range e.Args {
 			l.scanExprForInstantiations(arg)

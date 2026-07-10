@@ -2291,6 +2291,37 @@ func (c *Checker) checkMethodCallExpr(expr *ast.MethodCallExpr, scope *Scope) *T
 		// (We can't easily know all modules, so we skip this for now)
 	}
 
+	// Check if this is a module-qualified enum variant: pkg.Enum.Variant(args).
+	// The object parses as a field access (pkg.Enum) that is not otherwise valid,
+	// so resolve it here before the generic object-type path rejects it.
+	if fa, ok := expr.Object.(*ast.FieldAccessExpr); ok && c.moduleImports != nil {
+		if modIdent, ok := fa.Object.(*ast.Identifier); ok {
+			if modSyms, isModule := c.moduleImports[modIdent.Name]; isModule {
+				if enumInfo, ok := modSyms.Enums[fa.Field]; ok {
+					for _, variant := range enumInfo.Variants {
+						if variant.Name == expr.Method {
+							if len(expr.Args) != len(variant.Fields) {
+								c.diag.Errorf(line, col, "variant '%s.%s.%s' expects %d arguments, got %d",
+									modIdent.Name, fa.Field, expr.Method, len(variant.Fields), len(expr.Args))
+							}
+							for i, arg := range expr.Args {
+								argType := c.checkExpression(arg, scope)
+								if i < len(variant.Fields) && argType != nil && !argType.Equal(variant.Fields[i].Type) {
+									argLine, argCol := arg.Pos()
+									c.diag.Errorf(argLine, argCol, "variant '%s.%s.%s' field '%s' expects %s, got %s",
+										modIdent.Name, fa.Field, expr.Method, variant.Fields[i].Name, variant.Fields[i].Type.String(), argType.String())
+								}
+							}
+							return &Type{Name: enumInfo.Name, IsEnum: true, EnumInfo: enumInfo}
+						}
+					}
+					c.diag.Errorf(line, col, "enum '%s.%s' has no variant '%s'", modIdent.Name, fa.Field, expr.Method)
+					return nil
+				}
+			}
+		}
+	}
+
 	// Check object type
 	objType := c.checkExpression(expr.Object, scope)
 	if objType == nil {
@@ -2549,6 +2580,44 @@ func (c *Checker) checkModuleQualifiedCall(expr *ast.MethodCallExpr, modSyms *Mo
 
 	// Check if it's a function call
 	if fn, ok := modSyms.Functions[symbolName]; ok {
+		// Generic function: pkg.identity<Int>(x). Mirrors the unqualified path
+		// (checkCallExpr) with the module name woven into the diagnostics.
+		if len(fn.TypeParamNames) > 0 {
+			if len(expr.TypeArgs) == 0 {
+				c.diag.Errorf(line, col, "generic function '%s.%s' requires type arguments", moduleName, symbolName)
+			} else if len(expr.TypeArgs) != len(fn.TypeParamNames) {
+				c.diag.Errorf(line, col, "function '%s.%s' expects %d type arguments, got %d",
+					moduleName, symbolName, len(fn.TypeParamNames), len(expr.TypeArgs))
+			}
+			substMap := make(map[string]*Type)
+			for i, ta := range expr.TypeArgs {
+				resolved := ResolveType(ta, c.entities, c.enums)
+				if resolved == nil {
+					c.diag.Errorf(line, col, "unknown type '%s' in type argument", ta.Name)
+					continue
+				}
+				if i < len(fn.TypeParamNames) {
+					substMap[fn.TypeParamNames[i]] = resolved
+				}
+			}
+			if len(expr.Args) != len(fn.Params) {
+				c.diag.Errorf(line, col, "function '%s.%s' expects %d arguments, got %d",
+					moduleName, symbolName, len(fn.Params), len(expr.Args))
+			}
+			for i, arg := range expr.Args {
+				argType := c.checkExpression(arg, scope)
+				if i < len(fn.Params) && argType != nil {
+					expectedType := SubstituteType(fn.Params[i].Type, substMap)
+					if !argType.Equal(expectedType) && !expectedType.IsTypeParam {
+						argLine, argCol := arg.Pos()
+						c.diag.Errorf(argLine, argCol, "argument %d to '%s.%s': expected %s, got %s",
+							i+1, moduleName, symbolName, expectedType.String(), argType.String())
+					}
+				}
+			}
+			return SubstituteType(fn.ReturnType, substMap)
+		}
+
 		// Check argument count
 		if len(expr.Args) != len(fn.Params) {
 			c.diag.Errorf(line, col, "function '%s.%s' expects %d arguments, got %d",
@@ -2575,11 +2644,57 @@ func (c *Checker) checkModuleQualifiedCall(expr *ast.MethodCallExpr, modSyms *Mo
 			c.diag.Errorf(line, col, "entity '%s.%s' has no constructor", moduleName, symbolName)
 			return nil
 		}
+		for _, arg := range expr.Args {
+			c.checkExpression(arg, scope)
+		}
+		// Generic entity: pkg.Pair<Int>(a, b). Mirrors checkCallExpr's generic
+		// entity-constructor handling.
+		if len(entity.TypeParamNames) > 0 {
+			if len(expr.TypeArgs) == 0 {
+				c.diag.Errorf(line, col, "generic entity '%s.%s' requires type arguments", moduleName, symbolName)
+				return &Type{Name: symbolName, IsEntity: true, Entity: entity}
+			}
+			if len(expr.TypeArgs) != len(entity.TypeParamNames) {
+				c.diag.Errorf(line, col, "entity '%s.%s' expects %d type arguments, got %d",
+					moduleName, symbolName, len(entity.TypeParamNames), len(expr.TypeArgs))
+				return &Type{Name: symbolName, IsEntity: true, Entity: entity}
+			}
+			var resolvedArgs []*Type
+			for _, ta := range expr.TypeArgs {
+				resolved := ResolveType(ta, c.entities, c.enums)
+				if resolved == nil {
+					c.diag.Errorf(line, col, "unknown type '%s' in type argument", ta.Name)
+					return nil
+				}
+				resolvedArgs = append(resolvedArgs, resolved)
+			}
+			return &Type{Name: symbolName, IsEntity: true, Entity: entity, IsGeneric: true, TypeParams: resolvedArgs}
+		}
 		return &Type{Name: symbolName, IsEntity: true, Entity: entity}
 	}
 
-	// Check if it's an enum variant constructor -- not typical with qualified name but handle it
-	// (usually enums are referenced directly)
+	// Check if it's an enum variant constructor: pkg.Rectangle(w, h). Usually
+	// enums are constructed by the bare variant name (the flattened namespace),
+	// but the qualified form is accepted for disambiguation.
+	for _, enumInfo := range modSyms.Enums {
+		for _, variant := range enumInfo.Variants {
+			if variant.Name == symbolName {
+				if len(expr.Args) != len(variant.Fields) {
+					c.diag.Errorf(line, col, "variant '%s.%s' expects %d arguments, got %d",
+						moduleName, symbolName, len(variant.Fields), len(expr.Args))
+				}
+				for i, arg := range expr.Args {
+					argType := c.checkExpression(arg, scope)
+					if i < len(variant.Fields) && argType != nil && !argType.Equal(variant.Fields[i].Type) {
+						argLine, argCol := arg.Pos()
+						c.diag.Errorf(argLine, argCol, "variant '%s.%s' field '%s' expects %s, got %s",
+							moduleName, symbolName, variant.Fields[i].Name, variant.Fields[i].Type.String(), argType.String())
+					}
+				}
+				return &Type{Name: enumInfo.Name, IsEnum: true, EnumInfo: enumInfo}
+			}
+		}
+	}
 
 	// Symbol not found in module
 	c.diag.Errorf(line, col, "symbol '%s' is not exported from module '%s'", symbolName, moduleName)
