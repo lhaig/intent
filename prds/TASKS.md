@@ -99,12 +99,18 @@ async-context deferred to Phase 48). ADR 0055. Gated by `make diff-checker`.
 | 47.4 | fixtures + tests + no-false-positives | [prd-phase-47-builtin-arity.md](done/prd-phase-47-builtin-arity.md) | DONE (2026-07-02) | 3 shape fixtures byte-equal; +5 tests incl. plural + early-return; 22 examples clean. diff-checker 44/44, 188 tests |
 | 47.5 | docs + validate + push | [prd-phase-47-builtin-arity.md](done/prd-phase-47-builtin-arity.md) | DONE (2026-07-02) | ROADMAP + NEXT-STEPS + checker README + PRD; make validate + all gates green; committed + pushed |
 
-## Phase 48: Expression Type Inference + Type-Rule Checks — IN PROGRESS (foundation shipped 2026-07-02)
+## Phase 48 & 53: Self-Hosted Checker Type-Rule Checks — COMPLETE (2026-07-02..10)
 
 Sound-but-incomplete `infer_expr_type` (returns a Type only when certain, else an
-Unknown sentinel), with type-rule checks layered on incrementally behind the diff-checker
-gate. ADR 0056. A large, open-ended phase (full stage1 type-system parity). Foundation +
-first two checks shipped + pushed; the rest are the continuation.
+Unknown sentinel), with type-rule checks layered on behind the diff-checker gate. ADR 0056.
+The closing tail landed 2026-07-10 — spawn/try operand recursion, the async-test-no-await
+warning (warning-severity support added to the checker + `intentc check` output), full
+assert_eq comparable-set parity (`type_to_string`/`type_equal`), unary operator typing, and
+the Phase 53 siblings entity-has-no-constructor + extern param/return unknown-type.
+`make diff-checker` **100/100**, ~296 checker tests, all gates + validate green. Remaining
+sound-false-negatives + needs-machinery items are tracked in
+[prd-phase-58-checker-parity-tail.md](backlog/prd-phase-58-checker-parity-tail.md). PRD:
+[prd-phase-48-expression-inference.md](done/prd-phase-48-expression-inference.md).
 
 | # | Task | PRD | Status | Notes |
 |---|------|-----|--------|-------|

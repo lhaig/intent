@@ -4,13 +4,15 @@ Stage2 Intent semantic checker — Intent-implemented `intentc check`. Reuses th
 front-end in [`../shared/`](../shared/) and lives alongside stage1's Go checker
 (`internal/checker/`). The first compiler subsystem to be self-hosted.
 
-**Status (Phase 46, [ADR 0053](../../docs/decisions/0053-self-hosted-checker-type-foundation.md)):**
-type-representation foundation + the `unknown type` diagnostic — byte-equal with stage1
-`intentc check` across the examples corpus + fixtures (`make diff-checker` 44/44: 22 valid
-examples produce no errors, 22 invalid fixtures match byte-for-byte). Wired as `intentc
-check --self-hosted`. 188 in-language tests (rust + js). (Phase 45,
-[ADR 0052](../../docs/decisions/0052-self-hosted-checker-strategy.md), shipped the first
-slice — the checks below needing no type inference.)
+**Status (Phases 45-54 complete, incl. Phase 48/53 type-rule tail):**
+structural + name-resolution + arity checks, the `unknown type` diagnostic, expression type
+inference ([ADR 0056](../../docs/decisions/0056-self-hosted-expression-inference.md)), and the
+full type-rule check set — byte-equal with stage1 `intentc check` across the examples corpus +
+invalid fixtures (`make diff-checker` **100/100**), plus multi-file self-checking
+([ADR 0058](../../docs/decisions/0058-self-hosted-checker-cross-module-resolution.md),
+`make selfcheck-checker` 13/13). Wired as `intentc check --self-hosted`. ~296 in-language
+tests (rust + js). A small tail of sound-false-negative diagnostics is tracked in
+[`prds/backlog/prd-phase-58-checker-parity-tail.md`](../../prds/backlog/prd-phase-58-checker-parity-tail.md).
 
 ## Implemented checks
 
@@ -33,12 +35,16 @@ Type foundation + `unknown type` (Phase 46, ADR 0053 + 0054):
   each byte-equal with stage1 (outer-ref base name; `registerEnums`-before-entities
   quirk matched).
 
-Deferred: expression type inference and all type-rule checks (assignability, operators,
-generics substitution, match exhaustiveness, contracts) — Phase 47. Extern param/return
-`unknown type` (0 corpus usage) and method-call arity (needs the receiver type) remain
-small tracked gaps, along with builtin argument *typing* (`print() cannot print type …`,
-`assert() argument must be Bool`, the `await_*` async-context checks — Phase 48). Multi-file
-`CheckAll` is also later.
+Type inference + type-rule checks (Phases 48 & 53): expression inference (`infer_expr_type`,
+ADR 0056/0057), operator / assignment / argument typing, match checks, contract
+well-typedness, async-context checks, the assert_eq comparable-set, unary operator typing,
+entity has-no-constructor, and extern param/return `unknown type`. Multi-file `CheckAll`
+shipped in Phase 54 (ADR 0058).
+
+Deferred (sound false negatives — never emit a wrong diagnostic, never fire on valid code):
+method-call return-type inference, contract-clause name recursion, impl-method contracts,
+immutable-target assignment, and a few narrow edges — all catalogued in
+[`prds/backlog/prd-phase-58-checker-parity-tail.md`](../../prds/backlog/prd-phase-58-checker-parity-tail.md).
 
 | File | Module | Purpose |
 |------|--------|---------|

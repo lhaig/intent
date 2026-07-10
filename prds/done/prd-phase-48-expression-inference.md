@@ -57,3 +57,24 @@ green; commit + push each slice.
 
 `make diff-checker` green (fixtures byte-equal, 22 examples clean), 190+ checker tests,
 all formatter/linter/self-check gates + `make validate` green.
+
+## 7. Completion (2026-07-10) — COMPLETE
+
+The inference engine (`infer_expr_type`, ADR 0056) plus every type-rule check that
+fires on the corpus shipped across many slices. The originally-planned Phases 49-52
+were **superseded** by these Phase 48 slices (48e binary operators, 48i method-call
+arity/arg-types, 48j-a match, 48j-b contracts, 48j-c builtin argument typing, 48j-c2d/e
+async-context). The closing tail landed 2026-07-10: **spawn/try operand recursion**,
+the **async-test-no-await warning** (added warning-severity support to the checker),
+**full assert_eq comparable-set parity** (eq-method signature sub-checks + Map/Future
+rejection + generic recursion, via new `type_to_string`/`type_equal`), and **unary
+operator typing**. Sibling Phase 53 items also landed: **entity has-no-constructor** and
+**extern param/return unknown-type**. `make diff-checker` **100/100**, ~296 in-language
+checker tests, all self-check / formatter / linter / emit-sweep gates + `make validate`
+green throughout.
+
+A small set of remaining **sound false negatives** (method-call return-type inference,
+contract-clause name recursion) plus needs-machinery items (impl-method contracts,
+immutable-target assignment) and narrow edges are catalogued in
+[prd-phase-58-checker-parity-tail.md](../backlog/prd-phase-58-checker-parity-tail.md).
+They never emit a wrong diagnostic and never fire on valid code — safe to defer.
