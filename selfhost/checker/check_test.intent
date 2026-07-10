@@ -1448,3 +1448,26 @@ test "assert_eq: entity with a proper eq method is accepted" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+test "unary: '-' on a non-numeric operand is rejected" {
+    let fn_src: String = "function f(s: String) returns Void " + lbrace() + " let x: String = -s; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "unary '-' not defined for String");
+}
+
+test "unary: 'not' on a non-boolean operand is rejected" {
+    let fn_src: String = "function f(n: Int) returns Void " + lbrace() + " let b: Bool = not n; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "unary 'not' requires boolean operand, got Int");
+}
+
+test "unary: valid -Int and not Bool are accepted" {
+    let fn_src: String = "function f(n: Int, b: Bool) returns Void " + lbrace() + " let x: Int = -n; let y: Bool = not b; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

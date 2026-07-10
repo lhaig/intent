@@ -1319,6 +1319,23 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
             diags.push(ud[ui]);
             ui = ui + 1;
         }
+        // Operator typing (stage1 checkUnaryExpr:1625) — only on a confident
+        // operand type. `-` needs Int/Float; `not` needs Bool. Anchored at the
+        // operator token (ADR 0054 stamped position).
+        let ot: Type = infer_expr_type(e.children[0], scope, prog);
+        if not is_unknown_type(ot) {
+            if e.name == "-" {
+                if ot.name != "Int" and ot.name != "Float" {
+                    diags.push(CheckDiag(e.line, e.column, "unary '-' not defined for " + ot.name));
+                }
+            } else {
+                if e.name == "not" {
+                    if ot.name != "Bool" {
+                        diags.push(CheckDiag(e.line, e.column, "unary 'not' requires boolean operand, got " + ot.name));
+                    }
+                }
+            }
+        }
         return diags;
     }
     if e.kind == shared_ast.ex_paren() {

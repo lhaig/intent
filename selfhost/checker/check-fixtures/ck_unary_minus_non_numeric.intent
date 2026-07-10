@@ -1,0 +1,6 @@
+// stage1: unary '-' not defined for String
+module ck_unary_minus_non_numeric version "0.1.0";
+
+function f(s: String) returns Void {
+    let x: String = -s;
+}

@@ -693,18 +693,26 @@ public entity Parser {
 
     method parse_unary() returns Expr {
         if self.check(shared_lexer.tk_minus()) {
-            self.advance();
+            // Stamp the `-` token position so the checker's unary-typing diagnostic
+            // anchors there (stage1 UnaryExpr.Pos()). Inert to the formatter (ADR 0054).
+            let op_tok: Token = self.advance();
             let operand: Expr = self.parse_unary();
             let mutable children: Array<Expr> = [];
             children.push(operand);
-            return Expr(shared_ast.ex_unary(), 0, "", false, "-", children);
+            let mutable ue: Expr = Expr(shared_ast.ex_unary(), 0, "", false, "-", children);
+            ue.line = op_tok.line;
+            ue.column = op_tok.column;
+            return ue;
         }
         if self.check(shared_lexer.kw_not()) {
-            self.advance();
+            let op_tok: Token = self.advance();
             let operand: Expr = self.parse_unary();
             let mutable children: Array<Expr> = [];
             children.push(operand);
-            return Expr(shared_ast.ex_unary(), 0, "", false, "not", children);
+            let mutable ue: Expr = Expr(shared_ast.ex_unary(), 0, "", false, "not", children);
+            ue.line = op_tok.line;
+            ue.column = op_tok.column;
+            return ue;
         }
         if self.check(shared_lexer.kw_await_marker()) {
             // Stamp the `await` keyword position so the checker's async-context

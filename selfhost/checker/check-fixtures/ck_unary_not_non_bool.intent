@@ -1,0 +1,6 @@
+// stage1: unary 'not' requires boolean operand, got Int
+module ck_unary_not_non_bool version "0.1.0";
+
+function f(n: Int) returns Void {
+    let b: Bool = not n;
+}
