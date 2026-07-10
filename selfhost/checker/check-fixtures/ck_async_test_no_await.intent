@@ -1,0 +1,9 @@
+// stage1 (warning, not error): "<path>:L:C: warning: test \"...\" declared 'async'
+// but contains no 'await' expression" followed by "No errors found." (exit 0).
+// An async test whose body has no `await` expression. Phase 48 async-test-no-await.
+module ck_async_test_no_await version "0.1.0";
+
+async test "does no awaiting" {
+    let x: Int = 1;
+    assert(x == 1);
+}

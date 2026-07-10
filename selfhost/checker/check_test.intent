@@ -1382,3 +1382,27 @@ test "try operand: undeclared variable inside a try (?) expression is reported" 
     assert_eq(len(diags), 1);
     assert_eq(diags[0].message, "undeclared variable 'missing'");
 }
+
+test "async test with no await produces a warning diagnostic" {
+    let t_src: String = "async test \"noop\" " + lbrace() + " let x: Int = 1; assert(x == 1); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + t_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "test \"noop\" declared 'async' but contains no 'await' expression");
+    assert_eq(diags[0].severity, 1);
+}
+
+test "async test containing an await produces no warning" {
+    let g_src: String = "async function g() returns Int " + lbrace() + " return 0; " + rbrace();
+    let t_src: String = "async test \"waits\" " + lbrace() + " let fut: Future<Int> = spawn g(); let r: Int = await fut; assert(r == 0); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + g_src + " " + t_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
+
+test "non-async test with no await produces no warning" {
+    let t_src: String = "test \"plain\" " + lbrace() + " let x: Int = 1; assert(x == 1); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + t_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

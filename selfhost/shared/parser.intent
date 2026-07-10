@@ -1028,9 +1028,14 @@ public entity Parser {
                                                     prog.tests.push(self.parse_annotated_test_decl(cmts));
                                                 } else {
                                                     if self.check(shared_lexer.kw_async_marker()) and self.peek_n(1) == shared_lexer.kw_test_marker() {
+                                                        // Anchor at the `async` token: stage1 parseTestDecl captures
+                                                        // tok := p.current() BEFORE consuming async (parser.go:413).
+                                                        let async_tok: Token = self.tokens[self.position];
                                                         self.advance();
                                                         let mutable td: TestDecl = self.parse_test_decl(cmts);
                                                         td.is_async = true;
+                                                        td.line = async_tok.line;
+                                                        td.column = async_tok.column;
                                                         prog.tests.push(td);
                                                     } else {
                                                         if self.is_at_function_start() {

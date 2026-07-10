@@ -1870,12 +1870,25 @@ public entity CheckDiag {
     field line: Int;
     field column: Int;
     field message: String;
+    // 0 = error, 1 = warning (mirrors stage1 diagnostic.Severity). Defaulted to
+    // 0 so every existing CheckDiag(...) call stays an error; check_diag_warn
+    // builds warnings.
+    field severity: Int;
 
     constructor(line: Int, column: Int, message: String) {
         self.line = line;
         self.column = column;
         self.message = message;
+        self.severity = 0;
     }
+}
+
+// check_diag_warn — a warning-severity diagnostic (severity 1). Mirrors stage1
+// diag.Warningf; the checker's only warning today is async-test-no-await.
+public function check_diag_warn(line: Int, column: Int, message: String) returns CheckDiag {
+    let mutable d: CheckDiag = CheckDiag(line, column, message);
+    d.severity = 1;
+    return d;
 }
 
 // --- Diagnostic formatter ----------------------------------------------------
@@ -1893,7 +1906,11 @@ public function format_diags(diags: Array<CheckDiag>, file: String) returns Stri
             s = s + "\n";
         }
         let d: CheckDiag = diags[i];
-        s = s + "error[" + file + ":" + d.line.to_string() + ":" + d.column.to_string() + "]: " + d.message;
+        if d.severity == 1 {
+            s = s + "warning[" + file + ":" + d.line.to_string() + ":" + d.column.to_string() + "]: " + d.message;
+        } else {
+            s = s + "error[" + file + ":" + d.line.to_string() + ":" + d.column.to_string() + "]: " + d.message;
+        }
         i = i + 1;
     }
     return s;
@@ -2534,6 +2551,57 @@ function check_impl_bodies(prog: Program, global: Scope, fn_names: Array<String>
 // (checker.go:975). Return-in-test, break/continue-outside-loop, and
 // undeclared-variable all fire here if triggered.
 
+// expr_has_await / stmt_has_await / stmts_have_await — does the test body contain
+// an `await` EXPRESSION anywhere? Mirrors stage1's testSawAwait, which is set only
+// by checkAwaitExpr (the `await` expr) — NOT by await_all/await_any/timeout builtins.
+// Recurses children (covers lambda/quantifier/scrutinee) and match-arm bodies.
+function expr_has_await(e: Expr) returns Bool {
+    if e.kind == shared_ast.ex_await() {
+        return true;
+    }
+    let mutable i: Int = 0;
+    while i < len(e.children) {
+        if expr_has_await(e.children[i]) {
+            return true;
+        }
+        i = i + 1;
+    }
+    let mutable j: Int = 0;
+    while j < len(e.match_arms) {
+        if expr_has_await(e.match_arms[j].body) {
+            return true;
+        }
+        j = j + 1;
+    }
+    return false;
+}
+
+function stmt_has_await(s: Stmt) returns Bool {
+    if expr_has_await(s.expr) {
+        return true;
+    }
+    if stmts_have_await(s.then_block.stmts) {
+        return true;
+    }
+    if s.has_else {
+        if stmts_have_await(s.else_block.stmts) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function stmts_have_await(stmts: Array<Stmt>) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(stmts) {
+        if stmt_has_await(stmts[i]) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
 function check_tests(prog: Program, global: Scope, fn_names: Array<String>, fn_counts: Array<Int>, var_names: Array<String>, var_counts: Array<Int>) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable i: Int = 0;
@@ -2547,6 +2615,11 @@ function check_tests(prog: Program, global: Scope, fn_names: Array<String>, fn_c
         while tdi < len(td) {
             diags.push(td[tdi]);
             tdi = tdi + 1;
+        }
+        // An async test with no `await` expression in its body is a warning
+        // (stage1 checkTest:1010), emitted after the body checks.
+        if t.is_async and not stmts_have_await(t.body.stmts) {
+            diags.push(check_diag_warn(t.line, t.column, "test \"" + t.name + "\" declared 'async' but contains no 'await' expression"));
         }
         i = i + 1;
     }
