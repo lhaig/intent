@@ -1,0 +1,10 @@
+// stage1: entity 'P' has no constructor
+module ck_entity_no_constructor version "0.1.0";
+
+entity P {
+    field x: Int;
+}
+
+function f() returns Void {
+    let p: P = P(5);
+}

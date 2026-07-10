@@ -1742,9 +1742,9 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
         // "Stack<Int>"); parse_type splits base + type_args. stage1 recurses the
         // args first (done above) THEN checks arity, using the BASE name in the
         // message and anchoring at the call (= the ident). Only when the base is
-        // a generic entity WITH a constructor (stage1 emits "has no constructor"
-        // first otherwise, and returns before this check — so we skip that case,
-        // a sound false negative):
+        // a generic entity WITH a constructor (an entity with NO constructor emits
+        // "has no constructor" first and returns before the arity check, matching
+        // stage1 checkCallExpr:2053):
         //   - no type args  → `generic entity 'X' requires type arguments`;
         //   - wrong count   → `entity 'X' expects N type arguments, got M`.
         // The constructor's return type is NOT inferred here (stage2 returns
@@ -1756,13 +1756,20 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
             let ce_idx: Int = find_entity_index(prog, cbase.name);
             if ce_idx >= 0 {
                 let ce: EntityDecl = prog.entities[ce_idx];
-                if ce.has_constructor and len(ce.type_params) > 0 {
-                    let ntargs: Int = len(cbase.type_args);
-                    if ntargs == 0 {
-                        diags.push(CheckDiag(callee.line, callee.column, "generic entity '" + cbase.name + "' requires type arguments"));
-                    } else {
-                        if ntargs != len(ce.type_params) {
-                            diags.push(CheckDiag(callee.line, callee.column, "entity '" + cbase.name + "' expects " + len(ce.type_params).to_string() + " type arguments, got " + ntargs.to_string()));
+                if not ce.has_constructor {
+                    // stage1 checkCallExpr:2053 — an entity called as a constructor
+                    // but declared with no constructor. Fires before the type-arg
+                    // arity checks, for generic and non-generic entities alike.
+                    diags.push(CheckDiag(callee.line, callee.column, "entity '" + cbase.name + "' has no constructor"));
+                } else {
+                    if len(ce.type_params) > 0 {
+                        let ntargs: Int = len(cbase.type_args);
+                        if ntargs == 0 {
+                            diags.push(CheckDiag(callee.line, callee.column, "generic entity '" + cbase.name + "' requires type arguments"));
+                        } else {
+                            if ntargs != len(ce.type_params) {
+                                diags.push(CheckDiag(callee.line, callee.column, "entity '" + cbase.name + "' expects " + len(ce.type_params).to_string() + " type arguments, got " + ntargs.to_string()));
+                            }
                         }
                     }
                 }

@@ -1471,3 +1471,20 @@ test "unary: valid -Int and not Bool are accepted" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+test "entity called as constructor but declared with no constructor is rejected" {
+    let en: String = "entity P " + lbrace() + " field x: Int; " + rbrace();
+    let fn_src: String = "function f() returns Void " + lbrace() + " let p: P = P(5); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + en + " " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "entity 'P' has no constructor");
+}
+
+test "entity with a constructor is constructed cleanly" {
+    let en: String = "entity P " + lbrace() + " field x: Int; constructor(x: Int) " + lbrace() + " self.x = x; " + rbrace() + " " + rbrace();
+    let fn_src: String = "function f() returns Void " + lbrace() + " let p: P = P(5); " + rbrace();
+    let src: String = "module m version \"1.0\"; " + en + " " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}
