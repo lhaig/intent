@@ -57,3 +57,33 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
+
+  self-hosting:
+    name: Self-hosting gates
+    # The full self-hosting parity suite builds stage2 binaries and does cross-stage
+    # cargo builds — heavy, so run it on pushes to main only, not on every PR.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: false
+      # ubuntu-latest ships Rust/cargo, which the differential gates need to build
+      # and compile the stage2 binaries.
+      - run: cargo --version
+      - name: Build intentc
+        run: make build
+      - name: Differential parity gates (stage2 == stage1, byte-equal)
+        run: |
+          make diff-checker
+          make diff-formatter
+          make diff-linter
+          make selfcheck-formatter
+          make selfcheck-checker
+          make diff-emit
+          make diff-emit-self
+          make diff-emit-sweep
+      - name: Bootstrap fixpoint (stage1 -> stage2 -> stage3)
+        run: make bootstrap-stage3
