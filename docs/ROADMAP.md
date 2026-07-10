@@ -419,14 +419,16 @@ self-hosted and byte-equal with their Go (stage1) counterparts:
   multi-file source (ADR 0058).
 - **Compiler** (`intentc build --emit --self-hosted`) -- IR lowering + Rust backend in
   Intent (Phase 55, single-file; Phase 56, multi-file with cross-module name mangling,
-  type-origins, and call/method return-type inference).
+  type-origins, and call/method return-type inference; Phase 57, emitter hardening --
+  byte-equal with stage1 on EVERY program in the repo, not just the example corpus).
 
 The bootstrap is a proven fixpoint: **stage1** (Go) compiles the Intent compiler into
 **stage2**, **stage2** compiles it into **stage3**, and stage3 re-emits the entire
 toolchain byte-identical to stage1. Gates: `make diff-emit` (33/33 example corpus),
-`make diff-emit-self` (4/4 the toolchain's own source), `make bootstrap-stage3` (4/4
-the stage1->stage2->stage3 fixpoint), plus the per-tool `diff-*` / `selfcheck-*` gates.
-See ADR 0059 and `prds/done/phase-55-*` / `phase-56-*`.
+`make diff-emit-self` (4/4 the toolchain's own source), `make diff-emit-sweep` (71/0/0
+every repo program, Phase 57), `make bootstrap-stage3` (4/4 the stage1->stage2->stage3
+fixpoint), plus the per-tool `diff-*` / `selfcheck-*` gates. See ADR 0059 and
+`prds/done/phase-55-*` / `phase-56-*` (Phase 57 was gap-closing; see `prds/progress.md`).
 
 ## Milestone 8: Developer Experience
 

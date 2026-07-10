@@ -1,4 +1,4 @@
-# Pickup Notes — 2026-07-09 (Phase 56 STARTED — multi-file emit; slice 56.1 done, diff-emit 32/32. Phase 55 remains complete. See prds/active/prd-phase-56-multi-file-emit.md)
+# Pickup Notes — 2026-07-09 (Phase 57 COMPLETE — emitter hardening; `make diff-emit-sweep` 71/0/0, the stage2 emitter matches stage1 on EVERY repo program. Phases 55/56 complete. Self-hosting is achieved and hardened; see the "PHASE 57 COMPLETE" section below.)
 
 ## ▶ PHASE 56 — multi-file emit → full bootstrap (stage2 emits its own source)
 
@@ -69,14 +69,10 @@ hardened):** js/wasm backends in Intent (a separate mini-Phase-55 each); `--stri
 parity in the stage2 emit; extern-contract preservation in the formatter round-trip (the
 emitter drops them, matching stage1's codegen, but `fmt` on an extern-with-contracts loses
 them — ungated).
-  Expect: decl-name→file-base mangling (moduleManglings second pass: `shared_parser` →
-  `parser_`), HashMap `use` injection, untested construct combinations.
-- **56.4 — stage3 bootstrap** — compile the stage2 emit into a stage3 binary; verify it
-  matches stage2. Closes the full triangle.
 
 ---
 
-# Pickup Notes — 2026-07-08 (Phase 55 COMPLETE — the self-hosted compiler emits byte-equal Rust for the ENTIRE example corpus; see prds/active/prd-phase-55-self-hosted-compiler.md)
+# Pickup Notes — 2026-07-08 (Phase 55 COMPLETE — the self-hosted compiler emits byte-equal Rust for the ENTIRE example corpus; see prds/done/phase-55-self-hosted-compiler.md)
 
 ## ✅✅ PHASE 55 COMPLETE: the self-hosted compiler self-hosts the full corpus (2026-07-07..08) — ADR 0059
 
@@ -290,7 +286,7 @@ arity, return/match/contract typing) are **largely superseded** by the Phase 48 
 shipped. Three tools — fmt, lint, check — are now self-hosted and byte-equal with stage1.
 
 **DECIDED (2026-07-07): next front is Option 1 — the self-hosted compiler.** See the kickoff
-PRD: `prds/active/prd-phase-55-self-hosted-compiler.md` (read it first after any compaction).
+PRD: `prds/done/phase-55-self-hosted-compiler.md` (read it first after any compaction).
 
 **Phase 55 — self-hosted compiler (IR + backend):** reimplement in Intent the IR lowering
 (`internal/ir` ~2,745 LOC) + the Rust backend (`internal/rustbe` ~2,420 LOC) on the existing

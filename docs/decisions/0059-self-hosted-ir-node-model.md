@@ -380,4 +380,4 @@ substitution applies to signatures only.
 - [ADR 0053](0053-self-hosted-checker-type-foundation.md) — the checker's `Type` model, whose shape `IrType` mirrors.
 - [ADR 0054](0054-additive-ast-positions-for-diagnostics.md) — additive position fields (the `IrContract` line/column convention).
 - [ADR 0058](0058-self-hosted-checker-cross-module-resolution.md) — the Phase 54 multi-file harness pattern that `--emit --self-hosted` will mirror in 55c.
-- `prds/active/prd-phase-55-self-hosted-compiler.md` — the phase plan.
+- `prds/done/phase-55-self-hosted-compiler.md` — the phase plan.

@@ -16,7 +16,9 @@ selfhost/
                 ast.intent, parser.intent  (modules shared_lexer/ast/parser)
   formatter/    Intent-implemented `intentc fmt --self-hosted` (Phase 38-42)
   linter/       Intent-implemented `intentc lint --self-hosted` (Phase 43)
-  checker/      Intent-implemented `intentc check --self-hosted` (Phase 45 — first slice)
+  checker/      Intent-implemented `intentc check --self-hosted` (Phases 45-54)
+  compiler/     Intent-implemented `intentc build --emit --self-hosted` — IR lowering +
+                Rust backend (Phases 55-57; byte-equal with stage1 on every repo program)
 ```
 
 The shared front-end lives in `selfhost/shared/`; each tool is a sibling that
@@ -25,7 +27,8 @@ Phase 44). This split was deferred (ADR 0050 D1) until a third stage2 tool — t
 checker ([ADR 0052](../docs/decisions/0052-self-hosted-checker-strategy.md)) — was
 about to land, then done as a pure refactor before the checker arrived. The checker
 is multi-phase (Phase 45 ships structural + name-resolution + arity checks; type
-inference follows). Future: a fuller self-hosted `compiler/`.
+inference follows, Phases 46-54). The self-hosted `compiler/` (IR + Rust backend) landed
+in Phases 55-57 — the toolchain now compiles itself (ADR 0059; Milestone 9 in the roadmap).
 
 ## How stage2 is built
 

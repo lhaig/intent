@@ -139,19 +139,27 @@ first two checks shipped + pushed; the rest are the continuation.
 **NOTE:** stage1 `checkReturnStmt` does NOT compare the return value to the declared
 return type — there is no return-type-mismatch diagnostic to port.
 
-## Phase 55: Self-Hosted Compiler (IR + Backend) — ACTIVE (kickoff 2026-07-07)
+## Phase 57: Emitter Hardening — COMPLETE (2026-07-09)
 
-The bootstrapping endgame: reimplement IR lowering + the Rust backend in Intent so
-`intentc build --emit --self-hosted` emits Rust byte-equal with stage1. Full plan in
-[prd-phase-55-self-hosted-compiler.md](active/prd-phase-55-self-hosted-compiler.md).
-~5,000+ LOC, multi-phase; grow construct-by-construct, byte-equal-gated per slice.
+Proved the stage2 emitter correct beyond the 22-example corpus. `make diff-emit-sweep`
+differentially emits EVERY Intent program in the repo (stage1 vs stage2 `--self-hosted`):
+**71 byte-equal, 0 gaps, 0 regressions**. All 14 catalogued gaps closed — async builtins,
+HTTP, extern/FFI, cross-package calls, trait-method contracts, and more. See
+[docs/ROADMAP.md](../docs/ROADMAP.md) Milestone 9 and `prds/progress.md`.
 
-| # | Task | PRD | Status | Notes |
-|---|------|-----|--------|-------|
-| 55a | IR node entity model (trivial subset) | Phase 55 PRD | TODO | Mirror `internal/ir/nodes.go` for Program/Module/Function + a few Stmt/Expr kinds (expr-stmt, call, int/string literal). Tagged-entity `kind:Int` model like the AST (ADR-worthy — cite ADR 0008/0053/0054). New `selfhost/compiler/ir.intent`. |
-| 55b | lower hello.intent → stage2 IR | Phase 55 PRD | TODO | `selfhost/compiler/lower.intent` mirroring `internal/ir/lower.go` for the trivial subset (one `main`, `print("...")`, literals). Scope whether lowering needs the CheckResult or a parsed-only Program suffices for the subset. |
-| 55c | rustbe emit + harness wiring + diff-emit gate | Phase 55 PRD | TODO | `selfhost/compiler/rustbe.intent` mirroring `internal/rustbe/rustbe.go`; emit Rust byte-equal with stage1 `build --emit` on hello.intent. Wire `intentc build --emit --self-hosted` (mirror Phase 54 `stage2CheckerBinary`/`runStage2Checker`/`stage2CheckPaths`). New `make diff-emit` at 1/1. THIN FIRST SLICE = 55a+55b+55c end-to-end. |
-| 55+ | scale construct-by-construct | Phase 55 PRD | TODO | let → binops → if/while/for → functions/calls → entities/methods → enums/match → contracts (assert! + --strip-contracts) → Result/Option/? → generics → closures → async. Each a new emit-corpus entry, byte-equal. Target: the 22 examples (mirror TESTED_EXAMPLES). |
+## Phase 56: Multi-file Emit → Full Bootstrap — COMPLETE (2026-07-09)
+
+The stage2 compiler emits multi-module programs (`lower_all`/`generate_all`) with
+cross-module name mangling, type-origins, and return-type inference — including the whole
+toolchain's own source. Gates: diff-emit 33/33, diff-emit-self 4/4, bootstrap-stage3 4/4
+(stage1→2→3 fixpoint). PRD: [phase-56-multi-file-emit.md](done/phase-56-multi-file-emit.md).
+
+## Phase 55: Self-Hosted Compiler (IR + Backend) — COMPLETE (2026-07-08)
+
+IR lowering + the Rust backend reimplemented in Intent; `intentc build --emit --self-hosted`
+emits Rust byte-equal with stage1 across the full example corpus (`make diff-emit` 31/31 at
+completion). ADR 0059. PRD:
+[phase-55-self-hosted-compiler.md](done/phase-55-self-hosted-compiler.md).
 
 ## Phase 54: Multi-file self-hosted checking — COMPLETE (2026-07-03)
 
