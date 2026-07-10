@@ -1,0 +1,10 @@
+// stage1: undeclared variable 'missing'
+// The checker recurses contract clauses, so an undeclared variable in a
+// requires clause is reported. Phase 48 contract-clause name recursion.
+module ck_contract_undeclared_var version "0.1.0";
+
+function f(x: Int) returns Int
+    requires missing > 0
+{
+    return x;
+}

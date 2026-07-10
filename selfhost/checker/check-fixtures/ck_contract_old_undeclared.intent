@@ -1,0 +1,18 @@
+// stage1: undeclared variable 'missing'
+// old() is a contract keyword; its operand is still name-checked, so an
+// undeclared variable inside old(...) is reported.
+module ck_contract_old_undeclared version "0.1.0";
+
+entity Acct {
+    field balance: Int;
+
+    constructor(b: Int) {
+        self.balance = b;
+    }
+
+    method deposit(amount: Int) returns Void
+        ensures self.balance == old(missing) + amount
+    {
+        self.balance = self.balance + amount;
+    }
+}

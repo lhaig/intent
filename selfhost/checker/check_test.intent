@@ -1534,3 +1534,26 @@ test "method-call inference: matching type is accepted" {
     let diags: Array<CheckDiag> = parse_and_check(src);
     assert_eq(len(diags), 0);
 }
+
+test "contract: undeclared variable in a requires clause is reported" {
+    let fn_src: String = "function f(x: Int) returns Int requires missing > 0 " + lbrace() + " return x; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "undeclared variable 'missing'");
+}
+
+test "contract: undeclared variable inside old() is reported" {
+    let en: String = "entity Acct " + lbrace() + " field balance: Int; constructor(b: Int) " + lbrace() + " self.balance = b; " + rbrace() + " method dep(amount: Int) returns Void ensures self.balance == old(missing) + amount " + lbrace() + " self.balance = self.balance + amount; " + rbrace() + " " + rbrace();
+    let src: String = "module m version \"1.0\"; " + en;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 1);
+    assert_eq(diags[0].message, "undeclared variable 'missing'");
+}
+
+test "contract: valid clauses using result and params are clean" {
+    let fn_src: String = "function f(x: Int) returns Int requires x > 0 ensures result > 0 " + lbrace() + " return x; " + rbrace();
+    let src: String = "module m version \"1.0\"; " + fn_src;
+    let diags: Array<CheckDiag> = parse_and_check(src);
+    assert_eq(len(diags), 0);
+}

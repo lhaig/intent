@@ -1317,6 +1317,12 @@ function arm_typed_scope(arm: MatchArm, ed: EnumDecl, scope: Scope) returns Scop
 function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_counts: Array<Int>, var_names: Array<String>, var_counts: Array<Int>, prog: Program) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     if e.kind == shared_ast.ex_ident() {
+        // `result` is a contract keyword (stage1 parses it as ResultExpr, not an
+        // identifier), so it is never an undeclared variable. Its context validity
+        // (ensures-only) is a separate deferred check.
+        if e.name == "result" {
+            return diags;
+        }
         if not scope_resolve(scope, e.name) {
             diags.push(CheckDiag(e.line, e.column, "undeclared variable '" + e.name + "'"));
         }
@@ -1487,6 +1493,18 @@ function check_expr_names(e: Expr, scope: Scope, fn_names: Array<String>, fn_cou
         // children[0] is the callee; children[1..] are the arguments.
         let callee: Expr = e.children[0];
         let arg_count: Int = len(e.children) - 1;
+        // `old(expr)` is a contract keyword (stage1 parses it as OldExpr, not a
+        // call), so `old` is never an undefined function — recurse only its
+        // operand. Its context validity (ensures/invariant only) is deferred.
+        if callee.kind == shared_ast.ex_ident() and callee.name == "old" and arg_count == 1 {
+            let mutable od: Array<CheckDiag> = check_expr_names(e.children[1], scope, fn_names, fn_counts, var_names, var_counts, prog);
+            let mutable oi: Int = 0;
+            while oi < len(od) {
+                diags.push(od[oi]);
+                oi = oi + 1;
+            }
+            return diags;
+        }
         if callee.kind == shared_ast.ex_ident() {
             // Builtin arity FIRST (stage1 checkCallExpr order: builtins at 1655
             // precede variant 2034 / function 2167). On mismatch emit the
@@ -2576,11 +2594,21 @@ function make_method_scope(f: FunctionDecl, global: Scope, self_type: String) re
 // and is not flagged). Recursing the clause for undeclared/arg/operator errors
 // is a separate, deferred concern. Phase 48j-b, ADR 0056.
 
-function check_bool_contracts(clauses: Array<Expr>, prefix: String, scope: Scope, prog: Program) returns Array<CheckDiag> {
+function check_bool_contracts(clauses: Array<Expr>, prefix: String, scope: Scope, fn_names: Array<String>, fn_counts: Array<Int>, var_names: Array<String>, var_counts: Array<Int>, prog: Program) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
     let mutable i: Int = 0;
     while i < len(clauses) {
         let c: Expr = clauses[i];
+        // Name / argument / operator errors within the clause (stage1 runs
+        // checkExpression on each clause), THEN boolean-typedness on the inferred
+        // type. `result` and `old()` are handled as contract keywords in
+        // check_expr_names; quantifier bound vars are scoped there too.
+        let mutable nd: Array<CheckDiag> = check_expr_names(c, scope, fn_names, fn_counts, var_names, var_counts, prog);
+        let mutable ni: Int = 0;
+        while ni < len(nd) {
+            diags.push(nd[ni]);
+            ni = ni + 1;
+        }
         let t: Type = infer_expr_type(c, scope, prog);
         if not is_unknown_type(t) {
             if t.name != "Bool" {
@@ -2597,15 +2625,15 @@ function check_bool_contracts(clauses: Array<Expr>, prefix: String, scope: Scope
 // ensures) mirrors stage1; decreases clauses are a measure, not boolean, so
 // they are not checked.
 
-function check_fn_contracts(f: FunctionDecl, scope: Scope, prog: Program) returns Array<CheckDiag> {
+function check_fn_contracts(f: FunctionDecl, scope: Scope, fn_names: Array<String>, fn_counts: Array<Int>, var_names: Array<String>, var_counts: Array<Int>, prog: Program) returns Array<CheckDiag> {
     let mutable diags: Array<CheckDiag> = [];
-    let mutable rq: Array<CheckDiag> = check_bool_contracts(f.requires_clauses, "requires clause must be boolean, got ", scope, prog);
+    let mutable rq: Array<CheckDiag> = check_bool_contracts(f.requires_clauses, "requires clause must be boolean, got ", scope, fn_names, fn_counts, var_names, var_counts, prog);
     let mutable ri: Int = 0;
     while ri < len(rq) {
         diags.push(rq[ri]);
         ri = ri + 1;
     }
-    let mutable en: Array<CheckDiag> = check_bool_contracts(f.ensures_clauses, "ensures clause must be boolean, got ", scope, prog);
+    let mutable en: Array<CheckDiag> = check_bool_contracts(f.ensures_clauses, "ensures clause must be boolean, got ", scope, fn_names, fn_counts, var_names, var_counts, prog);
     let mutable ei: Int = 0;
     while ei < len(en) {
         diags.push(en[ei]);
@@ -2626,7 +2654,7 @@ function check_functions(prog: Program, global: Scope, fn_names: Array<String>, 
         // checkFunction:927 c.inAsyncFunc = fn.IsAsync). Phase 48j-c2d.
         let fn_scope: Scope = scope_set_async(make_fn_scope(f, global), f.is_async);
         // Contracts (requires then ensures) before the body, matching stage1.
-        let mutable fcd: Array<CheckDiag> = check_fn_contracts(f, fn_scope, prog);
+        let mutable fcd: Array<CheckDiag> = check_fn_contracts(f, fn_scope, fn_names, fn_counts, var_names, var_counts, prog);
         let mutable fci: Int = 0;
         while fci < len(fcd) {
             diags.push(fcd[fci]);
@@ -2658,7 +2686,7 @@ function check_entities(prog: Program, global: Scope, fn_names: Array<String>, f
         if len(e.type_params) == 0 {
             // Invariants first (self-only scope, no params). stage1:1068-1086.
             let inv_scope: Scope = scope_define_typed(scope_enter(global), "self", type_named(e.name));
-            let mutable invd: Array<CheckDiag> = check_bool_contracts(e.invariants, "invariant must be boolean, got ", inv_scope, prog);
+            let mutable invd: Array<CheckDiag> = check_bool_contracts(e.invariants, "invariant must be boolean, got ", inv_scope, fn_names, fn_counts, var_names, var_counts, prog);
             let mutable invi: Int = 0;
             while invi < len(invd) {
                 diags.push(invd[invi]);
@@ -2667,7 +2695,7 @@ function check_entities(prog: Program, global: Scope, fn_names: Array<String>, f
             // Constructor: contracts (requires/ensures) then body. stage1:1132.
             if e.has_constructor {
                 let ctor_scope: Scope = make_method_scope(e.ctor, global, e.name);
-                let mutable ccd: Array<CheckDiag> = check_fn_contracts(e.ctor, ctor_scope, prog);
+                let mutable ccd: Array<CheckDiag> = check_fn_contracts(e.ctor, ctor_scope, fn_names, fn_counts, var_names, var_counts, prog);
                 let mutable cci: Int = 0;
                 while cci < len(ccd) {
                     diags.push(ccd[cci]);
@@ -2685,7 +2713,7 @@ function check_entities(prog: Program, global: Scope, fn_names: Array<String>, f
             while mi < len(e.methods) {
                 let m: FunctionDecl = e.methods[mi];
                 let meth_scope: Scope = make_method_scope(m, global, e.name);
-                let mutable mcd: Array<CheckDiag> = check_fn_contracts(m, meth_scope, prog);
+                let mutable mcd: Array<CheckDiag> = check_fn_contracts(m, meth_scope, fn_names, fn_counts, var_names, var_counts, prog);
                 let mutable mci: Int = 0;
                 while mci < len(mcd) {
                     diags.push(mcd[mci]);
