@@ -373,17 +373,17 @@ Remaining, in rough value order:
   parameter), and the **`await` EXPRESSION** async check (48j-c2e — reused scope.in_async;
   stamped the ex_await keyword position first per ADR 0054, then added the ex_await case that
   also recurses the operand, closing the latent await-operand recursion gap).
-- **STATUS 2026-07-10 — Phase 48 & 53 COMPLETE.** All of the items below SHIPPED
-  (diff-checker **104/104**): spawn/try operand recursion, the async-test no-await warning (added
-  warning-severity support to the checker + `intentc check`), the full assert_eq comparable-set
-  (eq-signature sub-checks + Map/Future rejection + generic recursion, via `type_to_string`/
-  `type_equal`), unary operator typing, **method-call return-type inference** (bare type-param
-  substitution through the receiver), **contract-clause name recursion** (`result`/`old()` handled
-  as contract keywords), entity has-no-constructor, extern param/return unknown-type, and
-  trait-method-contract fmt/lint fidelity. The only remaining checker gaps — built-in-method
-  return typing, impl-method contracts, immutable-target assignment/push, the FFI-bridgeability
-  messages, the module-qualified has-no-constructor variant, and the `@target_specific("wasm")`
-  warning — are sound-false-negatives tracked in `prds/backlog/prd-phase-58-checker-parity-tail.md`.
+- **STATUS 2026-07-10 — Phase 48, 53 & 58 (high-value) COMPLETE.** SHIPPED (diff-checker
+  **110/110**): spawn/try operand recursion, the async-test no-await warning (warning-severity
+  support in the checker + `intentc check`), the full assert_eq comparable-set (via
+  `type_to_string`/`type_equal`), unary operator typing, method-call return-type inference,
+  contract-clause name recursion (`result`/`old()` as contract keywords), entity
+  has-no-constructor, extern param/return unknown-type, trait-method-contract fmt/lint fidelity,
+  **impl-block-method contracts**, and the **immutable-target checks** (assign / index-assign /
+  push / set / remove, via per-binding mutability in the Scope). A line is drawn under Phase 58
+  here; the low-value residual — built-in-method return typing, extern FFI-bridgeability messages,
+  the module-qualified has-no-constructor variant, and the `@target_specific("wasm")` warning —
+  is deferred (sound-false-negatives, `prds/backlog/prd-phase-58-checker-parity-tail.md`).
   Historical gap list retained below.
 - **Remaining Phase 48 gaps** (all sound false negatives / corpus-invisible today):
   - **assert_eq comparable-set — remainder** (entity no-eq-method is DONE, 48j-c2f): the
@@ -426,8 +426,9 @@ Remaining, in rough value order:
 Note: stage1 `checkReturnStmt` does NOT compare the return value to the declared return
 type — there is no return-type-mismatch diagnostic to port.
 
-Known deferred (need new machinery): impl-block-method contracts; immutable-target
-assignment/push (needs mutability tracking in Scope).
+Update (2026-07-10): both former "needs new machinery" items SHIPPED in Phase 58 —
+impl-block-method contracts, and immutable-target assignment/push (per-binding mutability
+now tracked on the checker Scope). See the STATUS note above for the deferred residual.
 
 ## How to resume
 

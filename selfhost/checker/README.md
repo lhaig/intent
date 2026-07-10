@@ -41,12 +41,14 @@ well-typedness, async-context checks, the assert_eq comparable-set, unary operat
 entity has-no-constructor, and extern param/return `unknown type`. Multi-file `CheckAll`
 shipped in Phase 54 (ADR 0058).
 
-Method-call return-type inference (user-entity methods, with type-param substitution) and
-contract-clause name recursion (`result`/`old()` handled as contract keywords) also shipped.
+Method-call return-type inference (user-entity methods, with type-param substitution),
+contract-clause name recursion (`result`/`old()` handled as contract keywords), impl-block
+method contracts, and the immutable-target checks (assign / index-assign / push / set /
+remove, via per-binding mutability in the `Scope`) also shipped (Phase 58).
 
 Deferred (sound false negatives — never emit a wrong diagnostic, never fire on valid code):
-built-in-method return typing, impl-method contracts, immutable-target assignment, and a few
-narrow edges — all catalogued in
+built-in-method return typing, extern FFI-bridgeability messages, the module-qualified
+has-no-constructor variant, and the `@target_specific("wasm")` warning — all catalogued in
 [`prds/backlog/prd-phase-58-checker-parity-tail.md`](../../prds/backlog/prd-phase-58-checker-parity-tail.md).
 
 | File | Module | Purpose |
