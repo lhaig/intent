@@ -510,6 +510,10 @@ public entity TraitMethodSig {
     field return_type: String;
     field line: Int;
     field column: Int;
+    // Boundary contracts on the signature. Stage1 preserves these on `fmt` and
+    // lints their absence; stored so the self-hosted formatter round-trips them.
+    field requires_clauses: Array<Expr>;
+    field ensures_clauses: Array<Expr>;
 
     constructor(name: String, params: Array<Param>, return_type: String) {
         self.name = name;
@@ -517,6 +521,8 @@ public entity TraitMethodSig {
         self.return_type = return_type;
         self.line = 0;
         self.column = 0;
+        self.requires_clauses = empty_expr_array();
+        self.ensures_clauses = empty_expr_array();
     }
 }
 

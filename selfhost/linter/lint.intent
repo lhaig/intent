@@ -482,16 +482,16 @@ public function lint_enum_decl(en: EnumDecl) returns Array<LintDiag> {
 // R6-trait QUIRK: stage1 calls checkEntityNaming for traits, so the message
 // literally says "entity", not "trait".
 // Stage1 order per method: R5 (naming), then R3 (contracts).
-// R3 always fires — stage2 parse_trait_method_sig expects `;` immediately after
-// the return type and does not parse requires/ensures, so every successfully-parsed
-// trait method has no contracts.
+// R3 fires only when the trait method has no requires/ensures (mirror stage1
+// lintTraits:122). Contracts are now parsed and stored on TraitMethodSig, so a
+// documented boundary contract suppresses R3.
 public function lint_trait_decl(tr: TraitDecl) returns Array<LintDiag> {
     let mutable diags: Array<LintDiag> = [];
     // R6-trait: naming check — message says "entity" (stage1 quirk)
     if not is_pascal_case(tr.name) {
         diags.push(LintDiag(tr.line, tr.column, "entity '" + tr.name + "' should use PascalCase naming"));
     }
-    // per method: R5 naming, then R3 contracts (always-fire; stage2 parser has no contract clause for trait methods)
+    // per method: R5 naming, then R3 contracts (fires only when the method has none)
     let mutable mi: Int = 0;
     while mi < len(tr.methods) {
         let m: TraitMethodSig = tr.methods[mi];
@@ -499,8 +499,10 @@ public function lint_trait_decl(tr: TraitDecl) returns Array<LintDiag> {
         if not is_snake_case(m.name) {
             diags.push(LintDiag(m.line, m.column, "function '" + m.name + "' should use snake_case naming"));
         }
-        // R3: no contracts (always fires for every parseable trait method)
-        diags.push(LintDiag(m.line, m.column, "trait method '" + tr.name + "." + m.name + "' has no requires or ensures contracts"));
+        // R3: no requires/ensures contracts (mirror stage1 — conditional on absence)
+        if len(m.requires_clauses) == 0 and len(m.ensures_clauses) == 0 {
+            diags.push(LintDiag(m.line, m.column, "trait method '" + tr.name + "." + m.name + "' has no requires or ensures contracts"));
+        }
         mi = mi + 1;
     }
     return diags;

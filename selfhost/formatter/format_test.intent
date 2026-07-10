@@ -1142,3 +1142,9 @@ test "extern with requires/ensures round-trips byte-identically" {
     let out: String = roundtrip(src);
     assert_eq(out, src);
 }
+
+test "trait method with a requires contract round-trips byte-identically" {
+    let src: String = "module m version \"1.0.0\";\n\ntrait Shaper " + '{'.to_string() + "\n    method area(x: Int) returns Float\n        requires x > 0\n    ;\n" + '}'.to_string() + "\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}

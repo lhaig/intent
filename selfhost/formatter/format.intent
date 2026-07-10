@@ -616,7 +616,25 @@ public function format_trait_method_sig(sig: TraitMethodSig) returns String {
     if sig.return_type != "" {
         s = s + " returns " + sig.return_type;
     }
-    s = s + ";";
+    // Contracts (mirror stage1 formatTraitMethodSig): each requires/ensures on
+    // its own 8-space-indented line, then `;` alone at 4-space indent. No
+    // contracts -> `;` right after the signature.
+    let has_contracts: Bool = len(sig.requires_clauses) > 0 or len(sig.ensures_clauses) > 0;
+    if has_contracts {
+        let mutable ri: Int = 0;
+        while ri < len(sig.requires_clauses) {
+            s = s + "\n        requires " + format_expr(sig.requires_clauses[ri]);
+            ri = ri + 1;
+        }
+        let mutable ei: Int = 0;
+        while ei < len(sig.ensures_clauses) {
+            s = s + "\n        ensures " + format_expr(sig.ensures_clauses[ei]);
+            ei = ei + 1;
+        }
+        s = s + "\n    ;";
+    } else {
+        s = s + ";";
+    }
     return s;
 }
 

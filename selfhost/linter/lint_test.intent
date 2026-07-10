@@ -649,14 +649,21 @@ test "R11: intent block with verified_by produces no R11 diag" {
 }
 
 // --- R3: trait method contracts (43.8) ----------------------------------------
-// R3 always fires — stage2 parse_trait_method_sig does not parse requires/ensures,
-// so every successfully-parsed trait method has no contracts.
+// R3 fires only when a trait method has NO requires/ensures (mirror stage1). Trait-
+// method contracts are now parsed and stored, so a documented contract suppresses R3.
 
-test "R3: trait method always produces no-contracts diag" {
+test "R3: contract-less trait method produces a no-contracts diag" {
     let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method execute() returns Int; " + '}'.to_string();
     let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "trait method 'T.execute' has no requires or ensures contracts"), true);
+}
+
+test "R3: trait method WITH contracts produces no diag" {
+    let src: String = "module m version \"1.0\"; trait T " + '{'.to_string() + " method execute(x: Int) returns Int requires x > 0; " + '}'.to_string();
+    let prog: Program = shared_parser.parse(src);
+    let diags: Array<LintDiag> = linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "trait method 'T.execute' has no requires or ensures contracts"), false);
 }
 
 test "R3/R5 ORDER: R5 naming fires before R3 contracts for same method" {
