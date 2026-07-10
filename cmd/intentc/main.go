@@ -1324,7 +1324,7 @@ func handleLsp(args []string) {
 		fmt.Fprintln(os.Stderr, "Usage: intentc lsp")
 		os.Exit(1)
 	}
-	srv := lsp.NewServer(os.Stdin, os.Stdout)
+	srv := lsp.NewServer(os.Stdin, os.Stdout, version)
 	if err := srv.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "lsp: %s\n", err)
 		os.Exit(1)

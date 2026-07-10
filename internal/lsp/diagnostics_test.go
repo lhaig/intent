@@ -204,7 +204,7 @@ func newTestServerWithHandle(t *testing.T) (client *transport, close func(), srv
 	clientToServer := newPipe()
 	serverToClient := newPipe()
 
-	srv = NewServer(clientToServer.readEnd(), serverToClient.writeEnd())
+	srv = NewServer(clientToServer.readEnd(), serverToClient.writeEnd(), "dev")
 	srvErr := make(chan error, 1)
 	go func() {
 		srvErr <- srv.Run()

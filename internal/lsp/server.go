@@ -23,6 +23,7 @@ type Server struct {
 	docs       *documentStore
 	debouncer  *debouncer
 	workspaces *workspaceManager
+	version    string
 
 	mu          sync.Mutex
 	initialized bool
@@ -30,13 +31,19 @@ type Server struct {
 	rootURI     DocumentURI
 }
 
-// NewServer constructs a Server bound to the given reader/writer pair.
-func NewServer(in io.Reader, out io.Writer) *Server {
+// NewServer constructs a Server bound to the given reader/writer pair. version is
+// the build-stamped compiler version (main.version, set via -ldflags), reported to
+// clients as ServerInfo.Version; pass "dev" for unstamped/dev builds.
+func NewServer(in io.Reader, out io.Writer, version string) *Server {
+	if version == "" {
+		version = "dev"
+	}
 	return &Server{
 		t:          newTransport(in, out),
 		docs:       newDocumentStore(),
 		debouncer:  newDebouncer(diagnosticsDebounce),
 		workspaces: newWorkspaceManager(),
+		version:    version,
 	}
 }
 
@@ -257,7 +264,7 @@ func (s *Server) handleInitialize(id json.RawMessage, params json.RawMessage) {
 		},
 		ServerInfo: &ServerInfo{
 			Name:    "intentc-lsp",
-			Version: "0.1.0",
+			Version: s.version,
 		},
 	}
 	if err := s.t.writeResponse(id, result); err != nil {
