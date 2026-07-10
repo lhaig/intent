@@ -1446,8 +1446,9 @@ public entity Parser {
     method parse_extern_decl(leading_comments: Array<String>) returns ExternDecl {
         // `extern function NAME(params) returns T from "crate::path" [requires/ensures];`
         // (mirrors parseExternFunctionDecl, ADR 0028). The `from` is a contextual ident;
-        // extern contracts are parsed and discarded (the decl emits no Rust — only its
-        // CALLS do, as `crate::path(args)`; contracts are checked, not emitted).
+        // extern contracts are stored on the decl so the formatter round-trips them and
+        // the linter can check their presence (the decl emits no Rust — only its CALLS
+        // do, as `crate::path(args)`; contracts are not lowered to codegen).
         let extern_tok: Token = self.expect(shared_lexer.kw_extern_marker(), "'extern'");
         let line: Int = extern_tok.line;
         let cmts: Array<String> = leading_comments;
@@ -1470,13 +1471,24 @@ public entity Parser {
             let path_tok: Token = self.expect(shared_lexer.tk_string(), "target string literal after 'from'");
             rust_path = self.unquote(path_tok.text);
         }
+        let mutable reqs: Array<Expr> = [];
+        let mutable enss: Array<Expr> = [];
         while self.is_contract_kw() and self.error == "" {
-            self.advance();
+            let kw_tok: Token = self.advance();
             let clause: Expr = self.parse_expr();
+            if kw_tok.text == "requires" {
+                reqs.push(clause);
+            } else {
+                if kw_tok.text == "ensures" {
+                    enss.push(clause);
+                }
+            }
         }
         self.expect(shared_lexer.tk_semicolon(), "';' to end extern declaration");
         let mutable ext: ExternDecl = ExternDecl(rust_path, name_tok.text, params, ret, line, cmts);
         ext.column = extern_tok.column;
+        ext.requires_clauses = reqs;
+        ext.ensures_clauses = enss;
         return ext;
     }
 
@@ -2249,7 +2261,7 @@ test "test declaration captures name and body" {
 
 test "extern declaration captures target + signature" {
     // `extern function NAME(params) returns T from "crate::path" [requires/ensures];`
-    // (ADR 0028). target holds the from-path; contracts are parsed and discarded.
+    // (ADR 0028). target holds the from-path; contracts are stored on the decl.
     let src: String = "module m version \"1.0\"; extern function panic(msg: String) returns Void from \"std::process::abort\" requires true;";
     let prog: Program = parse(src);
     assert_eq(prog.error, "");
@@ -2260,6 +2272,8 @@ test "extern declaration captures target + signature" {
     assert_eq(len(e.params), 1);
     assert_eq(e.params[0].name, "msg");
     assert_eq(e.return_type, "Void");
+    assert_eq(len(e.requires_clauses), 1);
+    assert_eq(len(e.ensures_clauses), 0);
 }
 
 test "intent block captures description, goal, guarantee, and verified_by refs" {

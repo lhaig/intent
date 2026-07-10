@@ -689,14 +689,25 @@ public function format_intent_block(ib: IntentBlock) returns String {
 }
 
 public function format_extern_decl(ex: ExternDecl) returns String {
-    // `extern function NAME(params) returns T\n    from "path";` (mirror stage1's
-    // formatExternFunctionDecl, ADR 0028). Contracts are not preserved on ExternDecl, so
-    // they are not re-emitted (the parser discards them).
+    // `extern function NAME(params) returns T\n    from "path"\n    requires ...\n
+    //     ensures ...;` (mirror stage1's formatExternFunctionDecl, ADR 0028). Contracts
+    // are stored on ExternDecl and re-emitted here so `fmt` round-trips them losslessly.
     let mutable s: String = "extern function " + ex.func_name + "(" + format_param_list(ex.params) + ")";
     if ex.return_type != "" {
         s = s + " returns " + ex.return_type;
     }
-    s = s + "\n    from \"" + ex.target + "\";";
+    s = s + "\n    from \"" + ex.target + "\"";
+    let mutable ri: Int = 0;
+    while ri < len(ex.requires_clauses) {
+        s = s + "\n    requires " + format_expr(ex.requires_clauses[ri]);
+        ri = ri + 1;
+    }
+    let mutable ei: Int = 0;
+    while ei < len(ex.ensures_clauses) {
+        s = s + "\n    ensures " + format_expr(ex.ensures_clauses[ei]);
+        ei = ei + 1;
+    }
+    s = s + ";";
     return s;
 }
 

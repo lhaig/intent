@@ -612,6 +612,10 @@ public entity ExternDecl {
     field line: Int;
     field column: Int;
     field comments_before: Array<String>;
+    // Boundary contracts (ADR 0028). Stage1 preserves these on `fmt` and lints their
+    // absence; stored here so the self-hosted formatter round-trips them losslessly.
+    field requires_clauses: Array<Expr>;
+    field ensures_clauses: Array<Expr>;
 
     constructor(target: String, func_name: String, params: Array<Param>, return_type: String, line: Int, comments_before: Array<String>) {
         self.target = target;
@@ -621,6 +625,8 @@ public entity ExternDecl {
         self.line = line;
         self.comments_before = comments_before;
         self.column = 0;
+        self.requires_clauses = empty_expr_array();
+        self.ensures_clauses = empty_expr_array();
     }
 }
 

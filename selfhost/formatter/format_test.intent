@@ -1136,3 +1136,9 @@ test "break and continue round-trip byte-identically" {
     let out: String = roundtrip(src);
     assert_eq(out, src);
 }
+
+test "extern with requires/ensures round-trips byte-identically" {
+    let src: String = "module m version \"1.0.0\";\n\nextern function h(x: String) returns String\n    from \"c::h\"\n    requires len(x) > 0\n    ensures len(result) == 64;\n\n";
+    let out: String = roundtrip(src);
+    assert_eq(out, src);
+}

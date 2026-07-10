@@ -682,9 +682,9 @@ test "R3/R5 ORDER: R5 naming fires before R3 contracts for same method" {
 }
 
 // --- R4: extern contracts (43.8) ----------------------------------------------
-// R4 always fires — stage2 parse_extern_decl parses requires/ensures but DISCARDS them
-// (they are not stored on ExternDecl), so every parsed extern has no contracts.
-// Extern syntax: extern function name(...) returns T from "crate::path";
+// R4 fires only when an extern has NO requires/ensures (mirror stage1 lintExternFunctions).
+// Contracts are stored on ExternDecl, so a documented boundary contract suppresses R4.
+// Extern syntax: extern function name(...) returns T from "crate::path" [requires/ensures];
 // ExternDecl.func_name holds the function name.
 
 test "R4: extern always produces no-contracts diag" {
@@ -692,6 +692,13 @@ test "R4: extern always produces no-contracts diag" {
     let prog: Program = shared_parser.parse(src);
     let diags: Array<LintDiag> = linter.lint_program(prog);
     assert_eq(has_diag_msg(diags, "extern function 'panic' has no requires/ensures; FFI declarations should document the boundary contract"), true);
+}
+
+test "R4: extern WITH contracts produces no diag" {
+    let src: String = "module m version \"1.0\"; extern function h(x: String) returns String from \"c::h\" requires len(x) > 0 ensures len(result) == 64;";
+    let prog: Program = shared_parser.parse(src);
+    let diags: Array<LintDiag> = linter.lint_program(prog);
+    assert_eq(has_diag_msg(diags, "extern function 'h' has no requires/ensures; FFI declarations should document the boundary contract"), false);
 }
 
 // --- type_uses_param helper tests (43.9) --------------------------------------

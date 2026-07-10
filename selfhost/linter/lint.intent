@@ -351,8 +351,11 @@ public function lint_function_decl(fdecl: FunctionDecl) returns Array<LintDiag> 
 // extern has no contracts.
 public function lint_extern_decl(ext: ExternDecl) returns Array<LintDiag> {
     let mutable diags: Array<LintDiag> = [];
-    // R4: every extern lacks contracts (stage2 parser surface has no contract clause for externs)
-    diags.push(LintDiag(ext.line, ext.column, "extern function '" + ext.func_name + "' has no requires/ensures; FFI declarations should document the boundary contract"));
+    // R4: an extern with no requires/ensures (mirror stage1 lintExternFunctions — fires
+    // only when both are empty; a documented boundary contract suppresses it).
+    if len(ext.requires_clauses) == 0 and len(ext.ensures_clauses) == 0 {
+        diags.push(LintDiag(ext.line, ext.column, "extern function '" + ext.func_name + "' has no requires/ensures; FFI declarations should document the boundary contract"));
+    }
     return diags;
 }
 
