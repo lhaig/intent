@@ -92,8 +92,18 @@ entity LowerScope {
     // the extern decl itself emits nothing. Carried constant on the scope. EMPTY normally.
     field extern_names: Array<String>;
     field extern_paths: Array<String>;
+    // local_func_names / func_prefixes — the funcOrigins bridge for unqualified imported
+    // calls (ADR 0061). local_func_names is the CURRENT module's own free-function names;
+    // func_prefixes is parallel to func_names (GLOBAL): each function's defining-module
+    // prefix ("" for the entry module). An unqualified call to a function NOT local to
+    // the current module (`helper(...)` for an imported `helper`) uses its defining
+    // module's prefix, mirroring stage1's funcOrigins; the local-name check preserves
+    // same-module precedence so a name defined in two modules (e.g. empty_string_array)
+    // still resolves to the caller's own prefix. Both EMPTY in single-file.
+    field local_func_names: Array<String>;
+    field func_prefixes: Array<String>;
 
-    constructor(names: Array<String>, types: Array<IrType>, enums: Array<EnumDecl>, entities: Array<EntityDecl>, self_name: String, in_old: Bool, self_entity_name: String, join_handle_vars: Array<String>, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, name_prefix: String, func_names: Array<String>, func_returns: Array<IrType>, extern_names: Array<String>, extern_paths: Array<String>) {
+    constructor(names: Array<String>, types: Array<IrType>, enums: Array<EnumDecl>, entities: Array<EntityDecl>, self_name: String, in_old: Bool, self_entity_name: String, join_handle_vars: Array<String>, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, name_prefix: String, func_names: Array<String>, func_returns: Array<IrType>, extern_names: Array<String>, extern_paths: Array<String>, local_func_names: Array<String>, func_prefixes: Array<String>) {
         self.names = names;
         self.types = types;
         self.enums = enums;
@@ -111,6 +121,8 @@ entity LowerScope {
         self.func_returns = func_returns;
         self.extern_names = extern_names;
         self.extern_paths = extern_paths;
+        self.local_func_names = local_func_names;
+        self.func_prefixes = func_prefixes;
     }
 }
 
@@ -130,7 +142,7 @@ function lower_scope_empty(enums: Array<EnumDecl>, entities: Array<EntityDecl>) 
         ent.push(entities[enti]);
         enti = enti + 1;
     }
-    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), e, ent, "self", false, "", shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), "", shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array());
+    return LowerScope(shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), e, ent, "self", false, "", shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), "", shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array());
 }
 
 // lower_scope_apply_ctx — a copy of `s` with the module-qualifier map AND the type-
@@ -139,7 +151,7 @@ function lower_scope_empty(enums: Array<EnumDecl>, entities: Array<EntityDecl>) 
 // `mod.fn(args)` becomes `mod_fn(args)` and a cross-module type `Point` becomes
 // `TypesPoint`. Both maps are EMPTY in single-file, so nothing mangles.
 function lower_scope_apply_ctx(s: LowerScope, ctx: LowerCtx) returns LowerScope {
-    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, s.join_handle_vars, ctx.module_names, ctx.module_prefixes, ctx.type_names, ctx.type_prefixes, ctx.name_prefix, ctx.func_names, ctx.func_returns, ctx.extern_names, ctx.extern_paths);
+    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, s.join_handle_vars, ctx.module_names, ctx.module_prefixes, ctx.type_names, ctx.type_prefixes, ctx.name_prefix, ctx.func_names, ctx.func_returns, ctx.extern_names, ctx.extern_paths, ctx.local_func_names, ctx.func_prefixes);
 }
 
 // path_module_name — the module name for a source path: the file base with the
@@ -219,8 +231,14 @@ public entity LowerCtx {
     field func_returns: Array<IrType>;
     field extern_names: Array<String>;
     field extern_paths: Array<String>;
+    // local_func_names — the CURRENT module's own free-function names. func_prefixes —
+    // parallel to func_names (global): each function's defining-module prefix. Together
+    // they resolve an unqualified imported call to its defining module's prefix while
+    // keeping same-module calls local (ADR 0061 funcOrigins). Both EMPTY in single-file.
+    field local_func_names: Array<String>;
+    field func_prefixes: Array<String>;
 
-    constructor(name_prefix: String, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, func_names: Array<String>, func_returns: Array<IrType>, extern_names: Array<String>, extern_paths: Array<String>) {
+    constructor(name_prefix: String, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, func_names: Array<String>, func_returns: Array<IrType>, extern_names: Array<String>, extern_paths: Array<String>, local_func_names: Array<String>, func_prefixes: Array<String>) {
         self.name_prefix = name_prefix;
         self.module_names = module_names;
         self.module_prefixes = module_prefixes;
@@ -230,13 +248,15 @@ public entity LowerCtx {
         self.func_returns = func_returns;
         self.extern_names = extern_names;
         self.extern_paths = extern_paths;
+        self.local_func_names = local_func_names;
+        self.func_prefixes = func_prefixes;
     }
 }
 
 // empty_lower_ctx — the single-file context: no name prefix, no module/type/func maps.
 // Keeps the single-file `lower` path byte-identical (no mangling / stamping fires).
 public function empty_lower_ctx() returns LowerCtx {
-    return LowerCtx("", shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array());
+    return LowerCtx("", shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), compiler_ir.empty_ir_type_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array());
 }
 
 // capitalize — first ASCII letter uppercased (mirrors stage1's structPrefix =
@@ -330,19 +350,19 @@ function lower_scope_define(s: LowerScope, name: String, ty: IrType) returns Low
         ti = ti + 1;
     }
     new_types.push(ty);
-    return LowerScope(new_names, new_types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix, s.func_names, s.func_returns, s.extern_names, s.extern_paths);
+    return LowerScope(new_names, new_types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix, s.func_names, s.func_returns, s.extern_names, s.extern_paths, s.local_func_names, s.func_prefixes);
 }
 
 // lower_scope_with_self — a copy of `s` with self_name + self_entity_name set (for
 // entity members: methods use "self", constructors "__self").
 function lower_scope_with_self(s: LowerScope, name: String, entity_name: String) returns LowerScope {
-    return LowerScope(s.names, s.types, s.enums, s.entities, name, s.in_old, entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix, s.func_names, s.func_returns, s.extern_names, s.extern_paths);
+    return LowerScope(s.names, s.types, s.enums, s.entities, name, s.in_old, entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix, s.func_names, s.func_returns, s.extern_names, s.extern_paths, s.local_func_names, s.func_prefixes);
 }
 
 // lower_scope_with_old — a copy of `s` with in_old set (for ensures clauses, where
 // `old(expr)` lowers to its captured variable).
 function lower_scope_with_old(s: LowerScope, flag: Bool) returns LowerScope {
-    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, flag, s.self_entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix, s.func_names, s.func_returns, s.extern_names, s.extern_paths);
+    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, flag, s.self_entity_name, s.join_handle_vars, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix, s.func_names, s.func_returns, s.extern_names, s.extern_paths, s.local_func_names, s.func_prefixes);
 }
 
 // lower_scope_add_joinhandle — a copy of `s` with `name` recorded as a spawn-bound
@@ -355,7 +375,7 @@ function lower_scope_add_joinhandle(s: LowerScope, name: String) returns LowerSc
         i = i + 1;
     }
     jh.push(name);
-    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, jh, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix, s.func_names, s.func_returns, s.extern_names, s.extern_paths);
+    return LowerScope(s.names, s.types, s.enums, s.entities, s.self_name, s.in_old, s.self_entity_name, jh, s.module_names, s.module_prefixes, s.type_names, s.type_prefixes, s.name_prefix, s.func_names, s.func_returns, s.extern_names, s.extern_paths, s.local_func_names, s.func_prefixes);
 }
 
 // lookup_entity_field_type — the declared type of `field_name` in entity `ent_name`,
@@ -391,6 +411,21 @@ function lookup_func_return(func_names: Array<String>, func_returns: Array<IrTyp
         i = i + 1;
     }
     return compiler_ir.ir_type_named("");
+}
+
+// lookup_func_prefix — the defining-module prefix of free function `name` (parallel to
+// func_names), or "" if not found. An unqualified call to an imported function uses this
+// prefix instead of the caller's (funcOrigins; mirrors stage1's g.funcOrigins lookup).
+// A "" result (entry-module function or unknown name) leaves the caller's prefix in place.
+function lookup_func_prefix(func_names: Array<String>, func_prefixes: Array<String>, name: String) returns String {
+    let mutable i: Int = 0;
+    while i < len(func_names) {
+        if func_names[i] == name {
+            return func_prefixes[i];
+        }
+        i = i + 1;
+    }
+    return "";
 }
 
 // lookup_extern_path — the Rust path (`from "..."`) of extern fn `name`, or "" if `name`
@@ -774,7 +809,7 @@ public function lower(prog: Program, path: String) returns IrModule {
     }
     // Single-file: every generic instantiation is emitted by the one module.
     let single_monos: Array<IrType> = collect_instantiations(prog, prog.entities);
-    return lower_module(prog, path, true, shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), prog.enums, prog.entities, func_names, func_returns, extern_names, extern_paths, single_monos);
+    return lower_module(prog, path, true, shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), prog.enums, prog.entities, func_names, func_returns, shared_ast.empty_string_array(), extern_names, extern_paths, single_monos);
 }
 
 // lower_module — lower one Program of a (possibly multi-file) build. is_entry marks
@@ -787,13 +822,22 @@ public function lower(prog: Program, path: String) returns IrModule {
 // for lookups/classification (is_known_entity for cross-module constructors, variant
 // resolution, self-field types) — mirroring stage1's global lowerer.entities. The per-
 // module prog.enums/prog.entities still drive which decls this module EMITS.
-public function lower_module(prog: Program, path: String, is_entry: Bool, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, all_enums: Array<EnumDecl>, all_entities: Array<EntityDecl>, func_names: Array<String>, func_returns: Array<IrType>, extern_names: Array<String>, extern_paths: Array<String>, emit_monos: Array<IrType>) returns IrModule {
+public function lower_module(prog: Program, path: String, is_entry: Bool, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, all_enums: Array<EnumDecl>, all_entities: Array<EntityDecl>, func_names: Array<String>, func_returns: Array<IrType>, func_prefixes: Array<String>, extern_names: Array<String>, extern_paths: Array<String>, emit_monos: Array<IrType>) returns IrModule {
     let mod_name: String = path_module_name(path);
     let mutable name_prefix: String = "";
     if not is_entry {
         name_prefix = mod_name + "_";
     }
-    let ctx: LowerCtx = LowerCtx(name_prefix, module_names, module_prefixes, type_names, type_prefixes, func_names, func_returns, extern_names, extern_paths);
+    // This module's OWN free-function names, so an unqualified call to one of them keeps
+    // the current module's prefix even if another module defines the same name (the
+    // funcOrigins same-module-precedence check; mirrors stage1's g.functions lookup).
+    let mutable local_func_names: Array<String> = shared_ast.empty_string_array();
+    let mutable lfi: Int = 0;
+    while lfi < len(prog.functions) {
+        local_func_names.push(prog.functions[lfi].name);
+        lfi = lfi + 1;
+    }
+    let ctx: LowerCtx = LowerCtx(name_prefix, module_names, module_prefixes, type_names, type_prefixes, func_names, func_returns, extern_names, extern_paths, local_func_names, func_prefixes);
     let mutable fns: Array<IrFunction> = compiler_ir.empty_ir_function_array();
     let mutable fi: Int = 0;
     while fi < len(prog.functions) {
@@ -937,6 +981,11 @@ public function lower_all(progs: Array<Program>, paths: Array<String>) returns I
     // type) so a call's result type can be stamped during lowering.
     let mutable func_names: Array<String> = shared_ast.empty_string_array();
     let mutable func_returns: Array<IrType> = compiler_ir.empty_ir_type_array();
+    // func_prefixes — parallel to func_names: each function's defining-module prefix
+    // ("<file-base>_" for a non-entry module, "" for the entry module). Lets an
+    // unqualified call to an imported function emit the defining module's prefix
+    // (funcOrigins; mirrors stage1's mod.Name + "_" over non-entry modules).
+    let mutable func_prefixes: Array<String> = shared_ast.empty_string_array();
     let mutable extern_names: Array<String> = shared_ast.empty_string_array();
     let mutable extern_paths: Array<String> = shared_ast.empty_string_array();
     let mutable g: Int = 0;
@@ -951,10 +1000,15 @@ public function lower_all(progs: Array<Program>, paths: Array<String>) returns I
             all_entities.push(progs[g].entities[gni]);
             gni = gni + 1;
         }
+        let mutable gpfx: String = "";
+        if g < n - 1 {
+            gpfx = path_module_name(paths[g]) + "_";
+        }
         let mutable gfi: Int = 0;
         while gfi < len(progs[g].functions) {
             func_names.push(progs[g].functions[gfi].name);
             func_returns.push(compiler_ir.ir_parse_type(progs[g].functions[gfi].return_type));
+            func_prefixes.push(gpfx);
             gfi = gfi + 1;
         }
         let mutable gxi: Int = 0;
@@ -987,7 +1041,7 @@ public function lower_all(progs: Array<Program>, paths: Array<String>) returns I
             }
             ti = ti + 1;
         }
-        mods.push(lower_module(progs[j], paths[j], is_entry, mod_names, mod_prefixes, type_names, type_prefixes, all_enums, all_entities, func_names, func_returns, extern_names, extern_paths, emit_monos));
+        mods.push(lower_module(progs[j], paths[j], is_entry, mod_names, mod_prefixes, type_names, type_prefixes, all_enums, all_entities, func_names, func_returns, func_prefixes, extern_names, extern_paths, emit_monos));
         j = j + 1;
     }
     return IrProgram(mods);
@@ -2006,7 +2060,20 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
                 if callee.name == "sleep" or callee.name == "await_all" or callee.name == "await_any" or callee.name == "timeout" {
                     fname = callee.name;
                 } else {
+                    // Default: a same-module call carries the current module's prefix.
                     fname = scope.name_prefix + callee.name;
+                    // An unqualified call to a function NOT defined in this module is an
+                    // imported call written without a qualifier: use its defining module's
+                    // prefix instead (funcOrigins, ADR 0061). The local-name check keeps
+                    // same-module precedence when a name is defined in two modules (e.g.
+                    // empty_string_array in shared_ast and lexer). Mirrors stage1's
+                    // `if not local: funcOrigins[name] + name`.
+                    if not string_in(scope.local_func_names, callee.name) {
+                        let origin_pfx: String = lookup_func_prefix(scope.func_names, scope.func_prefixes, callee.name);
+                        if origin_pfx != "" {
+                            fname = origin_pfx + callee.name;
+                        }
+                    }
                     // Stamp the result type (by the ORIGINAL fn name) for concat / dispatch.
                     rty = lookup_func_return(scope.func_names, scope.func_returns, callee.name);
                 }

@@ -1,0 +1,10 @@
+module main version "1.0.0";
+
+import "lib.intent";
+
+entry function main() returns Int {
+    let a: Int = helper(41);
+    let b: Int = twice(a);
+    print(b);
+    return 0;
+}

@@ -124,21 +124,21 @@ calls now emit, compile, and run; Go unit tests
 
 ### Self-hosting parity (internal, not user-facing)
 
-Two cross-module patterns are handled by the primary Go (stage1) compiler but not yet by
-the self-hosted stage2 backend. Both are invisible to users — `intentc build` runs stage1,
-which emits, compiles, and runs them correctly — but they constrain the byte-equal
-`diff-emit-sweep` gate, so the repo's swept programs avoid them:
+- **Unqualified calls to imported functions (fixed 2026-07-13).** stage2 now carries a
+  `funcOrigins` bridge that mirrors stage1: `lower_all` builds a `func_prefixes` array
+  parallel to `func_names` (each function's defining-module prefix, `""` for the entry
+  module), and each module records its own `local_func_names`. An unqualified call to a
+  function not local to the current module emits the defining module's prefix; the
+  local-name check preserves same-module precedence when a name is defined in two modules
+  (e.g. `empty_string_array` in `shared/ast.intent` and `shared/lexer.intent`, both called
+  bare — `bootstrap-stage3` exercises this). The `multimod_unqualified` diff-emit fixture
+  locks it in byte-equal with stage1.
 
 - **Generic free functions.** stage2 does not monomorphize generic *functions* at all (only
   generic entities); even a bare `identity<Int>()` diverges. So neither bare nor qualified
   generic-function calls are swept, and `multimod_qualified` covers only the generic-entity
-  constructor, variants, and `module.enum.variant`.
-- **Unqualified calls to imported functions.** stage2 emits the bare name (the stage1 fix
-  added a `funcOrigins` map that stage2 lacks), so no swept fixture uses that form — the
-  corpus and toolchain call cross-module functions qualified.
-
-Teaching stage2 to monomorphize generic free functions and to mangle unqualified imported
-calls is deferred to a later self-hosting slice.
+  constructor, variants, and `module.enum.variant`. Teaching stage2 to monomorphize generic
+  free functions is deferred to a later self-hosting slice.
 
 ## Consequences
 
@@ -151,7 +151,8 @@ calls is deferred to a later self-hosting slice.
   the supported features.
 - The blanket "cross-package code generation is not yet fully supported" warning is removed;
   DESIGN.md §15.9 is rewritten as the support matrix above. All user-facing cross-package
-  forms now work; only the two internal stage2 self-hosting-parity gaps above remain.
+  forms now work; the only remaining internal stage2 self-hosting-parity gap is generic
+  free-function monomorphization.
 
 ## References
 

@@ -1,0 +1,9 @@
+module lib version "1.0.0";
+
+public function helper(x: Int) returns Int {
+    return x + 1;
+}
+
+public function twice(x: Int) returns Int {
+    return x + x;
+}

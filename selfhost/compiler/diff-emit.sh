@@ -66,6 +66,7 @@ CORPUS=(
   "selfhost/compiler/emit-fixtures/multimod_enum/main.intent"
   "selfhost/compiler/emit-fixtures/multimod_generic/main.intent"
   "selfhost/compiler/emit-fixtures/multimod_qualified/main.intent"
+  "selfhost/compiler/emit-fixtures/multimod_unqualified/main.intent"
   "selfhost/compiler/emit-fixtures/let_locals.intent"
   "selfhost/compiler/emit-fixtures/binops.intent"
   "selfhost/compiler/emit-fixtures/control_flow.intent"
