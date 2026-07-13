@@ -557,6 +557,33 @@ function find_entity_decl(entities: Array<EntityDecl>, name: String) returns Ent
     return EntityDecl("", false, fields, methods, false, shared_ast.empty_function_decl(), invs, 0, cmts);
 }
 
+// func_is_generic — is `name` a declared free function with type parameters? Mirrors
+// entity_is_generic for the free-function monomorphization path (a generic free function
+// `identity<T>` is never emitted directly; each instantiation used becomes `identity__Int`).
+function func_is_generic(funcs: Array<FunctionDecl>, name: String) returns Bool {
+    let mutable i: Int = 0;
+    while i < len(funcs) {
+        if funcs[i].name == name {
+            return len(funcs[i].type_params) > 0;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// find_func_decl — the free-function decl named `name`, or an empty one (name "") if
+// absent. Mirrors find_entity_decl; used to monomorphize a generic function by name.
+function find_func_decl(funcs: Array<FunctionDecl>, name: String) returns FunctionDecl {
+    let mutable i: Int = 0;
+    while i < len(funcs) {
+        if funcs[i].name == name {
+            return funcs[i];
+        }
+        i = i + 1;
+    }
+    return shared_ast.empty_function_decl();
+}
+
 // append_types — functional concat of two Array<IrType> (immutable-param safe).
 function append_types(a: Array<IrType>, b: Array<IrType>) returns Array<IrType> {
     let mutable out: Array<IrType> = compiler_ir.empty_ir_type_array();
@@ -596,8 +623,10 @@ function insts_from_type_string(entities: Array<EntityDecl>, s: String) returns 
 }
 
 // insts_from_expr — instantiations referenced in an expression (a generic ctor call
-// `Stack<Int>()` bakes the args into the callee ident name), recursing children/arms.
-function insts_from_expr(entities: Array<EntityDecl>, e: Expr) returns Array<IrType> {
+// `Stack<Int>()` or a generic free-function call `identity<Int>()` both bake the args into
+// the callee ident name), recursing children/arms. `funcs` is the free-function registry
+// so a generic-function call is recorded alongside generic-entity instantiations.
+function insts_from_expr(entities: Array<EntityDecl>, funcs: Array<FunctionDecl>, e: Expr) returns Array<IrType> {
     let mutable out: Array<IrType> = compiler_ir.empty_ir_type_array();
     if e.kind == shared_ast.ex_call() {
         if len(e.children) > 0 {
@@ -612,24 +641,36 @@ function insts_from_expr(entities: Array<EntityDecl>, e: Expr) returns Array<IrT
                     out = append_types(out, insts_from_type_string(entities, callee.name));
                 }
             }
+            // A generic free-function call bakes its type args into the callee name too
+            // (`identity<Int>(...)` -> callee.name "identity<Int>"); if the base names a
+            // generic function, record its instantiation (mirrors stage1's
+            // recordFuncInstantiation). Entities are filtered out by func_is_generic.
+            if callee.kind == shared_ast.ex_ident() or callee.kind == shared_ast.ex_field() {
+                let ft: IrType = compiler_ir.ir_parse_type(callee.name);
+                if func_is_generic(funcs, ft.name) {
+                    if len(ft.type_args) > 0 {
+                        out.push(ft);
+                    }
+                }
+            }
         }
     }
     let mutable i: Int = 0;
     while i < len(e.children) {
-        out = append_types(out, insts_from_expr(entities, e.children[i]));
+        out = append_types(out, insts_from_expr(entities, funcs, e.children[i]));
         i = i + 1;
     }
     let mutable ai: Int = 0;
     while ai < len(e.match_arms) {
-        out = append_types(out, insts_from_expr(entities, e.match_arms[ai].body));
+        out = append_types(out, insts_from_expr(entities, funcs, e.match_arms[ai].body));
         ai = ai + 1;
     }
     return out;
 }
 
 // insts_from_block — instantiations in a block (let type annotations + expressions,
-// recursing nested blocks).
-function insts_from_block(entities: Array<EntityDecl>, b: Block) returns Array<IrType> {
+// recursing nested blocks). `funcs` threads the free-function registry to insts_from_expr.
+function insts_from_block(entities: Array<EntityDecl>, funcs: Array<FunctionDecl>, b: Block) returns Array<IrType> {
     let mutable out: Array<IrType> = compiler_ir.empty_ir_type_array();
     let mutable i: Int = 0;
     while i < len(b.stmts) {
@@ -637,15 +678,15 @@ function insts_from_block(entities: Array<EntityDecl>, b: Block) returns Array<I
         if s.kind == shared_ast.st_let() {
             out = append_types(out, insts_from_type_string(entities, s.type_name));
         }
-        out = append_types(out, insts_from_expr(entities, s.expr));
+        out = append_types(out, insts_from_expr(entities, funcs, s.expr));
         if s.kind == shared_ast.st_if() {
-            out = append_types(out, insts_from_block(entities, s.then_block));
+            out = append_types(out, insts_from_block(entities, funcs, s.then_block));
             if s.has_else {
-                out = append_types(out, insts_from_block(entities, s.else_block));
+                out = append_types(out, insts_from_block(entities, funcs, s.else_block));
             }
         }
         if s.kind == shared_ast.st_while() or s.kind == shared_ast.st_for() {
-            out = append_types(out, insts_from_block(entities, s.then_block));
+            out = append_types(out, insts_from_block(entities, funcs, s.then_block));
         }
         i = i + 1;
     }
@@ -653,7 +694,7 @@ function insts_from_block(entities: Array<EntityDecl>, b: Block) returns Array<I
 }
 
 // insts_from_func — instantiations in a function/method/ctor signature + body.
-function insts_from_func(entities: Array<EntityDecl>, f: FunctionDecl) returns Array<IrType> {
+function insts_from_func(entities: Array<EntityDecl>, funcs: Array<FunctionDecl>, f: FunctionDecl) returns Array<IrType> {
     let mutable out: Array<IrType> = compiler_ir.empty_ir_type_array();
     let mutable i: Int = 0;
     while i < len(f.params) {
@@ -661,22 +702,25 @@ function insts_from_func(entities: Array<EntityDecl>, f: FunctionDecl) returns A
         i = i + 1;
     }
     out = append_types(out, insts_from_type_string(entities, f.return_type));
-    out = append_types(out, insts_from_block(entities, f.body));
+    out = append_types(out, insts_from_block(entities, funcs, f.body));
     return out;
 }
 
-// collect_instantiations — the deduped (by mangled name) list of generic-entity
-// instantiations used across the whole program (mirrors collectInstantiations).
-function collect_instantiations(prog: Program, gen_entities: Array<EntityDecl>) returns Array<IrType> {
+// collect_instantiations — the deduped (by mangled name) list of generic instantiations
+// (both generic entities AND generic free functions) used across the whole program
+// (mirrors collectInstantiations + its func-instantiation pass). `gen_funcs` is the
+// free-function registry, threaded to insts_from_expr so generic-function calls are
+// recorded; each result IrType is dispatched to an entity- or function-mono in lower_module.
+function collect_instantiations(prog: Program, gen_entities: Array<EntityDecl>, gen_funcs: Array<FunctionDecl>) returns Array<IrType> {
     let mutable all: Array<IrType> = compiler_ir.empty_ir_type_array();
     let mutable fi: Int = 0;
     while fi < len(prog.functions) {
-        all = append_types(all, insts_from_func(gen_entities, prog.functions[fi]));
+        all = append_types(all, insts_from_func(gen_entities, gen_funcs, prog.functions[fi]));
         fi = fi + 1;
     }
     let mutable ti: Int = 0;
     while ti < len(prog.tests) {
-        all = append_types(all, insts_from_block(gen_entities, prog.tests[ti].body));
+        all = append_types(all, insts_from_block(gen_entities, gen_funcs, prog.tests[ti].body));
         ti = ti + 1;
     }
     let mutable ei: Int = 0;
@@ -689,11 +733,11 @@ function collect_instantiations(prog: Program, gen_entities: Array<EntityDecl>) 
                 fdi = fdi + 1;
             }
             if e.has_constructor {
-                all = append_types(all, insts_from_func(gen_entities, e.ctor));
+                all = append_types(all, insts_from_func(gen_entities, gen_funcs, e.ctor));
             }
             let mutable mi: Int = 0;
             while mi < len(e.methods) {
-                all = append_types(all, insts_from_func(gen_entities, e.methods[mi]));
+                all = append_types(all, insts_from_func(gen_entities, gen_funcs, e.methods[mi]));
                 mi = mi + 1;
             }
         }
@@ -703,7 +747,7 @@ function collect_instantiations(prog: Program, gen_entities: Array<EntityDecl>) 
     while ii < len(prog.impls) {
         let mutable mi2: Int = 0;
         while mi2 < len(prog.impls[ii].methods) {
-            all = append_types(all, insts_from_func(gen_entities, prog.impls[ii].methods[mi2]));
+            all = append_types(all, insts_from_func(gen_entities, gen_funcs, prog.impls[ii].methods[mi2]));
             mi2 = mi2 + 1;
         }
         ii = ii + 1;
@@ -783,6 +827,33 @@ function monomorphize_member(f: FunctionDecl, self_name: String, entity_name: St
     return func;
 }
 
+// monomorphize_function — a concrete free function for a generic decl + type args:
+// substitute the type params through the params + return type and mangle the name
+// (identity + [Int] -> identity__Int). Mirrors stage1's monomorphizeFunction. Like
+// monomorphize_member, the BODY is lowered with UNSTAMPED params (a T-typed param has no
+// concrete type in stage1 -> Copy -> not cloned); there is no `self`, so the base scope
+// is a plain empty scope. Emitted globally (no module prefix), matching the mangled call.
+function monomorphize_function(f: FunctionDecl, type_args: Array<IrType>, enums: Array<EnumDecl>, entities: Array<EntityDecl>) returns IrFunction {
+    let mangled: String = compiler_ir.ir_mangle_generic_name(f.name, type_args);
+    let base: LowerScope = lower_scope_empty(enums, entities);
+    let mutable params: Array<IrParam> = compiler_ir.empty_ir_param_array();
+    let mutable i: Int = 0;
+    while i < len(f.params) {
+        let p: Param = f.params[i];
+        params.push(IrParam(p.name, compiler_ir.ir_substitute_type(compiler_ir.ir_parse_type(p.type_name), f.type_params, type_args)));
+        i = i + 1;
+    }
+    let reqs: Array<IrContract> = lower_contracts(f.requires_clauses, f.requires_raw, base);
+    let old_caps: Array<IrOldCapture> = collect_old_captures(f.ensures_clauses, base);
+    let ens_scope: LowerScope = lower_scope_with_old(base, true);
+    let enss: Array<IrContract> = lower_contracts(f.ensures_clauses, f.ensures_raw, ens_scope);
+    let body: Array<IrStmt> = lower_block(f.body, base);
+    let ret: IrType = compiler_ir.ir_substitute_type(compiler_ir.ir_parse_type(f.return_type), f.type_params, type_args);
+    let mutable func: IrFunction = IrFunction(mangled, f.is_entry, f.is_public, f.is_async, params, ret, reqs, enss, body);
+    func.old_captures = old_caps;
+    return func;
+}
+
 // lower — an AST Program to a single IR Module (the entry module: its `entry`
 // function becomes the program main in the backend). Mirrors Lower in lower.go
 // for the trivial subset (functions + tests; other decl kinds land per slice).
@@ -808,8 +879,8 @@ public function lower(prog: Program, path: String) returns IrModule {
         exi = exi + 1;
     }
     // Single-file: every generic instantiation is emitted by the one module.
-    let single_monos: Array<IrType> = collect_instantiations(prog, prog.entities);
-    return lower_module(prog, path, true, shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), prog.enums, prog.entities, func_names, func_returns, shared_ast.empty_string_array(), extern_names, extern_paths, single_monos);
+    let single_monos: Array<IrType> = collect_instantiations(prog, prog.entities, prog.functions);
+    return lower_module(prog, path, true, shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), shared_ast.empty_string_array(), prog.enums, prog.entities, prog.functions, func_names, func_returns, shared_ast.empty_string_array(), extern_names, extern_paths, single_monos);
 }
 
 // lower_module — lower one Program of a (possibly multi-file) build. is_entry marks
@@ -822,7 +893,7 @@ public function lower(prog: Program, path: String) returns IrModule {
 // for lookups/classification (is_known_entity for cross-module constructors, variant
 // resolution, self-field types) — mirroring stage1's global lowerer.entities. The per-
 // module prog.enums/prog.entities still drive which decls this module EMITS.
-public function lower_module(prog: Program, path: String, is_entry: Bool, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, all_enums: Array<EnumDecl>, all_entities: Array<EntityDecl>, func_names: Array<String>, func_returns: Array<IrType>, func_prefixes: Array<String>, extern_names: Array<String>, extern_paths: Array<String>, emit_monos: Array<IrType>) returns IrModule {
+public function lower_module(prog: Program, path: String, is_entry: Bool, module_names: Array<String>, module_prefixes: Array<String>, type_names: Array<String>, type_prefixes: Array<String>, all_enums: Array<EnumDecl>, all_entities: Array<EntityDecl>, all_functions: Array<FunctionDecl>, func_names: Array<String>, func_returns: Array<IrType>, func_prefixes: Array<String>, extern_names: Array<String>, extern_paths: Array<String>, emit_monos: Array<IrType>) returns IrModule {
     let mod_name: String = path_module_name(path);
     let mutable name_prefix: String = "";
     if not is_entry {
@@ -874,18 +945,25 @@ public function lower_module(prog: Program, path: String, is_entry: Bool, module
         }
         eei = eei + 1;
     }
-    // Emit a monomorphized entity for each generic instantiation ASSIGNED to this
-    // module. lower_all assigns each instantiation to the first module (topological
-    // order) that uses it, so a generic instantiated in several modules is emitted
-    // once (mirrors stage1's collectInstantiations per-module + emit-time dedup). The
-    // decl is looked up in the GLOBAL entity registry so the entry module can
-    // monomorphize a generic defined in a dependency.
+    // Emit a monomorphization for each generic instantiation ASSIGNED to this module.
+    // lower_all assigns each instantiation to the first module (topological order) that
+    // uses it, so a generic instantiated in several modules is emitted once (mirrors
+    // stage1's collectInstantiations per-module + emit-time dedup). Each instantiation is
+    // either a generic ENTITY (-> a mono entity appended to ents) or a generic FREE
+    // FUNCTION (-> a mono function appended to fns, after the module's regular functions,
+    // matching stage1's monomorphizeFunction pass). The decls are looked up in the GLOBAL
+    // registries so the entry module can monomorphize a generic defined in a dependency.
     let mutable insi: Int = 0;
     while insi < len(emit_monos) {
         let inst: IrType = emit_monos[insi];
         let decl: EntityDecl = find_entity_decl(all_entities, inst.name);
         if decl.name != "" {
             ents.push(monomorphize_entity(decl, inst.type_args, all_enums, all_entities));
+        } else {
+            let fdecl: FunctionDecl = find_func_decl(all_functions, inst.name);
+            if fdecl.name != "" {
+                fns.push(monomorphize_function(fdecl, inst.type_args, all_enums, all_entities));
+            }
         }
         insi = insi + 1;
     }
@@ -977,6 +1055,10 @@ public function lower_all(progs: Array<Program>, paths: Array<String>) returns I
     // lowerer.entities). The per-module prog.* still drives which decls each module emits.
     let mutable all_enums: Array<EnumDecl> = [];
     let mutable all_entities: Array<EntityDecl> = [];
+    // Global free-function registry: every module's function decls, so a generic free
+    // function defined in a dependency can be found + monomorphized from any module
+    // (mirrors the all_entities registry for generic entities).
+    let mutable all_functions: Array<FunctionDecl> = [];
     // Free-function return-type registry (every module's functions, by name -> return
     // type) so a call's result type can be stamped during lowering.
     let mutable func_names: Array<String> = shared_ast.empty_string_array();
@@ -1006,6 +1088,7 @@ public function lower_all(progs: Array<Program>, paths: Array<String>) returns I
         }
         let mutable gfi: Int = 0;
         while gfi < len(progs[g].functions) {
+            all_functions.push(progs[g].functions[gfi]);
             func_names.push(progs[g].functions[gfi].name);
             func_returns.push(compiler_ir.ir_parse_type(progs[g].functions[gfi].return_type));
             func_prefixes.push(gpfx);
@@ -1030,7 +1113,7 @@ public function lower_all(progs: Array<Program>, paths: Array<String>) returns I
     let mutable j: Int = 0;
     while j < n {
         let is_entry: Bool = j == n - 1;
-        let these: Array<IrType> = collect_instantiations(progs[j], all_entities);
+        let these: Array<IrType> = collect_instantiations(progs[j], all_entities, all_functions);
         let mutable emit_monos: Array<IrType> = compiler_ir.empty_ir_type_array();
         let mutable ti: Int = 0;
         while ti < len(these) {
@@ -1041,7 +1124,7 @@ public function lower_all(progs: Array<Program>, paths: Array<String>) returns I
             }
             ti = ti + 1;
         }
-        mods.push(lower_module(progs[j], paths[j], is_entry, mod_names, mod_prefixes, type_names, type_prefixes, all_enums, all_entities, func_names, func_returns, func_prefixes, extern_names, extern_paths, emit_monos));
+        mods.push(lower_module(progs[j], paths[j], is_entry, mod_names, mod_prefixes, type_names, type_prefixes, all_enums, all_entities, all_functions, func_names, func_returns, func_prefixes, extern_names, extern_paths, emit_monos));
         j = j + 1;
     }
     return IrProgram(mods);
@@ -2026,6 +2109,20 @@ public function lower_expr(e: Expr, scope: LowerScope) returns IrExpr {
                     let mutable gcc: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, gmangled, args, compiler_ir.ir_type_named(gmangled));
                     gcc.call_kind = compiler_ir.callkind_constructor();
                     return gcc;
+                }
+            }
+            // A generic free-function call bakes its type args into the callee name the
+            // same way (`identity<Int>(5)` -> callee.name "identity<Int>"): if the base
+            // names a known user function (it is not a generic entity, handled above, nor a
+            // builtin) with type args present, it is a generic-function call. Emit a plain
+            // function call to the monomorphized global name (identity__Int, no module
+            // prefix — the mono is emitted globally), mirroring stage1's MangleGenericName.
+            if len(gctype.type_args) > 0 {
+                if string_in(scope.func_names, gctype.name) {
+                    let gfmangled: String = compiler_ir.ir_mangle_generic_name(gctype.name, gctype.type_args);
+                    let mutable gfc: IrExpr = IrExpr(compiler_ir.irex_call(), 0, "", false, gfmangled, args, lookup_func_return(scope.func_names, scope.func_returns, gctype.name));
+                    gfc.call_kind = compiler_ir.callkind_function();
+                    return gfc;
                 }
             }
             // A callee naming a declared entity is a constructor call (stage1

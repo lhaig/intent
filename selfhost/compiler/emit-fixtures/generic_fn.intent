@@ -1,0 +1,13 @@
+module generic_fn version "1.0.0";
+
+function identity<T>(x: T) returns T {
+    return x;
+}
+
+entry function main() returns Int {
+    let a: Int = identity<Int>(5);
+    let s: String = identity<String>("hi");
+    print(a);
+    print(s);
+    return 0;
+}

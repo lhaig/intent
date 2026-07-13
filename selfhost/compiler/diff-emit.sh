@@ -61,6 +61,7 @@ CORPUS=(
   "examples/handler_trait.intent"
   "examples/char_string_demo.intent"
   "examples/generic_stack.intent"
+  "selfhost/compiler/emit-fixtures/generic_fn.intent"
   "examples/multi_file/main.intent"
   "selfhost/compiler/emit-fixtures/multimod_entity/main.intent"
   "selfhost/compiler/emit-fixtures/multimod_enum/main.intent"

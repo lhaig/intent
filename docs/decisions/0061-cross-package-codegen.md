@@ -122,7 +122,10 @@ not local to the current module uses the defining module's prefix. Unqualified i
 calls now emit, compile, and run; Go unit tests
 (`TestGenerateUnqualifiedImportedFunctionCall` in each backend) lock it in.
 
-### Self-hosting parity (internal, not user-facing)
+### Self-hosting parity (internal, not user-facing) — closed
+
+Both previously-deferred stage2 gaps are now closed; the self-hosted backend emits the
+whole cross-package/generics surface byte-equal with stage1.
 
 - **Unqualified calls to imported functions (fixed 2026-07-13).** stage2 now carries a
   `funcOrigins` bridge that mirrors stage1: `lower_all` builds a `func_prefixes` array
@@ -134,11 +137,21 @@ calls now emit, compile, and run; Go unit tests
   bare — `bootstrap-stage3` exercises this). The `multimod_unqualified` diff-emit fixture
   locks it in byte-equal with stage1.
 
-- **Generic free functions.** stage2 does not monomorphize generic *functions* at all (only
-  generic entities); even a bare `identity<Int>()` diverges. So neither bare nor qualified
-  generic-function calls are swept, and `multimod_qualified` covers only the generic-entity
-  constructor, variants, and `module.enum.variant`. Teaching stage2 to monomorphize generic
-  free functions is deferred to a later self-hosting slice.
+- **Generic free functions (fixed 2026-07-13).** stage2 now monomorphizes generic *free
+  functions*, not just generic entities. `collect_instantiations` records a generic-function
+  call (`identity<Int>()`, whose type args the parser bakes into the callee name) alongside
+  generic-entity instantiations; `lower_module` dispatches each instantiation to either a
+  mono entity (appended to the module's entities) or a mono function via `monomorphize_function`
+  (appended after the module's regular functions, matching stage1's `monomorphizeFunction`
+  pass); and the call site rewrites `identity<Int>(...)` to the global mangled name
+  `identity__Int(...)`. The single-file `generic_fn` diff-emit fixture (one generic function,
+  two instantiations) locks it byte-equal with stage1.
+  - *Latent stage1 caveat, unchanged:* stage1 emits monomorphizations in Go-map iteration
+    order, so a module with **two or more distinct** generic entities/functions has a
+    non-deterministic emit order run-to-run. No corpus program hits this (each uses a single
+    generic construct); the `generic_fn` fixture stays deterministic by using one function.
+    Sorting mono emissions by mangled name in both stages would remove the hazard — a separate
+    follow-up, since it changes stage1's output ordering and needs re-gating.
 
 ## Consequences
 
@@ -151,8 +164,8 @@ calls now emit, compile, and run; Go unit tests
   the supported features.
 - The blanket "cross-package code generation is not yet fully supported" warning is removed;
   DESIGN.md §15.9 is rewritten as the support matrix above. All user-facing cross-package
-  forms now work; the only remaining internal stage2 self-hosting-parity gap is generic
-  free-function monomorphization.
+  forms work, and the self-hosted stage2 backend is now at full parity — the two internal
+  self-hosting gaps (unqualified imported calls, generic free functions) are both closed.
 
 ## References
 
