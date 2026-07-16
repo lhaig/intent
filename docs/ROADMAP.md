@@ -13,6 +13,31 @@ documented in [ADR 0008](decisions/0008-intermediate-representation.md)
 
 ---
 
+## Roadmap Ahead
+
+Milestones 1-9 are complete — the toolchain self-hosts and bootstraps as a proven fixpoint
+(see Milestone 9). The named goals still ahead, roughly in priority order:
+
+| Goal | Status | Reference |
+| --- | --- | --- |
+| **JS/WASM self-hosting** — extend the self-hosted compiler beyond the Rust target so the whole toolchain bootstraps on every backend | The biggest open goal; the self-hosted compiler emits Rust only today | Milestone 9 |
+| **Deterministic monomorphization emit order** — fix the Go-map-order hazard for 2+ distinct generics in a module | Latent, no corpus hit | [ADR 0061](decisions/0061-cross-package-codegen.md) |
+| **Self-hosted checker parity tail** — close the sound-false-negative diagnostics | Deferred | `prds/backlog/prd-phase-58-checker-parity-tail.md` |
+| **Versioned package registry** — remote fetch; today dependencies are git/path only | Deferred | [ADR 0027](decisions/0027-package-management-design.md) |
+| **Package marketplace / publish** | Backlog | `prds/backlog/phase-23-marketplace-publish.md` |
+| **Verification-aware contract stripping** (`--strip-contracts=verified`) | Next ADR | [ADR 0033](decisions/0033-release-flag-strip-policy.md) |
+| **LSP gaps** — method/field references, cross-module name disambiguation | Deferred | Phases 24-25 below |
+| **Async handler integration** (Attractor driver) | Deferred stretch goal | Driving Example below |
+
+Research directions (explorations, not committed goals) live in `prds/research/`:
+agent-interface, contract-integrity, counterexample-driven-repair, verification-trust-manifest.
+
+> The **Priority Order** and **Dependency Graph** sections near the end of this file describe
+> the original Milestone 4-8 sequencing. They predate the self-hosting work and are retained
+> for historical context — they no longer reflect active priorities; this section does.
+
+---
+
 ## Completed
 
 ### Milestone 1: Usable Language
@@ -469,6 +494,26 @@ Gates: `make diff-emit` 36/36 (new `multimod_qualified` fixture), `bootstrap-sta
 `diff-emit-sweep` clean. Deferred (internal stage2 parity, not user-facing): generic *free
 function* monomorphization in stage2, and the stage2 `funcOrigins` mangling for unqualified
 imported calls.
+
+### Phase 61: stage2 cross-package/generics parity -- DONE (v0.4.0, 2026-07-16)
+
+Closed the two stage2-internal parity items deferred at the end of Phase 60, so the
+self-hosted backend now emits the whole cross-package/generics surface byte-equal with stage1:
+
+- **Generic free-function monomorphization in stage2** — a call like `identity<Int>()` now
+  rewrites to the mangled global (`identity__Int(...)`) and emits the specialised function,
+  mirroring stage1's `monomorphizeFunction`. This was the last stage2 self-hosting-parity gap.
+- **stage2 `funcOrigins` mangling for unqualified imported calls** — `helper(...)` for a
+  function imported from a dependency now takes the *defining* module's prefix rather than the
+  caller's, so it compiles.
+
+The user-facing module-qualified generic/variant construction syntax (`pkg.Pair<Int>()`,
+`pkg.Variant()`, `pkg.Enum.Variant()`) landed alongside (stage1 + stage2). Gates: `make
+diff-emit` 38/38 (new `generic_fn` / `multimod_unqualified` fixtures), `diff-emit-sweep` 81/0,
+`diff-checker` 110/110, `bootstrap-stage3` 4/4, `make validate` OK. [ADR 0061](decisions/0061-cross-package-codegen.md)
+also records a latent stage1 emit-order hazard (monomorphizations emit in Go-map order —
+non-deterministic for 2+ distinct generics in a module; no corpus program hits it). Shipped in
+**v0.4.0**; release notes: `docs/releases/v0.4.0.md`.
 
 ## Milestone 8: Developer Experience
 
